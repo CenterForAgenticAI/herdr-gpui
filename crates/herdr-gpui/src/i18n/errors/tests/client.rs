@@ -1,6 +1,6 @@
 use super::*;
 use herdr_client::{
-    Error, SshFailure, clipboard, protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION,
+    Error, SshFailure, clipboard, protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION, regions,
     scrollback::EndpointErrorCode, sessions, ssh, wsl,
 };
 use std::{io, path::PathBuf, process::ExitStatus};
@@ -99,6 +99,7 @@ fn every_client_variant_has_a_message() {
         Error::ProfileId,
         Error::ProfileLabel,
         Error::Protocol(herdr_client::protocol::Error::FrameLimit),
+        Error::Regions(regions::Error::NotNegotiated),
         Error::RemoteCommand(status()),
         Error::RemoteOutput,
         Error::RequestTimeout,
@@ -194,6 +195,11 @@ fn every_clipboard_variant_has_a_message() {
         clipboard::Error::PreparationTimeout,
         clipboard::Error::WriteTimeout,
     ]);
+}
+
+#[test]
+fn every_regions_variant_has_a_message() {
+    assert_localized(&[regions::Error::NotNegotiated]);
 }
 
 #[test]
