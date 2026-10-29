@@ -48,6 +48,7 @@ fn named_pipe_keeps_current_pane_input_behind_a_partial_surface() {
         input_pane: Some("w1:p1".into()),
         written: Default::default(),
         request: None,
+        region: false,
         image: None,
     };
     assert!(reader.has_current_surface_prefix(

@@ -51,6 +51,7 @@ fn command(message: ClientMessage) -> Command {
         input_pane,
         written: Default::default(),
         request: None,
+        region: false,
         image: None,
     }
 }

@@ -30,6 +30,7 @@ mod options;
 pub mod private_endpoint;
 mod process;
 mod queue;
+pub mod regions;
 mod remote_host;
 mod script;
 pub mod scrollback;
@@ -65,7 +66,9 @@ pub use catalog::{
 };
 pub use clipboard::{ClipboardImageCancellation, ClipboardImageUpload};
 pub use compat::{MIN_HERDR_VERSION, VersionMismatch};
-pub use connect::{Transport, connect, connect_with_connector, connect_with_surface_active};
+pub use connect::{
+    Transport, connect, connect_with_connector, connect_with_hello, connect_with_surface_active,
+};
 #[cfg(feature = "cloud")]
 pub use discovery::CloudProvider;
 pub use discovery::{ConnectTarget, local_var, session_socket, set_login_config_home};
@@ -83,10 +86,12 @@ pub use options::ConnectOptions;
 #[cfg(windows)]
 pub use process::CREATE_NO_WINDOW;
 pub use process::new_command;
+pub use regions::RegionState;
 pub use remote_host::RemoteHost;
 pub use script::{
     ScriptHost, ScriptLimits, quoted_line, run_script, run_script_command, shell_quote,
 };
+pub use session::Hello;
 pub use sessions::{
     LocalSession, RemoteSession, SessionState, delete_local_session, delete_remote_session,
     list_local_sessions, list_remote_sessions, list_running_sessions_in,
