@@ -4,6 +4,7 @@
 
 mod clipboard;
 mod core_bridge;
+mod regions;
 mod sessions;
 mod ssh;
 mod terminal_attach;
@@ -125,6 +126,7 @@ impl Localize for Error {
             Self::ProfileId => fl!("error-client-profile-id"),
             Self::ProfileLabel => fl!("error-client-profile-label"),
             Self::Protocol(error) => error.localize(),
+            Self::Regions(error) => error.localize(),
             Self::RemoteCommand(status) => {
                 fl!("error-client-remote-command", status = status.to_string())
             }

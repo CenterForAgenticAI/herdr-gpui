@@ -11,7 +11,7 @@ use crate::{
     method::Method,
     options::validate_options,
     protocol::{endpoint::*, *},
-    session::{Health, Pace, Pending, Session, Signals, SurfaceEncodings, run_connection},
+    session::{Health, Hello, Pace, Pending, Session, Signals, SurfaceEncodings, run_connection},
     transport::Stream,
 };
 use crossbeam_channel::bounded;
@@ -42,6 +42,7 @@ mod liveness;
 mod partial_input;
 #[cfg(windows)]
 mod partial_input_windows;
+mod regions;
 mod session_state;
 mod surface_encoding;
 mod surfaces;
@@ -173,6 +174,23 @@ fn test_client_paced(
     thread::JoinHandle<Result<()>>,
     Arc<AtomicUsize>,
 ) {
+    let hello = Hello {
+        surface_active: active,
+        regions: false,
+    };
+    test_client_hello(hello, remote, pace)
+}
+
+fn test_client_hello(
+    hello: Hello,
+    remote: bool,
+    pace: Pace,
+) -> (
+    Client,
+    Stream,
+    thread::JoinHandle<Result<()>>,
+    Arc<AtomicUsize>,
+) {
     let (stream, server) = Stream::pair().unwrap();
     let (commands, rx) = queue::channel(COMMAND_CAPACITY).unwrap();
     let waits = rx.waits.clone();
@@ -185,7 +203,7 @@ fn test_client_paced(
         run_connection(
             stream,
             ConnectOptions::default(),
-            active,
+            hello,
             remote,
             rx,
             &tx,

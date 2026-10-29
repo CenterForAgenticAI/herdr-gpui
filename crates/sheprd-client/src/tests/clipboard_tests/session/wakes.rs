@@ -206,6 +206,7 @@ fn a_reservation_expiring_behind_an_inbound_frame_waits_for_the_frame() {
             input_pane: None,
             written: Default::default(),
             request: None,
+            region: false,
             image: Some(ImageSlot {
                 receiver,
                 lease,
