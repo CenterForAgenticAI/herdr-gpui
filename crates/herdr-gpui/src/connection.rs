@@ -4,8 +4,8 @@ use crate::{
     terminal::InputTarget,
 };
 use herdr_client::{
-    ClientEvent, ClientHandle, ConnectOptions, ConnectTarget, HostTheme, Method,
-    connect_with_connector,
+    ClientEvent, ClientHandle, ConnectOptions, ConnectTarget, Hello, HostTheme, Method,
+    connect_with_hello,
     protocol::{ClientHostAppearance, ClientHostColor, ClientPaneInputEvent},
 };
 use std::sync::{
@@ -23,6 +23,8 @@ pub(crate) struct ConnectionBridge {
     /// Scrollback answers, fenced with the connection like the main inbox.
     pub scrollback: Arc<Mutex<crate::scrollback::Inbox>>,
     sound_cancel: Arc<AtomicBool>,
+    /// What the last connection asked for in its hello.
+    pub(crate) hello: Hello,
 }
 
 /// One integration operation, independent of the modal dialog response slot.
@@ -124,6 +126,7 @@ impl ConnectionBridge {
             integrations: Arc::default(),
             links: Arc::default(),
             scrollback: Arc::default(),
+            hello: Hello::default(),
         }
     }
 
@@ -154,10 +157,12 @@ impl ConnectionBridge {
         self.reset(ConnectionStatus::Detached, active);
     }
 
-    pub fn reconnect(&mut self, options: ConnectOptions, active: bool, surface_active: bool) {
+    /// Connects again with `hello`. Only the window's own connection asks
+    /// for desktop regions; a parked group's connection passes the default.
+    pub fn reconnect(&mut self, options: ConnectOptions, active: bool, hello: Hello) {
         tracing::debug!("Connection bridge reconnecting");
         self.reset(ConnectionStatus::Connecting, active);
-        self.start(options, surface_active, |events| {
+        self.start(options, hello, |events| {
             std::thread::Builder::new()
                 .name("herdr-gui-events".into())
                 .spawn(events)
@@ -168,14 +173,15 @@ impl ConnectionBridge {
     fn start(
         &mut self,
         options: ConnectOptions,
-        surface_active: bool,
+        hello: Hello,
         spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
     ) {
         self.drained = Arc::new(AtomicBool::new(false));
+        self.hello = hello;
         let target = self.target.clone();
         let startup_inbox = self.inbox.clone();
         let result =
-            connect_with_connector(target, options, surface_active, move |target, stop| {
+            connect_with_hello(target, options, hello, move |target, stop| {
                 #[cfg(feature = "cloud")]
                 if matches!(target, ConnectTarget::Cloud { .. }) {
                     return crate::cloud::connect(target, stop);

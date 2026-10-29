@@ -302,7 +302,12 @@ impl Endpoint {
         self.detached = false;
         self.initial_surface = active;
         self.attempts = self.attempts.saturating_add(1);
-        self.connection.reconnect(options, false, active);
+        // The window's own connection is the one that shows desktop regions.
+        let hello = herdr_client::Hello {
+            surface_active: active,
+            regions: true,
+        };
+        self.connection.reconnect(options, false, hello);
         self.live = self.connection.take_update().unwrap_or_default();
         self.sync_live();
         self.toasts.receive(self.live.notifications.drain(..));

@@ -54,6 +54,8 @@ pub(crate) struct Command {
     pub(crate) input_pane: Option<String>,
     /// Set when this command is an API request awaiting a correlated response.
     pub(crate) request: Option<PendingRequest>,
+    /// Region traffic, refused unless the connection negotiated regions.
+    pub(crate) region: bool,
     pub(crate) image: Option<ImageSlot>,
     /// Progress of input written beside a partial inbound frame. Once attempted
     /// it is only written in bounded steps; once on the wire it finishes first.
@@ -130,6 +132,7 @@ impl ClientHandle {
             bytes: Vec::new(),
             input_pane: None,
             request: None,
+            region: false,
             written: ImageWriter::default(),
             image: Some(ImageSlot {
                 receiver,
@@ -169,6 +172,16 @@ impl ClientHandle {
         message: ClientMessage,
         request: Option<PendingRequest>,
     ) -> Result<()> {
+        self.enqueue_command(boot_id, message, request, false)
+    }
+
+    pub(crate) fn enqueue_command(
+        &self,
+        boot_id: &str,
+        message: ClientMessage,
+        request: Option<PendingRequest>,
+        region: bool,
+    ) -> Result<()> {
         if self.is_disconnected() {
             return Err(SendError::Disconnected);
         }
@@ -185,6 +198,7 @@ impl ClientHandle {
             bytes,
             input_pane,
             request,
+            region,
             image: None,
             written: ImageWriter::default(),
         })
@@ -276,12 +290,22 @@ impl ClientHandle {
     /// Serialize the API envelope, generate an ID, and queue on the ordered writer.
     /// Only methods advertised in Connected are sent. Responses retain API errors.
     pub fn request(&self, boot_id: &str, method: Method, params: Value) -> Result<String> {
+        self.request_command(boot_id, method, params, false)
+    }
+
+    pub(crate) fn request_command(
+        &self,
+        boot_id: &str,
+        method: Method,
+        params: Value,
+        region: bool,
+    ) -> Result<String> {
         let id = format!(
             "gpui-{}",
             self.inner.next_request.fetch_add(1, Ordering::Relaxed)
         );
         let request = json!({"id": id, "method": method.as_str(), "params": params}).to_string();
-        self.enqueue(
+        self.enqueue_command(
             boot_id,
             ClientMessage::ClientShellEndpointRequest {
                 boot_id: boot_id.into(),
@@ -291,6 +315,7 @@ impl ClientHandle {
                 id: id.clone(),
                 method,
             }),
+            region,
         )?;
         Ok(id)
     }

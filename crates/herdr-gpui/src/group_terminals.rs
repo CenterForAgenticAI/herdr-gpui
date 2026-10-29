@@ -224,7 +224,15 @@ impl HerdrWindow {
                     parked.group == active && parked.workspace == key && parked.connected()
                 })
             {
-                self.swap_primary(active, &key, cx);
+                if self.live.supports_regions {
+                    // The window's connection carries the desktop regions, and
+                    // a parked one never asks for them: rather than trade it
+                    // away, it moves to the group's tab and the group's parked
+                    // connection is dropped below, as no longer needed.
+                    self.browser.terminals.primary = Some(active);
+                } else {
+                    self.swap_primary(active, &key, cx);
+                }
                 // The connection may still be on its way to the group's tab;
                 // the window's navigation takes it the rest of the way.
                 if let Some(Pick::Herdr(tab)) = wants
@@ -289,7 +297,7 @@ impl HerdrWindow {
                 None if terminals.retry.iter().any(|(waiting, _)| waiting == group) => {}
                 None => {
                     let mut connection = ConnectionBridge::new(target.clone());
-                    connection.reconnect(self.options, false, true);
+                    connection.reconnect(self.options, false, herdr_client::Hello::default());
                     terminals.parked.push(Parked {
                         group: *group,
                         workspace: key.clone(),

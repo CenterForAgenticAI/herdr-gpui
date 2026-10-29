@@ -147,6 +147,12 @@ pub struct LiveState {
     /// every key, including releases, as escape codes. Keys the window already
     /// sends as key events then also send their release.
     pub(crate) keyboard_report_all: bool,
+    /// The daemon offers desktop regions. Only the window's own connection
+    /// asks for them, so on a parked connection this is never acted on.
+    pub(crate) supports_regions: bool,
+    /// The desktop regions this connection negotiated: the latest projection
+    /// and each region's latest frame. Empty unless the hello asked for them.
+    pub(crate) regions: herdr_client::RegionState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -226,6 +232,8 @@ impl Default for LiveState {
             notifications: Default::default(),
             notifications_lost: false,
             keyboard_report_all: false,
+            supports_regions: false,
+            regions: Default::default(),
             outer_focused: None,
             activation: None,
             supports_surface: false,
@@ -297,6 +305,10 @@ impl LiveState {
             supports_release_notes_dismiss,
             // Shapes the next key events, not anything drawn.
             keyboard_report_all: _,
+            supports_regions,
+            // Frames repaint like the terminal; a new projection moves the
+            // layout and is compared below.
+            regions,
         } = next;
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         if local_peer_warning.is_some() {
@@ -338,6 +350,8 @@ impl LiveState {
             && *supports_selection_read == self.supports_selection_read
             && *supports_copy_motion == self.supports_copy_motion
             && *supports_edit_scrollback == self.supports_edit_scrollback
+            && *supports_regions == self.supports_regions
+            && regions.projection() == self.regions.projection()
             && match (dialog_response, &self.dialog_response) {
                 (Some((a, None)), Some((b, None))) => a == b,
                 (a, b) => a.is_none() && b.is_none(),
@@ -535,12 +549,28 @@ impl LiveState {
                 self.version_mismatch = None;
                 // The daemon reports the mode to each new connection.
                 self.keyboard_report_all = false;
+                self.supports_regions = welcome
+                    .capabilities
+                    .iter()
+                    .any(|value| value == herdr_client::protocol::region_surface::CAPABILITY);
+                self.regions = Default::default();
                 self.status = ConnectionStatus::AwaitingSnapshot;
                 self.error = None;
             }
             ClientEvent::Snapshot(snapshot) => self.receive_snapshot(snapshot),
             ClientEvent::Surface(surface) => self.receive_surface(surface),
             ClientEvent::SurfaceImages(images) => self.receive_surface_images(images),
+            // A stale projection or an unwanted frame changes nothing.
+            ClientEvent::RegionProjection(projection) => {
+                if !self.regions.apply_projection(projection) {
+                    return;
+                }
+            }
+            ClientEvent::RegionSurface(surface) => {
+                if !self.regions.apply_surface(surface) {
+                    return;
+                }
+            }
             // The `Disconnected` that follows carries the reason text.
             ClientEvent::VersionMismatch(mismatch) => {
                 if let Some(version) = mismatch.server_version() {
@@ -565,6 +595,8 @@ impl LiveState {
                 self.surface = None;
                 self.announcement_dismissal = None;
                 self.surface_images = Default::default();
+                self.supports_regions = false;
+                self.regions = Default::default();
             }
             ClientEvent::CommandRejected { request_id, reason } => {
                 if request_id.is_some() && request_id == self.drag_request {

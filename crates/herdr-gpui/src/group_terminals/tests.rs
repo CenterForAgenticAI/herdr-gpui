@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 mod idle_reassert;
 mod padding;
+mod regions;
 mod titlebar_navigation;
 
 /// A coherent surface for `snapshot`, as the daemon projects one.

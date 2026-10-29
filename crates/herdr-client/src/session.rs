@@ -4,7 +4,9 @@
 //! reconnects; only an activation the daemon refused unprocessed is resent.
 
 mod barrier;
+mod regions;
 pub(crate) use barrier::Barrier;
+pub use regions::Hello;
 
 use crate::{
     Error, Result, clipboard,
@@ -136,6 +138,7 @@ pub(crate) struct Session {
     pub(crate) health: Option<Health>,
     pub(crate) welcome: Option<EndpointServerWelcome>,
     pub(crate) encodings: SurfaceEncodings,
+    pub(crate) regions: regions::Regions,
     pub(crate) snapshot: Option<Arc<ClientShellSnapshot>>,
     pub(crate) surface: Option<Arc<PaneSurfaceFrame>>,
     pub(crate) images: ImageStore,
@@ -153,6 +156,7 @@ impl Session {
             health: None,
             welcome: None,
             encodings: SurfaceEncodings::default(),
+            regions: regions::Regions::default(),
             snapshot: None,
             surface: None,
             images: ImageStore::default(),
@@ -218,6 +222,8 @@ impl Session {
                 .is_none_or(|w| !supports_surface_interest(w))
         {
             Some(Error::UnsupportedSurfaceInterest)
+        } else if command.region && !self.regions.negotiated {
+            Some(crate::regions::Error::NotNegotiated.into())
         } else {
             None
         }
@@ -315,7 +321,7 @@ pub(crate) struct Signals<'a> {
 pub(crate) fn run_connection(
     mut stream: Stream,
     options: ConnectOptions,
-    surface_active: bool,
+    hello: Hello,
     remote: bool,
     commands: CommandReceiver,
     tx: &Sender<ClientEvent>,
@@ -337,11 +343,11 @@ pub(crate) fn run_connection(
         direct_graphics: false,
         endpoint_keybindings: false,
         mouse_capture: false,
-        surface_active,
+        surface_active: hello.surface_active,
         surface_reuse: true,
         surface_delta: true,
         surface_scroll: true,
-        regions: false,
+        regions: hello.regions,
         snapshot_codecs: vec![SNAPSHOT_CODEC_V1.into()],
         surface_codecs: vec![SURFACE_CODEC_V1.into()],
         input_codecs: vec![INPUT_CODEC_V1.into()],
@@ -356,7 +362,8 @@ pub(crate) fn run_connection(
         MAX_FRAME_SIZE,
     )?;
     let mut reader = FrameReader::with_timeout(pace.partial_frame);
-    let mut session = Session::new(surface_active, remote);
+    let mut session = Session::new(hello.surface_active, remote);
+    session.regions.requested = hello.regions;
     let mut queued: Option<Command> = None;
     while !stop.load(Ordering::Acquire) {
         session.check_timeouts()?;
@@ -620,6 +627,7 @@ impl Session {
             health,
             welcome,
             encodings,
+            regions,
             snapshot,
             surface,
             images,
@@ -675,8 +683,9 @@ impl Session {
                 *health = Some(Health::new(Instant::now()));
             }
             *encodings = SurfaceEncodings::from(&w);
+            regions.accept_welcome(&w);
             emit(ClientEvent::Connected(w.clone()))?;
-            tracing::info!(?encodings, "endpoint handshake accepted");
+            tracing::info!(?encodings, ?regions, "endpoint handshake accepted");
             *pipeline_barriers = barrier::verified_ordering(&w.server_version);
             *welcome = Some(w);
             return Ok(());
@@ -749,6 +758,9 @@ impl Session {
                     .ok_or(Error::EncodedSurfaceBeforeBaseline)?;
                 let next = reuse.reconstruct(base)?;
                 accept_surface(next, snapshot.as_deref(), surface, images, &mut emit)?;
+            }
+            ServerMessage::EndpointControl { kind, data } if regions::server_kind(&kind) => {
+                regions.receive(&kind, &data, &mut emit)?;
             }
             ServerMessage::EndpointControl { .. } => {} // Unknown optional named controls are ignored.
             ServerMessage::PaneSurface(next) => {

@@ -87,6 +87,7 @@ fn expired_preparation_skips_retained_permit_but_not_published_data() {
                 input_pane: None,
                 written: Default::default(),
                 request: None,
+                region: false,
                 image: Some(ImageSlot {
                     receiver,
                     lease,

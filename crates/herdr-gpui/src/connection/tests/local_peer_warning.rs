@@ -40,7 +40,7 @@ fn local_peer_warning_is_fenced_on_detach_and_reconnect() {
         if reconnect {
             let mut options = ConnectOptions::default();
             options.surface_size.cols = 0;
-            bridge.reconnect(options, false, true);
+            bridge.reconnect(options, false, Hello::default());
         } else {
             bridge.detach(false);
         }

@@ -4,7 +4,11 @@
 use crate::{
     Error, Result, VersionMismatch,
     limits::POLL,
-    protocol::{endpoint::EndpointServerWelcome, *},
+    protocol::{
+        endpoint::EndpointServerWelcome,
+        region_surface::{RegionProjection, RegionSurface},
+        *,
+    },
     surface_images::SurfaceImages,
 };
 use crossbeam_channel::{SendTimeoutError, Sender};
@@ -33,6 +37,12 @@ pub enum ClientEvent {
         request_id: Option<String>,
         reason: Error,
     },
+    /// The desktop regions this connection negotiated, newest last. Only a
+    /// connection whose hello asked for regions and whose daemon agreed
+    /// emits these.
+    RegionProjection(Arc<RegionProjection>),
+    /// A complete frame of one region's terminal.
+    RegionSurface(Arc<RegionSurface>),
     /// Notifications, clipboard, title, bell, and other non-surface wire events.
     Message(ServerMessage),
     /// The handshake was refused because one side must be updated. Sent
