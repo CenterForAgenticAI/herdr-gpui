@@ -60,6 +60,10 @@ pub enum Error {
     DeltaSpan,
     #[error("surface delta popup update does not match its popup")]
     DeltaPopup,
+    #[error("region surface exceeds the frame limit")]
+    RegionLimit,
+    #[error("region surface grid does not match its size")]
+    RegionGrid,
 }
 
 impl Error {

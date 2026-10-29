@@ -33,6 +33,8 @@ fn every_protocol_variant_has_a_message() {
         Error::PatchGeometry,
         Error::PatchIdentity,
         Error::PatchRowBounds,
+        Error::RegionGrid,
+        Error::RegionLimit,
         Error::ScrollBounds,
         Error::ScrollCount,
         Error::ScrollPayload,
