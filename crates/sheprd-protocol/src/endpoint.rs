@@ -33,6 +33,9 @@ pub struct EndpointClientHello {
     pub surface_delta: bool,
     #[serde(default)]
     pub surface_scroll: bool,
+    /// Asks for desktop-region projections and surfaces; see `region_surface`.
+    #[serde(default)]
+    pub regions: bool,
     #[serde(default)]
     pub snapshot_codecs: Vec<String>,
     #[serde(default)]
