@@ -102,7 +102,9 @@ fn split_ratio_wire_name() {
 
 /// Herdr's `CLIENT_SHELL_METHODS` (src/server/client_commands.rs): the
 /// only methods it answers on the client endpoint. Anything else is
-/// rejected, so a variant outside this list is a dead code path.
+/// rejected, so a variant outside this list is a dead code path. The
+/// `region.*` entries come from the unreleased `feat/desktop-regions-v2`
+/// branch at `c8a5057d`; a daemon without it does not advertise them.
 const OFFERED: &[&str] = &[
     // keep-sorted start
     "client_shell.surface.set",
@@ -130,6 +132,10 @@ const OFFERED: &[&str] = &[
     "pane.swap",
     "pane.zoom",
     "product_announcement.dismiss",
+    "region.focus",
+    "region.hide",
+    "region.resize",
+    "region.show",
     "release_notes.dismiss",
     "server.reload_config",
     "tab.close",
