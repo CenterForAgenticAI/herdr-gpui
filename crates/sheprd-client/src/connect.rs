@@ -9,7 +9,7 @@ use crate::{
     limits::{COMMAND_CAPACITY, EVENT_CAPACITY},
     options::{ConnectOptions, validate_options},
     queue,
-    session::{Pace, Signals, run_connection},
+    session::{Hello, Pace, Signals, run_connection},
     ssh::{self, Bridge},
     transport::Stream,
     wsl,
@@ -74,6 +74,20 @@ pub fn connect_with_connector<T: Into<Transport>>(
     surface_active: bool,
     connector: impl FnOnce(&ConnectTarget, &AtomicBool) -> io::Result<T> + Send + 'static,
 ) -> Result<Client> {
+    let hello = Hello {
+        surface_active,
+        ..Hello::default()
+    };
+    connect_with_hello(target, options, hello, connector)
+}
+
+/// [`connect_with_connector`], saying `hello` to the daemon.
+pub fn connect_with_hello<T: Into<Transport>>(
+    target: ConnectTarget,
+    options: ConnectOptions,
+    hello: Hello,
+    connector: impl FnOnce(&ConnectTarget, &AtomicBool) -> io::Result<T> + Send + 'static,
+) -> Result<Client> {
     validate_options(options)?;
     match &target {
         ConnectTarget::Ssh { target, session } => {
@@ -124,7 +138,7 @@ pub fn connect_with_connector<T: Into<Transport>>(
                 run_connection(
                     stream,
                     options,
-                    surface_active,
+                    hello,
                     child.is_some(),
                     rx,
                     &tx,
