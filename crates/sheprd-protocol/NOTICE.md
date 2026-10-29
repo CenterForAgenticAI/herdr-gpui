@@ -32,6 +32,15 @@ applies the same structural limits before touching any baseline. The
 `surface-*-v1.bin` fixtures in `tests/fixtures/` were produced by Herdr's own
 encoders at that commit.
 
+`src/region_surface.rs` adapts `src/protocol/region_surface.rs` from the
+unreleased CenterForAgenticAI/herdr branch `feat/desktop-regions-v2` at
+commit `c8a5057d`, under the same license, with the `regions` hello field
+from `src/protocol.rs` there. Modified: decoders return this crate's typed
+errors and also run the frame's ordinary validation. The JSON shapes, the
+`RegionSurface` field order, message kinds, the capability name, and the
+decoder limits are unchanged; the frozen fixture digest in
+`tests/region_surface.rs` is Herdr's.
+
 The client discovery rules also adapt `src/server/socket_paths.rs`,
 `src/session.rs`, and `src/config/io.rs` from the same source/license.
 The native client's build mode does not implicitly select Herdr's dev session.
