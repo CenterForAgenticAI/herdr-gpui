@@ -35,6 +35,8 @@ impl Localize for Error {
             Self::PatchGeometry => fl!("error-protocol-patch-geometry"),
             Self::PatchIdentity => fl!("error-protocol-patch-identity"),
             Self::PatchRowBounds => fl!("error-protocol-patch-row-bounds"),
+            Self::RegionGrid => fl!("error-protocol-region-grid"),
+            Self::RegionLimit => fl!("error-protocol-region-limit"),
             Self::ScrollBounds => fl!("error-protocol-scroll-bounds"),
             Self::ScrollCount => fl!("error-protocol-scroll-count"),
             Self::ScrollPayload => fl!("error-protocol-scroll-payload"),
