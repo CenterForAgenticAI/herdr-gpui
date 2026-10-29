@@ -227,6 +227,7 @@ mod tests {
             input_pane: None,
             written: Default::default(),
             request: None,
+            region: false,
             image: None,
         }
     }
