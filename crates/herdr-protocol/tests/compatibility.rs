@@ -119,7 +119,7 @@ fn upstream_json_fixtures_and_future_values() {
         serde_json::from_str(include_str!("fixtures/endpoint-hello-v1.json")).unwrap();
     assert_eq!(hello.generation, 1);
     assert!(hello.surface_active);
-    assert!(!hello.surface_reuse && !hello.surface_delta);
+    assert!(!hello.surface_reuse && !hello.surface_delta && !hello.regions);
     let welcome: EndpointServerWelcome =
         serde_json::from_str(include_str!("fixtures/endpoint-welcome-v1.json")).unwrap();
     assert_eq!(welcome.input_codec, INPUT_CODEC_V1);
