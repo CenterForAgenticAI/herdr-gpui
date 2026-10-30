@@ -87,10 +87,15 @@ impl RegionState {
     /// The latest frame of `region`, only when it came from that region's
     /// own terminal.
     pub fn frame(&self, region: &ClientRegion) -> Option<&FrameData> {
+        self.surface(region).map(|surface| &surface.frame)
+    }
+
+    /// The latest surface of `region`, shared, for a view that keeps what it
+    /// painted; only when it came from that region's own terminal.
+    pub fn surface(&self, region: &ClientRegion) -> Option<&Arc<RegionSurface>> {
         self.surfaces
             .get(&region.region_id)
             .filter(|surface| surface.terminal_id == region.terminal_id)
-            .map(|surface| &surface.frame)
     }
 
     /// Whether the projection says `region` holds the keyboard.
@@ -111,4 +116,5 @@ impl RegionState {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;
