@@ -53,6 +53,9 @@ pub(crate) enum PanelDrag {
     ModPanel,
     /// The rail beside an agent chat's conversation.
     ChatRail,
+    /// The plugin region on the window's right edge; the daemon keeps its
+    /// size.
+    DesktopRegion,
 }
 
 /// The rail beside an agent chat's conversation.
@@ -217,7 +220,7 @@ impl crate::SheprdWindow {
             PanelDrag::ReviewFiles => Some((&mut self.review_files_width, Side::Left)),
             PanelDrag::ModPanel => Some((&mut self.mod_panel_width, Side::Right)),
             PanelDrag::ChatRail => Some((&mut self.chat_rail_width, Side::Right)),
-            PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
+            PanelDrag::SettingsNavigation | PanelDrag::DiffSides | PanelDrag::DesktopRegion => None,
         }
     }
 
@@ -230,7 +233,7 @@ impl crate::SheprdWindow {
             PanelDrag::ReviewFiles => Some((self.review_files_width, Side::Left)),
             PanelDrag::ModPanel => Some((self.mod_panel_width, Side::Right)),
             PanelDrag::ChatRail => Some((self.chat_rail_width, Side::Right)),
-            PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
+            PanelDrag::SettingsNavigation | PanelDrag::DiffSides | PanelDrag::DesktopRegion => None,
         }
     }
 
