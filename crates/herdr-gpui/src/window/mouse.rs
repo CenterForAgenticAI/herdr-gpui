@@ -485,6 +485,8 @@ impl HerdrWindow {
             .as_ref()
             .and_then(|snapshot| snapshot.focused_pane_id.as_deref())
             != Some(id)
+            // Focusing the pane a region took the keyboard from takes it back.
+            || self.live.regions.focused_terminal().is_some()
         {
             self.navigate(NavigationTarget::Pane(id), cx);
         }

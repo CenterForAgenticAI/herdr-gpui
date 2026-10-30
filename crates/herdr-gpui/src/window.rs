@@ -170,6 +170,8 @@ pub(crate) struct HerdrWindow {
     pub(crate) daemon_text: crate::release_notes::DaemonText,
     /// Notes waiting for their agents to be ready for them.
     pub(crate) deliveries: crate::agent_notes::Deliveries,
+    /// The plugin region docked on the right edge.
+    pub(crate) desktop_region: crate::desktop_region::Panel,
     /// A press on a device's header that may lift it for reordering.
     pub(crate) device_drag: Option<sidebar::DeviceDrag>,
     /// The devices the sidebar lists.

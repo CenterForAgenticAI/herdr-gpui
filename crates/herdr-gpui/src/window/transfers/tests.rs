@@ -8,7 +8,7 @@ use gpui::{
     TestAppContext, VisualTestContext, Window, div, point, prelude::*, px, size,
 };
 use herdr_client::{
-    Client, ClientEvent, ConnectOptions, ConnectTarget, Stream, connect_with_connector,
+    Client, ClientEvent, ConnectOptions, ConnectTarget, Hello, Stream, connect_with_hello,
     protocol::{endpoint::*, *},
 };
 use std::{
@@ -97,6 +97,12 @@ impl Peer {
     /// A peer whose welcome also advertises `methods` and `capabilities`, such
     /// as the surface interest a `client_shell.surface.set` request needs.
     pub(crate) fn welcoming(methods: &[&str], capabilities: &[&str]) -> Self {
+        Self::greeting(methods, capabilities, Hello::default())
+    }
+
+    /// A peer that sent `hello`, such as the window connection's request for
+    /// desktop regions, before the welcome.
+    pub(crate) fn greeting(methods: &[&str], capabilities: &[&str], hello: Hello) -> Self {
         let mut welcome: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../herdr-protocol/tests/fixtures/endpoint-welcome-v1.json"
         ))
@@ -113,10 +119,10 @@ impl Peer {
         server
             .set_write_timeout(Some(Duration::from_secs(3)))
             .unwrap();
-        let client = connect_with_connector(
+        let client = connect_with_hello(
             ConnectTarget::Local,
             ConnectOptions::default(),
-            true,
+            hello,
             move |_, _| Ok(stream),
         )
         .unwrap();

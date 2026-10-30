@@ -558,6 +558,8 @@ impl HerdrWindow {
             Command::ToggleSidebar => self.toggle_sidebar(),
             Command::FocusNextRegion => return self.cycle_region(true, window, cx),
             Command::FocusPreviousRegion => return self.cycle_region(false, window, cx),
+            Command::ToggleDesktopRegion => return self.toggle_desktop_region(cx),
+            Command::FocusDesktopRegion => return self.focus_desktop_region(cx),
             // Window chrome only, so it runs while the daemon is still away.
             Command::ToggleStatusBar => {
                 self.status_bar_visible = !self.status_bar_visible;

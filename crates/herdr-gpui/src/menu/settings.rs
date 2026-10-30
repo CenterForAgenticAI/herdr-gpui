@@ -381,6 +381,8 @@ impl HerdrWindow {
                 | Command::ToggleStatusBar
                 | Command::FocusNextRegion
                 | Command::FocusPreviousRegion
+                | Command::ToggleDesktopRegion
+                | Command::FocusDesktopRegion
                 | Command::ToggleZenMode
                 | Command::DevicesOverview
                 | Command::IncreaseFontSize

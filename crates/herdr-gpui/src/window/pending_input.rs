@@ -129,6 +129,10 @@ impl HerdrWindow {
         if self.menu.page.is_some() || self.mouse_focus_pending() {
             return true;
         }
+        // A focused desktop region takes typed input instead of the pane.
+        if let Some(terminal) = self.region_input_target().map(str::to_owned) {
+            return self.send_region_input(&terminal, event, cx);
+        }
         // Keys typed while a WSL drop's paths are mapped follow those paths.
         if !self.input_ready() || self.wsl_paste.is_some() {
             if self.disconnected() {

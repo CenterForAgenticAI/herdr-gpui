@@ -54,6 +54,7 @@ mod contrast;
 mod control;
 mod copy_mode;
 mod daemon;
+mod desktop_region;
 mod devices_overview;
 mod dialog_input;
 mod dispatch;

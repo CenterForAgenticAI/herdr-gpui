@@ -204,7 +204,7 @@ impl HerdrWindow {
 
     /// Herdr's shared `ui.mouse_scroll_lines`, its default until the shared
     /// config loads.
-    fn mouse_scroll_lines(&self) -> std::num::NonZeroU16 {
+    pub(crate) fn mouse_scroll_lines(&self) -> std::num::NonZeroU16 {
         self.settings.shared.as_ref().map_or(
             crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
             |shared| shared.mouse_scroll_lines,

@@ -36,6 +36,9 @@ pub(crate) enum PanelDrag {
     DiffSides,
     /// The review's list of changed files.
     ReviewFiles,
+    /// The plugin region on the window's right edge; the daemon keeps its
+    /// size.
+    DesktopRegion,
 }
 
 /// The notes panel beside a review or an annotated page.
@@ -189,7 +192,7 @@ impl crate::HerdrWindow {
             #[cfg(any(target_os = "macos", windows))]
             PanelDrag::PageNotes => Some((&mut self.notes_width, Side::Right)),
             PanelDrag::ReviewFiles => Some((&mut self.review_files_width, Side::Left)),
-            PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
+            PanelDrag::SettingsNavigation | PanelDrag::DiffSides | PanelDrag::DesktopRegion => None,
         }
     }
 
@@ -200,7 +203,7 @@ impl crate::HerdrWindow {
             #[cfg(any(target_os = "macos", windows))]
             PanelDrag::PageNotes => Some((self.notes_width, Side::Right)),
             PanelDrag::ReviewFiles => Some((self.review_files_width, Side::Left)),
-            PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
+            PanelDrag::SettingsNavigation | PanelDrag::DiffSides | PanelDrag::DesktopRegion => None,
         }
     }
 
