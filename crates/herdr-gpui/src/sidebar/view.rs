@@ -6,8 +6,9 @@
 //! is notified, so the window notifies this one whenever it is notified itself
 //! (`HerdrWindow::new` observes itself), and a surface-only update redraws the
 //! window without notifying it (`HerdrWindow::redraw_terminal`). Moving
-//! status marks draw in the window's mark layer (`mark_layer`), so their
-//! frames do not invalidate it either.
+//! marks, the status marks and the activity bar's busy pulse, draw in the
+//! window's mark layer (`mark_layer`), so their frames do not invalidate it
+//! either.
 //!
 //! The rows still come from `HerdrWindow::render_sidebar`, so their listeners
 //! and state stay where they were.

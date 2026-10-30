@@ -543,6 +543,25 @@ pub(crate) fn full_draw(window: &mut Window, cx: &mut App) -> ArenaClearNeeded {
     window.draw(cx)
 }
 
+/// Lets `frames` display frames pass, `step` apart: each advances the clock,
+/// runs the frame callbacks a moving mark waits on, and draws what they
+/// invalidated, as the platform would.
+#[cfg(test)]
+pub(crate) fn run_frames(
+    cx: &mut gpui::VisualTestContext,
+    frames: usize,
+    step: std::time::Duration,
+) {
+    for _ in 0..frames {
+        cx.executor().advance_clock(step);
+        cx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<HerdrWindow>) -> HerdrWindow {
     let sidebar_view = {

@@ -465,7 +465,7 @@ fn spin(mark: Svg, id: &'static str, period_ms: u64) -> impl IntoElement {
             period_ms,
         )))
         .repeat_synced()
-        .with_max_fps(30.),
+        .with_max_fps(crate::mark_layer::MAX_FPS),
         |mark, delta| mark.with_transformation(Transformation::rotate(percentage(delta))),
     )
 }
