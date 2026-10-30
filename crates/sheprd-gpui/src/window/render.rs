@@ -980,7 +980,8 @@ impl Render for SheprdWindow {
                             .when(!self.hosted, |column| {
                                 column.children(self.zen_status_bar(cx))
                             }),
-                    ),
+                    )
+                    .children(self.render_desktop_region(window, cx)),
             );
         // After the body, whose rows reserve the marks it draws, and under
         // everything that covers the body.
