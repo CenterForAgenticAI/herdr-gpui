@@ -615,6 +615,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<HerdrWindow>)
         selection_follow: Default::default(),
         find: None,
         copy_mode: None,
+        core_terminals: Default::default(),
         find_memory: Default::default(),
         flash: None,
         flash_motion: Default::default(),

@@ -210,6 +210,10 @@ pub struct Config {
     pub github: GitHubConfig,
     /// Where GitLab tokens pasted in the account menu are saved.
     pub gitlab: GitLabConfig,
+    /// New tabs run in herdr-core (Herdr 2) rather than Herdr 1, for their
+    /// native panes. Off by default while Herdr 1 holds the user's sessions;
+    /// without Herdr 1 installed, terminals are Herdr 2's anyway.
+    pub herdr_2_terminals: bool,
     /// Font resolution searched for an icon font for the terminal and found
     /// none installed, so Private Use Area glyphs draw as missing-glyph boxes.
     /// Never set when the config names the terminal's `fallback` itself.
@@ -425,6 +429,7 @@ impl Default for Config {
             focus_follows_mouse: true,
             github: GitHubConfig::default(),
             gitlab: GitLabConfig::default(),
+            herdr_2_terminals: false,
             icon_font_missing: false,
             keep_selection_after_copy: true,
             keybinding_overrides: BTreeMap::new(),
@@ -514,6 +519,7 @@ struct Settings {
     focus_follows_mouse: Option<bool>,
     github: GitHubConfig,
     gitlab: GitLabConfig,
+    herdr_2_terminals: Option<bool>,
     keep_selection_after_copy: Option<bool>,
     keybindings: BTreeMap<String, Binding>,
     language: Option<herdr_i18n::Language>,
@@ -930,6 +936,7 @@ impl Config {
         config.open_files_in = settings.open_files_in;
         config.editor_command = settings.editor_command;
         config.keep_selection_after_copy = settings.keep_selection_after_copy.unwrap_or(true);
+        config.herdr_2_terminals = settings.herdr_2_terminals.unwrap_or(false);
         for (name, font, settings) in [
             ("sidebar", &mut config.sidebar, settings.sidebar.font),
             ("tabs", &mut config.tabs, settings.tabs),
