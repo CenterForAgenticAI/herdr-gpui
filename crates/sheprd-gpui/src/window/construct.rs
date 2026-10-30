@@ -180,6 +180,7 @@ impl SheprdWindow {
             core_terminals,
             daemon_text: Default::default(),
             deliveries: Default::default(),
+            desktop_region: Default::default(),
             device_drag: None,
             device_filter: Default::default(),
             device_order: Vec::new(),
