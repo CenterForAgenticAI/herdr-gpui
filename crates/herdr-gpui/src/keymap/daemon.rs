@@ -258,6 +258,16 @@ const ACTIONS: &[(&str, Target, &str)] = &[
         Target::Command(Command::ToggleSidebar),
         "prefix+b",
     ),
+    (
+        "toggle_region",
+        Target::Command(Command::ToggleDesktopRegion),
+        "",
+    ),
+    (
+        "focus_region",
+        Target::Command(Command::FocusDesktopRegion),
+        "",
+    ),
 ];
 
 /// How a daemon binding is typed.
