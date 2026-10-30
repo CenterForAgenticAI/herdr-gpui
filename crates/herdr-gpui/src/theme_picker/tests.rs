@@ -2,6 +2,8 @@
 use super::*;
 use core::prelude::v1::test;
 
+mod en_xa;
+
 #[gpui::test]
 fn saving_blocks_cancel_replacement_and_reload_until_reconciled(cx: &mut TestAppContext) {
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);

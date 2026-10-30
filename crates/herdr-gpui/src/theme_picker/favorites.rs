@@ -6,6 +6,7 @@ use crate::{
         Config,
         favorite_themes::{self, FavoriteEdit},
     },
+    i18n::fl,
 };
 use gpui::{prelude::*, *};
 
@@ -43,9 +44,9 @@ impl HerdrWindow {
             .debug_selector(move || format!("theme-star-{index}"))
             .role(Role::Button)
             .aria_label(if favorite {
-                "Unstar theme"
+                fl!("theme-picker-unstar")
             } else {
-                "Star theme"
+                fl!("theme-picker-star")
             })
             .flex_none()
             .size(px(22.))
@@ -152,7 +153,10 @@ impl HerdrWindow {
             }
             Err(error) => {
                 tracing::warn!(%error, "Could not save favorite themes");
-                picker.favorites_error = Some(format!("Could not save favorite themes: {error}"));
+                picker.favorites_error = Some(fl!(
+                    "theme-picker-favorites-failed",
+                    error = error.to_string()
+                ));
                 // The next star retries these, unless it clicked the same
                 // theme again; the loop stops so a failing file is not
                 // rewritten on its own.
