@@ -56,6 +56,11 @@ pub enum Command {
     /// sidebar, and the status bar, where Tab moves between controls.
     FocusNextRegion,
     FocusPreviousRegion,
+    /// Hides or shows the plugin region on the window's right edge.
+    ToggleDesktopRegion,
+    /// Gives the keyboard to the right-edge plugin region, or back to the
+    /// focused pane when the region has it.
+    FocusDesktopRegion,
     /// Hides the window's chrome and every group but the one in use.
     ToggleZenMode,
     DevicesOverview,
@@ -604,6 +609,16 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::FocusPreviousRegion,
         name: "focus_previous_region",
         message: "commands-focus-previous-region",
+    },
+    CommandInfo {
+        command: Command::ToggleDesktopRegion,
+        name: "toggle_desktop_region",
+        message: "commands-toggle-desktop-region",
+    },
+    CommandInfo {
+        command: Command::FocusDesktopRegion,
+        name: "focus_desktop_region",
+        message: "commands-focus-desktop-region",
     },
     CommandInfo {
         command: Command::ToggleZenMode,
