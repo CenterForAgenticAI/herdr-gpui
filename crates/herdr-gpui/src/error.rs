@@ -200,6 +200,8 @@ pub enum Error {
     MissingHome,
     #[error("neither XDG_STATE_HOME nor HOME is set")]
     MissingStateRoot,
+    #[error(transparent)]
+    Mods(#[from] crate::mods::Error),
     #[error("No current daemon snapshot.")]
     NoSnapshot,
     #[error("No tab selected.")]
