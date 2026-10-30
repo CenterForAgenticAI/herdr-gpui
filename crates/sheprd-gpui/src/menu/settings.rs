@@ -394,6 +394,8 @@ impl SheprdWindow {
                 | Command::ToggleModPanel
                 | Command::FocusNextRegion
                 | Command::FocusPreviousRegion
+                | Command::ToggleDesktopRegion
+                | Command::FocusDesktopRegion
                 | Command::ToggleZenMode
                 | Command::DevicesOverview
                 | Command::NewCoreTerminal

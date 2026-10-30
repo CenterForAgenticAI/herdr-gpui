@@ -786,6 +786,7 @@ impl Render for SheprdWindow {
             | self.annotations_moving()
             | self.chrome_sliding()
             | self.flash_moving()
+            | self.desktop_region_moving()
         {
             window.request_animation_frame();
         }
@@ -958,7 +959,8 @@ impl Render for SheprdWindow {
                             .child(content)
                             .children(self.render_notices(cx))
                             .children(self.zen_status_bar(cx)),
-                    ),
+                    )
+                    .children(self.render_desktop_region(window, cx)),
             )
             // After the body, whose rows reserve the marks it draws, and under
             // everything that covers the body.
