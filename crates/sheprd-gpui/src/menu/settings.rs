@@ -401,6 +401,8 @@ impl SheprdWindow {
                 | Command::ToggleAllHosts
                 | Command::FocusNextRegion
                 | Command::FocusPreviousRegion
+                | Command::ToggleDesktopRegion
+                | Command::FocusDesktopRegion
                 | Command::ToggleZenMode
                 | Command::DevicesOverview
                 | Command::NotificationHistory
