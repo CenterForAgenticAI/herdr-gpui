@@ -51,6 +51,9 @@ pub(crate) enum PanelDrag {
     ReviewFiles,
     /// The panel of mod sections on the window's right.
     ModPanel,
+    /// The plugin region on the window's right edge; the daemon keeps its
+    /// size.
+    DesktopRegion,
 }
 
 /// The notes panel beside a review or an annotated page.
@@ -212,7 +215,7 @@ impl crate::SheprdWindow {
             PanelDrag::PageNotes => Some((&mut self.notes_width, Side::Right)),
             PanelDrag::ReviewFiles => Some((&mut self.review_files_width, Side::Left)),
             PanelDrag::ModPanel => Some((&mut self.mod_panel_width, Side::Right)),
-            PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
+            PanelDrag::SettingsNavigation | PanelDrag::DiffSides | PanelDrag::DesktopRegion => None,
         }
     }
 
@@ -224,7 +227,7 @@ impl crate::SheprdWindow {
             PanelDrag::PageNotes => Some((self.notes_width, Side::Right)),
             PanelDrag::ReviewFiles => Some((self.review_files_width, Side::Left)),
             PanelDrag::ModPanel => Some((self.mod_panel_width, Side::Right)),
-            PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
+            PanelDrag::SettingsNavigation | PanelDrag::DiffSides | PanelDrag::DesktopRegion => None,
         }
     }
 
