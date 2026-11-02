@@ -149,6 +149,7 @@ error-updater-cancel-unacknowledged = Update worker could not acknowledge cancel
 
 # Why App Updates never checks, after "In-app updates unavailable:" (update-panel-disabled).
 error-updater-disabled-local-build = In-app updates require a release build with an embedded update verification key. Local builds and test fixtures never check automatically.
+error-updater-disabled-packaged = This build is updated by the package it was installed from. Use your package manager, such as brew upgrade.
 error-updater-disabled-platform = No standalone updater is available for this platform. Use your package manager or download a supported release.
 # Starts lowercase, as it follows a colon.
 error-updater-disabled-secondary = another window owns app updates in this process. Use the window that was open first.

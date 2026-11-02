@@ -201,6 +201,7 @@ impl Localize for sheprd_updater::Disabled {
         match self {
             // keep-sorted start
             Self::LocalBuild => fl!("error-updater-disabled-local-build"),
+            Self::Packaged => fl!("error-updater-disabled-packaged"),
             Self::Platform => fl!("error-updater-disabled-platform"),
             Self::Secondary => fl!("error-updater-disabled-secondary"),
             Self::Unsupported(failure) => failure.localize(),
