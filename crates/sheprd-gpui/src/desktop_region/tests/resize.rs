@@ -105,7 +105,7 @@ fn a_drag_past_the_pane_minimum_stops_there_and_keeps_the_panel(cx: &mut TestApp
         "{panel:?}"
     );
     let drawn = view.read_with(cx, |view, _| view.desktop_region.drawn.clone());
-    assert_eq!(drawn.as_deref(), Some("region_1"));
+    assert_eq!(drawn.as_ref().map(|(_, id)| id.as_str()), Some("region_1"));
     // Released there, it stays drawn until the daemon answers.
     cx.simulate_mouse_up(far, MouseButton::Left, Modifiers::default());
     draw(cx);
