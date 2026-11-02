@@ -206,6 +206,7 @@ fn every_reason_app_updates_never_checks_has_a_message() {
     use herdr_updater::Disabled;
     assert_localized(&[
         Disabled::LocalBuild,
+        Disabled::Packaged,
         Disabled::Platform,
         Disabled::Secondary,
         Disabled::Unsupported(Error::WorkerStopped.into()),
