@@ -31,6 +31,7 @@ fn states() -> Vec<State> {
         // as the worker and the updater keep them: typed, until the panel
         // words them.
         State::Disabled(Disabled::LocalBuild),
+        State::Disabled(Disabled::Packaged),
         State::Disabled(Disabled::Platform),
         State::Disabled(Disabled::Secondary),
         State::Disabled(Disabled::Unsupported(Error::WorkerStopped.into())),

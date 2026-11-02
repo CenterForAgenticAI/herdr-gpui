@@ -9,6 +9,10 @@ use std::{fmt, ops::Deref, sync::Arc};
 pub enum Disabled {
     /// A local build or test fixture: no release version or update key.
     LocalBuild,
+    /// A build its distributor updates through a package manager: it was
+    /// built with `HERDR_UPDATES=package`, so it never offers another
+    /// publisher's release in its place.
+    Packaged,
     /// No standalone updater exists for this platform.
     Platform,
     /// Another window of this process runs the update worker.
@@ -22,6 +26,9 @@ impl fmt::Display for Disabled {
         match self {
             Self::LocalBuild => formatter.write_str(
                 "In-app updates require a release build with an embedded update verification key. Local builds and test fixtures never check automatically.",
+            ),
+            Self::Packaged => formatter.write_str(
+                "This build is updated by the package it was installed from. Use your package manager, such as brew upgrade.",
             ),
             Self::Platform => formatter.write_str(
                 "No standalone updater is available for this platform. Use your package manager or download a supported release.",
