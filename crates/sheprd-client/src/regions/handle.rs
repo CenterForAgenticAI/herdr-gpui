@@ -5,7 +5,10 @@
 use crate::{
     ClientHandle, Result,
     method::Method,
-    protocol::{ClientMessage, ClientPaneInputEvent, region_surface::RegionViewport},
+    protocol::{
+        ClientMessage, ClientPaneInputEvent,
+        region_surface::{RegionCommand, RegionViewport},
+    },
 };
 use serde_json::json;
 
@@ -33,6 +36,13 @@ impl ClientHandle {
             None,
             true,
         )
+    }
+
+    /// Shows, hides or resizes a region without a reply. Unlike the region
+    /// methods it reaches a server whose surface this client is not viewing,
+    /// when that server advertised `region_background`.
+    pub fn send_region_command(&self, boot_id: &str, command: &RegionCommand) -> Result<()> {
+        self.enqueue_command(boot_id, command.message()?, None, true)
     }
 
     pub fn focus_region(&self, boot_id: &str, region_id: &str) -> Result<String> {
