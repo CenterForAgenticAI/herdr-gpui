@@ -23,6 +23,13 @@ pub const PROJECTION_KIND: &str = "endpoint.regions.v1";
 pub const SURFACE_KIND: &str = "endpoint.region-surface.v1";
 /// Client to server, JSON [`RegionViewport`].
 pub const VIEWPORT_KIND: &str = "endpoint.region-viewport.v1";
+/// Client to server, JSON [`RegionCommand`]. A client viewing another
+/// machine may not send endpoint requests to this server, so it shows, hides
+/// and resizes this server's regions with these instead.
+pub const COMMAND_KIND: &str = "endpoint.region-command.v1";
+/// The server keeps streaming its regions to a client viewing another
+/// machine, and accepts that client's region input and [`COMMAND_KIND`].
+pub const BACKGROUND_CAPABILITY: &str = "region_background";
 /// The edge this client draws. Regions on other edges are skipped.
 pub const RIGHT_EDGE: &str = "right";
 
@@ -75,6 +82,31 @@ pub struct RegionViewport {
     pub region_id: String,
     pub cols: u16,
     pub rows: u16,
+}
+
+/// A change to one region, sent without a reply. The JSON shape is the wire
+/// contract: `{"op":"show"|"hide","region_id":..}` or
+/// `{"op":"resize","region_id":..,"size":..}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum RegionCommand {
+    Show { region_id: String },
+    Hide { region_id: String },
+    Resize { region_id: String, size: u16 },
+}
+
+impl RegionCommand {
+    pub fn decode(data: &str) -> Result<Self> {
+        Ok(serde_json::from_str(data)?)
+    }
+
+    /// The client message carrying this command.
+    pub fn message(&self) -> Result<ClientMessage> {
+        Ok(ClientMessage::EndpointControl {
+            kind: COMMAND_KIND.into(),
+            data: serde_json::to_string(self)?,
+        })
+    }
 }
 
 impl RegionProjection {
