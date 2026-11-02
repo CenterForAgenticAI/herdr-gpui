@@ -1,26 +1,32 @@
 //! Desktop regions: a plugin's terminal docked on the window's right edge,
 //! drawn from the daemon's region projection and frames (`region_surface`).
-//! Only the window's own connection negotiates them, so a window without
-//! the capability lays out exactly as before. The panel follows the daemon:
+//! The viewed machine's region wins the edge; while another machine is
+//! viewed, this Mac's own region fills it when that machine has none (see
+//! `source`). A window without the capability lays out exactly as before.
+//! The panel follows the daemon:
 //! it shows a region only while the projection says it is visible, and the
 //! keyboard goes to it only while the projection also says it is focused.
 //! Regions on other edges are not drawn and get no viewport report.
 // i18n: migrated
 
 mod render;
+mod source;
 #[cfg(test)]
 mod tests;
+
+use source::Owner;
+pub(crate) use source::moves_focus;
 
 use crate::{HerdrWindow, i18n::fl, motion, navigation::NavigationTarget, window::Flash};
 use gpui::{Bounds, Context, Pixels, Window};
 use herdr_client::{
-    ClientHandle, SendError,
+    ClientHandle, RegionState, SendError,
     protocol::{
         ClientPaneInputEvent,
-        region_surface::{ClientRegion, RegionViewport},
+        region_surface::{ClientRegion, RegionCommand, RegionViewport},
     },
 };
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 /// Columns the panes keep beside a region. Herdr's own layout hides a
 /// region that would leave fewer (`MIN_TAB_SURFACE_WIDTH`).
@@ -40,14 +46,20 @@ pub(crate) struct Panel {
     /// where it is, without sliding.
     boot: Option<String>,
     drag: Option<Drag>,
-    /// The region drawn now, which typed input may go to.
-    drawn: Option<String>,
-    /// The region last drawn and its width, kept to slide it out.
-    leaving: Option<(ClientRegion, u16)>,
-    /// The last viewport sent, with the boot it was sent to.
-    reported: Option<(String, RegionViewport)>,
+    /// The region drawn now and whose it is; typed input may go to it.
+    drawn: Option<(Owner, String)>,
+    /// The region last drawn, kept to slide it out.
+    leaving: Option<Shown>,
+    /// A local region holding the keyboard while another machine is viewed.
+    /// The window keeps this focus: that server is not the one being viewed.
+    local_focus: Option<String>,
+    /// The last viewport sent to each endpoint, with the boot it went to.
+    reported: HashMap<String, (String, RegionViewport)>,
     slide: motion::Toggle,
 }
+
+/// A region the panel draws: whose it is, the region, and its width.
+type Shown = (Owner, ClientRegion, u16);
 
 /// A size the user dragged to, drawn until the daemon's projection catches
 /// up with it.
@@ -60,6 +72,11 @@ struct Drag {
 }
 
 impl Panel {
+    /// Lets go of a local region's keyboard focus. True when it held it.
+    pub(crate) fn release_local_focus(&mut self) -> bool {
+        self.local_focus.take().is_some()
+    }
+
     /// Forgets a released drag once a newer projection has arrived.
     fn settle(&mut self, revision: Option<u64>) {
         if let Some(Drag {
@@ -104,17 +121,17 @@ fn bounded(region: &ClientRegion, size: u16) -> u16 {
 }
 
 impl HerdrWindow {
-    /// The right region this window draws now, and its width in cells.
-    fn desktop_region_layout(&self, window: &Window) -> Option<(ClientRegion, u16)> {
-        if !self.live.supports_regions {
-            return None;
-        }
-        let region = self.live.regions.visible_right()?;
+    /// The right region this window draws now, whose it is, and its width
+    /// in cells.
+    fn desktop_region_layout(&self, window: &Window) -> Option<Shown> {
+        let owner = self.right_owner()?;
+        let region = self.source_regions(owner)?.visible_right()?;
         let size = self
             .desktop_region
             .drag
             .map_or(region.size, |drag| drag.size);
-        columns(region, size, self.desktop_region_row(window)).map(|cols| (region.clone(), cols))
+        columns(region, size, self.desktop_region_row(window))
+            .map(|cols| (owner, region.clone(), cols))
     }
 
     /// The cells across the window body beside the sidebar, which the panes
@@ -129,33 +146,40 @@ impl HerdrWindow {
     }
 
     /// Records what this frame draws: the slide toward it, the region typed
-    /// input may go to, and, when nothing is drawn, a zero viewport.
-    fn track_desktop_region(&mut self, layout: Option<&(ClientRegion, u16)>, now: Instant) {
-        let projection = self.live.regions.projection();
-        let boot = projection.map(|projection| projection.boot_id.clone());
+    /// input may go to, and a zero viewport for each right region not drawn.
+    fn track_desktop_region(&mut self, layout: Option<&Shown>, now: Instant) {
+        let owner = layout.map_or(Owner::Viewed, |(owner, ..)| *owner);
+        let boot = self
+            .source_regions(owner)
+            .and_then(RegionState::projection)
+            .map(|projection| projection.boot_id.clone());
         let first = self.desktop_region.boot != boot;
         self.desktop_region.boot = boot;
         self.desktop_region.slide.set(layout.is_some(), now, first);
-        self.desktop_region.drawn = layout.map(|(region, _)| region.region_id.clone());
+        self.desktop_region.drawn =
+            layout.map(|(owner, region, _)| (*owner, region.region_id.clone()));
         if let Some(shown) = layout {
             self.desktop_region.leaving = Some(shown.clone());
-            return;
-        }
-        if !self.desktop_region.slide.moving(now) {
+        } else if !self.desktop_region.slide.moving(now) {
             self.desktop_region.leaving = None;
         }
-        let hidden = self
-            .live
-            .regions
-            .right()
-            .filter(|_| self.live.supports_regions)
-            .map(|region| RegionViewport {
-                region_id: region.region_id.clone(),
-                cols: 0,
-                rows: 0,
-            });
-        if let Some(hidden) = hidden {
-            self.report_desktop_region(hidden);
+        // A right region hidden, or covered by the viewed machine's, has no
+        // room here; the drawn one reports its cells as it is placed.
+        for owner in Owner::ALL {
+            if layout.is_some_and(|(drawn, ..)| *drawn == owner) {
+                continue;
+            }
+            let hidden = self
+                .source_regions(owner)
+                .and_then(RegionState::right)
+                .map(|region| RegionViewport {
+                    region_id: region.region_id.clone(),
+                    cols: 0,
+                    rows: 0,
+                });
+            if let Some(hidden) = hidden {
+                self.report_desktop_region(owner, hidden);
+            }
         }
     }
 
@@ -164,55 +188,52 @@ impl HerdrWindow {
         self.desktop_region.slide.moving(motion::now())
     }
 
-    /// Tells the daemon the cells this window draws for a region, once per
-    /// change and connection.
-    fn report_desktop_region(&mut self, viewport: RegionViewport) {
-        if !self.live.supports_regions {
+    /// Tells `owner`'s server the cells this window draws for its region,
+    /// once per change and connection.
+    fn report_desktop_region(&mut self, owner: Owner, viewport: RegionViewport) {
+        if self.source_regions(owner).is_none() {
             return;
         }
-        let (Some(handle), Some(snapshot)) = (
-            &self.endpoints[self.selected_endpoint].connection.handle,
-            &self.live.snapshot,
-        ) else {
+        let Some((endpoint, handle, boot)) = self.region_connection(owner) else {
             return;
         };
-        let sent = (snapshot.boot_id.clone(), viewport);
-        if self.desktop_region.reported.as_ref() == Some(&sent) {
+        let sent = (boot.to_owned(), viewport);
+        if self.desktop_region.reported.get(endpoint) == Some(&sent) {
             return;
         }
-        match handle.send_region_viewport(&sent.0, &sent.1) {
-            Ok(()) => self.desktop_region.reported = Some(sent),
+        let result = handle.send_region_viewport(&sent.0, &sent.1);
+        let endpoint = endpoint.to_owned();
+        match result {
+            Ok(()) => {
+                self.desktop_region.reported.insert(endpoint, sent);
+            }
             Err(error) => tracing::debug!(%error, "Region viewport not sent"),
         }
     }
 
     /// The region terminal typed input goes to: the drawn right region,
-    /// while the projection says it holds the keyboard.
+    /// while it holds the keyboard.
     pub(crate) fn region_input_target(&self) -> Option<&str> {
-        if !self.live.supports_regions {
-            return None;
-        }
-        let region = self.live.regions.visible_right()?;
-        (self.desktop_region.drawn.as_deref() == Some(region.region_id.as_str())
-            && self.live.regions.is_focused(region))
-        .then_some(region.terminal_id.as_str())
+        let (owner, drawn) = self.desktop_region.drawn.as_ref()?;
+        let region = self.source_regions(*owner)?.visible_right()?;
+        (drawn == &region.region_id && self.region_focused(*owner, region))
+            .then_some(region.terminal_id.as_str())
     }
 
-    /// Sends `event` to the region terminal `terminal_id`. False when it
-    /// was not sent and the window said why.
+    /// Sends `event` to the drawn region's terminal `terminal_id`, on the
+    /// connection of the server running it. False when it was not sent and
+    /// the window said why.
     pub(crate) fn send_region_input(
         &mut self,
         terminal_id: &str,
         event: ClientPaneInputEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let (Some(handle), Some(snapshot)) = (
-            &self.endpoints[self.selected_endpoint].connection.handle,
-            &self.live.snapshot,
-        ) else {
+        let owner = self.drawn_owner().unwrap_or(Owner::Viewed);
+        let Some((_, handle, boot)) = self.region_connection(owner) else {
             return true;
         };
-        if let Err(error) = handle.send_region_input(&snapshot.boot_id, terminal_id, [event]) {
+        if let Err(error) = handle.send_region_input(boot, terminal_id, [event]) {
             self.local_error = Some(fl!(
                 "desktop-region-input-failed",
                 error = error.to_string()
@@ -224,8 +245,8 @@ impl HerdrWindow {
         true
     }
 
-    /// Queues one region request on the window's connection; a failure
-    /// shows in the window.
+    /// Queues one region request on the viewed machine's connection; a
+    /// failure shows in the window.
     fn region_request(
         &mut self,
         request: impl FnOnce(&ClientHandle, &str) -> Result<String, SendError>,
@@ -248,52 +269,112 @@ impl HerdrWindow {
         true
     }
 
-    /// The right region a command acts on, or a flash saying why there is
-    /// none.
-    fn commanded_region(&mut self, cx: &mut Context<Self>) -> Option<ClientRegion> {
+    /// Sends `command` for a region of this Mac's server while another
+    /// machine is viewed; a failure shows in the window.
+    fn region_command(&mut self, command: RegionCommand, cx: &mut Context<Self>) -> bool {
+        let Some((_, handle, boot)) = self.region_connection(Owner::Local) else {
+            return false;
+        };
+        if let Err(error) = handle.send_region_command(boot, &command) {
+            self.local_error = Some(fl!(
+                "desktop-region-request-failed",
+                error = error.to_string()
+            ));
+            cx.notify();
+            return false;
+        }
+        true
+    }
+
+    /// The right region a command acts on and whose it is, or a flash
+    /// saying why there is none: the region drawn, else the viewed machine's
+    /// hidden one, else this Mac's.
+    fn commanded_region(&mut self, cx: &mut Context<Self>) -> Option<(Owner, ClientRegion)> {
         self.live.snapshot.as_ref()?;
-        let region = self
-            .live
-            .regions
-            .right()
-            .filter(|_| self.live.supports_regions)
-            .cloned();
-        if region.is_none() {
-            let text = match self.live.supports_regions {
+        let owner = self.right_owner().or_else(|| {
+            Owner::ALL.into_iter().find(|owner| {
+                self.source_regions(*owner)
+                    .and_then(RegionState::right)
+                    .is_some()
+            })
+        });
+        let found =
+            owner.and_then(|owner| Some((owner, self.source_regions(owner)?.right()?.clone())));
+        if found.is_none() {
+            let offered = Owner::ALL
+                .into_iter()
+                .any(|owner| self.source_regions(owner).is_some());
+            let text = match offered {
                 true => fl!("desktop-region-none"),
                 false => fl!("desktop-region-unsupported"),
             };
             self.show_flash(Flash::warning(text), cx);
         }
-        region
+        found
     }
 
     /// Hides the right region, or shows it again.
     pub(crate) fn toggle_desktop_region(&mut self, cx: &mut Context<Self>) {
-        let Some(region) = self.commanded_region(cx) else {
+        let Some((owner, region)) = self.commanded_region(cx) else {
             return;
         };
-        let id = region.region_id;
-        self.region_request(
-            |handle, boot| match region.visible {
-                true => handle.hide_region(boot, &id),
-                false => handle.show_region(boot, &id),
-            },
-            cx,
-        );
+        let region_id = region.region_id;
+        match (owner, region.visible) {
+            (Owner::Local, true) => {
+                self.region_command(RegionCommand::Hide { region_id }, cx);
+            }
+            (Owner::Local, false) => {
+                self.region_command(RegionCommand::Show { region_id }, cx);
+            }
+            (Owner::Viewed, visible) => {
+                self.region_request(
+                    |handle, boot| match visible {
+                        true => handle.hide_region(boot, &region_id),
+                        false => handle.show_region(boot, &region_id),
+                    },
+                    cx,
+                );
+            }
+        }
     }
 
-    /// Hides the region `region_id`, as its header's button does.
-    pub(crate) fn hide_desktop_region(&mut self, region_id: &str, cx: &mut Context<Self>) {
-        self.region_request(|handle, boot| handle.hide_region(boot, region_id), cx);
+    /// Hides `owner`'s region `region_id`, as its header's button does.
+    fn hide_desktop_region(&mut self, owner: Owner, region_id: &str, cx: &mut Context<Self>) {
+        match owner {
+            Owner::Viewed => {
+                self.region_request(|handle, boot| handle.hide_region(boot, region_id), cx);
+            }
+            Owner::Local => {
+                let region_id = region_id.to_owned();
+                self.region_command(RegionCommand::Hide { region_id }, cx);
+            }
+        }
     }
 
     /// Gives the keyboard to the right region, showing it first when it is
     /// hidden, or back to the focused pane when the region has it.
     pub(crate) fn focus_desktop_region(&mut self, cx: &mut Context<Self>) {
-        let Some(region) = self.commanded_region(cx) else {
+        let Some((owner, region)) = self.commanded_region(cx) else {
             return;
         };
+        if owner == Owner::Local {
+            let focused = self.region_focused(owner, &region);
+            let region_id = region.region_id;
+            if !region.visible
+                && !self.region_command(
+                    RegionCommand::Show {
+                        region_id: region_id.clone(),
+                    },
+                    cx,
+                )
+            {
+                return;
+            }
+            self.desktop_region.local_focus = (!focused).then_some(region_id);
+            cx.notify();
+            return;
+        }
+        self.release_local_region(cx);
         if self.live.regions.is_focused(&region) {
             self.focus_pane_from_region(cx);
             return;
