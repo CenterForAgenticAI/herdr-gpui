@@ -484,6 +484,9 @@ impl HerdrWindow {
     }
 
     pub(crate) fn focus_clicked_pane(&mut self, id: &str, cx: &mut Context<Self>) {
+        // A local region shown beside another machine holds the keyboard
+        // here only, so clicking a pane takes it back without asking.
+        self.release_local_region(cx);
         if self
             .live
             .snapshot

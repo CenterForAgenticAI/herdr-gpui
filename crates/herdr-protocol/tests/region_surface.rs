@@ -5,8 +5,8 @@
 use herdr_protocol::{
     endpoint::EndpointClientHello,
     region_surface::{
-        ClientRegion, PROJECTION_KIND, RegionProjection, RegionSurface, RegionViewport,
-        SURFACE_KIND, VIEWPORT_KIND,
+        BACKGROUND_CAPABILITY, COMMAND_KIND, ClientRegion, PROJECTION_KIND, RegionCommand,
+        RegionProjection, RegionSurface, RegionViewport, SURFACE_KIND, VIEWPORT_KIND,
     },
     *,
 };
@@ -203,6 +203,37 @@ fn viewport_round_trips_and_rejects_bad_shapes() {
     assert_eq!(kind, VIEWPORT_KIND);
     assert_eq!(RegionViewport::decode(&data).unwrap(), viewport);
     assert!(RegionViewport::decode(r#"{"region_id":7}"#).is_err());
+}
+
+#[test]
+fn region_command_json_shape_is_frozen() {
+    assert_eq!(BACKGROUND_CAPABILITY, "region_background");
+    let command = RegionCommand::Resize {
+        region_id: "region_1".into(),
+        size: 40,
+    };
+    let ClientMessage::EndpointControl { kind, data } = command.message().unwrap() else {
+        panic!("expected endpoint control");
+    };
+    assert_eq!(kind, "endpoint.region-command.v1");
+    assert_eq!(kind, COMMAND_KIND);
+    assert_eq!(data, r#"{"op":"resize","region_id":"region_1","size":40}"#);
+    assert_eq!(RegionCommand::decode(&data).unwrap(), command);
+    let ClientMessage::EndpointControl { data, .. } = RegionCommand::Show {
+        region_id: "region_1".into(),
+    }
+    .message()
+    .unwrap() else {
+        panic!("expected endpoint control");
+    };
+    assert_eq!(data, r#"{"op":"show","region_id":"region_1"}"#);
+    assert_eq!(
+        RegionCommand::decode(r#"{"op":"hide","region_id":"region_1"}"#).unwrap(),
+        RegionCommand::Hide {
+            region_id: "region_1".into()
+        }
+    );
+    assert!(RegionCommand::decode(r#"{"op":"close","region_id":"region_1"}"#).is_err());
 }
 
 #[test]
