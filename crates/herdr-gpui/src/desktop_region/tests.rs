@@ -17,6 +17,7 @@ use herdr_client::{
 };
 use std::sync::Arc;
 
+mod background;
 mod commands;
 mod input;
 mod layout;
