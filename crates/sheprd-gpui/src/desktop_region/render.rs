@@ -3,7 +3,7 @@
 //! edge that resizes it. Clicks focus the region; once it is focused, mouse
 //! input reaches its terminal as the projection allows.
 
-use super::{BORDER, Drag, MIN_ROWS, dragged};
+use super::{BORDER, Drag, MIN_ROWS, Owner, dragged};
 use crate::{
     SheprdWindow,
     config::corners,
@@ -16,7 +16,7 @@ use gpui::{prelude::*, *};
 use sheprd_client::protocol::{
     ClientMouseButton, ClientMouseGeometry, ClientMouseKind, ClientMousePosition,
     ClientPaneInputEvent,
-    region_surface::{ClientRegion, RegionViewport},
+    region_surface::{ClientRegion, RegionCommand, RegionViewport},
 };
 
 /// The header's height above the region's terminal.
@@ -33,14 +33,16 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let now = motion::now();
-        let revision = self.live.regions.projection().map(|p| p.revision);
+        let revision = self
+            .right_owner()
+            .and_then(|owner| Some(self.source_regions(owner)?.projection()?.revision));
         self.desktop_region.settle(revision);
         let layout = self.desktop_region_layout(window);
         self.track_desktop_region(layout.as_ref(), now);
-        let (region, cols) = layout.or_else(|| self.desktop_region.leaving.clone())?;
+        let (owner, region, cols) = layout.or_else(|| self.desktop_region.leaving.clone())?;
         let width = f32::from(cols) * self.cell_width + BORDER;
         let shown = self.desktop_region.slide.shown(now);
-        let focused = self.desktop_region.drawn.is_some() && self.live.regions.is_focused(&region);
+        let focused = self.desktop_region.drawn.is_some() && self.region_focused(owner, &region);
         let border = match focused {
             true => self.theme.primary(),
             false => self.theme.surface,
@@ -56,8 +58,8 @@ impl SheprdWindow {
             .border_l_1()
             .border_color(rgb(border))
             .bg(self.fill().base(self.terminal_theme().background))
-            .child(self.desktop_region_header(&region, focused, cx))
-            .child(self.desktop_region_terminal(&region, cx))
+            .child(self.desktop_region_header(owner, &region, focused, cx))
+            .child(self.desktop_region_terminal(owner, &region, cx))
             .child(panel_resize::handle(
                 "desktop-region-resize",
                 Side::Right,
@@ -103,6 +105,7 @@ impl SheprdWindow {
 
     fn desktop_region_header(
         &self,
+        owner: Owner,
         region: &ClientRegion,
         focused: bool,
         cx: &mut Context<Self>,
@@ -136,7 +139,7 @@ impl SheprdWindow {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
-                this.hide_desktop_region(&id, cx);
+                this.hide_desktop_region(owner, &id, cx);
             }));
         div()
             .id("desktop-region-header")
@@ -169,12 +172,16 @@ impl SheprdWindow {
 
     fn desktop_region_terminal(
         &self,
+        owner: Owner,
         region: &ClientRegion,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let entity = cx.entity();
         let painter = self.painter.clone();
-        let surface = self.live.regions.surface(region).cloned();
+        let surface = self
+            .source_regions(owner)
+            .and_then(|regions| regions.surface(region))
+            .cloned();
         let region_id = region.region_id.clone();
         let cell_width = self.cell_width;
         let cell_height = self.config.terminal.line_height();
@@ -215,7 +222,7 @@ impl SheprdWindow {
                 canvas(
                     move |bounds, _, cx| {
                         entity.update(cx, |this, _| {
-                            this.place_desktop_region(&region_id, bounds, cell_height);
+                            this.place_desktop_region(owner, &region_id, bounds, cell_height);
                         });
                     },
                     move |bounds, _, window, cx| {
@@ -247,35 +254,63 @@ impl SheprdWindow {
 
     /// Reports the cells laid out for `region_id`: zero while it is not the
     /// region drawn, or too short to draw.
-    fn place_desktop_region(&mut self, region_id: &str, bounds: Bounds<Pixels>, cell_height: f32) {
+    fn place_desktop_region(
+        &mut self,
+        owner: Owner,
+        region_id: &str,
+        bounds: Bounds<Pixels>,
+        cell_height: f32,
+    ) {
         self.desktop_region.bounds = bounds;
         let (cols, rows) = cells(bounds, self.cell_width, cell_height);
-        let drawn = self.desktop_region.drawn.as_deref() == Some(region_id);
+        let drawn = self
+            .desktop_region
+            .drawn
+            .as_ref()
+            .is_some_and(|(drawn, id)| *drawn == owner && id == region_id);
         let (cols, rows) = match drawn && rows >= MIN_ROWS {
             true => (cols, rows),
             false => (0, 0),
         };
-        self.report_desktop_region(RegionViewport {
-            region_id: region_id.into(),
-            cols,
-            rows,
-        });
+        self.report_desktop_region(
+            owner,
+            RegionViewport {
+                region_id: region_id.into(),
+                cols,
+                rows,
+            },
+        );
     }
 
     /// Focuses the drawn right region unless it already has the keyboard.
-    /// True when it already had it.
+    /// True when it already had it. This Mac's region shown while another
+    /// machine is viewed takes the keyboard in this window only.
     fn focus_drawn_region(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(region) = self.live.regions.visible_right() else {
+        let Some((owner, drawn)) = self.desktop_region.drawn.clone() else {
             return false;
         };
-        if self.desktop_region.drawn.as_deref() != Some(region.region_id.as_str()) {
+        let Some(region) = self
+            .source_regions(owner)
+            .and_then(|regions| regions.visible_right())
+        else {
+            return false;
+        };
+        if drawn != region.region_id {
             return false;
         }
-        if self.live.regions.is_focused(region) {
+        if self.region_focused(owner, region) {
             return true;
         }
-        let id = region.region_id.clone();
-        self.region_request(|handle, boot| handle.focus_region(boot, &id), cx);
+        match owner {
+            Owner::Local => {
+                self.desktop_region.local_focus = Some(drawn);
+                cx.notify();
+            }
+            Owner::Viewed => {
+                self.release_local_region(cx);
+                self.region_request(|handle, boot| handle.focus_region(boot, &drawn), cx);
+            }
+        }
         false
     }
 
@@ -357,9 +392,8 @@ impl SheprdWindow {
             ClientMouseKind::ScrollUp | ClientMouseKind::ScrollDown
         );
         let reporting = self
-            .live
-            .regions
-            .visible_right()
+            .drawn_owner()
+            .and_then(|owner| self.source_regions(owner)?.visible_right())
             .is_some_and(|region| region.mouse_reporting);
         if !scroll && !reporting {
             return;
@@ -385,7 +419,14 @@ impl SheprdWindow {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(region) = self.live.regions.visible_right().cloned() else {
+        let Some(owner) = self.drawn_owner() else {
+            return;
+        };
+        let Some(region) = self
+            .source_regions(owner)
+            .and_then(|regions| regions.visible_right())
+            .cloned()
+        else {
             return;
         };
         let wanted = (f32::from(right - x) - BORDER) / self.cell_width.max(1.);
@@ -403,8 +444,18 @@ impl SheprdWindow {
             size,
             released: None,
         });
-        let id = region.region_id;
-        self.region_request(|handle, boot| handle.resize_region(boot, &id, size), cx);
+        let region_id = region.region_id;
+        match owner {
+            Owner::Viewed => {
+                self.region_request(
+                    |handle, boot| handle.resize_region(boot, &region_id, size),
+                    cx,
+                );
+            }
+            Owner::Local => {
+                self.region_command(RegionCommand::Resize { region_id, size }, cx);
+            }
+        }
         cx.notify();
     }
 
@@ -417,11 +468,12 @@ impl SheprdWindow {
         else {
             return;
         };
-        let projection = self.live.regions.projection();
-        let landed = self
-            .live
-            .regions
-            .visible_right()
+        let regions = self
+            .drawn_owner()
+            .and_then(|owner| self.source_regions(owner));
+        let projection = regions.and_then(|regions| regions.projection());
+        let landed = regions
+            .and_then(|regions| regions.visible_right())
             .is_some_and(|region| region.size == drag.size);
         self.desktop_region.drag = (!landed).then(|| Drag {
             released: Some(projection.map_or(0, |p| p.revision)),
