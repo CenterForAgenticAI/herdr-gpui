@@ -615,6 +615,8 @@ impl SheprdWindow {
         }
         self.clear_pending_input();
         self.menu.reset();
+        // A local region's keyboard focus belongs to the machine left behind.
+        self.desktop_region.release_local_focus();
         self.selection_epoch += 1;
         self.discard_composition(cx);
         let endpoint = &self.endpoints[self.selected_endpoint];
