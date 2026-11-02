@@ -64,6 +64,17 @@ pub const APP_VERSION: &str = match option_env!("HERDR_RELEASE_VERSION") {
     None => "dev",
 };
 
+/// A distributor's build that its package manager updates. It may still embed
+/// the update key, so it can verify the release's host builds, but it never
+/// checks for or installs a release itself: that release would replace the
+/// distributor's build with the publisher's.
+const PACKAGED: bool = packaged(option_env!("HERDR_UPDATES"));
+
+/// Whether `HERDR_UPDATES` hands updates to the package manager.
+const fn packaged(updates: Option<&str>) -> bool {
+    matches!(updates, Some(value) if value.eq_ignore_ascii_case("package"))
+}
+
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// The sample release body the QA preview shows, so the notes section can be
@@ -263,6 +274,10 @@ impl Updater {
     pub fn start(channel: UpdateChannel) -> Self {
         let mut updater = Self::default();
         updater.channel = channel;
+        if PACKAGED {
+            updater.state = State::Disabled(Disabled::Packaged);
+            return updater;
+        }
         let Some(key) = option_env!("HERDR_UPDATE_PUBLIC_KEY") else {
             return updater;
         };
