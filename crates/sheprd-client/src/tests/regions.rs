@@ -218,6 +218,42 @@ fn without_negotiation_region_commands_never_reach_the_wire() {
 }
 
 #[test]
+fn region_commands_need_negotiation_and_reach_the_wire_once_negotiated() {
+    let command = region_surface::RegionCommand::Hide {
+        region_id: "region_1".into(),
+    };
+    let (client, _server, worker) = connected(REGIONS, false);
+    client
+        .handle
+        .send_region_command("boot-v1", &command)
+        .unwrap();
+    assert!(matches!(
+        event(&client),
+        ClientEvent::CommandRejected {
+            request_id: None,
+            reason: Error::Regions(crate::regions::Error::NotNegotiated),
+        }
+    ));
+    client.handle.disconnect();
+    worker.join().unwrap().unwrap();
+    let (client, mut server, worker) = connected(REGIONS, true);
+    client
+        .handle
+        .send_region_command("boot-v1", &command)
+        .unwrap();
+    let ClientMessage::EndpointControl { kind, data } = receive(&mut server) else {
+        panic!("not a region command");
+    };
+    assert_eq!(kind, region_surface::COMMAND_KIND);
+    assert_eq!(
+        region_surface::RegionCommand::decode(&data).unwrap(),
+        command
+    );
+    client.handle.disconnect();
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
 fn a_negotiated_connection_writes_viewports_input_and_region_requests() {
     let (client, mut server, worker) = connected(REGIONS, true);
     let handle = &client.handle;
