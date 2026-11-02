@@ -203,6 +203,7 @@ impl HerdrWindow {
         if !self.input_ready() {
             return false;
         }
+        self.release_local_region(cx);
         let queued = self.request_focus_change(
             &fl!("window-notices-navigate"),
             Some((&target).into()),
@@ -733,6 +734,10 @@ impl HerdrWindow {
         if let Some(snapshot) = &self.live.snapshot
             && let Some((method, params)) = controls::request(command, snapshot)
         {
+            // Focusing the viewed machine takes the keyboard off a local region.
+            if crate::desktop_region::moves_focus(method, &params) {
+                self.release_local_region(cx);
+            }
             self.request_focus_change(method.as_str(), None, |handle, boot| {
                 handle.request(boot, method, params)
             });
