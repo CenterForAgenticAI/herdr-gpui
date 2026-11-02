@@ -166,9 +166,12 @@ pub struct LiveState {
     /// every key, including releases, as escape codes. Keys the window already
     /// sends as key events then also send their release.
     pub(crate) keyboard_report_all: bool,
-    /// The daemon offers desktop regions. Only the window's own connection
-    /// asks for them, so on a parked connection this is never acted on.
+    /// The daemon offers desktop regions. A parked connection's are drawn
+    /// only for this Mac's server, and only with `supports_region_background`.
     pub(crate) supports_regions: bool,
+    /// The daemon keeps streaming its regions, and takes their input and
+    /// commands, while this connection's surface is not the one viewed.
+    pub(crate) supports_region_background: bool,
     /// The desktop regions this connection negotiated: the latest projection
     /// and each region's latest frame. Empty unless the hello asked for them.
     pub(crate) regions: herdr_client::RegionState,
@@ -253,6 +256,7 @@ impl Default for LiveState {
             notifications_lost: false,
             keyboard_report_all: false,
             supports_regions: false,
+            supports_region_background: false,
             regions: Default::default(),
             outer_focused: None,
             activation: None,
@@ -369,6 +373,7 @@ impl LiveState {
             // Shapes the next key events, not anything drawn.
             keyboard_report_all: _,
             supports_regions,
+            supports_region_background,
             // Frames repaint like the terminal; a new projection moves the
             // layout and is compared below.
             regions,
@@ -414,6 +419,7 @@ impl LiveState {
             && *supports_copy_motion == self.supports_copy_motion
             && *supports_edit_scrollback == self.supports_edit_scrollback
             && *supports_regions == self.supports_regions
+            && *supports_region_background == self.supports_region_background
             && regions.projection() == self.regions.projection()
             && match (dialog_response, &self.dialog_response) {
                 (Some((a, None)), Some((b, None))) => a == b,
@@ -621,10 +627,10 @@ impl LiveState {
                 self.version_mismatch = None;
                 // The daemon reports the mode to each new connection.
                 self.keyboard_report_all = false;
-                self.supports_regions = welcome
-                    .capabilities
-                    .iter()
-                    .any(|value| value == herdr_client::protocol::region_surface::CAPABILITY);
+                let offers = |capability| welcome.capabilities.iter().any(|value| value == capability);
+                self.supports_regions = offers(herdr_client::protocol::region_surface::CAPABILITY);
+                self.supports_region_background =
+                    offers(herdr_client::protocol::region_surface::BACKGROUND_CAPABILITY);
                 self.regions = Default::default();
                 self.status = ConnectionStatus::AwaitingSnapshot;
                 self.error = None;
@@ -668,6 +674,7 @@ impl LiveState {
                 self.announcement_dismissal = None;
                 self.surface_images = Default::default();
                 self.supports_regions = false;
+                self.supports_region_background = false;
                 self.regions = Default::default();
             }
             ClientEvent::CommandRejected { request_id, reason } => {
