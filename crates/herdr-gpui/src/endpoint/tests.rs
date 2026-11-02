@@ -22,7 +22,7 @@ fn saved_profile_ids_are_the_catalog_ids_behind_ssh_endpoints() {
 impl Endpoint {
     /// Attaches `handle` the way `connect` leaves the shown endpoint, with its
     /// surface requested, for window tests that run without a daemon.
-    #[cfg(feature = "integration-test")]
+    #[cfg(any(test, feature = "integration-test"))]
     pub(crate) fn attach_shown(&mut self, handle: ClientHandle) {
         self.connection.handle = Some(handle);
         self.initial_surface = true;
