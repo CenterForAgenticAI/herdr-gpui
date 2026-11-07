@@ -49,6 +49,7 @@ fn instance(host: &str) -> Api {
         instance: host.into(),
         host: host.into(),
         scheme: Scheme::Https,
+        headers: Default::default(),
     }
 }
 
@@ -146,6 +147,7 @@ hosts:
             instance: "git.corp.example".into(),
             host: "api.corp.example:8443".into(),
             scheme: Scheme::Http,
+            headers: Default::default(),
         }
     );
     let url = issues_url((&key, &api), None).unwrap();
@@ -306,6 +308,7 @@ fn an_unreachable_api_names_the_address_it_tried() {
         instance: "gitlab.example.com".into(),
         host: address.to_string(),
         scheme: Scheme::Http,
+        headers: Default::default(),
     };
     let error = gitlab::sync((&key, &api), None, None, &|| false, &mut None)
         .err()
