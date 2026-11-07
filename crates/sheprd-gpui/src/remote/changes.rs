@@ -131,6 +131,7 @@ fn log_failure(error: sheprd_github::Error) -> Failure {
     match error {
         // GitHub keeps logs for a while, and only Actions has them.
         sheprd_github::Error::Status(404 | 410) => Failure::NoLog,
+        sheprd_github::Error::CheckLog(check_log::Error::TooLong) => Failure::LogTooLong,
         _ => Failure::Unreadable,
     }
 }

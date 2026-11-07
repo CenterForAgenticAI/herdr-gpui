@@ -2,7 +2,7 @@
 //! carries. GitHub answers a log request with a redirect to storage that
 //! needs no token, so the token is sent to GitHub alone. A failure is
 //! written last, so the reader keeps a log's tail rather than its start,
-//! whatever its size. Log text is untrusted.
+//! and refuses a log too long to reach the end of. Log text is untrusted.
 
 use crate::http::{agent, authorization};
 use secrecy::SecretString;
@@ -21,7 +21,8 @@ pub const MAX_EXCERPT: usize = 8 * 1024;
 const LINES_BEFORE: usize = 80;
 /// Bytes kept of the end of a log.
 const TAIL: usize = 256 * 1024;
-/// Bytes read of a log before giving up on reaching its end.
+/// Bytes of a log read at most: past them its end, and so its failure, is
+/// out of reach.
 const READ_LIMIT: u64 = 64 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(20);
 /// What GitHub Actions writes before a line that failed the step.
@@ -59,7 +60,7 @@ pub fn job_log(token: &SecretString, owner: &str, repo: &str, job: u64) -> crate
     if !(200..=299).contains(&status) {
         return Err(crate::Error::Status(status));
     }
-    let tail = tail(log.body_mut().as_reader(), TAIL, READ_LIMIT).map_err(Error::Read)?;
+    let tail = tail(log.body_mut().as_reader(), TAIL, READ_LIMIT)?;
     Ok(String::from_utf8_lossy(&tail).into_owned())
 }
 
@@ -78,15 +79,21 @@ fn refusal(status: u16) -> crate::Error {
     }
 }
 
-/// The last `keep` bytes of at most `limit` read from `reader`.
-fn tail(reader: impl Read, keep: usize, limit: u64) -> std::io::Result<Vec<u8>> {
-    let mut reader = reader.take(limit);
+/// The last `keep` bytes of `reader`, which ends within `limit` bytes or is
+/// refused: what is read by then is not the end, and would pass for it.
+fn tail(reader: impl Read, keep: usize, limit: u64) -> Result<Vec<u8>, Error> {
+    let mut reader = reader.take(limit.saturating_add(1));
     let mut kept = VecDeque::with_capacity(keep);
     let mut chunk = [0; 16 * 1024];
+    let mut total = 0;
     loop {
-        let read = reader.read(&mut chunk)?;
+        let read = reader.read(&mut chunk).map_err(Error::Read)?;
         if read == 0 {
             return Ok(kept.into());
+        }
+        total += read as u64;
+        if total > limit {
+            return Err(Error::TooLong);
         }
         kept.extend(&chunk[..read]);
         kept.drain(..kept.len().saturating_sub(keep));

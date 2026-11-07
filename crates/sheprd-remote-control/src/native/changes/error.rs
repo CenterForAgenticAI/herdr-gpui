@@ -22,9 +22,9 @@ impl Error {
         match self {
             Self::Busy => StatusCode::TOO_MANY_REQUESTS,
             Self::Failed(Failure::Gone | Failure::NoFile) => StatusCode::NOT_FOUND,
-            Self::Failed(Failure::NoBase | Failure::NoLog | Failure::NoRepository) => {
-                StatusCode::CONFLICT
-            }
+            Self::Failed(
+                Failure::LogTooLong | Failure::NoBase | Failure::NoLog | Failure::NoRepository,
+            ) => StatusCode::CONFLICT,
             Self::Failed(Failure::Unreadable) => StatusCode::BAD_GATEWAY,
             Self::NoDesktop => StatusCode::SERVICE_UNAVAILABLE,
             Self::TimedOut => StatusCode::GATEWAY_TIMEOUT,

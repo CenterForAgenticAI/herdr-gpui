@@ -158,6 +158,7 @@ impl Localize for check_log::Error {
             // keep-sorted start
             Self::Location => fl!("error-github-check-log-location"),
             Self::Read(_) => fl!("error-github-check-log-read"),
+            Self::TooLong => fl!("error-github-check-log-too-long"),
             // keep-sorted end
         }
     }

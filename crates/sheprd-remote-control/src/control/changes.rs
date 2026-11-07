@@ -101,6 +101,8 @@ pub enum Failure {
     // keep-sorted start
     #[error("this workspace is not one Sheprd has open")]
     Gone,
+    #[error("this check's log is too long to read to its end")]
+    LogTooLong,
     #[error("no branch to compare with was found")]
     NoBase,
     #[error("that file is no longer changed")]

@@ -10,9 +10,15 @@ fn a_log_keeps_its_end_whatever_its_size() {
 }
 
 #[test]
-fn a_log_is_read_no_further_than_the_limit() {
+fn a_log_that_ends_at_the_limit_is_read_to_its_end() {
     let log = b"0123456789";
-    assert_eq!(tail(log.as_slice(), 3, 5).unwrap(), b"234");
+    assert_eq!(tail(log.as_slice(), 3, 10).unwrap(), b"789");
+}
+
+#[test]
+fn a_log_past_the_limit_is_refused_rather_than_shown_as_its_end() {
+    let log = b"0123456789";
+    assert!(matches!(tail(log.as_slice(), 3, 9), Err(Error::TooLong)));
 }
 
 #[test]

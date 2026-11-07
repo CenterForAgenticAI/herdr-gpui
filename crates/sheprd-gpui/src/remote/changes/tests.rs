@@ -288,6 +288,14 @@ fn a_gone_log_reads_as_none_and_other_refusals_as_unreadable() {
     );
 }
 
+#[test]
+fn a_log_too_long_to_reach_its_end_says_so() {
+    assert_eq!(
+        log_failure(check_log::Error::TooLong.into()),
+        Failure::LogTooLong
+    );
+}
+
 fn workspace() -> ClientShellWorkspace {
     ClientShellWorkspace {
         workspace_id: "w".into(),
