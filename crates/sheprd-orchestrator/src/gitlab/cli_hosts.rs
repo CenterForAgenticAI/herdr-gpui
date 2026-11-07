@@ -5,7 +5,11 @@
 //! glab keeps them in YAML. Only the block form glab writes is read, one
 //! `key: value` per line under each host; anything else is skipped, and a
 //! remote it does not map keeps its own host as before.
+//!
+//! Each host's `custom_headers` list is read too, for an instance behind an
+//! access proxy such as Cloudflare Access (`headers`).
 
+use super::headers::{CustomHeader, Headers};
 use std::{
     ffi::OsString,
     fs::File,
@@ -24,6 +28,9 @@ pub struct CliHost {
     pub api_host: Option<String>,
     pub api_protocol: Option<String>,
     pub ssh_host: Option<String>,
+    /// The instance's `custom_headers`, resolved: sent with every request to
+    /// its API over HTTPS, and never to another host.
+    pub headers: Headers,
 }
 
 /// glab's config file, where glab looks for it: `GLAB_CONFIG_DIR`, else the
@@ -71,7 +78,7 @@ pub fn read() -> Vec<CliHost> {
     let mut text = String::new();
     let read = File::open(&path).and_then(|file| file.take(LIMIT + 1).read_to_string(&mut text));
     match read {
-        Ok(size) if size as u64 <= LIMIT => parse(&text),
+        Ok(size) if size as u64 <= LIMIT => parse_in(&text, Some(&sheprd_client::login_env::var)),
         Ok(_) => Vec::new(),
         Err(error) => {
             tracing::debug!(
@@ -88,7 +95,24 @@ pub fn read() -> Vec<CliHost> {
 /// its fields the `key: value` lines one level further; nested lists such as
 /// `custom_headers` are deeper and skipped.
 pub fn parse(text: &str) -> Vec<CliHost> {
+    parse_in(text, None)
+}
+
+/// [`parse`], with each host's `custom_headers` list read too and its
+/// `valueFromEnv` names looked up with `variable`.
+pub fn parse_with(text: &str, variable: &Variable<'_>) -> Vec<CliHost> {
+    parse_in(text, Some(variable))
+}
+
+/// Looks up an environment variable by name.
+pub type Variable<'a> = dyn Fn(&str) -> Option<OsString> + 'a;
+
+fn parse_in(text: &str, variable: Option<&Variable<'_>>) -> Vec<CliHost> {
     let mut hosts = Vec::new();
+    // Each host's `custom_headers`, as written, beside `hosts`.
+    let mut lists: Vec<Vec<CustomHeader>> = Vec::new();
+    // Inside the last host's `custom_headers` list: its items' state.
+    let mut list: Option<Items> = None;
     let mut in_hosts = false;
     // The indentation of host names and of their fields, from their first line.
     let mut host_indent = None;
@@ -102,11 +126,21 @@ pub fn parse(text: &str) -> Vec<CliHost> {
         if content.is_empty() || content.starts_with('#') {
             continue;
         }
-        let entry = entry(content);
         if indent == 0 {
-            in_hosts = matches!(&entry, Some((key, None)) if key == "hosts");
+            in_hosts = matches!(entry(content), Some((key, None)) if key == "hosts");
+            list = None;
             continue;
         }
+        if let (Some(items), Some(fields), Some(headers)) =
+            (list.as_mut(), field_indent, lists.last_mut())
+            // A list's items may sit at its key's own indentation.
+            && (indent > fields || (indent == fields && content.starts_with('-')))
+        {
+            items.read(content, indent, headers);
+            continue;
+        }
+        list = None;
+        let entry = entry(content);
         let (true, Some((key, value))) = (in_hosts, entry) else {
             continue;
         };
@@ -118,6 +152,7 @@ pub fn parse(text: &str) -> Vec<CliHost> {
                     host: key,
                     ..CliHost::default()
                 });
+                lists.push(Vec::new());
             }
             continue;
         }
@@ -131,10 +166,50 @@ pub fn parse(text: &str) -> Vec<CliHost> {
             "api_host" => host.api_host = value,
             "api_protocol" => host.api_protocol = value,
             "ssh_host" => host.ssh_host = value,
+            "custom_headers" if value.is_none() && variable.is_some() => {
+                list = Some(Items::default());
+            }
             _ => {}
         }
     }
+    if let Some(variable) = variable {
+        for (host, list) in hosts.iter_mut().zip(lists) {
+            host.headers = Headers::resolve(list, variable);
+        }
+    }
     hosts
+}
+
+/// The items of a `custom_headers` list: `- name: ...` lines, each followed
+/// by its other keys at the indentation of `name`.
+#[derive(Default)]
+struct Items {
+    /// The indentation of the current item's keys.
+    keys: Option<usize>,
+}
+
+impl Items {
+    fn read(&mut self, content: &str, indent: usize, list: &mut Vec<CustomHeader>) {
+        let (content, indent) = match content.strip_prefix('-') {
+            Some(rest) if rest.is_empty() || rest.starts_with(' ') => {
+                let item = rest.trim_start_matches(' ');
+                list.push(CustomHeader::default());
+                // `-` alone leaves the keys to the lines below it.
+                let keys = indent + (content.len() - item.len());
+                self.keys = (!item.is_empty()).then_some(keys);
+                (item, keys)
+            }
+            Some(_) => return,
+            None => (content, indent),
+        };
+        if content.is_empty() || *self.keys.get_or_insert(indent) != indent {
+            return;
+        }
+        let (Some(header), Some((key, value))) = (list.last_mut(), entry(content)) else {
+            return;
+        };
+        header.set(&key, value);
+    }
 }
 
 /// A mapping line's key and its scalar value, if it has one. A list item or
@@ -171,6 +246,16 @@ fn scalar(raw: &str) -> Option<String> {
             .trim_end(),
     };
     (!value.is_empty()).then(|| value.to_owned())
+}
+
+/// The headers glab sends to `instance`, from this machine's config. Reads a
+/// file and may probe the shell: call it from a worker.
+pub fn headers_for(instance: &str) -> Headers {
+    read()
+        .into_iter()
+        .find(|host| host.host.eq_ignore_ascii_case(instance))
+        .map(|host| host.headers)
+        .unwrap_or_default()
 }
 
 /// The instance glab reaches over SSH at `remote_host` when that is not an

@@ -150,6 +150,12 @@ error-orchestrator-gitlab-environment-refused = GitLab refused GITLAB_TOKEN; cha
 error-orchestrator-gitlab-envrc-refused = GitLab refused the GITLAB_TOKEN this checkout's .envrc sets; change it there, since it is tried first
 # $repository is a GitLab project path, such as group/project.
 error-orchestrator-gitlab-forbidden = GitLab refused access to { $repository }; the token needs the read_api scope
+# $header is a header name from the GitLab CLI's config, such as CF-Access-Client-Id.
+error-orchestrator-gitlab-header-command = The GitLab CLI's header { $header } uses valueFromCommand, which is never run; use valueFromEnv
+# $header is the header name that was read, in quotes.
+error-orchestrator-gitlab-header-invalid = The GitLab CLI's header { $header } is not one an HTTP request can carry
+# $header is a header name; $variable an environment variable's name, such as CF_ACCESS_CLIENT_ID.
+error-orchestrator-gitlab-header-unset = The GitLab CLI's header { $header } reads { $variable }, which the login shell does not set
 # $host is the text that was read, in quotes.
 error-orchestrator-gitlab-host = { $host } is not a GitLab host name
 error-orchestrator-gitlab-insecure-host = GitLab at { $host } is read over plain HTTP, and a token is only ever sent over HTTPS: use an https:// remote
@@ -163,6 +169,8 @@ error-orchestrator-gitlab-not-found = GitLab shows no project { $repository } to
 error-orchestrator-gitlab-rate-limit = GitLab rate limit reached; it is read again later
 error-orchestrator-gitlab-read = GitLab's answer could not be read: { $error }
 error-orchestrator-gitlab-record = The saved GitLab tokens are not in the expected form
+# $origin and $location are a scheme and host, such as https://gitlab.example.com; $status is the HTTP status code.
+error-orchestrator-gitlab-redirect = GitLab request to { $origin } was redirected to { $location } (HTTP { $status }); an access proxy in front of it may need custom_headers in the GitLab CLI's config
 error-orchestrator-gitlab-scope = GitLab refused the token's access; it needs the read_api scope
 error-orchestrator-gitlab-sign-in = GitLab shows { $repository } only when signed in: add a token from the account button at the top right
 error-orchestrator-gitlab-size = GitLab's answer exceeded the size limit
