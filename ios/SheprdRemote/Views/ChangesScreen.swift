@@ -91,6 +91,8 @@ struct ChangesScreen: View {
         _ = await (files, checks)
     }
 
+    /// A refresh runs outside the task keyed on the comparison, so switching
+    /// does not cancel it: its answer counts only for what is still shown.
     private func loadFiles() async {
         let (device, id, scope) = (key.device, key.workspace, scope)
         files = .waiting
@@ -98,17 +100,17 @@ struct ChangesScreen: View {
             let list = try await model.fleet.call(device) { client, token in
                 try await client.changes(workspace: id, scope: scope, bearer: token)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, scope == self.scope else { return }
             files = .loaded(list)
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, scope == self.scope else { return }
             files = .failed(error.localizedDescription)
         }
     }
 
     /// Checks are extra here, so failing to read them only leaves them out.
     private func loadChecks() async {
-        guard workspace?.pullRequest != nil else {
+        guard let number = workspace?.pullRequest?.number else {
             checks = nil
             return
         }
@@ -116,7 +118,7 @@ struct ChangesScreen: View {
         let read = try? await model.fleet.call(device) { client, token in
             try await client.checks(workspace: id, bearer: token)
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, number == workspace?.pullRequest?.number else { return }
         checks = read
     }
 
