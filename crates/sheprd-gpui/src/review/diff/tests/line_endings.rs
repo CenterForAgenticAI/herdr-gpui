@@ -22,7 +22,7 @@ fn git(directory: &Path, args: &[&str]) {
 fn a_line_ending_warning_leaves_the_first_files_status_and_counts() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().canonicalize().unwrap();
-    git(&path, &["init", "-q"]);
+    git(&path, &["init", "-q", "-b", "main"]);
     git(&path, &["config", "core.autocrlf", "true"]);
     std::fs::write(path.join("gone.rs"), "bye\n").unwrap();
     std::fs::write(path.join("lib.rs"), "one\ntwo\n").unwrap();
