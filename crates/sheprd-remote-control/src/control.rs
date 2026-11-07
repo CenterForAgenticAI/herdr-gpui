@@ -13,6 +13,7 @@ pub mod app_update;
 pub mod changes;
 pub mod hosts;
 pub mod pull_requests;
+pub mod tags;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, BufWriter, Write},
@@ -190,6 +191,12 @@ pub enum Request {
     HostRevokes,
     /// A host no longer holds the device.
     HostRevoked(hosts::HostRevoke),
+    /// This computer's tags: offers Sheprd's copy, if any, and answers with
+    /// the ones that stand (`tags`).
+    Tags {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offer: Option<tags::ComputerTags>,
+    },
     /// On a host: adds a phone another computer's user allowed, as
     /// `herdr-remote-control enroll` asks. Sheprd never sends it to its
     /// own daemon.
@@ -251,6 +258,7 @@ pub enum Response {
         revokes: Vec<hosts::HostRevoke>,
     },
     Enrolled(hosts::Enrolled),
+    Tags(tags::ComputerTags),
     AppUpdate {
         /// A phone asked to update since the last report. Taken by reading.
         requested: bool,

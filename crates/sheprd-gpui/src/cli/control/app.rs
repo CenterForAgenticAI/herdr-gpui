@@ -24,13 +24,17 @@ pub enum WindowCommand {
     Reconnect,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiCommand {
     Sidebar(Switch),
     StatusBar(Switch),
     FontSize(FontSize),
     /// The activity bar section to show.
     Panel(crate::sidebar::ActivityPanel),
+    /// Lists the agents panel's coordinator groups.
+    AgentGroups,
+    /// The coordinator group to show; none is every group.
+    AgentGroup(Option<String>),
 }
 
 pub(super) fn app(args: &mut Args) -> Result<AppCommand, CliError> {
@@ -80,12 +84,12 @@ fn size(text: std::ffi::OsString) -> Result<Size, CliError> {
 }
 
 /// The panel names `ui panel` takes, as its errors and help name them.
-const PANELS: &str = "workspaces|overview|pull-requests|issues|security|automations|usage";
+const PANELS: &str = "workspaces|overview|pull-requests|issues|tasks|security|automations|usage";
 
 pub(super) fn ui(args: &mut Args) -> Result<UiCommand, CliError> {
     let verb = args.verb().ok_or(CliError::MissingArgument {
         command: "ui",
-        what: "sidebar|statusbar|font-size|panel",
+        what: "sidebar|statusbar|font-size|panel|agent-group",
     })?;
     Ok(match verb.to_str() {
         Some("sidebar") => UiCommand::Sidebar(switch(args.positional())?),
@@ -97,6 +101,11 @@ pub(super) fn ui(args: &mut Args) -> Result<UiCommand, CliError> {
                     .ok_or(CliError::InvalidValue(PANELS))?,
             )
         }
+        Some("agent-group") => match args.optional_text()? {
+            None => UiCommand::AgentGroups,
+            Some(name) if name == "all" => UiCommand::AgentGroup(None),
+            Some(name) => UiCommand::AgentGroup(Some(name)),
+        },
         Some("font-size") => {
             let value = args.required_text("+|-|reset|POINTS")?;
             UiCommand::FontSize(match value.as_str() {

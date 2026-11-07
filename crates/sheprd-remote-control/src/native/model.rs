@@ -4,7 +4,10 @@
 
 use crate::{
     ansi::{self, Color, Style},
-    control::pull_requests::{PullRequests, Tone, WorkspacePullRequest},
+    control::{
+        pull_requests::{PullRequests, Tone, WorkspacePullRequest},
+        tags::ComputerTags,
+    },
     hub::{self, ChatRow, Layout, Summary},
     load::Load,
 };
@@ -29,7 +32,7 @@ pub(crate) struct Home {
     pub(crate) fingerprint: String,
     /// Whether the Herdr daemon is reachable now.
     pub(crate) connected: bool,
-    /// Permission requests waiting across every chat: the app's badge.
+    /// Agents that need an answer or finished unseen: the app's badge.
     pub(crate) waiting: usize,
     /// This computer's CPU and memory; absent until first read, and from
     /// older servers.
@@ -43,6 +46,9 @@ pub(crate) struct Home {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) version: Option<String>,
     pub(crate) workspaces: Vec<Workspace>,
+    /// The tags this computer carries; older servers leave them out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tags: Option<ComputerTags>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -55,6 +61,10 @@ pub(crate) struct Workspace {
     /// repository's linked worktrees under it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) worktree: Option<ClientShellWorktree>,
+    /// The Herdr 1 session it is in, which a phone groups a computer's
+    /// workspaces by; older servers leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) pull_request: Option<PullRequest>,
     /// Commits on its branch that no pull request carries yet.
@@ -327,7 +337,10 @@ pub(crate) struct Sources<'a> {
     pub(crate) load: Option<Load>,
     pub(crate) summaries: HashMap<String, Summary>,
     pub(crate) pull_requests: &'a PullRequests,
+    pub(crate) tags: ComputerTags,
     pub(crate) version: &'a str,
+    /// The panes wanting the user, from [`crate::web::State::attention`].
+    pub(crate) waiting: usize,
 }
 
 impl Home {
@@ -339,9 +352,10 @@ impl Home {
             load,
             mut summaries,
             pull_requests,
+            tags,
             version,
+            waiting,
         } = sources;
-        let waiting = summaries.values().map(|summary| summary.questions).sum();
         let workspaces = layout
             .workspaces
             .iter()
@@ -351,6 +365,7 @@ impl Home {
                 branch: workspace.branch.clone(),
                 cwd: workspace.cwd.clone(),
                 worktree: workspace.worktree.clone(),
+                session: workspace.session.clone(),
                 pull_request: pull_request(pull_requests, &layout.boot, workspace).map(|pr| {
                     PullRequest {
                         number: pr.number,
@@ -375,6 +390,7 @@ impl Home {
             waiting,
             load,
             working: Some(layout.working),
+            tags: Some(tags),
             version: Some(version.to_owned()),
             workspaces,
         }

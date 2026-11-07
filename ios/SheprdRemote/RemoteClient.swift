@@ -98,13 +98,14 @@ final class PinnedTrust: NSObject, URLSessionTaskDelegate, Sendable {
 }
 
 enum RemoteError: Error, LocalizedError {
+    /// The status, and what to tell the person (`Refusal`).
     case status(Int, String)
     case notHTTP
     case unreachable
 
     var errorDescription: String? {
         switch self {
-        case let .status(code, body): apiErrorMessage(body).map { "\($0)." } ?? "The computer answered \(code): \(body)"
+        case let .status(_, text): text
         case .notHTTP: "The computer's answer was not HTTP."
         case .unreachable: "None of the computer's addresses answered."
         }
@@ -233,6 +234,14 @@ final class RemoteClient: Sendable {
             "POST", "/api/v2/hosts/\(Self.segment(host))/pair",
             body: API.HostPairRequest(publicKey: publicKey), bearer: bearer
         )
+    }
+
+    // MARK: Tags
+
+    /// Offers this phone's copy of the computer's tags; answers those that
+    /// stand, which are the computer's own if it heard of a later edit.
+    func offerTags(_ tags: Home.Tags, bearer: String) async throws -> Home.Tags {
+        try await send("PUT", "/api/v2/tags", body: tags, bearer: bearer)
     }
 
     // MARK: Terminals
@@ -383,7 +392,7 @@ final class RemoteClient: Sendable {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw RemoteError.notHTTP }
         guard (200..<300).contains(http.statusCode) else {
-            throw RemoteError.status(http.statusCode, String(decoding: data.prefix(300), as: UTF8.self))
+            throw RemoteError.status(http.statusCode, Refusal.text(status: http.statusCode, body: data))
         }
     }
 
@@ -428,7 +437,8 @@ final class RemoteClient: Sendable {
     private func decode<Answer: Decodable>(_ data: Data, _ response: URLResponse) throws -> Answer {
         guard let http = response as? HTTPURLResponse else { throw RemoteError.notHTTP }
         guard (200..<300).contains(http.statusCode) else {
-            let text = String(decoding: data.prefix(300), as: UTF8.self)
+            let text = Refusal.text(status: http.statusCode, body: data)
+            log.error("\(PathFailure.route(http.url), privacy: .public) refused with \(http.statusCode): \(text, privacy: .public)")
             throw RemoteError.status(http.statusCode, text)
         }
         return try JSONDecoder().decode(Answer.self, from: data)

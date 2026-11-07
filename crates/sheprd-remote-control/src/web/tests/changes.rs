@@ -22,6 +22,7 @@ fn with_workspace(dir: &std::path::Path) -> Shared {
                 cwd: "/code/app".into(),
                 branch: Some("topic".into()),
                 worktree: None,
+                session: None,
                 chats: Vec::new(),
                 terminals: Vec::new(),
             }],

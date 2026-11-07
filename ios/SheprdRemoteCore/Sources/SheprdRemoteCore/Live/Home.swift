@@ -24,8 +24,10 @@ public struct Home: Codable, Hashable, Sendable {
     /// The release serving, to show; older computers leave it out.
     public var version: String?
     public var workspaces: [Workspace]
+    /// The tags this computer keeps; older computers leave them out.
+    public var tags: Tags?
 
-    public init(api: Int? = nil, computer: String, fingerprint: String, connected: Bool, waiting: Int, load: Load? = nil, working: Int? = nil, version: String? = nil, workspaces: [Workspace]) {
+    public init(api: Int? = nil, computer: String, fingerprint: String, connected: Bool, waiting: Int, load: Load? = nil, working: Int? = nil, version: String? = nil, workspaces: [Workspace], tags: Tags? = nil) {
         self.api = api
         self.computer = computer
         self.fingerprint = fingerprint
@@ -35,6 +37,24 @@ public struct Home: Codable, Hashable, Sendable {
         self.working = working
         self.version = version
         self.workspaces = workspaces
+        self.tags = tags
+    }
+
+    /// A computer's tags and when they were last edited, also the body and
+    /// answer of `PUT /api/v2/tags`.
+    public struct Tags: Codable, Hashable, Sendable {
+        public var tags: [String]
+        public var updatedMs: UInt64
+
+        public init(tags: [String], updatedMs: UInt64) {
+            self.tags = tags
+            self.updatedMs = updatedMs
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case tags
+            case updatedMs = "updated_ms"
+        }
     }
 
     /// Whether the computer runs a Sheprd too old for this app.
@@ -63,6 +83,9 @@ public struct Home: Codable, Hashable, Sendable {
         public var cwd: String
         /// The repository checkout it is; older computers leave it out.
         public var worktree: Worktree?
+        /// The Herdr session it is in, when its computer names one; older
+        /// computers, and Herdr 2 workspaces, leave it out.
+        public var session: String?
         public var pullRequest: PullRequest?
         /// Commits on its branch that no pull request carries yet; older
         /// computers leave it out.
@@ -70,8 +93,11 @@ public struct Home: Codable, Hashable, Sendable {
         public var chats: [ChatRow]
         public var terminals: [TerminalRow]
 
+        /// Its pull request is merged, so the work here is done.
+        public var merged: Bool { pullRequest?.tone == .merged }
+
         enum CodingKeys: String, CodingKey {
-            case id, label, branch, cwd, worktree, chats, terminals
+            case id, label, branch, cwd, worktree, session, chats, terminals
             case pullRequest = "pull_request"
             case unopenedCommits = "unopened_commits"
         }
