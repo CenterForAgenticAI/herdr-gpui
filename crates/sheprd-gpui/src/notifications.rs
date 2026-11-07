@@ -399,7 +399,9 @@ pub(crate) fn tick(
                     return paused || now < n.expires;
                 }
                 if n.ready {
-                    return true;
+                    // Not on screen yet, so quiet hours take it too, or it
+                    // would appear once the toast or menu before it left.
+                    return n.client_local || !quiet;
                 }
                 if !n.client_local {
                     let delay = if n.kind == Kind::Custom {

@@ -14,7 +14,7 @@
 //! one queued when the app quits is not sent.
 
 use super::{Error, Row};
-use crate::{SheprdWindow, i18n::fl, teleport::Host, window::Flash};
+use crate::{SheprdWindow, i18n::fl, state::LiveState, teleport::Host, window::Flash};
 use gpui::{Context, Window};
 use sheprd_client::protocol::AgentStatus;
 use std::{
@@ -53,6 +53,17 @@ pub(crate) struct Reply {
     agent: String,
     pub text: String,
     pub phase: Phase,
+}
+
+/// An agent the reply dialog was opened for, as it was then: the text is
+/// written to this agent, whatever holds its pane by the time it is submitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Target {
+    pub title: String,
+    endpoint: String,
+    pane: String,
+    boot: String,
+    agent: String,
 }
 
 /// What a reply's pane holds now.
@@ -211,20 +222,26 @@ fn deliver(host: &Host, pane: &str, text: &str) -> Result<(), Error> {
 }
 
 impl SheprdWindow {
-    /// What `reply`'s pane holds, from the prepared snapshots.
-    fn reply_presence(&self, reply: &Reply) -> Presence {
-        let Some((index, endpoint)) = self
+    /// The host `id` and its live state, if it is still in this window.
+    fn overview_host(&self, id: &str) -> Option<(&crate::endpoint::Endpoint, &LiveState)> {
+        let (index, endpoint) = self
             .endpoints
             .iter()
             .enumerate()
-            .find(|(_, endpoint)| endpoint.id == reply.endpoint)
-        else {
-            return Presence::Gone;
-        };
+            .find(|(_, endpoint)| endpoint.id == id)?;
         let live = if index == self.selected_endpoint {
             &self.live
         } else {
             &endpoint.live
+        };
+        Some((endpoint, live))
+    }
+
+    /// What `pane` holds, from the prepared snapshots, for a reply written to
+    /// `agent` on daemon boot `boot`.
+    fn reply_presence(&self, (id, pane): (&str, &str), boot: &str, agent: &str) -> Presence {
+        let Some((endpoint, live)) = self.overview_host(id) else {
+            return Presence::Gone;
         };
         let Some(snapshot) = live
             .snapshot
@@ -233,15 +250,17 @@ impl SheprdWindow {
         else {
             return Presence::Unreachable;
         };
-        if snapshot.boot_id != reply.boot {
+        if snapshot.boot_id != boot {
             return Presence::Gone;
         }
         snapshot
             .agents
             .iter()
-            .find(|agent| agent.pane_id == reply.pane)
-            .filter(|agent| crate::sidebar::agent_name(agent) == reply.agent)
-            .map_or(Presence::Gone, |agent| Presence::Here(agent.agent_status))
+            .find(|candidate| candidate.pane_id == pane)
+            .filter(|candidate| crate::sidebar::agent_name(candidate) == agent)
+            .map_or(Presence::Gone, |candidate| {
+                Presence::Here(candidate.agent_status)
+            })
     }
 
     /// Sends the replies whose agents are at their prompts, on every tick.
@@ -250,7 +269,9 @@ impl SheprdWindow {
             return;
         }
         let mut replies = std::mem::take(&mut self.overview.replies);
-        let advance = replies.advance(Instant::now(), |reply| self.reply_presence(reply));
+        let advance = replies.advance(Instant::now(), |reply| {
+            self.reply_presence((&reply.endpoint, &reply.pane), &reply.boot, &reply.agent)
+        });
         self.overview.replies = replies;
         if advance.send.is_empty() && advance.dropped.is_empty() {
             return;
@@ -298,67 +319,66 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         let total = rows.len();
-        let rows: Vec<Row> = rows
-            .into_iter()
-            .filter(|row| self.overview_row_takes_replies(row))
+        let targets: Vec<Target> = rows
+            .iter()
+            .filter_map(|row| self.overview_reply_target(row))
             .collect();
-        if rows.is_empty() {
+        if targets.is_empty() {
             self.show_flash(Flash::warning(fl!("overview-reply-unsupported")), cx);
             return;
         }
-        if rows.len() < total {
-            let skipped = total - rows.len();
+        if targets.len() < total {
+            let skipped = total - targets.len();
             self.show_flash(
                 Flash::warning(fl!("overview-reply-skipped", count = skipped)),
                 cx,
             );
         }
         if self.open_menu(window, cx) {
-            self.overview.reply_to = rows;
+            self.overview.reply_to = targets;
             crate::menu::open_overview_reply(self);
         }
     }
 
-    /// Whether `row` is an agent on a host whose `herdr` CLI this client can
-    /// run.
-    fn overview_row_takes_replies(&self, row: &Row) -> bool {
-        row.pane().is_some_and(|(id, _)| {
-            self.endpoints.iter().any(|endpoint| {
-                endpoint.id == id
-                    && crate::pane_move::refusal(&endpoint.connection.target).is_none()
-            })
+    /// The agent `row` shows, as it is now, if it is on a host whose `herdr`
+    /// CLI this client can run.
+    fn overview_reply_target(&self, row: &Row) -> Option<Target> {
+        let (id, pane) = row.pane()?;
+        let (endpoint, live) = self.overview_host(id)?;
+        if crate::pane_move::refusal(&endpoint.connection.target).is_some() {
+            return None;
+        }
+        let snapshot = live.snapshot.as_deref()?;
+        let agent = snapshot.agents.iter().find(|a| a.pane_id == pane)?;
+        Some(Target {
+            title: row.title.clone(),
+            endpoint: id.to_owned(),
+            pane: pane.to_owned(),
+            boot: snapshot.boot_id.clone(),
+            agent: crate::sidebar::agent_name(agent).to_owned(),
         })
     }
 
-    /// The rows the reply dialog is for.
-    pub(crate) fn overview_reply_targets(&self) -> &[Row] {
+    /// The agents the reply dialog is for.
+    pub(crate) fn overview_reply_targets(&self) -> &[Target] {
         &self.overview.reply_to
     }
 
-    /// Queues `text` for each row the dialog was opened for.
+    /// Queues `text` for each agent the dialog was opened for, leaving out one
+    /// that is no longer there: the daemon may have restarted while the user
+    /// typed, and a pane ID can come back holding another agent.
     pub(crate) fn queue_overview_replies(&mut self, text: &str, cx: &mut Context<Self>) {
-        let rows = std::mem::take(&mut self.overview.reply_to);
+        let targets = std::mem::take(&mut self.overview.reply_to);
         let text = text.trim();
         let mut unqueued = 0;
-        for row in &rows {
-            let queued = row.pane().and_then(|pane| {
-                let (index, endpoint) = self
-                    .endpoints
-                    .iter()
-                    .enumerate()
-                    .find(|(_, endpoint)| endpoint.id == pane.0)?;
-                let live = if index == self.selected_endpoint {
-                    &self.live
-                } else {
-                    &endpoint.live
-                };
-                let snapshot = live.snapshot.as_deref()?;
-                let agent = snapshot.agents.iter().find(|a| a.pane_id == pane.1)?;
-                let name = crate::sidebar::agent_name(agent);
-                let boot = &snapshot.boot_id;
-                Some(self.overview.replies.push(pane, boot, name, text))
-            });
-            unqueued += usize::from(queued != Some(true));
+        for target in &targets {
+            let pane = (target.endpoint.as_str(), target.pane.as_str());
+            let queued = self.reply_presence(pane, &target.boot, &target.agent) != Presence::Gone
+                && self
+                    .overview
+                    .replies
+                    .push(pane, &target.boot, &target.agent, text);
+            unqueued += usize::from(!queued);
         }
         if unqueued > 0 {
             self.show_flash(

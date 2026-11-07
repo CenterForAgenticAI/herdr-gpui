@@ -41,7 +41,7 @@ impl SheprdWindow {
     pub(super) fn render_overview_reply(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
         let targets = self.overview_reply_targets();
-        let name = targets.first().map_or("", |row| row.title.as_str());
+        let name = targets.first().map_or("", |target| target.title.as_str());
         let armed = self
             .menu
             .input

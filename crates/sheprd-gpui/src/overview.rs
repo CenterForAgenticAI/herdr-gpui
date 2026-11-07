@@ -106,8 +106,8 @@ pub(crate) struct Page {
     /// Whether the batch bar's snooze menu is open.
     batch_menu: bool,
     replies: replies::Replies,
-    /// The rows the open reply dialog answers.
-    reply_to: Vec<Row>,
+    /// The agents the open reply dialog answers.
+    reply_to: Vec<replies::Target>,
     /// What the rows were last rebuilt from.
     inputs: inputs::Inputs,
 }

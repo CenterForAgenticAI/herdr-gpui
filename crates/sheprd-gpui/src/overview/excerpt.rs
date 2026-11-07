@@ -66,7 +66,9 @@ fn lines(surface: &PaneSurfaceFrame, pane: &str) -> Option<Vec<String>> {
 }
 
 /// What `pane`, blocked since `since`, shows now or showed when its tab was
-/// last left. Nothing from another daemon boot is ever shown.
+/// last left. Nothing from another daemon boot is ever shown. Remembered frames
+/// carry whole seconds, so one left in the second the agent blocked could be
+/// from before it did, and is not trusted.
 pub(super) fn of_pane(
     live: Option<&Arc<PaneSurfaceFrame>>,
     last_seen: &LastSeen,
@@ -81,7 +83,7 @@ pub(super) fn of_pane(
         let since = since?.duration_since(UNIX_EPOCH).ok()?.as_secs();
         last_seen
             .frames(boot)
-            .filter(|(_, at)| *at >= since)
+            .filter(|(_, at)| *at > since)
             .find_map(|(surface, _)| lines(surface, pane))
     })
 }

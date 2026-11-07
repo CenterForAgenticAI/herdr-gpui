@@ -87,6 +87,35 @@ fn a_toast_already_showing_stays_when_quiet_hours_begin() {
 }
 
 #[test]
+fn a_toast_waiting_its_turn_does_not_appear_during_quiet_hours() {
+    let now = Instant::now();
+    let mut endpoints = endpoints();
+    receive(&mut endpoints[0], wire(Kind::NeedsAttention), now);
+    let mut second = wire(Kind::NeedsAttention);
+    second.pane_id = Some("w1:p2".into());
+    receive(&mut endpoints[0], second, now);
+    tick_quiet(&mut endpoints, config(0), false, now);
+    assert_eq!(endpoints[0].toasts.entries.len(), 2, "one shows, one waits");
+    assert_eq!(visible(&endpoints).len(), 1);
+    tick_quiet(&mut endpoints, config(0), true, now);
+    assert_eq!(endpoints[0].toasts.entries.len(), 1, "the waiting one left");
+    assert_eq!(visible(&endpoints).len(), 1, "the one showing stayed");
+    assert_eq!(kept(&endpoints), 2, "both stay in the history");
+}
+
+#[test]
+fn feedback_waiting_its_turn_survives_quiet_hours() {
+    let now = Instant::now();
+    let mut endpoints = endpoints();
+    receive(&mut endpoints[0], wire(Kind::NeedsAttention), now);
+    tick_quiet(&mut endpoints, config(0), false, now);
+    let notice = Notice::local_feedback(tests::notification("saved"), now);
+    endpoints[0].toasts.receive([notice]);
+    tick_quiet(&mut endpoints, config(0), true, now);
+    assert_eq!(endpoints[0].toasts.entries.len(), 2);
+}
+
+#[test]
 fn delivery_off_shows_nothing_but_keeps_the_alert() {
     let now = Instant::now();
     let mut endpoints = endpoints();

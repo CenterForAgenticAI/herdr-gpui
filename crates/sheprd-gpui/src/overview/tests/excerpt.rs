@@ -191,3 +191,15 @@ fn a_frame_from_before_the_agent_blocked_is_not_its_question() {
     // With no time to compare, nothing says the frame is current.
     assert_eq!(of_pane(None, &seen, "b", "w1:p1", None), None);
 }
+
+#[test]
+fn a_frame_left_in_the_second_the_agent_blocked_could_predate_it() {
+    let frame = surface("b", "w1:p1", &[" Old text"]);
+    let seen = remembered(&frame, 100);
+    for nanos in [0, 900_000_000] {
+        let since = UNIX_EPOCH + Duration::new(100, nanos);
+        assert_eq!(of_pane(None, &seen, "b", "w1:p1", Some(since)), None);
+    }
+    let since = UNIX_EPOCH + Duration::new(99, 900_000_000);
+    assert!(of_pane(None, &seen, "b", "w1:p1", Some(since)).is_some());
+}

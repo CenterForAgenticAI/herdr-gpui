@@ -15,6 +15,9 @@ mod page;
 mod poll;
 mod presets;
 mod replies;
+// Only these clients open the dialog; see `pane_move::refusal`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod reply_dialog;
 mod sections;
 mod selection;
 
