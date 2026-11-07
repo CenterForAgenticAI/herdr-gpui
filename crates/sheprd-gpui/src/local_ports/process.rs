@@ -4,9 +4,10 @@
 //! A pid is reused once its process exits, so every signal first looks the
 //! pid up again and goes ahead only while it still names the process the
 //! user chose: the same start time, owned by this user. The signal goes to
-//! that pid alone, never to a group or a name.
+//! that process alone, never to a group or a name, and through [`Pinned`]
+//! where the OS can hold it.
 
-use super::{Listener, Outcome, naming, scan::Socket};
+use super::{Listener, Outcome, naming, pinned::Pinned, scan::Socket};
 use crate::processes::Identity;
 use sheprd_control_protocol::protocol::hosts::PortAction;
 use std::{
@@ -216,71 +217,100 @@ fn send(system: &System, pid: u32, signal: Signal) -> bool {
         .unwrap_or(false)
 }
 
-/// Does `action` to `victim` if it is still that process. Blocking: a
-/// worker's call.
+/// Does `action` to each of `victims` that is still that process. Blocking:
+/// a worker's call.
 pub(super) fn act(
     system: &mut System,
     action: PortAction,
-    victim: Identity,
+    victims: &[Identity],
     user: u32,
     grace: Duration,
-) -> Outcome {
+) -> Vec<(Identity, Outcome)> {
+    // Held before the first look, so what the look proves of a pid is true
+    // of the process every later signal goes to.
+    let pinned: HashMap<Identity, Pinned> = victims
+        .iter()
+        .filter_map(|victim| Some((*victim, Pinned::open(victim.pid)?)))
+        .collect();
     let system = RefCell::new(system);
     act_with(
         action,
-        victim,
+        victims,
         user,
         grace,
-        || look(&mut system.borrow_mut(), victim.pid),
-        |signal| send(&system.borrow(), victim.pid, signal),
+        |victim| look(&mut system.borrow_mut(), victim.pid),
+        |victim, signal| match pinned.get(&victim) {
+            Some(process) => process.send(signal),
+            None => send(&system.borrow(), victim.pid, signal),
+        },
         thread::sleep,
     )
 }
 
 /// [`act`]'s steps, with the OS behind `look` (the pid's process now),
-/// `send`, and `wait`. Every signal after the first goes out only once a
-/// fresh look shows the pid still names `victim`: stopping sends SIGTERM,
-/// then SIGCONT so a paused process can act on it, then SIGKILL if it still
-/// runs after `grace`. A process that exits and whose pid is reused in
-/// between is never resumed or killed.
+/// `send`, and `wait`. Every signal goes out only once a fresh look shows
+/// the pid still names its victim. Stopping sends SIGTERM to them all, then
+/// SIGCONT so a paused one can act on it, and SIGKILL to those still running
+/// after one shared `grace`, so a batch takes no longer than one process. A
+/// process that exits and whose pid is reused in between is never resumed
+/// or killed.
 pub(crate) fn act_with(
     action: PortAction,
-    victim: Identity,
+    victims: &[Identity],
     user: u32,
     grace: Duration,
-    mut look: impl FnMut() -> Option<Found>,
-    mut send: impl FnMut(Signal) -> bool,
+    mut look: impl FnMut(Identity) -> Option<Found>,
+    mut send: impl FnMut(Identity, Signal) -> bool,
     mut wait: impl FnMut(Duration),
-) -> Outcome {
-    if let Err(outcome) = check(look(), victim, user) {
-        return outcome;
-    }
+) -> Vec<(Identity, Outcome)> {
     let signal = match action {
         PortAction::Stop => Signal::Term,
         PortAction::Pause => Signal::Stop,
         PortAction::Resume => Signal::Continue,
     };
-    if !send(signal) {
-        return Outcome::Failed;
-    }
+    let mut outcomes: Vec<(Identity, Outcome)> = victims
+        .iter()
+        .map(|&victim| {
+            let outcome = match check(look(victim), victim, user) {
+                Err(outcome) => outcome,
+                Ok(()) if send(victim, signal) => Outcome::Signalled,
+                Ok(()) => Outcome::Failed,
+            };
+            (victim, outcome)
+        })
+        .collect();
     if action != PortAction::Stop {
-        return Outcome::Signalled;
+        return outcomes;
     }
-    if check(look(), victim, user).is_err() {
-        return Outcome::Signalled;
-    }
-    send(Signal::Continue);
+    let mut running: Vec<usize> = (0..outcomes.len())
+        .filter(|&index| outcomes[index].1 == Outcome::Signalled)
+        .collect();
+    running.retain(|&index| {
+        let victim = outcomes[index].0;
+        let alive = check(look(victim), victim, user).is_ok();
+        if alive {
+            send(victim, Signal::Continue);
+        }
+        alive
+    });
     let mut waited = Duration::ZERO;
-    while waited < grace {
+    while !running.is_empty() && waited < grace {
         wait(POLL);
         waited += POLL;
-        if check(look(), victim, user).is_err() {
-            return Outcome::Signalled;
+        running.retain(|&index| {
+            let victim = outcomes[index].0;
+            check(look(victim), victim, user).is_ok()
+        });
+    }
+    for index in running {
+        let victim = outcomes[index].0;
+        if check(look(victim), victim, user).is_ok() {
+            outcomes[index].1 = if send(victim, Signal::Kill) {
+                Outcome::Killed
+            } else {
+                Outcome::Failed
+            };
         }
     }
-    if send(Signal::Kill) {
-        Outcome::Killed
-    } else {
-        Outcome::Failed
-    }
+    outcomes
 }

@@ -3,9 +3,13 @@
 use super::*;
 
 mod badge;
+#[cfg(unix)]
+mod batch;
 mod en_xa;
 #[cfg(unix)]
 mod naming;
+#[cfg(target_os = "linux")]
+mod pinned;
 #[cfg(unix)]
 mod process;
 #[cfg(unix)]

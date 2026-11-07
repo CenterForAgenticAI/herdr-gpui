@@ -9,6 +9,17 @@ const VICTIM: Identity = Identity {
     started: 1_700_000_000,
 };
 
+/// [`act`] on one process.
+fn one(
+    system: &mut System,
+    action: PortAction,
+    victim: Identity,
+    user: u32,
+    grace: Duration,
+) -> Outcome {
+    act(system, action, &[victim], user, grace)[0].1
+}
+
 fn found(started: u64, user: Option<u32>) -> Option<Found> {
     Some(Found {
         started,
@@ -99,25 +110,25 @@ fn pausing_resuming_and_stopping_a_real_process() {
     let user = user();
     let grace = Duration::from_secs(3);
     assert_eq!(
-        act(&mut system, PortAction::Pause, victim, user, grace),
+        one(&mut system, PortAction::Pause, victim, user, grace),
         Outcome::Signalled
     );
     assert!(reaches(&mut system, &child, true));
     assert_eq!(
-        act(&mut system, PortAction::Resume, victim, user, grace),
+        one(&mut system, PortAction::Resume, victim, user, grace),
         Outcome::Signalled
     );
     assert!(reaches(&mut system, &child, false));
     // A paused process still ends: SIGCONT follows SIGTERM.
-    act(&mut system, PortAction::Pause, victim, user, grace);
+    one(&mut system, PortAction::Pause, victim, user, grace);
     assert_eq!(
-        act(&mut system, PortAction::Stop, victim, user, grace),
+        one(&mut system, PortAction::Stop, victim, user, grace),
         Outcome::Signalled
     );
     assert!(!child.wait().unwrap().success());
     // Its pid now names nothing, or another process: nothing is sent.
     assert_eq!(
-        act(&mut system, PortAction::Stop, victim, user, grace),
+        one(&mut system, PortAction::Stop, victim, user, grace),
         Outcome::Exited
     );
 }
@@ -139,7 +150,7 @@ fn a_process_ignoring_sigterm_is_killed_after_its_grace() {
     .unwrap();
     let victim = identity(&mut system, &child);
     assert_eq!(
-        act(
+        one(
             &mut system,
             PortAction::Stop,
             victim,
@@ -159,7 +170,7 @@ fn a_stale_start_time_is_never_signalled() {
     let mut victim = identity(&mut system, &child);
     victim.started -= 1;
     assert_eq!(
-        act(
+        one(
             &mut system,
             PortAction::Stop,
             victim,
@@ -179,19 +190,19 @@ fn scripted_stop(seen: &[Option<Found>], grace: Duration) -> (Outcome, Vec<Signa
     let looks = RefCell::new(seen.iter().copied());
     let last = seen.last().copied().flatten();
     let sent = RefCell::new(Vec::new());
-    let outcome = act_with(
+    let outcomes = act_with(
         PortAction::Stop,
-        VICTIM,
+        &[VICTIM],
         501,
         grace,
-        || looks.borrow_mut().next().unwrap_or(last),
-        |signal| {
+        |_| looks.borrow_mut().next().unwrap_or(last),
+        |_, signal| {
             sent.borrow_mut().push(signal);
             true
         },
         |_| {},
     );
-    (outcome, sent.into_inner())
+    (outcomes[0].1, sent.into_inner())
 }
 
 #[test]

@@ -13,6 +13,8 @@ mod error;
 #[cfg(unix)]
 mod naming;
 #[cfg(unix)]
+mod pinned;
+#[cfg(unix)]
 mod process;
 mod row;
 #[cfg(unix)]

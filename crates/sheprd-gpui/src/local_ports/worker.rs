@@ -67,13 +67,7 @@ fn run(
     loop {
         match commands.recv_timeout(due.saturating_duration_since(Instant::now())) {
             Ok(Command::Signal(action, victims)) => {
-                let outcomes = victims
-                    .into_iter()
-                    .map(|victim| {
-                        let outcome = process::act(&mut system, action, victim, user, GRACE);
-                        (victim, outcome)
-                    })
-                    .collect();
+                let outcomes = process::act(&mut system, action, &victims, user, GRACE);
                 // Blocks while the UI is behind; a closed section ends it.
                 if updates.send(Update::Signalled(action, outcomes)).is_err() {
                     return;
