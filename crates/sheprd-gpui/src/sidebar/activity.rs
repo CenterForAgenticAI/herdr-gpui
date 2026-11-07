@@ -402,7 +402,7 @@ impl SheprdWindow {
         }
     }
 
-    fn render_activity_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(crate) fn render_activity_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = &self.theme;
         let counts = self.activity_counts(cx);
         let bar = div()
@@ -631,7 +631,7 @@ impl SheprdWindow {
     /// The section's name over the sidebar, across its width, ended by the
     /// sidebar toggle. Over the rail, too narrow for the name, the toggle
     /// stands alone.
-    fn panel_title(&self, panel: ActivityPanel, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn panel_title(&self, panel: ActivityPanel, cx: &mut Context<Self>) -> Div {
         let expanded = self.sidebar_visible;
         let theme = &self.theme;
         let font = &self.config.sidebar;

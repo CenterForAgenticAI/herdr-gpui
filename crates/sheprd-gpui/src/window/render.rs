@@ -125,6 +125,7 @@ impl Render for SheprdWindow {
         self.surface_signal.read(cx);
         let sidebar = self
             .sidebar_column_width(f32::from(window.viewport_size().width))
+            .filter(|_| !self.hosted)
             .map(|width| {
                 (
                     crate::sidebar::cached_view(&self.sidebar_view, width),
@@ -135,7 +136,7 @@ impl Render for SheprdWindow {
         // leaves none behind.
         if let Some(marks) = crate::mark_layer::Marks::of(window, cx) {
             marks.begin_frame(cx.entity_id());
-            if sidebar.is_none() {
+            if sidebar.is_none() && !self.hosted {
                 marks.forget(self.sidebar_view.entity_id());
             }
         }
@@ -957,21 +958,19 @@ impl Render for SheprdWindow {
                             .relative()
                             .child(content)
                             .children(self.render_notices(cx))
-                            .children(self.zen_status_bar(cx)),
+                            .when(!self.hosted, |column| {
+                                column.children(self.zen_status_bar(cx))
+                            }),
                     ),
             )
             // After the body, whose rows reserve the marks it draws, and under
             // everything that covers the body.
-            .child(AnyView::from(self.mark_layer.clone()))
-            // At the window's foot in every layout: under the traffic lights
-            // it would hide them, and one place is easier to find.
-            .when(!zen, |root| root.children(self.render_worktree_banner()))
-            .children(self.render_tab_ghost(cx))
-            .children(self.render_toasts(window, cx))
-            .children(self.render_file_transfer(window, cx))
-            .children(self.render_menu_leaving(window, cx))
-            .when(self.menu.page.is_some(), |root| {
-                root.child(self.render_menu(window, cx))
+            .when(!self.hosted, |root| {
+                let root = root.child(AnyView::from(self.mark_layer.clone()));
+                // At the window's foot in every layout: under the traffic
+                // lights it would hide them, and one place is easier to find.
+                let root = root.when(!zen, |root| root.children(self.render_worktree_banner()));
+                self.with_overlays(root, window, cx)
             });
         crate::titlebar::frame(window, self.theme.active, root)
     }

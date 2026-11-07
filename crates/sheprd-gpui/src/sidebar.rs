@@ -38,7 +38,7 @@ pub(crate) mod layout_tests;
 pub(crate) mod native_tests;
 
 pub(crate) use {
-    activity::{Activity, ActivityPanel, BUTTON as BAR_BUTTON, ICON as BAR_ICON},
+    activity::{Activity, ActivityPanel, BAR_WIDTH, BUTTON as BAR_BUTTON, ICON as BAR_ICON},
     agents::{Indicators, agent_name, pane_name, state_label, status_indicator, status_text},
     device_drag::DeviceDrag,
     hover::{HoverMenu, HoverRest},

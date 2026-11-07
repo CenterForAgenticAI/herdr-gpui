@@ -24,11 +24,11 @@ const MODEL_WIDTH: f32 = 160.;
 
 impl SheprdWindow {
     /// The bar's height, which grows with the UI font.
-    pub(super) fn status_bar_height(&self) -> f32 {
+    pub(crate) fn status_bar_height(&self) -> f32 {
         (self.config.ui.size * 1.5 + 4.).max(22.)
     }
 
-    pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(crate) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let status = (!matches!(self.live.status, ConnectionStatus::Connected)
             || self.local_error.is_some()
             || self.live.error.is_some())

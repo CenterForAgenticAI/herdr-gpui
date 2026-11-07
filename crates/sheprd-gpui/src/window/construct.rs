@@ -205,6 +205,7 @@ impl SheprdWindow {
             git_anchor: Default::default(),
             gui_config_diagnostic,
             held_keys: Default::default(),
+            hosted: false,
             hover: None,
             hover_menu: None,
             hovered_terminal_link: false,
