@@ -18,7 +18,7 @@ fn source(found: Option<Found>) -> Option<Source> {
 #[test]
 fn a_refused_personal_token_gives_way_to_the_cli_sign_in() {
     assert_eq!(
-        source(token::renewed(|| None, entra, pat)),
+        source(token::renewed(None, || None, entra, pat)),
         Some(Source::Cli)
     );
 }
@@ -26,16 +26,58 @@ fn a_refused_personal_token_gives_way_to_the_cli_sign_in() {
 #[test]
 fn without_a_cli_sign_in_the_personal_token_stays() {
     assert_eq!(
-        source(token::renewed(|| None, || None, pat)),
+        source(token::renewed(None, || None, || None, pat)),
         Some(Source::Environment)
     );
-    assert!(token::renewed(|| None, || None, |_| None).is_none());
+    assert!(token::renewed(None, || None, || None, |_| None).is_none());
 }
 
 #[test]
 fn a_token_saved_since_the_refusal_takes_over_from_the_shell() {
     assert_eq!(
-        source(token::renewed(|| Some("pasted".into()), entra, pat)),
+        source(token::renewed(None, || Some("pasted".into()), entra, pat)),
+        Some(Source::Saved)
+    );
+}
+
+#[test]
+fn a_refused_saved_token_gives_way_to_the_cli_sign_in() {
+    let refused = Token::Personal("expired".into());
+    assert_eq!(
+        source(token::renewed(
+            Some(&refused),
+            || Some("expired".into()),
+            entra,
+            |_| None
+        )),
+        Some(Source::Cli)
+    );
+}
+
+#[test]
+fn a_token_pasted_over_the_refused_one_is_tried() {
+    let refused = Token::Personal("expired".into());
+    assert_eq!(
+        source(token::renewed(
+            Some(&refused),
+            || Some("pasted".into()),
+            entra,
+            |_| None
+        )),
+        Some(Source::Saved)
+    );
+}
+
+#[test]
+fn a_refused_saved_token_with_nothing_else_stays_to_be_reported() {
+    let refused = Token::Personal("expired".into());
+    assert_eq!(
+        source(token::renewed(
+            Some(&refused),
+            || Some("expired".into()),
+            || None,
+            |_| None
+        )),
         Some(Source::Saved)
     );
 }

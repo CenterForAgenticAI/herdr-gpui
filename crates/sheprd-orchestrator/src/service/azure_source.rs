@@ -63,10 +63,14 @@ impl Worker {
         }
         match self.read_azure(key, previous) {
             Err(Error::Azure(azure::Error::Authentication)) => {
+                let refused = self.azure_token.take().and_then(|(_, found)| found);
                 let cancelled = &self.cancelled;
-                let token = azure::token::renew(&organization, self.request.azure_store, &|| {
-                    cancelled.load(Ordering::Relaxed)
-                });
+                let token = azure::token::renew(
+                    &organization,
+                    self.request.azure_store,
+                    refused.as_ref().map(|found| &found.token),
+                    &|| cancelled.load(Ordering::Relaxed),
+                );
                 self.azure_token = Some((organization, token));
                 self.read_azure(key, previous)
             }

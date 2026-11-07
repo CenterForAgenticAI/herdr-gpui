@@ -278,7 +278,8 @@ organizations: the desktop keyring (`dev.herdr.gpui.azure-devops`), or with
 reaches running workers at once, which sync again with the new store. When
 Azure DevOps refuses a token, the worker tries the saved token, then the
 Azure CLI's sign-in, and the shell's token last: that one is read once per
-run, so it may be the token just refused.
+run, so it may be the token just refused. A saved token that is still the
+refused one goes after them all.
 
 Merge requests are not listed yet. They would need `PullRequest`-like
 metadata in the shared schema, which is a contract change for both

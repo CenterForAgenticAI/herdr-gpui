@@ -96,15 +96,17 @@ pub fn resolve(
         .or_else(|| cli().map(found(Source::Cli)))
 }
 
-/// The token to try after Azure DevOps refused one, for `organization`.
+/// The token to try after Azure DevOps refused `refused`, for `organization`.
 /// Blocks on the store and a subprocess, which `cancelled` stops: call it
 /// from a worker.
 pub fn renew(
     organization: &str,
     store: sheprd_credentials::Store,
+    refused: Option<&Token>,
     cancelled: &impl Fn() -> bool,
 ) -> Option<Found> {
     renewed(
+        refused,
         || super::saved::token(store, organization),
         || cli(cancelled),
         sheprd_client::login_env::var,
@@ -115,18 +117,30 @@ pub fn renew(
 /// token. This reverses [`lookup`]'s order for the environment: the login
 /// shell's environment is read once per run, so a refused personal access
 /// token is still there until the app restarts, and a token pasted since or a
-/// new `az login` must be able to take over from it.
+/// new `az login` must be able to take over from it. A saved token that is
+/// still the `refused` one goes last for the same reason, so an expired token
+/// does not hide a sign-in; with nothing else, it stays to be reported as
+/// refused.
 pub fn renewed(
+    refused: Option<&Token>,
     saved: impl FnOnce() -> Option<SecretString>,
     cli: impl FnOnce() -> Option<Token>,
     variable: impl Fn(&str) -> Option<OsString>,
 ) -> Option<Found> {
     let found = |source| move |token| Found { token, source };
-    saved()
-        .map(Token::Personal)
-        .map(found(Source::Saved))
+    let (fresh, unchanged) = match (saved(), refused) {
+        (Some(token), Some(Token::Personal(old)))
+            if token.expose_secret() == old.expose_secret() =>
+        {
+            (None, Some(token))
+        }
+        (token, _) => (token, None),
+    };
+    let saved = |token: Option<SecretString>| token.map(Token::Personal).map(found(Source::Saved));
+    saved(fresh)
         .or_else(|| cli().map(found(Source::Cli)))
         .or_else(|| environment(variable).map(found(Source::Environment)))
+        .or_else(|| saved(unchanged))
 }
 
 /// `AZURE_DEVOPS_EXT_PAT`, read through `variable`.
