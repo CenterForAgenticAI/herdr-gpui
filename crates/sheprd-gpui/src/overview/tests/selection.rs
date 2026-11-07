@@ -63,3 +63,21 @@ fn rows_that_leave_the_list_leave_the_selection_and_their_anchor() {
     selection.extend(&key("c"), &order(&["a", "c"]));
     assert_eq!(selection.len(), 2);
 }
+
+#[test]
+fn agents_sharing_a_name_and_checkout_are_picked_by_their_pane() {
+    let first = row("a", State::Blocked);
+    let mut second = row("a", State::Blocked);
+    second.open = Open::Pane {
+        endpoint: "local".into(),
+        pane: "pane-other".into(),
+        tab: "t0".into(),
+        workspace: "w0".into(),
+    };
+    assert_eq!(first.key, second.key, "marks treat them as one");
+    let mut selection = Selection::default();
+    selection.toggle(&first.pick());
+    assert!(selection.contains(&first.pick()));
+    assert!(!selection.contains(&second.pick()), "a reply reaches one");
+    assert_eq!(selection.len(), 1);
+}

@@ -426,7 +426,7 @@ impl SheprdWindow {
             .and_then(|marks| marks.get(&row.key))
             .is_some_and(|mark| mark.pinned);
         let menu_open = self.overview.menu.as_ref() == Some(&row.key);
-        let selected = shelf == Shelf::Active && self.overview.selection.contains(&row.key);
+        let selected = shelf == Shelf::Active && self.overview.selection.contains(&row.pick());
         let glyph = match row.state {
             State::Failed => svg()
                 .path("icons/error.svg")
@@ -562,7 +562,7 @@ impl SheprdWindow {
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 let modifiers = event.modifiers();
                 if shelf == Shelf::Active && (modifiers.shift || modifiers.secondary(cx)) {
-                    this.select_overview_row(&clicked.key, modifiers.shift, cx);
+                    this.select_overview_row(&clicked, modifiers.shift, cx);
                 } else if let Shelf::Closed(id, _) = shelf {
                     this.open_closed_agent(id, window, cx);
                 } else {

@@ -2,17 +2,47 @@
 //! actions then apply to. The selection is this page's alone: it is not
 //! saved, and rows that leave the active list leave it too.
 
-use super::Key;
+use super::{Key, Row};
 
-#[derive(Debug, Default)]
-pub(crate) struct Selection {
-    keys: Vec<Key>,
-    /// Where a Shift click's range starts: the row last toggled.
-    anchor: Option<Key>,
+/// One row the user picked. A row's [`Key`] is what marks remember, and two
+/// agents of the same name in one checkout share it, so an agent is picked
+/// by its pane: picking one must never reply to the other.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Pick {
+    Pane { endpoint: String, pane: String },
+    Run(Key),
 }
 
-impl Selection {
-    pub(crate) fn contains(&self, key: &Key) -> bool {
+impl Row {
+    pub(crate) fn pick(&self) -> Pick {
+        match self.pane() {
+            Some((endpoint, pane)) => Pick::Pane {
+                endpoint: endpoint.to_owned(),
+                pane: pane.to_owned(),
+            },
+            None => Pick::Run(self.key.clone()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Selection<T = Pick> {
+    keys: Vec<T>,
+    /// Where a Shift click's range starts: the row last toggled.
+    anchor: Option<T>,
+}
+
+impl<T> Default for Selection<T> {
+    fn default() -> Self {
+        Self {
+            keys: Vec::new(),
+            anchor: None,
+        }
+    }
+}
+
+impl<T: Clone + PartialEq> Selection<T> {
+    pub(crate) fn contains(&self, key: &T) -> bool {
         self.keys.contains(key)
     }
 
@@ -30,7 +60,7 @@ impl Selection {
     }
 
     /// Adds `key`, or takes it out if it was selected.
-    pub(crate) fn toggle(&mut self, key: &Key) {
+    pub(crate) fn toggle(&mut self, key: &T) {
         match self.keys.iter().position(|selected| selected == key) {
             Some(index) => {
                 self.keys.remove(index);
@@ -42,7 +72,10 @@ impl Selection {
 
     /// Adds the rows of `order` from the anchor to `key`, keeping what was
     /// selected. With no anchor still listed, it adds `key` alone.
-    pub(crate) fn extend<'a>(&mut self, key: &Key, order: impl IntoIterator<Item = &'a Key>) {
+    pub(crate) fn extend<'a>(&mut self, key: &T, order: impl IntoIterator<Item = &'a T>)
+    where
+        T: 'a,
+    {
         let order: Vec<_> = order.into_iter().collect();
         let end = order.iter().position(|row| *row == key);
         let start = self
@@ -60,7 +93,10 @@ impl Selection {
     }
 
     /// Keeps only the rows still in `order`. Says whether any left.
-    pub(crate) fn retain<'a>(&mut self, order: impl IntoIterator<Item = &'a Key>) -> bool {
+    pub(crate) fn retain<'a>(&mut self, order: impl IntoIterator<Item = &'a T>) -> bool
+    where
+        T: 'a,
+    {
         let order: Vec<_> = order.into_iter().collect();
         let before = self.keys.len();
         self.keys.retain(|key| order.contains(&key));

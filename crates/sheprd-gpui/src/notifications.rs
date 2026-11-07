@@ -43,6 +43,9 @@ pub(crate) struct Notice {
     ready: bool,
     pub(crate) visible: bool,
     checked: Option<Instant>,
+    /// Quiet hours held it while it waited out the delay. Such a notice stays
+    /// in the history only, even when the delay ends after the quiet hours.
+    hushed: bool,
     displayed: Option<(Instant, bool)>,
     suppression_target: Option<crate::navigation::OwnedNavigationTarget>,
     /// Handed to the OS notification center. Retained only so a click can
@@ -162,6 +165,7 @@ impl Notice {
             ready: false,
             visible: false,
             checked: None,
+            hushed: false,
             displayed: None,
             suppression_target,
             posted: false,
@@ -404,6 +408,7 @@ pub(crate) fn tick(
                     return n.client_local || !quiet;
                 }
                 if !n.client_local {
+                    n.hushed |= quiet;
                     let delay = if n.kind == Kind::Custom {
                         0
                     } else {
@@ -458,7 +463,7 @@ pub(crate) fn tick(
                         .toasts
                         .history
                         .record(n, std::time::SystemTime::now());
-                    if quiet || delivery == Delivery::Off {
+                    if quiet || n.hushed || delivery == Delivery::Off {
                         return false;
                     }
                 }

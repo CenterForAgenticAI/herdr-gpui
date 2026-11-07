@@ -6,17 +6,19 @@ use crate::{SheprdWindow, devices_overview::Look, i18n::fl};
 use gpui::{prelude::*, *};
 
 impl SheprdWindow {
-    /// Picks `key` into the selection, or a range ending there with `range`.
-    pub(super) fn select_overview_row(&mut self, key: &Key, range: bool, cx: &mut Context<Self>) {
+    /// Picks `row` into the selection, or a range ending there with `range`.
+    pub(super) fn select_overview_row(&mut self, row: &Row, range: bool, cx: &mut Context<Self>) {
+        let pick = row.pick();
         self.overview.menu = None;
         if range {
             let sections = self.overview_sections(cx);
             let unfolded = self.overview.idle_open;
-            self.overview
-                .selection
-                .extend(key, sections.active(unfolded).map(|row| &row.key));
+            self.overview.selection.extend(
+                &pick,
+                &sections.active(unfolded).map(Row::pick).collect::<Vec<_>>(),
+            );
         } else {
-            self.overview.selection.toggle(key);
+            self.overview.selection.toggle(&pick);
         }
         if self.overview.selection.is_empty() {
             self.overview.batch_menu = false;
@@ -28,7 +30,7 @@ impl SheprdWindow {
     fn overview_selected(&self, sections: &Sections) -> Vec<Row> {
         sections
             .active(self.overview.idle_open)
-            .filter(|row| self.overview.selection.contains(&row.key))
+            .filter(|row| self.overview.selection.contains(&row.pick()))
             .cloned()
             .collect()
     }

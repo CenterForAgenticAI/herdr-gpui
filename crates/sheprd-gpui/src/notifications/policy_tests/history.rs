@@ -51,6 +51,27 @@ fn quiet_hours_hold_an_alert_back_but_keep_it_for_later() {
 }
 
 #[test]
+fn an_alert_whose_delay_ends_after_quiet_hours_stays_in_the_history() {
+    let now = Instant::now();
+    let mut endpoints = endpoints();
+    Arc::make_mut(endpoints[0].live.snapshot.as_mut().unwrap()).agents[0].agent_status =
+        AgentStatus::Blocked;
+    receive(&mut endpoints[0], wire(Kind::NeedsAttention), now);
+    // Received a moment before the quiet hours end, with a five-second delay.
+    tick_quiet(&mut endpoints, config(5), true, now);
+    assert_eq!(endpoints[0].toasts.entries.len(), 1, "still waiting");
+    tick_quiet(
+        &mut endpoints,
+        config(5),
+        false,
+        now + Duration::from_secs(5),
+    );
+    assert!(visible(&endpoints).is_empty());
+    assert!(endpoints[0].toasts.entries.is_empty());
+    assert_eq!(kept(&endpoints), 1);
+}
+
+#[test]
 fn quiet_hours_hold_back_system_notifications_too() {
     let now = Instant::now();
     let mut endpoints = endpoints();

@@ -320,7 +320,7 @@ impl SheprdWindow {
         if self
             .overview
             .selection
-            .retain(sections.active(unfolded).map(|row| &row.key))
+            .retain(&sections.active(unfolded).map(Row::pick).collect::<Vec<_>>())
         {
             if self.overview.selection.is_empty() {
                 self.overview.batch_menu = false;
