@@ -19,6 +19,7 @@ fn shell(state: ActivityState) -> Activity {
         label: "npm run dev".into(),
         started_ms: now_ms().saturating_sub(65_000),
         state,
+        stoppable: false,
     }
 }
 
@@ -61,6 +62,14 @@ fn the_row_opens_a_table_and_clears_once_everything_ended(cx: &mut TestAppContex
     let (view, _peer, cx) = open(cx, ConnectTarget::Local);
     let program = Program::new();
     let mut stream = attach_with(&view, &program, idle_with_a_shell(), cx);
+    // The rail lists the same work; the table stands in for it when hidden.
+    view.update(cx, |view, _| {
+        let pane = view.chats.panes().next().unwrap().target.pane_id.clone();
+        if let Some(chat) = view.chats.pane_mut(&pane) {
+            chat.rail = false;
+        }
+    });
+    poll(&view, &program, cx);
     assert!(cx.debug_bounds("chat-running-table").is_none());
     let row = cx.debug_bounds("chat-running").unwrap();
     cx.simulate_click(row.center(), Modifiers::default());

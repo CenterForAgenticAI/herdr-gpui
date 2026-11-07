@@ -248,15 +248,34 @@ whole-file write, the card shows the written text and counts its lines without
 claiming any were removed. Changes too large to compare show their text before
 and after. A tool the app doesn't know keeps its own name.
 
-## Sub-agents and background shells
+## Sub-agents, background shells, and monitors
 
-When the agent hands a task to a sub-agent or leaves a command running in the
-background, the row above the composer says so after what the agent is doing,
-such as `Writing… 12s · 2 sub-agents · 1 background shell`. A background shell
-outlives the turn that started it, so once the agent is idle the row keeps
-saying what still runs (`1 background shell still running`) and clears when
-everything has ended. Click it for a table of each one: what it is, how long it
-has run or ran, and whether it is running, done, failed, or stopped.
+When the agent hands a task to a sub-agent, leaves a command running in the
+background, or starts a monitor, the row above the composer says so after what
+the agent is doing, such as `Writing… 12s · 2 sub-agents · 1 background shell`.
+A background shell outlives the turn that started it, so once the agent is idle
+the row keeps saying what still runs (`1 background shell still running`) and
+clears when everything has ended.
+
+The rail beside the conversation lists each one under **Sub-agents**,
+**Shells**, or **Monitors**, running work first with how long it has run and
+its latest step, and what ended folded under **N ended**. Click a row to go to
+its card. Hover a running row and its time becomes a Stop button, which ends
+that one piece of work at once, without asking, and leaves the turn running.
+Only work the agent can really stop offers it: Claude's sub-agents, shells, and
+monitors once Claude has named them, and Codex's sub-agents. Codex offers no
+way to stop a command inside a thread, so its shells have no Stop, and Copilot's
+and OpenCode's sub-agents are listed without one, as ACP has no request for it.
+Gemini and Pi report none of this, so these sections stay away.
+
+Every rail section folds to one line. While anything runs, **Plan** and
+**Changed** fold on their own to leave room, showing the current step and the
+change totals; once nothing runs they open again. Clicking a section's header
+overrides that for as long as the chat is open.
+
+When the rail is hidden or the pane is too narrow for it, click the row above
+the composer for a table instead: what each one is, how long it has run or ran,
+and whether it is running, done, failed, or stopped.
 
 A sub-agent's call is marked **Sub-agent** in the conversation, with the number
 of steps it took; open it to list them. Its steps stay in its card rather than

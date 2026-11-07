@@ -284,6 +284,7 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let bounds = place.bounds();
+        let rail_shows = Self::chat_rail_shows(chat, bounds);
         let theme = &self.theme;
         let pane_id = chat.target.pane_id.clone();
         chat.text_geometry.begin_frame();
@@ -442,7 +443,7 @@ impl SheprdWindow {
                                 !chat.selection.is_empty() || chat.selection.is_selecting(),
                             ))
                             .children(
-                                self.render_chat_working(chat, cx)
+                                self.render_chat_working(chat, rail_shows, cx)
                                     .map(|content| self.chat_column(content)),
                             )
                             .children(
@@ -450,7 +451,7 @@ impl SheprdWindow {
                                     .map(|content| self.chat_column(content)),
                             )
                             .children(
-                                self.render_chat_running_table(chat)
+                                self.render_chat_running_table(chat, rail_shows)
                                     .map(|content| self.chat_column(content)),
                             )
                             .children(
@@ -471,7 +472,7 @@ impl SheprdWindow {
                                 view.child(self.chat_column(self.render_chat_composer(chat, cx)))
                             }),
                     )
-                    .children(self.render_chat_rail(chat, bounds)),
+                    .children(self.render_chat_rail(chat, bounds, cx)),
             )
             .children(self.render_chat_viewer(chat, bounds, cx))
             .into_any_element()
@@ -479,7 +480,12 @@ impl SheprdWindow {
 
     /// The layout's sign that the agent is working on a turn, with what it
     /// left running said after it.
-    fn render_chat_working(&self, chat: &ChatPane, cx: &mut Context<Self>) -> Option<Div> {
+    fn render_chat_working(
+        &self,
+        chat: &ChatPane,
+        rail_shows: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         let open = chat.steps.is_open();
         let working = working::Working::of(chat.session.transcript(), super::now_ms())
             .map(|working| working::Working { open, ..working });
@@ -501,7 +507,7 @@ impl SheprdWindow {
                     }),
                 )
             });
-        self.render_chat_running_row(chat, row, working.is_none(), cx)
+        self.render_chat_running_row(chat, row, working.is_none(), rail_shows, cx)
     }
 
     /// The chat's background where no page shows: on macOS, where a page

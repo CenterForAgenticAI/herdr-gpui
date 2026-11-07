@@ -8,10 +8,10 @@ use std::collections::{HashMap, HashSet};
 
 use acp::v1 as wire;
 use sheprd_chat_protocol::{
-    Author, Change, Choice, ConfigOption, Cost, Entry, EntryId, EntryKind, Image, Mode, Modes,
-    NoticeLevel, OptionCategory, OptionKind, OptionValue, PlanEntry, PlanPriority, PlanStatus,
-    SessionInfo, SlashCommand, Tokens, Tool, ToolContent, ToolKind, ToolStatus, Transcript,
-    TurnSummary, Usage,
+    ActivityKind, ActivityState, Author, Change, Choice, ConfigOption, Cost, Entry, EntryId,
+    EntryKind, Image, Mode, Modes, NoticeLevel, OptionCategory, OptionKind, OptionValue, PlanEntry,
+    PlanPriority, PlanStatus, SessionInfo, SlashCommand, Tokens, Tool, ToolContent, ToolKind,
+    ToolStatus, Transcript, TurnSummary, Usage,
 };
 
 /// Sub-agents whose step counts are kept before forgetting those that left
@@ -30,8 +30,9 @@ const MAX_SKIPPED: usize = 1024;
 
 pub(crate) mod activity;
 mod claude_code;
+mod subagents;
 pub(crate) mod todos;
-pub(crate) use activity::{Report, Tag, kill_all};
+pub(crate) use activity::{Report, STOP_METHOD, Tag, kill_all};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Stream {
@@ -49,6 +50,8 @@ struct Open {
 
 #[derive(Debug, Default)]
 pub(crate) struct Projector {
+    /// Sub-agents of agents speaking ACP directly that have not ended.
+    direct: HashSet<String>,
     next: u64,
     open: Option<Open>,
     /// Whether the agent sends ACP's plan, which then stands over what its
@@ -344,6 +347,53 @@ impl Projector {
         *count <= MAX_STEPS
     }
 
+    /// The tag a call of an agent speaking ACP directly amounts to: the
+    /// start or end of a sub-agent, or a step of the one running. A child
+    /// session names no call, so with several running a step stays a card
+    /// of its own rather than going under the wrong one.
+    fn direct_tag(
+        &mut self,
+        call_id: &str,
+        meta: Option<&wire::Meta>,
+        input: Option<&serde_json::Value>,
+        status: Option<wire::ToolCallStatus>,
+    ) -> Tag {
+        if subagents::from_child(meta) {
+            let mut running = self.direct.iter();
+            return Tag {
+                activity: None,
+                parent: running.next().filter(|_| running.next().is_none()).cloned(),
+            };
+        }
+        if !self.direct.contains(call_id) {
+            let starts = self.direct.len() < MAX_ACTIVITIES_TRACKED
+                && input.is_some_and(subagents::waits_for_one);
+            if !starts {
+                return Tag::default();
+            }
+            self.direct.insert(call_id.to_owned());
+        }
+        let state = match status {
+            Some(wire::ToolCallStatus::Completed) => ActivityState::Finished,
+            Some(wire::ToolCallStatus::Failed) => ActivityState::Failed,
+            _ => return Tag::activity(Report::new(ActivityKind::Subagent, ActivityState::Running)),
+        };
+        self.direct.remove(call_id);
+        Tag::activity(Report::new(ActivityKind::Subagent, state))
+    }
+
+    /// The turn ended: a sub-agent it waited for ended with it, even if the
+    /// agent never said so, as on a cancelled turn.
+    pub(crate) fn direct_turn_ended(&mut self, transcript: &Transcript, now: u64) -> Vec<Change> {
+        self.direct
+            .drain()
+            .filter_map(|call| {
+                let report = Report::new(ActivityKind::Subagent, ActivityState::Killed);
+                activity::record(transcript, &call, &call, report, now)
+            })
+            .collect()
+    }
+
     /// The plan in a to-do tool call's `input`, unless the agent sends its
     /// own.
     fn todo_plan(&self, input: Option<&serde_json::Value>) -> Vec<Change> {
@@ -363,14 +413,27 @@ impl Projector {
     ) -> Vec<Change> {
         use wire::SessionUpdate as U;
         let change = match update {
+            // A sub-agent's words are its own; what it does shows in its card.
+            U::AgentMessageChunk(chunk) | U::AgentThoughtChunk(chunk)
+                if subagents::from_child(chunk.meta.as_ref()) =>
+            {
+                return Vec::new();
+            }
             U::UserMessageChunk(chunk) => self.chunk(transcript, Stream::User, chunk),
             U::AgentMessageChunk(chunk) => self.chunk(transcript, Stream::Agent, chunk),
             U::AgentThoughtChunk(chunk) => self.chunk(transcript, Stream::Thought, chunk),
             U::ToolCall(call) => {
                 let call_id = call.tool_call_id.0.to_string();
-                let tag = Tag::read(call.meta.as_ref()).or_else(|| {
-                    claude_code::tag(call.meta.as_ref(), call.raw_input.as_ref(), None)
-                });
+                let tag = Tag::read(call.meta.as_ref())
+                    .or_else(|| claude_code::tag(call.meta.as_ref(), call.raw_input.as_ref(), None))
+                    .or_else(|| {
+                        self.direct_tag(
+                            &call_id,
+                            call.meta.as_ref(),
+                            call.raw_input.as_ref(),
+                            Some(call.status),
+                        )
+                    });
                 if tag == Tag::default()
                     && self.todos.len() < MAX_SKIPPED
                     && todos::is_tool(
@@ -389,13 +452,22 @@ impl Projector {
             }
             U::ToolCallUpdate(update) => {
                 let call_id = update.tool_call_id.0.to_string();
-                let tag = Tag::read(update.meta.as_ref()).or_else(|| {
-                    claude_code::tag(
-                        update.meta.as_ref(),
-                        update.fields.raw_input.as_ref(),
-                        update.fields.status,
-                    )
-                });
+                let tag = Tag::read(update.meta.as_ref())
+                    .or_else(|| {
+                        claude_code::tag(
+                            update.meta.as_ref(),
+                            update.fields.raw_input.as_ref(),
+                            update.fields.status,
+                        )
+                    })
+                    .or_else(|| {
+                        self.direct_tag(
+                            &call_id,
+                            update.meta.as_ref(),
+                            update.fields.raw_input.as_ref(),
+                            update.fields.status,
+                        )
+                    });
                 if self.todos.contains(&call_id) {
                     let input = update.fields.raw_input.as_ref();
                     let stays =

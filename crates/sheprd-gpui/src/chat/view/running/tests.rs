@@ -11,6 +11,7 @@ fn activity(call: &str, kind: ActivityKind, state: ActivityState, started: u64) 
         label: format!("{call} label"),
         started_ms: started,
         state,
+        stoppable: false,
     }
 }
 

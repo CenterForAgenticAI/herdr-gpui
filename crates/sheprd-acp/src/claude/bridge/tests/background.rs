@@ -98,7 +98,12 @@ fn a_background_shell_outlives_its_turn_until_claude_says_it_ended() {
     ));
     let started = update(&outs[0]);
     assert_eq!(started["status"], "completed", "the call itself is done");
-    assert!(started.get("_meta").is_none(), "the shell still runs");
+    assert_eq!(
+        tag(started)["activity"]["state"],
+        "running",
+        "the shell still runs"
+    );
+    assert_eq!(tag(started)["activity"]["stoppable"], true);
 
     let outs = bridge.on_harness(&result("success", Some("end_turn")));
     assert!(

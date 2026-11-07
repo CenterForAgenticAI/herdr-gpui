@@ -253,9 +253,10 @@ fn a_name_outranks_a_title() {
 fn a_call_with_an_activity_is_never_hidden() {
     let report = Report {
         detail: None,
-        kind: sheprd_chat_protocol::ActivityKind::Shell,
+        kind: ActivityKind::Shell,
         label: None,
-        state: sheprd_chat_protocol::ActivityState::Running,
+        state: ActivityState::Running,
+        stoppable: false,
     };
     let tag = Tag {
         activity: Some(report),

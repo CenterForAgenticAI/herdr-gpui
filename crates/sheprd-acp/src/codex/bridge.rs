@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use super::{approval, background, background::Background, items, settings::Settings};
 use crate::{
     harness::{Out, Translator, out},
-    project::Tag,
+    project::{STOP_METHOD, Tag},
     rpc::Inbound,
 };
 
@@ -76,6 +76,9 @@ impl Translator for Bridge {
         match inbound {
             Inbound::Request { id, method, params } => self.request(id, &method, params),
             Inbound::Notification { method, .. } if method == "session/cancel" => self.cancel(),
+            Inbound::Notification { method, params } if method == STOP_METHOD => {
+                self.stop_activity(&params)
+            }
             Inbound::Response { id, result } => {
                 let wire::RequestId::Number(id) = id else {
                     return Vec::new();
@@ -213,6 +216,19 @@ impl Bridge {
                 Vec::new()
             }
         }
+    }
+
+    /// Interrupts a sub-agent's turn; its thread reports how it ended.
+    fn stop_activity(&mut self, params: &Value) -> Vec<Out> {
+        let target = params
+            .get("callId")
+            .and_then(Value::as_str)
+            .and_then(|call| self.background.child_of(call))
+            .map(|(thread, turn)| json!({"threadId": thread, "turnId": turn}));
+        target
+            .map(|target| self.call("turn/interrupt", target, Pending::Interrupt))
+            .into_iter()
+            .collect()
     }
 
     fn response(&mut self, id: &Value, message: &Value) -> Vec<Out> {
@@ -438,7 +454,15 @@ impl Bridge {
         };
         let session = self.session().to_owned();
         let item = params.get("item");
-        match method {
+        let stoppable = params
+            .get("turnId")
+            .or_else(|| params.pointer("/turn/id"))
+            .and_then(Value::as_str)
+            .filter(|_| method != "turn/completed")
+            .and_then(|turn| self.background.child_turn(thread, turn))
+            .map(|known| self.reported(known));
+        let mut outs: Vec<Out> = stoppable.into_iter().collect();
+        outs.extend(match method {
             "item/started" => item
                 .and_then(items::started)
                 .map(|call| {
@@ -467,7 +491,8 @@ impl Bridge {
                     .collect()
             }
             _ => Vec::new(),
-        }
+        });
+        outs
     }
 
     /// The update that says how another call's activity stands.
