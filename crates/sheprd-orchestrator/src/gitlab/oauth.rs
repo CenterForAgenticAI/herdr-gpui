@@ -5,7 +5,7 @@
 //! is sent; it has no secret to keep. Every call blocks on the network:
 //! run it from a worker.
 
-use super::{Error, TIMEOUT, agent, body, saved::OAuth, valid};
+use super::{Error, TIMEOUT, agent, body, cli_hosts, headers, saved::OAuth, valid};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::time::Duration;
@@ -199,15 +199,21 @@ fn post(instance: &str, path: &str, fields: &[(&str, &str)]) -> Result<(u16, Vec
     let url = url::Url::parse(&format!("{origin}/oauth/{path}"))
         .map_err(|_| Error::Address(instance.to_owned()))?;
     // ureq owns the form's buffers; never log the fields or the reply.
-    let mut reply = agent(TIMEOUT.min(Duration::from_secs(15)))
+    let request = agent(TIMEOUT.min(Duration::from_secs(15)))
         .post(url.as_str())
         .header("User-Agent", "Sheprd")
-        .header("Accept", "application/json")
+        .header("Accept", "application/json");
+    // An instance behind an access proxy needs glab's headers here too.
+    let mut reply = cli_hosts::headers_for(instance)
+        .apply(request, true)?
         .send_form(fields.iter().copied())
         .map_err(|error| Error::Network {
-            origin,
+            origin: origin.clone(),
             source: Box::new(error),
         })?;
     let status = reply.status().as_u16();
+    if let Some(error) = headers::redirect(status, reply.headers(), &origin) {
+        return Err(error);
+    }
     Ok((status, body(&mut reply, LIMIT)?))
 }
