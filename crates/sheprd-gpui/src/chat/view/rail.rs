@@ -221,18 +221,18 @@ impl SheprdWindow {
                                 .truncate()
                                 .child(safe_text(short_path(&diff.path), 200)),
                         )
-                        .child(
-                            div()
-                                .flex_none()
-                                .text_color(rgb(hues.green))
-                                .child(format!("+{}", diff.added)),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .text_color(rgb(hues.red))
-                                .child(format!("\u{2212}{}", diff.removed)),
-                        )
+                        .children(diff.lines.iter().flat_map(|lines| {
+                            [
+                                div()
+                                    .flex_none()
+                                    .text_color(rgb(hues.green))
+                                    .child(format!("+{}", lines.added)),
+                                div()
+                                    .flex_none()
+                                    .text_color(rgb(hues.red))
+                                    .child(format!("\u{2212}{}", lines.removed)),
+                            ]
+                        }))
                 }))
                 .children(more(changed.len()))
         });

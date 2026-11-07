@@ -45,11 +45,7 @@ fn a_tool_call_is_summarized() {
     assert_eq!(summary.more, 4);
     assert_eq!(
         summary.diffs,
-        vec![DiffSummary {
-            path: "/src/new.rs".into(),
-            added: 2,
-            removed: 0
-        }]
+        vec![DiffSummary::counted("/src/new.rs".into(), 2, 0)]
     );
     assert_eq!(summary.terminals, 1);
 }

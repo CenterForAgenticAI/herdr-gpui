@@ -67,8 +67,50 @@ const TOOL_IMAGES: usize = 4;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiffSummary {
     pub(crate) path: String,
+    /// Absent when the two sides were not compared: the file changed, but
+    /// by how much is unknown.
+    pub(crate) lines: Option<LineChanges>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LineChanges {
     pub(crate) added: usize,
     pub(crate) removed: usize,
+}
+
+impl std::ops::Add for LineChanges {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            added: self.added + other.added,
+            removed: self.removed + other.removed,
+        }
+    }
+}
+
+impl DiffSummary {
+    pub(crate) fn counted(path: String, added: usize, removed: usize) -> Self {
+        Self {
+            path,
+            lines: Some(LineChanges { added, removed }),
+        }
+    }
+
+    /// Adds another change to the same file. One unknown count makes the
+    /// total unknown: a partial sum would read as the whole change.
+    fn merge(&mut self, lines: Option<LineChanges>) {
+        self.lines = self.lines.zip(lines).map(|(a, b)| a + b);
+    }
+}
+
+/// The lines these changes add up to, unless one of them was not counted.
+pub(crate) fn total_lines(diffs: &[DiffSummary]) -> Option<LineChanges> {
+    diffs
+        .iter()
+        .try_fold(LineChanges::default(), |total, diff| {
+            Some(total + diff.lines?)
+        })
 }
 
 /// Characters of a tool call's header.
@@ -340,10 +382,7 @@ impl Prepared {
                     .iter_mut()
                     .find(|known| known.path == diff.path)
                 {
-                    Some(known) => {
-                        known.added += diff.added;
-                        known.removed += diff.removed;
-                    }
+                    Some(known) => known.merge(diff.lines),
                     None => self.changed.push(diff.clone()),
                 }
             }

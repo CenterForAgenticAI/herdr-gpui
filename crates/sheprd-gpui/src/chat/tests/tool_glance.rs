@@ -53,3 +53,38 @@ fn folded_tools_keep_diff_counts_and_an_output_preview(cx: &mut TestAppContext) 
     assert!(cx.debug_bounds("chat-tool-diff-1-0").is_some());
     assert!(cx.debug_bounds("chat-tool-preview-1").is_none());
 }
+
+#[gpui::test]
+fn an_edit_too_large_to_compare_stays_listed_without_a_count(cx: &mut TestAppContext) {
+    let (view, _peer, cx) = open(cx, ConnectTarget::Local);
+    let program = Program::new();
+    let edit = |id, old: String| Entry {
+        id: EntryId(id),
+        kind: EntryKind::Tool(Tool {
+            call_id: format!("call-{id}"),
+            content: vec![ToolContent::Diff {
+                path: "/work/src/lib.rs".into(),
+                old: Some(old),
+                new: "new\n".into(),
+            }],
+            kind: ToolKind::Edit,
+            locations: Vec::new(),
+            parent: None,
+            started_ms: None,
+            status: ToolStatus::Completed,
+            title: "Edit".into(),
+        }),
+    };
+    let entries = vec![edit(1, "old\n".into()), edit(2, "x".repeat(128 * 1024))];
+    let _stream = attach_with(&view, &program, snapshot(cursor(1, 0), entries), cx);
+    assert!(cx.debug_bounds("chat-tool-diff-2-0").is_some());
+    view.read_with(cx, |view, _| {
+        let changed = view.chats.pane("w1:p1").unwrap().prepared.changed();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].path, "/work/src/lib.rs");
+        assert_eq!(
+            changed[0].lines, None,
+            "a partial total would read as whole"
+        );
+    });
+}

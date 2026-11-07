@@ -12,6 +12,11 @@ fn summary(old: &str, new: &str) -> ToolSummary {
     )
 }
 
+fn lines(summary: &ToolSummary) -> (usize, usize) {
+    let lines = summary.diffs[0].lines.unwrap();
+    (lines.added, lines.removed)
+}
+
 #[test]
 fn glance_counts_match_reorders_newlines_and_header_like_changed_text() {
     for (old, new, expected, removed, added) in [
@@ -21,12 +26,12 @@ fn glance_counts_match_reorders_newlines_and_header_like_changed_text() {
         ("--old\n", "++new\n", (1, 1), "---old\n", "+++new\n"),
     ] {
         let summary = summary(old, new);
-        assert_eq!((summary.diffs[0].added, summary.diffs[0].removed), expected);
+        assert_eq!(lines(&summary), expected);
         let source = &summary.previews[0].code.source;
         assert!(source.contains(removed) && source.contains(added));
     }
     let same = summary("same\n", "same\n");
-    assert_eq!((same.diffs[0].added, same.diffs[0].removed), (0, 0));
+    assert_eq!(lines(&same), (0, 0));
 }
 
 #[test]
@@ -34,10 +39,7 @@ fn coarse_preview_counts_cover_all_generated_operations_without_display_row_limi
     let old = (0..600).map(|i| format!("old {i}\n")).collect::<String>();
     let new = (0..600).map(|i| format!("new {i}\n")).collect::<String>();
     let summary = summary(&old, &new);
-    assert_eq!(
-        (summary.diffs[0].added, summary.diffs[0].removed),
-        (600, 600)
-    );
+    assert_eq!(lines(&summary), (600, 600));
     let source = &summary.previews[0].code.source;
     assert!(source.contains("-old 599\n") && source.contains("+new 599\n"));
 }
@@ -46,7 +48,8 @@ fn coarse_preview_counts_cover_all_generated_operations_without_display_row_limi
 fn unprepared_changes_keep_their_source_without_guessing_numeric_totals() {
     for old in ["x".repeat(STRUCTURED_BYTES), "x\n".repeat(2_049)] {
         let summary = summary(&old, "new\n");
-        assert!(summary.diffs.is_empty());
+        assert_eq!(summary.diffs.len(), 1, "the file still changed");
+        assert_eq!(summary.diffs[0].lines, None);
         assert!(summary.previews[0].before.is_some());
         assert!(summary.previews[0].original.contains(&old));
     }
@@ -62,7 +65,8 @@ fn unprepared_changes_keep_their_source_without_guessing_numeric_totals() {
         new: "new\n".into(),
     });
     let summary = summarize(&content, ToolKind::Edit, &mut Visuals::default());
-    assert!(summary.diffs.is_empty());
+    assert_eq!(summary.diffs[0].path, "overflow.rs");
+    assert_eq!(summary.diffs[0].lines, None);
     assert!(summary.previews[MAX_PARTS].original.contains("overflow.rs"));
     assert!(summary.previews[MAX_PARTS].before.is_some());
 }
@@ -86,4 +90,25 @@ fn a_whole_new_file_counts_its_lines_at_any_size() {
 fn counted_edits_read_the_same_as_their_diff() {
     let summary = summary("a\nb\nc\n", "a\nB\nc\nd\n");
     assert_eq!(counts(&summary.diffs), [("file.rs", 2, 1)]);
+}
+
+#[test]
+fn a_total_with_an_uncounted_edit_is_unknown_rather_than_partial() {
+    let counted = DiffSummary::counted("file.rs".into(), 2, 1);
+    let uncounted = DiffSummary {
+        path: "file.rs".into(),
+        lines: None,
+    };
+    let both = [counted.clone(), counted.clone()];
+    assert_eq!(
+        total_lines(&both),
+        Some(LineChanges {
+            added: 4,
+            removed: 2
+        })
+    );
+    assert_eq!(total_lines(&[counted.clone(), uncounted]), None);
+    let mut merged = counted;
+    merged.merge(None);
+    assert_eq!(merged.lines, None);
 }
