@@ -1,4 +1,5 @@
 use super::*;
+use crate::remote::supervisor::changes::RUNNING;
 use sheprd_remote_control::control::changes::{Answer, Ask, AskId, Failure, Wanted};
 use std::sync::Mutex;
 
@@ -85,4 +86,63 @@ fn a_question_taken_from_the_daemon_is_answered_by_its_id(cx: &mut TestAppContex
         *ANSWERED.lock().unwrap(),
         [(AskId(5), Answer::Failed(Failure::Gone))]
     );
+}
+
+fn ask(id: u64) -> Ask {
+    Ask {
+        id: AskId(id),
+        boot_id: "another session".into(),
+        workspace_id: "w".into(),
+        wanted: Wanted::Checks,
+    }
+}
+
+static LIMITED_ANSWERS: Mutex<Vec<AskId>> = Mutex::new(Vec::new());
+static LIMITED_WAITS: AtomicUsize = AtomicUsize::new(0);
+
+fn daemon_with_many_questions(_: &Path, request: &Request) -> Result<Response, control::Error> {
+    match request {
+        Request::Status => Ok(Response::Status(status(1))),
+        Request::ChangeAsks => {
+            LIMITED_WAITS.fetch_add(1, Ordering::SeqCst);
+            Err(control::Error::NoAnswer)
+        }
+        Request::ChangeAnswer { id, .. } => {
+            LIMITED_ANSWERS.lock().unwrap().push(*id);
+            Ok(Response::Done)
+        }
+        _ => Ok(Response::Done),
+    }
+}
+
+#[gpui::test]
+fn only_a_few_answers_run_at_once_and_no_more_questions_are_taken_meanwhile(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| Supervisor::fixture(cx, on(), daemon_with_many_questions));
+    // Learns a phone is connected, and that the daemon has nothing yet.
+    cx.update(Supervisor::tick);
+    cx.run_until_parked();
+    let waits = LIMITED_WAITS.load(Ordering::SeqCst);
+    let asks = (0..RUNNING as u64 + 2).map(ask).collect();
+    cx.update(|cx| Supervisor::take_asks(cx, Ok(Response::ChangeAsks { asks })));
+    cx.update(|cx| {
+        let changes = &cx.global::<Supervisor>().changes;
+        assert_eq!(changes.running, RUNNING);
+        assert_eq!(changes.queued.len(), 2);
+        Supervisor::poll_changes(cx);
+    });
+    assert_eq!(LIMITED_WAITS.load(Ordering::SeqCst), waits);
+
+    cx.run_until_parked();
+    let mut answered = LIMITED_ANSWERS.lock().unwrap().clone();
+    answered.sort_by_key(|id| id.0);
+    assert_eq!(
+        answered,
+        (0..RUNNING as u64 + 2).map(AskId).collect::<Vec<_>>()
+    );
+    cx.update(|cx| {
+        let changes = &cx.global::<Supervisor>().changes;
+        assert_eq!((changes.running, changes.queued.len()), (0, 0));
+    });
 }

@@ -2,18 +2,32 @@
 //! is connected it waits on the daemon for their questions, one long request
 //! at a time, the next tick starting the next, and answers each on the
 //! background executor. With no phone connected it asks nothing.
+//!
+//! The daemon's limit counts only questions a phone still waits for, and an
+//! answer keeps running after its phone gives up, so the answers running here
+//! are limited too. While that many run, or questions taken wait their turn,
+//! no more are taken: the rest stay with the daemon, where a phone that stops
+//! waiting frees its place.
 
 use super::*;
 use crate::remote::changes::Sources;
 use sheprd_remote_control::control::changes::Ask;
+use std::collections::VecDeque;
 
 /// How long after a failed wait the daemon is asked again.
 const RETRY: Duration = Duration::from_secs(5);
 
+/// How many answers are worked out at once.
+pub(super) const RUNNING: usize = 4;
+
 #[derive(Default)]
 pub(crate) struct Changes {
     polling: bool,
+    /// Questions taken from the daemon that wait for a running answer to end.
+    pub(super) queued: VecDeque<Ask>,
     retry_at: Option<Instant>,
+    /// Answers being worked out now, at most `RUNNING`.
+    pub(super) running: usize,
     sources: Arc<Sources>,
 }
 
@@ -33,7 +47,8 @@ impl Supervisor {
             .changes
             .retry_at
             .is_some_and(|at| Instant::now() < at);
-        if !phones || waiting || supervisor.changes.polling {
+        let busy = supervisor.changes.running >= RUNNING || !supervisor.changes.queued.is_empty();
+        if !phones || waiting || busy || supervisor.changes.polling {
             return;
         }
         let Some(address) = supervisor.address.clone() else {
@@ -49,8 +64,7 @@ impl Supervisor {
         .detach();
     }
 
-    fn take_asks(cx: &mut App, answer: Result<Response, control::Error>) {
-        let executor = cx.background_executor().clone();
+    pub(super) fn take_asks(cx: &mut App, answer: Result<Response, control::Error>) {
         let supervisor = cx.global_mut::<Self>();
         supervisor.changes.polling = false;
         let Ok(Response::ChangeAsks { asks }) = answer else {
@@ -59,14 +73,39 @@ impl Supervisor {
             return;
         };
         supervisor.changes.retry_at = None;
-        if let Some(address) = supervisor.address.clone() {
-            let (send, sources) = (supervisor.send, supervisor.changes.sources.clone());
-            for ask in asks {
-                let (address, sources) = (address.clone(), sources.clone());
-                executor
-                    .spawn(async move { reply(&address, send, &sources, &ask) })
-                    .detach();
-            }
+        supervisor.changes.queued.extend(asks);
+        Self::start_answers(cx);
+    }
+
+    /// Starts queued answers while fewer than `RUNNING` run.
+    fn start_answers(cx: &mut App) {
+        let executor = cx.background_executor().clone();
+        let supervisor = cx.global_mut::<Self>();
+        let Some(address) = supervisor.address.clone() else {
+            // With no daemon to answer, nobody waits for these.
+            supervisor.changes.queued.clear();
+            return;
+        };
+        let (send, sources) = (supervisor.send, supervisor.changes.sources.clone());
+        let mut started = Vec::new();
+        while supervisor.changes.running < RUNNING {
+            let Some(ask) = supervisor.changes.queued.pop_front() else {
+                break;
+            };
+            supervisor.changes.running += 1;
+            let (address, sources) = (address.clone(), sources.clone());
+            started.push(executor.spawn(async move { reply(&address, send, &sources, &ask) }));
+        }
+        for task in started {
+            cx.spawn(async move |cx| {
+                task.await;
+                cx.update(|cx| {
+                    let changes = &mut cx.global_mut::<Self>().changes;
+                    changes.running = changes.running.saturating_sub(1);
+                    Self::start_answers(cx);
+                });
+            })
+            .detach();
         }
     }
 }
