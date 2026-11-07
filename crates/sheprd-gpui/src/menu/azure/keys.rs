@@ -80,6 +80,25 @@ impl AzureMenu {
         actions
     }
 
+    /// The child of the page's scrolling body that holds `action`, in the
+    /// order `render_azure_page` adds them. The tabs, Save, and Close sit
+    /// outside the body and always show.
+    pub(crate) fn body_child(&self, action: &Action) -> Option<usize> {
+        let cards = 1 + usize::from(self.problem.is_some());
+        let form = cards + self.organizations.len();
+        match action {
+            Action::Forget(organization) => self
+                .organizations
+                .iter()
+                .position(|status| status.organization == *organization)
+                .map(|index| cards + index),
+            Action::Organization => Some(form),
+            Action::Token => Some(form + 1),
+            Action::CreateToken => Some(form + 2),
+            Action::GitHub | Action::GitLab | Action::Save | Action::Close => None,
+        }
+    }
+
     /// Whether the keyboard selected `action`.
     pub(crate) fn is_selected(&self, action: &Action) -> bool {
         self.selected.as_ref() == Some(action)
@@ -103,7 +122,8 @@ impl SheprdWindow {
         }
     }
 
-    /// Selects `action`, moving focus into its field or out of the fields.
+    /// Selects `action`, moving focus into its field or out of the fields,
+    /// and scrolls it into view so nothing is used unseen.
     fn select_azure(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
         let azure = &self.menu.azure;
         let input = match action {
@@ -116,6 +136,9 @@ impl SheprdWindow {
             |input| input.read(cx).focus.clone(),
         );
         window.focus(&focus, cx);
+        if let Some(child) = azure.body_child(&action) {
+            azure.scroll.scroll_to_item(child);
+        }
         self.menu.azure.selected = Some(action);
     }
 

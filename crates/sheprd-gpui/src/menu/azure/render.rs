@@ -143,6 +143,7 @@ impl SheprdWindow {
             .debug_selector(|| "azure-body".into())
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&azure.scroll)
             .p(px(16.))
             .flex()
             .flex_col()

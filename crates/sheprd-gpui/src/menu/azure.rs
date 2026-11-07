@@ -65,6 +65,8 @@ pub(crate) struct AzureMenu {
     pub(super) token: Option<Entity<SearchInput>>,
     /// The stop the keyboard selected, which a field with focus outranks.
     pub(crate) selected: Option<keys::Action>,
+    /// The page's body, which follows the keyboard's selection.
+    pub(super) scroll: ScrollHandle,
     /// A save or forget under way; the buttons wait for it.
     pub(crate) working: bool,
     pub(crate) message: Option<String>,

@@ -133,3 +133,53 @@ fn a_forgotten_organizations_control_is_not_used(cx: &mut TestAppContext) {
     draw(cx);
     assert_eq!(message(&view, cx), "");
 }
+
+#[gpui::test]
+fn the_selection_scrolls_into_view_both_ways(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx);
+    let names: Vec<String> = (0..30).map(|index| format!("org{index:02}")).collect();
+    view.update(cx, |view, cx| {
+        let kept = names.iter().cloned().collect();
+        view.show_azure_organizations(names.clone(), &kept, || Lookup::None);
+        cx.notify();
+    });
+    draw(cx);
+    let shown = |cx: &mut VisualTestContext, selector: String| {
+        let selector: &'static str = selector.leak();
+        draw(cx);
+        let body = cx.debug_bounds("azure-body").unwrap();
+        let control = cx.debug_bounds(selector).unwrap();
+        assert!(
+            control.top() >= body.top() && control.bottom() <= body.bottom(),
+            "{selector} at {control:?} is outside {body:?}"
+        );
+    };
+    cx.simulate_keystrokes("shift-tab");
+    shown(cx, "azure-organization-input".into());
+    for index in (0..names.len()).rev() {
+        cx.simulate_keystrokes("shift-tab");
+        shown(cx, format!("azure-forget-{index}"));
+    }
+    for index in 1..names.len() {
+        cx.simulate_keystrokes("tab");
+        shown(cx, format!("azure-forget-{index}"));
+    }
+}
+
+#[gpui::test]
+fn each_stop_names_its_child_of_the_body(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx);
+    saved_contoso(&view, cx);
+    view.update(cx, |view, _| {
+        let azure = &mut view.menu.azure;
+        let child = |azure: &crate::menu::azure::AzureMenu, action| azure.body_child(&action);
+        // The help line, then two cards.
+        assert_eq!(child(azure, Action::Forget("contoso".into())), Some(1));
+        assert_eq!(child(azure, Action::Organization), Some(3));
+        assert_eq!(child(azure, Action::Token), Some(4));
+        assert_eq!(child(azure, Action::CreateToken), Some(5));
+        assert_eq!(child(azure, Action::Save), None);
+        azure.problem = Some("unreadable".into());
+        assert_eq!(child(azure, Action::Forget("contoso".into())), Some(2));
+    });
+}
