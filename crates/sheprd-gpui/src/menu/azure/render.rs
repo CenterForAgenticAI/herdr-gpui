@@ -1,7 +1,7 @@
 //! Drawing the account menu's Azure DevOps page: a short help line, a card
 //! for each organization, and the form that checks and saves a token.
 
-use super::{Lookup, OrganizationStatus, status_line};
+use super::{Lookup, OrganizationStatus, keys::Action, status_line};
 use crate::i18n::fl;
 use crate::{SheprdWindow, menu::Page, search_input::SearchInput};
 use gpui::{prelude::*, *};
@@ -41,6 +41,10 @@ impl SheprdWindow {
         );
         let ready = !self.menu.azure.working;
         let organization = status.organization.clone();
+        let selected = self
+            .menu
+            .azure
+            .is_selected(&Action::Forget(organization.clone()));
         let forget = status.saved.then(|| {
             self.gitlab_button(
                 format!("azure-forget-{index}"),
@@ -48,6 +52,7 @@ impl SheprdWindow {
                 false,
                 ready,
             )
+            .when(selected, |button| self.selected_look(button))
             .when(ready, |button| {
                 button.on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
@@ -179,6 +184,9 @@ impl SheprdWindow {
                     .cursor_pointer()
                     .text_color(accent)
                     .hover(|style| style.underline())
+                    .when(azure.is_selected(&Action::CreateToken), |link| {
+                        link.underline()
+                    })
                     .child(fl!("azure-devops-menu-create-token"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         cx.stop_propagation();
@@ -208,6 +216,9 @@ impl SheprdWindow {
                     true,
                     ready,
                 )
+                .when(azure.is_selected(&Action::Save), |button| {
+                    self.selected_look(button)
+                })
                 .when(ready, |button| {
                     button.on_click(cx.listener(|this, _, _, cx| {
                         cx.stop_propagation();

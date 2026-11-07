@@ -6,6 +6,7 @@ use crate::{SheprdWindow, menu::Page};
 use gpui::{Entity, TestAppContext, VisualTestContext, px, size};
 
 mod en_xa;
+mod keyboard;
 mod page;
 mod status;
 

@@ -25,7 +25,7 @@ use std::{
     },
 };
 
-mod keys;
+pub(super) mod keys;
 pub(super) mod render;
 #[cfg(test)]
 mod tests;
@@ -63,6 +63,8 @@ pub(crate) struct AzureMenu {
     stop: Arc<AtomicBool>,
     pub(super) organization: Option<Entity<SearchInput>>,
     pub(super) token: Option<Entity<SearchInput>>,
+    /// The stop the keyboard selected, which a field with focus outranks.
+    pub(crate) selected: Option<keys::Action>,
     /// A save or forget under way; the buttons wait for it.
     pub(crate) working: bool,
     pub(crate) message: Option<String>,
@@ -212,6 +214,7 @@ impl SheprdWindow {
             });
         }
         self.menu.azure.message = None;
+        self.menu.azure.selected = None;
         let mut read = SheprdWindow::all_orchestrator_azure_organizations(cx);
         let own = self.orchestrator_azure_organizations(cx);
         read.extend(own.iter().cloned());
