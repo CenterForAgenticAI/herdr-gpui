@@ -191,6 +191,29 @@ impl Localize for gitlab::Error {
             ),
             Self::RateLimit => fl!("error-orchestrator-gitlab-rate-limit"),
             Self::Status(status) => fl!("error-orchestrator-gitlab-status", status = *status),
+            Self::Redirect {
+                origin,
+                location,
+                status,
+            } => fl!(
+                "error-orchestrator-gitlab-redirect",
+                origin = origin.as_str(),
+                location = location.as_str(),
+                status = *status
+            ),
+            Self::HeaderUnset { header, variable } => fl!(
+                "error-orchestrator-gitlab-header-unset",
+                header = header.as_str(),
+                variable = variable.as_str()
+            ),
+            Self::HeaderCommand { header } => fl!(
+                "error-orchestrator-gitlab-header-command",
+                header = header.as_str()
+            ),
+            Self::HeaderInvalid { header } => fl!(
+                "error-orchestrator-gitlab-header-invalid",
+                header = format!("{header:?}")
+            ),
             Self::Denied => fl!("error-orchestrator-gitlab-denied"),
             Self::CodeExpired => fl!("error-orchestrator-gitlab-code-expired"),
             Self::Host(host) => fl!("error-orchestrator-gitlab-host", host = format!("{host:?}")),
