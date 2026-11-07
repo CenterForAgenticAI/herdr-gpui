@@ -320,6 +320,33 @@ fn azure_mine_keeps_the_readers_own_and_not_a_namesakes(cx: &mut TestAppContext)
         })
     });
     assert_eq!(listed(&view, cx), ["contoso/Fabrikam/web!1"]);
+    // Nor is a namesake's rejected pull request the reader's to fix.
+    let fix = |rejected: u64, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            view.update(cx, |view, _| {
+                view.yours.authored = false;
+                view.repo_mut().snapshot.pr_status = Arc::new(HashMap::from([(
+                    ("contoso/Fabrikam/web".to_owned(), rejected),
+                    crate::orchestrator::PrStatus {
+                        review: Some(crate::orchestrator::Review::Rejected),
+                        ..Default::default()
+                    },
+                )]));
+                view.refresh_rows();
+                view.lines.iter().any(|line| {
+                    matches!(
+                        line,
+                        Line::Heading {
+                            heading: Heading::Next(Next::Fix),
+                            ..
+                        }
+                    )
+                })
+            })
+        })
+    };
+    assert!(fix(1, cx));
+    assert!(!fix(2, cx));
 }
 
 #[gpui::test]

@@ -17,6 +17,6 @@ orchestrator-browse-projects-refresh = Read { $organization }'s projects again
 orchestrator-browse-projects-loading = Reading projects…
 orchestrator-browse-projects-empty = No repositories
 # Under a long list, the rows it leaves out.
-orchestrator-browse-projects-more = { $count } more repositories not shown
+orchestrator-browse-projects-more = Show more repositories ({ $count } left)
 # Under the list once as many repositories are listed as one view keeps.
 orchestrator-browse-projects-full = { $count } repositories are listed; remove one to add another

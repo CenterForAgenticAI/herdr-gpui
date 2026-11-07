@@ -228,6 +228,21 @@ impl Service {
     }
 }
 
+/// `read`, then once more after `renew` when Azure DevOps refuses the token.
+pub(crate) fn renewing<S, T>(
+    state: &mut S,
+    read: impl Fn(&mut S) -> Result<T>,
+    renew: impl FnOnce(&mut S),
+) -> Result<T> {
+    match read(state) {
+        Err(Error::Azure(azure::Error::Authentication)) => {
+            renew(state);
+            read(state)
+        }
+        result => result,
+    }
+}
+
 struct RemoteWorker {
     request: RemoteRequest,
     mailbox: Arc<Mutex<Option<Snapshot>>>,
@@ -299,15 +314,7 @@ impl RemoteWorker {
         }
         self.publish();
         self.cooldown = None;
-        let looked_up = self.token.is_some();
-        let mut result = self.read();
-        if looked_up && matches!(result, Err(Error::Azure(azure::Error::Authentication))) {
-            // An Azure CLI token lasts about an hour; the next comes from
-            // the same sign-in.
-            self.token = None;
-            result = self.read();
-        }
-        match result {
+        match renewing(self, Self::read, Self::renew_token) {
             Ok(read) => {
                 self.catalog = false;
                 self.retry_until = None;
@@ -331,6 +338,18 @@ impl RemoteWorker {
             }
         }
         self.publish();
+    }
+
+    /// Replaces a token Azure DevOps refused: an Azure CLI token lasts about
+    /// an hour, and a new `az login` must take over from a refused personal
+    /// access token, which the environment keeps until the app restarts.
+    fn renew_token(&mut self) {
+        let cancelled = &self.cancelled;
+        self.token = Some(if self.request.look_up_token {
+            azure::token::renew(&|| cancelled.load(Ordering::Relaxed))
+        } else {
+            None
+        });
     }
 
     fn read(&mut self) -> Result<Read> {

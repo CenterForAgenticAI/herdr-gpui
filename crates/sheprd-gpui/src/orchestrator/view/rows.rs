@@ -589,14 +589,25 @@ pub(crate) enum Next {
 
 impl Next {
     pub(crate) fn of(item: &Item, status: Option<&PrStatus>, login: Option<&str>) -> Self {
-        if matches!(item.state.as_str(), "closed" | "merged") {
-            return Self::Closed;
-        }
         let mine = login.is_some_and(|login| {
             item.author
                 .as_deref()
                 .is_some_and(|author| author.eq_ignore_ascii_case(login))
         });
+        Self::given(mine, item, status, login)
+    }
+
+    /// As [`Next::of`], told whether the reader opened it: a forge whose
+    /// authors share names answers that by identity instead.
+    pub(crate) fn given(
+        mine: bool,
+        item: &Item,
+        status: Option<&PrStatus>,
+        login: Option<&str>,
+    ) -> Self {
+        if matches!(item.state.as_str(), "closed" | "merged") {
+            return Self::Closed;
+        }
         let review = status.and_then(|status| status.review);
         let checks = status.and_then(PrStatus::checks_state);
         if !mine

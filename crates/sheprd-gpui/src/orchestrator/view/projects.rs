@@ -86,12 +86,9 @@ impl OrchestratorView {
             || match azure_project(&item.key.source) {
                 Some(project) => self.projects.contains(&project),
                 // Beads in an Azure DevOps checkout stays with its project.
-                None => {
-                    self.projects.contains(&repo.key)
-                        || self
-                            .pick_of(&repo.key)
-                            .is_some_and(|pick| self.projects.contains(&pick))
-                }
+                None => self
+                    .pick_of(&repo.key)
+                    .is_some_and(|pick| self.projects.contains(&pick)),
             }
     }
 
@@ -120,7 +117,8 @@ impl OrchestratorView {
             .projects_listing()
             .filter(|repo| tasks || !repo.reads_azure())
             .map(|repo| Entry::Repo {
-                key: repo.key.clone(),
+                // One pick means the same project on every tab.
+                key: self.pick_of(&repo.key).unwrap_or_else(|| repo.key.clone()),
                 label: self.project_label(repo),
             })
             .collect();
@@ -251,7 +249,9 @@ impl OrchestratorView {
                 if !counted.insert(item.key.canonical()) {
                     continue;
                 }
-                let pick = azure_project(&item.key.source).unwrap_or_else(|| repo.key.clone());
+                let pick = azure_project(&item.key.source)
+                    .or_else(|| self.pick_of(&repo.key))
+                    .unwrap_or_else(|| repo.key.clone());
                 *counts.entry(pick).or_default() += 1;
             }
         }

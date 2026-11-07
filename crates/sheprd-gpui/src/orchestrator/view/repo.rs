@@ -160,6 +160,12 @@ impl Repo {
             .is_some_and(|remote| remote.source.provider == crate::orchestrator::Provider::Azure)
     }
 
+    /// Whether the reader opened `item`, where that is known by identity.
+    pub(super) fn opened_by_identity(&self, item: &Item) -> Option<bool> {
+        self.reads_azure()
+            .then(|| self.snapshot.authored.contains(&item.key.canonical()))
+    }
+
     /// Whether it has a Beads database.
     pub(crate) fn has_beads(&self) -> bool {
         self.snapshot.repo.as_ref().is_some_and(|info| info.beads)

@@ -189,6 +189,8 @@ pub(crate) struct OrchestratorView {
     sort: Sort,
     /// The dropdown open under the search row, if any.
     menu: Option<Menu>,
+    /// How many repositories the Browse menu draws: its pages so far.
+    browse_rows: usize,
     filters: Filters,
     /// The Pull requests tab's Mine and Review requested toggles.
     yours: rows::Yours,
@@ -279,6 +281,7 @@ impl OrchestratorView {
             tab: Tab::default(),
             sort: Sort::default(),
             menu: None,
+            browse_rows: browse::MAX_ROWS,
             filters: Filters::default(),
             yours: rows::Yours::default(),
             filters_open: false,

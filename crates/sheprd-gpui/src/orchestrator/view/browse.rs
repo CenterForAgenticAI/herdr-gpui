@@ -17,7 +17,7 @@ use crate::{
 use gpui::{prelude::*, *};
 
 /// The most repository rows the Projects menu draws; the rest are counted.
-const MAX_ROWS: usize = 400;
+pub(super) const MAX_ROWS: usize = 400;
 /// Where a dropdown starts under the search row, and the room it leaves
 /// below itself.
 const MENU_TOP: f32 = 120.;
@@ -83,6 +83,12 @@ impl OrchestratorView {
     /// Opens `menu`, or shuts it when it is the one open.
     pub(super) fn toggle_menu(&mut self, menu: Menu) {
         self.menu = (self.menu != Some(menu)).then_some(menu);
+        self.browse_rows = MAX_ROWS;
+    }
+
+    /// Draws another page of the Browse menu's repositories.
+    pub(super) fn show_more_repositories(&mut self) {
+        self.browse_rows += MAX_ROWS;
     }
 
     /// A dropdown's control: its text and a chevron.
@@ -328,7 +334,7 @@ impl OrchestratorView {
                 rows.push(note(fl!("orchestrator-browse-projects-empty")));
             }
             for project in &catalog.projects {
-                if drawn >= MAX_ROWS {
+                if drawn >= self.browse_rows {
                     left_out += project.repositories.len();
                     continue;
                 }
@@ -343,7 +349,7 @@ impl OrchestratorView {
                         .into_any_element(),
                 );
                 for name in &project.repositories {
-                    if drawn >= MAX_ROWS {
+                    if drawn >= self.browse_rows {
                         left_out += 1;
                         continue;
                     }
@@ -372,10 +378,16 @@ impl OrchestratorView {
             }
         }
         if left_out > 0 {
-            rows.push(note(fl!(
-                "orchestrator-browse-projects-more",
-                count = left_out
-            )));
+            rows.push(
+                self.menu_row("orchestrator-projects-more".into(), false)
+                    .text_color(rgb(theme.subtext()))
+                    .child(fl!("orchestrator-browse-projects-more", count = left_out))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_more_repositories();
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
         }
         if browsed >= MAX_BROWSED {
             rows.push(note(fl!(

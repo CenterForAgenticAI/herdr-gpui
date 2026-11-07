@@ -189,8 +189,9 @@ fn tasks_offer_checkouts_and_keep_beads_under_an_azure_pick(cx: &mut TestAppCont
             // Organizations list no tasks; the checkout holding Beads does.
             assert!(matches!(
                 view.project_entries().as_slice(),
-                [Entry::Repo { key: found, .. }] if *found == key
+                [Entry::Repo { key: found, .. }] if *found == pick
             ));
+            // The pick Tasks offers is the one every other tab narrows by.
             view.projects.insert(pick);
             let repo = &view.repos[0];
             assert!(view.picked(repo, &task));

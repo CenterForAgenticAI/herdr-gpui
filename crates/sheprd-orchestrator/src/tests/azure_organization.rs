@@ -405,3 +405,37 @@ fn azure_verdicts_tone_as_githubs_reviews_do() {
         tone(Review::Approved)
     );
 }
+
+#[test]
+fn a_refused_token_is_renewed_once_and_other_failures_are_not() {
+    use std::cell::Cell;
+    // A first refusal, as after Refresh, renews and reads again.
+    let reads = Cell::new(0);
+    let renewals = Cell::new(0);
+    let read = |_: &mut ()| {
+        reads.set(reads.get() + 1);
+        if reads.get() == 1 {
+            Err(Error::Azure(azure::Error::Authentication))
+        } else {
+            Ok(())
+        }
+    };
+    assert!(remote::renewing(&mut (), read, |_| renewals.set(renewals.get() + 1)).is_ok());
+    assert_eq!((reads.get(), renewals.get()), (2, 1));
+    // A token refused again is not renewed a second time.
+    let reads = Cell::new(0);
+    let read = |_: &mut ()| -> Result<()> {
+        reads.set(reads.get() + 1);
+        Err(Error::Azure(azure::Error::Authentication))
+    };
+    assert!(remote::renewing(&mut (), read, |_| {}).is_err());
+    assert_eq!(reads.get(), 2);
+    // Any other failure is not the token's.
+    let reads = Cell::new(0);
+    let read = |_: &mut ()| -> Result<()> {
+        reads.set(reads.get() + 1);
+        Err(Error::Cancelled)
+    };
+    assert!(remote::renewing(&mut (), read, |_| panic!("renewed")).is_err());
+    assert_eq!(reads.get(), 1);
+}

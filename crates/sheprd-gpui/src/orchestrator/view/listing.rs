@@ -277,11 +277,12 @@ impl OrchestratorView {
             Tab::PullRequests => rows::pull_request_lines(&merged, |row| {
                 let repo = &self.repos[row.repo];
                 let item = self.row_item(row);
-                rows::Next::of(
-                    item,
-                    rows::status_of(item, &repo.snapshot.pr_status),
-                    repo.reading_login(),
-                )
+                let status = rows::status_of(item, &repo.snapshot.pr_status);
+                let login = repo.reading_login();
+                match repo.opened_by_identity(item) {
+                    Some(mine) => rows::Next::given(mine, item, status, login),
+                    None => rows::Next::of(item, status, login),
+                }
             }),
         };
         let mut providers: Vec<Provider> = Vec::new();
