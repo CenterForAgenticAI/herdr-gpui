@@ -3,7 +3,7 @@
 
 use super::{
     Api, Error, Scheme, TIMEOUT, agent, authorization, body, cli_token, environment_token, envrc,
-    saved,
+    headers, saved,
 };
 use secrecy::SecretString;
 use serde::Deserialize;
@@ -118,17 +118,24 @@ pub fn whoami(api: &Api, token: &SecretString) -> Result<User, Error> {
     let origin = format!("https://{}", api.host);
     let url = url::Url::parse(&format!("{origin}/api/v4/user"))
         .map_err(|_| Error::Address(api.host.clone()))?;
-    let mut reply = agent(TIMEOUT)
+    let request = agent(TIMEOUT)
         .get(url.as_str())
         .header("User-Agent", "Sheprd")
         .header("Accept", "application/json")
-        .header("Authorization", authorization(token)?)
+        .header("Authorization", authorization(token)?);
+    let mut reply = api
+        .headers
+        .apply(request, true)?
         .call()
         .map_err(|error| Error::Network {
-            origin,
+            origin: origin.clone(),
             source: Box::new(error),
         })?;
-    match reply.status().as_u16() {
+    let status = reply.status().as_u16();
+    if let Some(error) = headers::redirect(status, reply.headers(), &origin) {
+        return Err(error);
+    }
+    match status {
         200 => {}
         401 => return Err(Error::Authentication),
         403 => return Err(Error::Scope),
