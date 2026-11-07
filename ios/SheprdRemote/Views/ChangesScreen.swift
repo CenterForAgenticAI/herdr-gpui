@@ -39,6 +39,13 @@ struct ChangesScreen: View {
         var status: LinkStatus?
     }
 
+    /// What the checks are read for: a link that came back, or a pull
+    /// request opened or closed while the screen stays open.
+    private struct ChecksReading: Equatable {
+        var status: LinkStatus?
+        var number: UInt64?
+    }
+
     var body: some View {
         List {
             Section {
@@ -58,7 +65,7 @@ struct ChangesScreen: View {
         .toolbar(.hidden, for: .tabBar)
         .refreshable { await reload() }
         .task(id: Reading(scope: scope, status: machine?.status)) { await loadFiles() }
-        .task(id: machine?.status) { await loadChecks() }
+        .task(id: ChecksReading(status: machine?.status, number: workspace?.pullRequest?.number)) { await loadChecks() }
         .sheet(item: $sending) { check in SendLogSheet(key: key, check: check) }
         #if DEBUG
         .navigationDestination(item: $debugFile) { FileDiffScreen(key: key, scope: scope, file: $0) }
@@ -101,11 +108,16 @@ struct ChangesScreen: View {
 
     /// Checks are extra here, so failing to read them only leaves them out.
     private func loadChecks() async {
-        guard workspace?.pullRequest != nil else { return }
+        guard workspace?.pullRequest != nil else {
+            checks = nil
+            return
+        }
         let (device, id) = (key.device, key.workspace)
-        checks = try? await model.fleet.call(device) { client, token in
+        let read = try? await model.fleet.call(device) { client, token in
             try await client.checks(workspace: id, bearer: token)
         }
+        guard !Task.isCancelled else { return }
+        checks = read
     }
 
     @ViewBuilder private var filesSection: some View {
