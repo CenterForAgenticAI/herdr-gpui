@@ -15,6 +15,7 @@
 
 pub mod account;
 pub mod envrc;
+pub mod headers;
 pub mod merge_request;
 pub mod oauth;
 pub mod saved;
@@ -99,6 +100,24 @@ pub enum Error {
     RateLimit,
     #[error("GitLab request failed (HTTP {0})")]
     Status(u16),
+    #[error(
+        "GitLab request to {origin} was redirected to {location} (HTTP {status}); an access proxy in front of it may need custom_headers in the GitLab CLI's config"
+    )]
+    Redirect {
+        origin: String,
+        location: String,
+        status: u16,
+    },
+    #[error(
+        "The GitLab CLI's header {header} reads {variable}, which the login shell does not set"
+    )]
+    HeaderUnset { header: String, variable: String },
+    #[error(
+        "The GitLab CLI's header {header} uses valueFromCommand, which is never run; use valueFromEnv"
+    )]
+    HeaderCommand { header: String },
+    #[error("The GitLab CLI's header {header:?} is not one an HTTP request can carry")]
+    HeaderInvalid { header: String },
     #[error("GitLab's sign-in was declined")]
     Denied,
     #[error("The GitLab sign-in code expired; connect again")]
@@ -181,6 +200,9 @@ impl Error {
                 | Self::Scope
                 | Self::Forbidden { .. }
                 | Self::NotFound { .. }
+                | Self::HeaderUnset { .. }
+                | Self::HeaderCommand { .. }
+                | Self::HeaderInvalid { .. }
         )
     }
 
@@ -271,6 +293,9 @@ pub struct Api {
     /// Where requests go: the instance, unless the CLI sets another.
     pub host: String,
     pub scheme: Scheme,
+    /// The instance's `custom_headers` from the GitLab CLI, sent only over
+    /// HTTPS to `host`.
+    pub headers: headers::Headers,
 }
 
 impl Api {
@@ -278,10 +303,18 @@ impl Api {
     /// CLI's instances.
     pub fn new(host: &str, scheme: Scheme, cli: &[cli_hosts::CliHost]) -> Self {
         let Some(mapped) = cli_hosts::by_ssh_host(cli, host) else {
+            // A remote on an instance's own host keeps its host and scheme,
+            // and carries that instance's headers.
+            let headers = cli
+                .iter()
+                .find(|named| named.host.eq_ignore_ascii_case(host))
+                .map(|named| named.headers.clone())
+                .unwrap_or_default();
             return Self {
                 instance: host.to_owned(),
                 host: host.to_owned(),
                 scheme,
+                headers,
             };
         };
         Self {
@@ -291,6 +324,7 @@ impl Api {
                 .clone()
                 .unwrap_or_else(|| mapped.host.clone()),
             scheme: Self::cli_scheme(Some(mapped)),
+            headers: mapped.headers.clone(),
         }
     }
 
@@ -307,6 +341,7 @@ impl Api {
                 .and_then(|named| named.api_host.clone())
                 .unwrap_or_else(|| host.to_owned()),
             scheme: Self::cli_scheme(named),
+            headers: named.map(|named| named.headers.clone()).unwrap_or_default(),
         }
     }
 
@@ -577,11 +612,15 @@ fn get_page<N: Listed>(
     if let Credential::Token(token) = credential {
         request = request.header("Authorization", authorization(token)?);
     }
+    request = api.headers.apply(request, api.scheme == Scheme::Https)?;
     let mut reply = request.call().map_err(|error| Error::Network {
         origin: api.origin(),
         source: Box::new(error),
     })?;
     let status = reply.status().as_u16();
+    if let Some(error) = headers::redirect(status, reply.headers(), &api.origin()) {
+        return Err(error);
+    }
     if status != 200 {
         *cooldown = retry_after(status, reply.headers(), SystemTime::now());
         tracing::warn!(
