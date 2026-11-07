@@ -20,6 +20,11 @@ fn command_sessions_and_scripts_name_the_session_without_reading_the_source() {
         ),
         (
             "write_stdin",
+            json!({"session_id": 7, "chars": "\n"}),
+            "Send input to command session 7",
+        ),
+        (
+            "write_stdin",
             json!({"session_id": "7", "chars": ""}),
             "Poll command session 7",
         ),

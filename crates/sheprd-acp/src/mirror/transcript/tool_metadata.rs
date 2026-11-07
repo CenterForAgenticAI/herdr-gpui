@@ -54,7 +54,11 @@ pub(super) fn describe(name: &str, input: &Value) -> Described {
         // A script's source is opaque: nothing it mentions is known to run.
         "exec" => (ToolKind::Execute, Some("Tool script".to_owned())),
         "write_stdin" => {
-            let typed = field(&["chars"]).is_some();
+            // Enter alone is input, so this must not trim as `field` does.
+            let typed = input
+                .get("chars")
+                .and_then(Value::as_str)
+                .is_some_and(|chars| !chars.is_empty());
             let action = if typed { "Send input to" } else { "Poll" };
             (
                 ToolKind::Execute,
