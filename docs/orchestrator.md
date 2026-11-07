@@ -117,6 +117,16 @@ the remote's scheme, as before, and the source key always keeps the remote's
 host, as agent-launcher keys it. A failed connection names the address it
 tried.
 
+An instance behind an access proxy, such as Cloudflare Access, is reached with
+the instance's `custom_headers` from the same config, as glab sends them. Each
+item's `value`, or the login shell's variable its `valueFromEnv` names, is
+sent with every API and sign-in request to that instance over HTTPS, never
+over HTTP and never to another host; requests follow no redirect. A
+`valueFromCommand` is never run. As glab does, a header that cannot be made,
+such as one whose variable is unset, fails the instance's requests and names
+the header and variable; a value is never shown. A reply that redirects, as a
+proxy's sign-in page does, names where it was sent.
+
 A token is sent only over HTTPS: over HTTP
 the read is anonymous, and a project that is not public asks for an
 `https://` remote. Pages follow a cursor on creation time

@@ -209,6 +209,7 @@ fn local_api(address: std::net::SocketAddr) -> Api {
         instance: "gitlab.com".into(),
         host: address.to_string(),
         scheme: Scheme::Http,
+        headers: Default::default(),
     }
 }
 

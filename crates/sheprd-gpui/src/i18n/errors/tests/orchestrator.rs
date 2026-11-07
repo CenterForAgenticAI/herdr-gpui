@@ -154,6 +154,21 @@ fn every_gitlab_variant_has_a_message() {
         },
         gitlab::Error::RateLimit,
         gitlab::Error::Status(500),
+        gitlab::Error::Redirect {
+            origin: "https://gitlab.example.com".into(),
+            location: "https://team.cloudflareaccess.com".into(),
+            status: 302,
+        },
+        gitlab::Error::HeaderUnset {
+            header: "CF-Access-Client-Id".into(),
+            variable: "CF_ACCESS_CLIENT_ID".into(),
+        },
+        gitlab::Error::HeaderCommand {
+            header: "CF-Access-Client-Id".into(),
+        },
+        gitlab::Error::HeaderInvalid {
+            header: "bad header".into(),
+        },
         gitlab::Error::Denied,
         gitlab::Error::CodeExpired,
         gitlab::Error::Host("not a host".into()),
