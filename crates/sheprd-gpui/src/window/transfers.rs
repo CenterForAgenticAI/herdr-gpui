@@ -405,7 +405,7 @@ impl SheprdWindow {
                 .gap(px(8.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .on_scroll(|_, _, cx| cx.stop_propagation())
                 .child(div().child(title))
                 .child(div().truncate().child(transfer.label.clone()))
                 .child(
@@ -443,7 +443,7 @@ impl SheprdWindow {
                             this.poll_file_transfer(cx);
                         })),
                 )
-                .children(self.overlay_probe())
+                .children(self.overlay_probe(crate::browser::Overlay::FileTransfer))
                 .into_any_element(),
         )
     }

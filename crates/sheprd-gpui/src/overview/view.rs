@@ -561,7 +561,7 @@ impl SheprdWindow {
             .child(actions)
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 let modifiers = event.modifiers();
-                if shelf == Shelf::Active && (modifiers.shift || modifiers.secondary()) {
+                if shelf == Shelf::Active && (modifiers.shift || modifiers.secondary(cx)) {
                     this.select_overview_row(&clicked.key, modifiers.shift, cx);
                 } else if let Shelf::Closed(id, _) = shelf {
                     this.open_closed_agent(id, window, cx);

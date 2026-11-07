@@ -2,8 +2,12 @@
 //! notices over the top-right of the terminal area. Dismissing asks the daemon to mark it seen,
 //! so every client of that daemon stops showing it.
 // i18n: migrated
-use super::{SheprdWindow, render::Notice};
+use super::{
+    SheprdWindow,
+    render::{Notice, NoticeCard},
+};
 use crate::{
+    browser::Overlay,
     i18n::{Localize, fl},
     notifications::safe_text,
     state::AnnouncementDismissal,
@@ -32,6 +36,7 @@ impl SheprdWindow {
             .id("announcement")
             .debug_selector(|| "announcement".into())
             .min_w_0()
+            .relative()
             .min_h_0()
             .w_full()
             .max_w(px(MAX_WIDTH))
@@ -47,7 +52,7 @@ impl SheprdWindow {
             .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .flex_1()
@@ -110,7 +115,8 @@ impl SheprdWindow {
                         cx.stop_propagation();
                         this.dismiss_announcement(&version, &id, cx);
                     })),
-            );
+            )
+            .children(self.overlay_probe(Overlay::Notice(NoticeCard::Announcement)));
         // Its body always scrolls, so it gives up height like an open card.
         Some(Notice {
             card: card.into_any_element(),

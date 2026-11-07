@@ -732,6 +732,7 @@ impl SheprdWindow {
             Page::Host
                 | Page::RenameDevice
                 | Page::ForwardPort
+                | Page::DeviceTags
                 | Page::DeviceTheme
                 | Page::RemoveDevice
         ) {
@@ -941,7 +942,7 @@ impl SheprdWindow {
                     this.dismiss_menu(window, cx);
                 }),
             )
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, window, cx| {

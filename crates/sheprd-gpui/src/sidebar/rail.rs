@@ -193,6 +193,13 @@ impl SheprdWindow {
                 } else {
                     endpoint.label.clone()
                 };
+                // An offline or folded host has no rows to carry the mark.
+                let text = muted_word(
+                    Some(text.clone()),
+                    crate::notification_mutes::Mutes::any(cx)
+                        .is_some_and(|mutes| mutes.host(&endpoint.id)),
+                )
+                .unwrap_or(text);
                 let box_id = endpoint_id.clone();
                 let chrome = host_chrome(selected, look, theme);
                 spaces = spaces.child(
@@ -269,9 +276,9 @@ impl SheprdWindow {
                 let context_id = id.clone();
                 let focused = selected && workspace.focused;
                 let number = workspace.number.to_string();
-                let muted = silenced
-                    .get(&endpoint_index)
-                    .is_some_and(|silenced| silenced.workspace(&workspace.workspace_id));
+                let muted = silenced.get(&endpoint_index).is_some_and(|silenced| {
+                    silenced.host() || silenced.workspace(&workspace.workspace_id)
+                });
                 let marks = div()
                     .row()
                     .items_center()
@@ -402,7 +409,8 @@ impl SheprdWindow {
             } else {
                 theme.muted
             };
-            let icon_path = crate::icons::AgentIcon::from_identity(agent.agent.as_deref()).path();
+            let icon_path =
+                super::agents::agent_icon(agent, snapshot, &self.config.sidebar_style).path();
             // The host letter shares the workspace number's column. With one
             // host there is no letter, so the icon takes that column and still
             // starts on the badge's left edge.

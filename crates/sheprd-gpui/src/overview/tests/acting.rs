@@ -12,11 +12,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-fn command() -> Modifiers {
-    Modifiers::secondary_key()
-}
-
-fn click_with(cx: &mut VisualTestContext, selector: String, modifiers: Modifiers) {
+/// Clicks with the platform's Cmd or Ctrl held.
+fn command_click(cx: &mut VisualTestContext, selector: String) {
+    let modifiers = cx.update(|_, cx| Modifiers::secondary_key(cx));
     let point = bounds(cx, selector.clone())
         .unwrap_or_else(|| panic!("{selector}"))
         .center();
@@ -51,13 +49,13 @@ fn a_modified_click_selects_a_row_rather_than_opening_it(cx: &mut gpui::TestAppC
     let (view, cx) = fixture(cx);
     let blocked = row(&view, cx, State::Blocked);
     assert!(cx.debug_bounds("overview-batch").is_none());
-    click_with(cx, format!("overview-row-{blocked}"), command());
+    command_click(cx, format!("overview-row-{blocked}"));
     assert!(cx.debug_bounds("overview-batch").is_some(), "the bar shows");
     assert!(
         cx.debug_bounds("overview").is_some(),
         "the page stayed open"
     );
-    click_with(cx, format!("overview-row-{blocked}"), command());
+    command_click(cx, format!("overview-row-{blocked}"));
     assert!(
         cx.debug_bounds("overview-batch").is_none(),
         "the last row out takes the bar with it"
@@ -68,8 +66,8 @@ fn a_modified_click_selects_a_row_rather_than_opening_it(cx: &mut gpui::TestAppC
 fn the_bar_settles_every_selected_row(cx: &mut gpui::TestAppContext) {
     let (view, cx) = fixture(cx);
     let (blocked, done) = (row(&view, cx, State::Blocked), row(&view, cx, State::Done));
-    click_with(cx, format!("overview-row-{blocked}"), command());
-    click_with(cx, format!("overview-row-{done}"), command());
+    command_click(cx, format!("overview-row-{blocked}"));
+    command_click(cx, format!("overview-row-{done}"));
     click(cx, "overview-batch-settle");
     let sections = cx.update(|_, cx| view.read(cx).overview_sections(cx));
     assert_eq!(sections.settled.len(), 2);
@@ -81,8 +79,8 @@ fn the_bar_settles_every_selected_row(cx: &mut gpui::TestAppContext) {
 fn the_bar_snoozes_every_selected_row_until_the_time_picked(cx: &mut gpui::TestAppContext) {
     let (view, cx) = fixture(cx);
     let (blocked, done) = (row(&view, cx, State::Blocked), row(&view, cx, State::Done));
-    click_with(cx, format!("overview-row-{blocked}"), command());
-    click_with(cx, format!("overview-row-{done}"), command());
+    command_click(cx, format!("overview-row-{blocked}"));
+    command_click(cx, format!("overview-row-{done}"));
     click(cx, "overview-batch-snooze");
     click(cx, "overview-snooze-preset-0");
     let sections = cx.update(|_, cx| view.read(cx).overview_sections(cx));
@@ -95,7 +93,7 @@ fn the_bar_snoozes_every_selected_row_until_the_time_picked(cx: &mut gpui::TestA
 fn a_selected_row_that_leaves_the_list_leaves_the_selection(cx: &mut gpui::TestAppContext) {
     let (view, cx) = fixture(cx);
     let blocked = row(&view, cx, State::Blocked);
-    click_with(cx, format!("overview-row-{blocked}"), command());
+    command_click(cx, format!("overview-row-{blocked}"));
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             let mut snapshot = (**view.live.snapshot.as_ref().unwrap()).clone();
@@ -217,7 +215,7 @@ fn a_reply_too_long_to_send_is_refused_not_cut(cx: &mut gpui::TestAppContext) {
 fn snoozing_one_row_leaves_the_selection_alone(cx: &mut gpui::TestAppContext) {
     let (view, cx) = fixture(cx);
     let (blocked, done) = (row(&view, cx, State::Blocked), row(&view, cx, State::Done));
-    click_with(cx, format!("overview-row-{blocked}"), command());
+    command_click(cx, format!("overview-row-{blocked}"));
     click(cx, format!("overview-snooze-{done}"));
     click(cx, "overview-snooze-preset-0");
     assert!(cx.debug_bounds("overview-batch").is_some());

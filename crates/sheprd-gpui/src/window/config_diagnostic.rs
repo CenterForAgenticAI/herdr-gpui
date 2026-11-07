@@ -3,8 +3,12 @@
 //! the missing icon font, then the selected endpoint's daemon `config.toml`
 //! diagnostic.
 // i18n: migrated
-use super::{Flash, SheprdWindow, chrome_focus::Region, render::Notice};
-use crate::{fonts::StyledFont, i18n::fl, notifications::safe_text};
+use super::{
+    Flash, SheprdWindow,
+    chrome_focus::Region,
+    render::{Notice, NoticeCard},
+};
+use crate::{browser::Overlay, fonts::StyledFont, i18n::fl, notifications::safe_text};
 use gpui::{prelude::*, *};
 use std::sync::Arc;
 
@@ -17,6 +21,7 @@ const MAX_WIDTH: f32 = 420.;
 /// One card's text and state, as [`SheprdWindow::render_diagnostic_card`]
 /// draws it.
 struct Card<'a> {
+    notice: NoticeCard,
     selector: &'static str,
     label: String,
     lines: &'a Arc<[String]>,
@@ -33,6 +38,7 @@ impl SheprdWindow {
             let (dismissed, toggled) = (lines.clone(), lines.clone());
             self.render_diagnostic_card(
                 Card {
+                    notice: NoticeCard::AppConfig,
                     selector: "gui-config-diagnostic",
                     label: fl!("window-notices-diagnostic-app"),
                     lines,
@@ -58,6 +64,7 @@ impl SheprdWindow {
                 crate::icon_font_notice::COMMAND.map(|command| self.command_chip(command, cx));
             self.render_diagnostic_card(
                 Card {
+                    notice: NoticeCard::IconFont,
                     selector: "icon-font-notice",
                     label: fl!("window-notices-diagnostic-app"),
                     lines,
@@ -91,6 +98,7 @@ impl SheprdWindow {
                 let toggled = source.clone();
                 Some(self.render_diagnostic_card(
                     Card {
+                        notice: NoticeCard::DaemonConfig,
                         selector: "config-diagnostic",
                         label: safe_text(&endpoint.label, 80),
                         lines,
@@ -183,6 +191,7 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Notice {
         let Card {
+            notice,
             selector,
             label,
             lines,
@@ -312,6 +321,7 @@ impl SheprdWindow {
             .role(Role::Group)
             .aria_label(name)
             .occlude()
+            .relative()
             .min_w_0()
             .max_w(px(MAX_WIDTH))
             .flex()
@@ -325,7 +335,7 @@ impl SheprdWindow {
             .text_color(rgb(self.theme.foreground))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             // The card itself has nothing else to do on a click, so all of it
             // opens and closes; its controls stop their own clicks first.
             .when(foldable, |card| {
@@ -333,7 +343,8 @@ impl SheprdWindow {
                     .on_click(cx.listener(move |this, _, _, cx| toggle(this, cx)))
             })
             .child(header)
-            .children(footer.map(|footer| div().flex_none().child(footer)));
+            .children(footer.map(|footer| div().flex_none().child(footer)))
+            .children(self.overlay_probe(Overlay::Notice(notice)));
         Notice {
             card: card.into_any_element(),
             shrinks: open,

@@ -18,7 +18,8 @@ const QUIT_DELAY: Duration = Duration::from_millis(200);
 
 impl SheprdWindow {
     /// The hosts this window shows, with their connection status.
-    pub(crate) fn control_hosts(&self) -> Vec<HostInfo> {
+    pub(crate) fn control_hosts(&self, cx: &App) -> Vec<HostInfo> {
+        let mutes = crate::notification_mutes::Mutes::of(cx);
         self.endpoints
             .iter()
             .enumerate()
@@ -40,12 +41,14 @@ impl SheprdWindow {
                     label: endpoint.label.clone(),
                     status: status.to_owned(),
                     selected,
+                    muted: mutes.is_some_and(|mutes| mutes.host(&endpoint.id)),
+                    tags: self.device_tags.of(&endpoint.id).to_vec(),
                 }
             })
             .collect()
     }
 
-    fn control_info(&self, window: &Window) -> WindowInfo {
+    fn control_info(&self, window: &Window, cx: &App) -> WindowInfo {
         let bounds = window.bounds();
         WindowInfo {
             id: window.window_handle().window_id().as_u64(),
@@ -59,7 +62,7 @@ impl SheprdWindow {
                 .snapshot
                 .as_ref()
                 .and_then(|snapshot| snapshot.focused_workspace_id.clone()),
-            hosts: self.control_hosts(),
+            hosts: self.control_hosts(cx),
         }
     }
 }
@@ -69,7 +72,7 @@ fn windows(cx: &mut App) -> Vec<WindowInfo> {
         .into_iter()
         .filter_map(|handle| {
             handle
-                .update(cx, |view, window, _| view.control_info(window))
+                .update(cx, |view, window, cx| view.control_info(window, cx))
                 .ok()
         })
         .collect()
@@ -293,18 +296,23 @@ pub(super) fn ui(call: Call<UiOp>, cx: &mut App) -> Response {
                 );
             }
             if !view.activity_panel_listed(panel) {
-                return Response::error(
-                    ErrorCode::Unsupported,
-                    format!(
+                let why = match panel {
+                    crate::sidebar::ActivityPanel::Tasks => {
+                        "No project in this window has a .beads folder".to_owned()
+                    }
+                    panel => format!(
                         "{} is turned off: [sidebar] {} = false",
                         panel.name(),
                         panel.name()
                     ),
-                );
+                };
+                return Response::error(ErrorCode::Unsupported, why);
             }
             view.show_activity_panel(panel, window, cx);
             Response::done(format!("Showing {}", panel.name()))
         }
+        UiOp::AgentGroups => agent_groups(view),
+        UiOp::AgentGroup { name } => pick_agent_group(view, name, cx),
         UiOp::StatusBar { switch } => {
             let visible = switch.apply(view.status_bar_visible);
             if visible != view.status_bar_visible {
@@ -333,6 +341,48 @@ pub(super) fn ui(call: Call<UiOp>, cx: &mut App) -> Response {
             }
         }
     })
+}
+
+/// Groups live in the agents panel, so without it there is nothing to show.
+fn no_agent_groups() -> Response {
+    Response::error(
+        ErrorCode::Unsupported,
+        "No coordinator groups: set [sidebar] coordinator_suffix and show the agents panel",
+    )
+}
+
+fn agent_groups(view: &SheprdWindow) -> Response {
+    let Some(groups) = view.agent_groups() else {
+        return no_agent_groups();
+    };
+    Response::App {
+        reply: Reply::AgentGroups {
+            current: view.agent_group.clone(),
+            groups: groups.names().iter().map(|&name| name.to_owned()).collect(),
+        },
+    }
+}
+
+fn pick_agent_group(
+    view: &mut SheprdWindow,
+    name: Option<String>,
+    cx: &mut gpui::Context<SheprdWindow>,
+) -> Response {
+    let Some(groups) = view.agent_groups() else {
+        return no_agent_groups();
+    };
+    if let Some(name) = &name
+        && !groups.names().contains(&name.as_str())
+    {
+        return super::not_found(format!("No coordinator group is named {name}"));
+    }
+    let message = name.as_ref().map_or_else(
+        || "Showing every agent group".to_owned(),
+        |name| format!("Showing agent group {name}"),
+    );
+    view.agent_group = name;
+    cx.notify();
+    Response::done(message)
 }
 
 pub(super) fn command(call: Call<CommandOp>, cx: &mut App) -> Response {

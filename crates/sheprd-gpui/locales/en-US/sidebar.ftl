@@ -87,3 +87,14 @@ sidebar-workspace-move-not-sent = Workspace move not sent: { $error }
 # the Orca layout.
 sidebar-primary = primary
 sidebar-spoken-muted = notifications muted
+# A row's badge, in place of a pull request number: its branch has commits and
+# no pull request yet. Keep it about as short as "#123".
+sidebar-pull-request-unopened = +PR
+
+# The agents header's coordinator group filter, which a click steps through;
+# a group's own name stands in for this label once one is picked.
+sidebar-group-all = all groups
+# A screen reader's name for that button; $group is the label it shows.
+sidebar-agents-group = Agent group: { $group }
+# A screen reader's name for a coordinator's row; $row is its usual name.
+sidebar-coordinator-row = Coordinator: { $row }

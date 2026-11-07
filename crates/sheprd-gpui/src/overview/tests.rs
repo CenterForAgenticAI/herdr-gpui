@@ -12,6 +12,7 @@ mod idle_fold;
 mod marks;
 mod mutes;
 mod page;
+mod poll;
 mod presets;
 mod replies;
 mod sections;
