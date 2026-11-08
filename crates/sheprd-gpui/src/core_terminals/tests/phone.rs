@@ -68,11 +68,20 @@ fn a_zoom_fills_the_tab_with_the_phones_pane_and_a_second_shows_the_split() {
 }
 
 #[test]
-fn closing_names_the_tab_to_close() {
+fn closing_names_the_tab_and_the_terminals_left_in_it() {
     let mut terminals = terminals();
+    let left = terminals.tabs[&TabId::test(1)]
+        .panes
+        .terminals()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(!left.is_empty());
+    // A split that landed after the daemon ended the tab's terminals is
+    // still in the tab: it ends with it rather than outliving it.
     assert!(matches!(
         terminals.phone_change(&ask(1, "t1", Op::Close)),
-        Some(Change::Close(tab)) if tab == TabId::test(1)
+        Some(Change::Close(tab, ending)) if tab == TabId::test(1) && ending == left
     ));
 }
 
@@ -159,6 +168,6 @@ fn a_tab_closes_even_after_its_panes_ended() {
     // The daemon ended the terminals first; the pane it names may be gone.
     assert!(matches!(
         terminals.phone_change(&ask(1, "t404", Op::Close)),
-        Some(Change::Close(tab)) if tab == TabId::test(1)
+        Some(Change::Close(tab, _)) if tab == TabId::test(1)
     ));
 }

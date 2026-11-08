@@ -32,8 +32,9 @@ pub(super) struct Pending {
 pub(super) enum Change {
     /// Made, or refused, already.
     Answered(Answer),
-    /// The tab to close.
-    Close(TabId),
+    /// The tab to close, and the terminals still in it: a split that
+    /// landed after the phone's daemon ended the others.
+    Close(TabId, Vec<TerminalId>),
     /// The tab whose zoom moved to the phone's pane.
     Zoomed(TabId),
     /// A new shell to start beside the pane.
@@ -46,9 +47,14 @@ impl CoreTerminals {
     pub(super) fn phone_change(&mut self, ask: &Ask) -> Option<Change> {
         let tab = *self.tabs.keys().find(|tab| tab.number() == ask.tab)?;
         // The tab goes whole: its panes may have left already, their
-        // terminals ended first.
+        // terminals ended first. Any still in it end with it.
         if ask.op == Op::Close {
-            return Some(Change::Close(tab));
+            let left = self
+                .tabs
+                .get(&tab)
+                .map(|shown| shown.panes.terminals().into_iter().cloned().collect())
+                .unwrap_or_default();
+            return Some(Change::Close(tab, left));
         }
         let busy = self.starting.is_some() || self.wanted.is_some() || self.phone_split.is_some();
         let shown = self.tabs.get_mut(&tab)?;
@@ -61,7 +67,7 @@ impl CoreTerminals {
         let axis = match ask.op {
             Op::SplitRight => Axis::Row,
             Op::SplitDown => Axis::Column,
-            Op::Close => return Some(Change::Close(tab)),
+            Op::Close => return Some(Change::Close(tab, Vec::new())),
             Op::Zoom => {
                 // One pane already fills its tab, as Herdr leaves it.
                 if shown.panes.count() < 2 {
@@ -129,7 +135,10 @@ impl SheprdWindow {
     ) -> Option<Option<Answer>> {
         let answer = match self.core_terminals.phone_change(ask)? {
             Change::Answered(answer) => Some(answer),
-            Change::Close(tab) => {
+            Change::Close(tab, left) => {
+                for terminal in left {
+                    self.end_core_terminal(terminal);
+                }
                 self.close_browser_tab(tab, window, cx);
                 Some(Answer::Done)
             }
