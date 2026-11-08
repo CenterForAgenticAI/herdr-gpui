@@ -1,10 +1,9 @@
 //! The daemon request a command becomes against a snapshot.
 
-use crate::Command;
+use super::Command;
 use serde_json::{Value, json};
 use sheprd_client::{Method, protocol::ClientShellSnapshot};
 
-/// The request `command` sends for `snapshot`, or `None` when the window runs it.
 pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Method, Value)> {
     let workspace = snapshot
         .workspaces
@@ -158,6 +157,7 @@ pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Meth
         | Command::FocusPreviousRegion
         | Command::ToggleZenMode
         | Command::DevicesOverview
+        | Command::NotificationHistory
         | Command::NewCoreTerminal
         | Command::MirrorCorePane
         | Command::ConvertToChat

@@ -313,6 +313,8 @@ impl<R: FnMut(Update)> Session<R> {
         self.turn = None;
         self.resolve_all();
         self.projector.close();
+        let ended = self.projector.direct_turn_ended(&self.transcript, now_ms());
+        self.emit_all(ended);
         let tokens = result.as_ref().ok().and_then(project::tokens);
         let (end, tokens, error) = match result.map(serde_json::from_value::<wire::PromptResponse>)
         {

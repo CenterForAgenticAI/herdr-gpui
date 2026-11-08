@@ -189,8 +189,8 @@ fn connected_panel_is_content_sized_with_only_header_close(cx: &mut TestAppConte
         let avatar = cx.debug_bounds("github-avatar").unwrap();
         assert_eq!(mark.size, gpui::size(gpui::px(20.), gpui::px(20.)));
         assert_eq!(avatar.size, gpui::size(gpui::px(40.), gpui::px(40.)));
-        // Sign out, Add account, then Close.
-        cx.simulate_keystrokes("tab tab tab enter");
+        // The GitLab and Azure DevOps tabs, Sign out, Add account, then Close.
+        cx.simulate_keystrokes("tab tab tab tab tab enter");
         cx.update(|window, cx| {
             assert!(view.read(cx).menu.page.is_none());
             assert!(view.read(cx).menu.github.connected());
@@ -217,7 +217,8 @@ fn actions_follow_state_and_focus_cannot_become_signout(cx: &mut TestAppContext)
     cx.update(|window, cx| {
         view.update(cx, |view, cx| view.github_fixture(true, window, cx));
     });
-    cx.simulate_keystrokes("tab tab");
+    // Past the GitLab and Azure DevOps tabs and Copy.
+    cx.simulate_keystrokes("tab tab tab tab");
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             assert!(view.menu.github_selected == Some(Action::Open));

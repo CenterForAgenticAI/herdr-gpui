@@ -20,7 +20,7 @@ pub mod marks;
 pub mod provision;
 pub mod remote;
 mod sessions;
-pub mod snapshot;
+pub use sheprd_client::herdr::snapshot;
 mod warning;
 
 pub use {

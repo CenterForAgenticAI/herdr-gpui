@@ -150,6 +150,8 @@ pub(super) fn terminal(
         });
     Some(Terminal {
         agent,
+        // A core reports no agent sessions or process info to move with.
+        convert: None,
         cwd: cwd(first),
         label: if title.is_empty() {
             first

@@ -400,6 +400,7 @@ impl SheprdWindow {
                 | Command::FocusPreviousRegion
                 | Command::ToggleZenMode
                 | Command::DevicesOverview
+                | Command::NotificationHistory
                 | Command::NewCoreTerminal
                 | Command::MirrorCorePane
                 | Command::ConvertToChat

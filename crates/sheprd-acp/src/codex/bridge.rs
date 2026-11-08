@@ -1,7 +1,10 @@
 //! The translation between the session's ACP and Codex's app server, free
 //! of threads and pipes.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use acp::v1 as wire;
 use serde_json::{Value, json};
@@ -9,9 +12,11 @@ use serde_json::{Value, json};
 use super::{approval, background, background::Background, items, settings::Settings};
 use crate::{
     harness::{Out, Translator, out},
-    project::Tag,
+    project::{STOP_METHOD, Tag},
     rpc::Inbound,
 };
+
+mod commands;
 
 /// What a request to Codex is waiting for.
 #[derive(Debug)]
@@ -23,6 +28,8 @@ enum Pending {
     /// `turn/start`, answering nothing itself: the turn ends the prompt.
     Turn,
     Interrupt,
+    /// `turn/interrupt` of a sub-agent's turn, which says when it fails.
+    StopActivity,
 }
 
 /// The session's request to open a thread, waiting for the handshake.
@@ -37,6 +44,7 @@ struct Opening {
 pub(super) struct Bridge {
     asks: HashMap<i64, approval::Ask>,
     background: Background,
+    commands: commands::Commands,
     /// Codex's `model/list`, kept until the thread opens.
     models: Option<Value>,
     next_id: i64,
@@ -61,6 +69,15 @@ pub(super) struct Bridge {
 }
 
 impl Translator for Bridge {
+    fn next_tick(&self) -> Option<Instant> {
+        self.commands.next_tick()
+    }
+
+    fn tick(&mut self) -> Vec<Out> {
+        let session = self.session().to_owned();
+        self.commands.flush(&session)
+    }
+
     fn start(&mut self) -> Vec<Out> {
         vec![self.call(
             "initialize",
@@ -76,6 +93,9 @@ impl Translator for Bridge {
         match inbound {
             Inbound::Request { id, method, params } => self.request(id, &method, params),
             Inbound::Notification { method, .. } if method == "session/cancel" => self.cancel(),
+            Inbound::Notification { method, params } if method == STOP_METHOD => {
+                self.stop_activity(&params)
+            }
             Inbound::Response { id, result } => {
                 let wire::RequestId::Number(id) = id else {
                     return Vec::new();
@@ -215,6 +235,19 @@ impl Bridge {
         }
     }
 
+    /// Interrupts a sub-agent's turn; its thread reports how it ended.
+    fn stop_activity(&mut self, params: &Value) -> Vec<Out> {
+        let target = params
+            .get("callId")
+            .and_then(Value::as_str)
+            .and_then(|call| self.background.child_of(call))
+            .map(|(thread, turn)| json!({"threadId": thread, "turnId": turn}));
+        target
+            .map(|target| self.call("turn/interrupt", target, Pending::StopActivity))
+            .into_iter()
+            .collect()
+    }
+
     fn response(&mut self, id: &Value, message: &Value) -> Vec<Out> {
         let Some(pending) = id.as_i64().and_then(|id| self.pending.remove(&id)) else {
             return Vec::new();
@@ -266,14 +299,27 @@ impl Bridge {
             },
             Pending::Turn => match result {
                 Ok(started) => self.turn_started(started.pointer("/turn/id")),
-                Err(message) => self
-                    .prompt
-                    .take()
-                    .map(|id| out::reply(id, Err(out::failure(message))))
-                    .into_iter()
-                    .collect(),
+                Err(message) => {
+                    self.commands.clear();
+                    self.prompt
+                        .take()
+                        .map(|id| out::reply(id, Err(out::failure(message))))
+                        .into_iter()
+                        .collect()
+                }
             },
             Pending::Interrupt => Vec::new(),
+            Pending::StopActivity => result
+                .err()
+                .map(|message| {
+                    out::notice(
+                        self.session(),
+                        wire::NoticeSeverity::Warning,
+                        format!("Codex could not stop that sub-agent: {message}"),
+                    )
+                })
+                .into_iter()
+                .collect(),
         }
     }
 
@@ -283,6 +329,7 @@ impl Bridge {
             .and_then(Value::as_str)
             .unwrap_or_default();
         self.thread = Some(id.to_owned());
+        self.commands.clear();
         self.settings = Settings::new(self.models.as_ref().unwrap_or(&Value::Null), thread);
         out::reply(
             acp,
@@ -294,7 +341,10 @@ impl Bridge {
         let Some(turn) = turn.and_then(Value::as_str) else {
             return Vec::new();
         };
-        self.turn = Some(turn.to_owned());
+        if self.turn.as_deref() != Some(turn) {
+            self.commands.clear();
+            self.turn = Some(turn.to_owned());
+        }
         if std::mem::take(&mut self.interrupting) {
             return self.cancel();
         }
@@ -339,26 +389,11 @@ impl Bridge {
                 let thought = method != "item/agentMessage/delta";
                 vec![out::chunk(&session, thought, delta, Some(item))]
             }
-            "item/started" => {
-                let Some(item) = params.get("item") else {
-                    return Vec::new();
-                };
-                let tag = self.background.started(item);
-                items::started(item)
-                    .map(|call| {
-                        let call = if tag == Tag::default() {
-                            call
-                        } else {
-                            call.meta(tag.meta())
-                        };
-                        out::update(&session, wire::SessionUpdate::ToolCall(call))
-                    })
-                    .into_iter()
-                    .collect()
-            }
-            "item/completed" => self.item_completed(params.get("item")),
+            "item/commandExecution/outputDelta" => self.command_output(params),
+            "item/started" => self.item_started(params),
+            "item/completed" => self.item_completed(params),
             "turn/started" => self.turn_started(params.pointer("/turn/id")),
-            "turn/completed" => self.turn_completed(params.get("turn")),
+            "turn/completed" if self.ends_turn(params) => self.turn_completed(params.get("turn")),
             "turn/plan/updated" => vec![out::update(
                 &session,
                 wire::SessionUpdate::Plan(items::plan(params)),
@@ -383,12 +418,25 @@ impl Bridge {
         }
     }
 
-    fn item_completed(&mut self, item: Option<&Value>) -> Vec<Out> {
-        let Some(item) = item else {
+    /// Whether a `turn/completed` is not a late one of an earlier turn.
+    fn ends_turn(&self, params: &Value) -> bool {
+        let ended = params.pointer("/turn/id").and_then(Value::as_str);
+        ended.is_none() || self.turn.is_none() || ended == self.turn.as_deref()
+    }
+
+    fn item_completed(&mut self, params: &Value) -> Vec<Out> {
+        let Some(item) = params.get("item") else {
             return Vec::new();
         };
         let session = self.session().to_owned();
         let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+        if item.get("type").and_then(Value::as_str) == Some("commandExecution") {
+            if self.stale_command(params) && !self.background.is_shell(id) {
+                return Vec::new();
+            }
+            // The final output replaces what streamed, even when empty.
+            self.command_ended(params, id);
+        }
         let streamed = self.streamed.remove(id);
         match item.get("type").and_then(Value::as_str) {
             Some("agentMessage") if !streamed => item
@@ -438,7 +486,15 @@ impl Bridge {
         };
         let session = self.session().to_owned();
         let item = params.get("item");
-        match method {
+        let stoppable = params
+            .get("turnId")
+            .or_else(|| params.pointer("/turn/id"))
+            .and_then(Value::as_str)
+            .filter(|_| method != "turn/completed")
+            .and_then(|turn| self.background.child_turn(thread, turn))
+            .map(|known| self.reported(known));
+        let mut outs: Vec<Out> = stoppable.into_iter().collect();
+        outs.extend(match method {
             "item/started" => item
                 .and_then(items::started)
                 .map(|call| {
@@ -467,7 +523,8 @@ impl Bridge {
                     .collect()
             }
             _ => Vec::new(),
-        }
+        });
+        outs
     }
 
     /// The update that says how another call's activity stands.
@@ -500,17 +557,20 @@ impl Bridge {
     }
 
     fn turn_completed(&mut self, turn: Option<&Value>) -> Vec<Out> {
+        let mut outs = self.tick();
         let backgrounded = self.background.turn_ended();
-        let mut outs: Vec<Out> = backgrounded
-            .into_iter()
-            .map(|started| self.reported(started))
-            .collect();
+        outs.extend(
+            backgrounded
+                .into_iter()
+                .map(|started| self.reported(started)),
+        );
         let Some(id) = self.prompt.take() else {
             return outs;
         };
         self.turn = None;
         self.interrupting = false;
         self.streamed.clear();
+        self.commands.clear();
         let status = turn
             .and_then(|turn| turn.get("status"))
             .and_then(Value::as_str);

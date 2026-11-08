@@ -26,6 +26,11 @@ struct TerminalScreen: View {
     @State private var problem: String?
     @State private var clipboardHasText = UIPasteboard.general.hasStrings
     @State private var renaming = false
+    /// A move of the tab's agent into a chat is under way.
+    @State private var converting = false
+    /// Whether this screen is shown, so a move that ends after the person
+    /// left it does not pull them back to its chat.
+    @State private var shown = false
     @State private var newName = ""
     /// Lines a swipe in progress has scrolled the terminal so far.
     @State private var swiped = 0
@@ -187,6 +192,15 @@ struct TerminalScreen: View {
                             Button("Zoom", systemImage: "arrow.up.left.and.arrow.down.right") { run(.zoom) }
                         }
                     }
+                    if let offer = item?.terminal.convert {
+                        Section {
+                            Button(
+                                converting ? "Moving into Chat…" : "Move Agent into Chat",
+                                systemImage: "bubble.left.and.text.bubble.right"
+                            ) { convert(offer) }
+                            .disabled(converting)
+                        }
+                    }
                     Section {
                         Button("Rename Tab…", systemImage: "pencil") {
                             newName = item?.terminal.label ?? title
@@ -218,7 +232,9 @@ struct TerminalScreen: View {
             picks = []
             Task { await upload(item) }
         }
+        .onDisappear { shown = false }
         .onAppear {
+            shown = true
             store = model.fleet.openTerm(key)
             model.recentDevice = key.device
             if typing == nil { typing = TermTyping(key: key, fleet: model.fleet) }
@@ -366,6 +382,34 @@ struct TerminalScreen: View {
             do {
                 try await model.fleet.rename(key, to: label)
                 problem = nil
+            } catch {
+                problem = error.localizedDescription
+            }
+        }
+    }
+
+    /// Moves the tab's agent into a chat in the same pane, as Sheprd's Move
+    /// Agent into Chat does, and opens the chat in this terminal's place
+    /// once it is up, unless the person has left this screen meanwhile. The
+    /// computer refuses a busy agent, one Herdr reports no session for, or
+    /// one replaced since the offer, and says why; the agent then keeps
+    /// running here.
+    private func convert(_ offer: Home.TerminalRow.ConvertOffer) {
+        converting = true
+        Task {
+            defer { converting = false }
+            do {
+                let chat = try await model.fleet.call(key.device) { client, token in
+                    try await client.convertToChat(offer, bearer: token)
+                }
+                if let chat {
+                    problem = nil
+                    guard shown else { return }
+                    model.pendingRouteReplaces = key
+                    model.pendingRoute = .chat(PaneKey(device: key.device, pane: chat), title: name)
+                } else {
+                    problem = "The chat is still starting; it shows in your list once it is up."
+                }
             } catch {
                 problem = error.localizedDescription
             }

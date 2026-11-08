@@ -34,6 +34,7 @@ fn a_named_session_prefixes_every_id_it_lists() {
     assert_eq!(terminal.tab, "herdr:work:t2");
     assert_eq!(terminal.panes[0].pane, "herdr:work:p2");
     assert_eq!(terminal.agent.as_ref().unwrap().pane, "herdr:work:p2");
+    assert_eq!(terminal.convert.as_ref().unwrap().0, "herdr:work:p2");
     // What a pane is, as against where it is, stays as Herdr says.
     assert_eq!(workspace.chats[0].endpoint.as_str(), ENDPOINT);
     assert_eq!(layout.boot, "boot-1");

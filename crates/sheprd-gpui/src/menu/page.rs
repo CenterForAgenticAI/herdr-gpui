@@ -26,6 +26,8 @@ pub(crate) enum Page {
     AppUpdate,
     /// Approving an automation script, or enabling automations on a host.
     Automation,
+    /// The account menu's Azure DevOps tokens, beside GitHub's and GitLab's.
+    AzureDevOps,
     /// Reviewing, then following, a move of the pane menu's pane to another
     /// device.
     CarryPane,
@@ -74,6 +76,8 @@ pub(crate) enum Page {
     OpenCheckout,
     /// Asks before opening a terminal hyperlink with an unlisted scheme.
     OpenLink,
+    /// A reply to one or several of the Overview's agents.
+    OverviewReply,
     Palette,
     Pane,
     /// The processes under the pane menu's pane.
@@ -190,6 +194,20 @@ impl Page {
                 | Self::PrReview
                 | Self::PrComment
                 | Self::PrMerge
+        )
+    }
+
+    /// The Git popover, its dialogs, and the Overview's reply, which share a
+    /// width that follows the window.
+    pub(crate) fn popover_sized(self) -> bool {
+        matches!(
+            self,
+            Self::Git
+                | Self::GitCommit
+                | Self::PrReview
+                | Self::PrComment
+                | Self::PrMerge
+                | Self::OverviewReply
         )
     }
 

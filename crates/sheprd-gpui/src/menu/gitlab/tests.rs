@@ -14,6 +14,7 @@ use sheprd_orchestrator::gitlab::{
 };
 use std::{path::PathBuf, sync::Arc};
 
+mod account_tabs;
 mod en_xa;
 mod keyboard;
 mod plain_saved;

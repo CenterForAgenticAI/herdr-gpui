@@ -59,6 +59,8 @@ pub enum Command {
     /// Hides the window's chrome and every group but the one in use.
     ToggleZenMode,
     DevicesOverview,
+    /// Shows the alerts kept on the Overview.
+    NotificationHistory,
     /// Starts a shell in herdr-core (Herdr 2) and shows it in a tab.
     NewCoreTerminal,
     /// Opens a watch-only view of the focused herdr-core pane in a new tab.
@@ -609,6 +611,11 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::DevicesOverview,
         name: "devices_overview",
         message: "commands-devices-overview",
+    },
+    CommandInfo {
+        command: Command::NotificationHistory,
+        name: "notification_history",
+        message: "commands-notification-history",
     },
     CommandInfo {
         command: Command::NewCoreTerminal,

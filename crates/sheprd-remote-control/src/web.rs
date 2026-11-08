@@ -74,6 +74,8 @@ pub(crate) struct State {
     pub(crate) auth: Mutex<Auth>,
     /// Present when the daemon issues its own certificates.
     pub(crate) authority: Option<Authority>,
+    /// Phones' questions about workspaces, waiting for Sheprd.
+    pub(crate) changes: crate::native::changes::Mailbox,
     pub(crate) computer: String,
     /// Streams open per device.
     pub(crate) connected: Mutex<HashMap<DeviceId, usize>>,
@@ -225,11 +227,28 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/v2/new", get(crate::native::new_options))
         .route("/api/v2/search", get(crate::native::search))
         .route("/api/v2/tags", get(tags::get).put(tags::put))
+        .route("/api/v2/term/{pane}/convert", post(crate::native::convert))
         .route("/api/v2/update", get(update::status).post(update::request))
         .route("/api/v2/workspaces", post(crate::native::create_workspace))
         .route(
+            "/api/v2/workspaces/{workspace}/changes",
+            get(crate::native::changes::files),
+        )
+        .route(
+            "/api/v2/workspaces/{workspace}/changes/diff",
+            get(crate::native::changes::diff),
+        )
+        .route(
             "/api/v2/workspaces/{workspace}/chats",
             post(crate::native::start_chat),
+        )
+        .route(
+            "/api/v2/workspaces/{workspace}/checks",
+            get(crate::native::changes::checks),
+        )
+        .route(
+            "/api/v2/workspaces/{workspace}/checks/{job}/log",
+            get(crate::native::changes::check_log),
         )
         .route(
             "/api/v2/workspaces/{workspace}/rename",
@@ -388,6 +407,8 @@ pub(crate) enum ApiError {
     App(#[from] crate::app::Error),
     #[error(transparent)]
     Auth(#[from] auth::Error),
+    #[error(transparent)]
+    Changes(#[from] crate::native::changes::Error),
     #[error("that is not a folder you can start a workspace in")]
     Folder,
     #[error(transparent)]
@@ -415,6 +436,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Changes(error) => error.status(),
             Self::TooManyStreams => StatusCode::TOO_MANY_REQUESTS,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Auth(auth::Error::RateLimited | auth::Error::NearbyBusy) => {
@@ -446,6 +468,12 @@ impl IntoResponse for ApiError {
             Self::Hub(crate::hub::Error::UnknownChat | crate::hub::Error::UnknownWorkspace) => {
                 StatusCode::NOT_FOUND
             }
+            Self::Hub(crate::hub::Error::Convert(
+                crate::hub::ConvertError::AlreadyConverting
+                | crate::hub::ConvertError::Core
+                | crate::hub::ConvertError::Platform
+                | crate::hub::ConvertError::Refused(_),
+            )) => StatusCode::CONFLICT,
             Self::Hub(_) | Self::NoPush => StatusCode::SERVICE_UNAVAILABLE,
         };
         // The request line only has the status. A computer without push

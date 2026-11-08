@@ -98,6 +98,7 @@ pub async fn run(options: Options) -> Result<()> {
     let hub = Hub::start(
         options.herdr_socket.clone(),
         options.chat_dir.clone(),
+        options.wsl_catalog.clone(),
         options.core_endpoint.clone(),
         &options.state_dir,
     )?;
@@ -108,6 +109,7 @@ pub async fn run(options: Options) -> Result<()> {
         apps,
         auth: Mutex::new(auth),
         authority,
+        changes: Default::default(),
         computer: options::computer_name(),
         connected: Mutex::new(HashMap::new()),
         fingerprint,

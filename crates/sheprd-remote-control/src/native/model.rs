@@ -118,6 +118,20 @@ pub(crate) struct Terminal {
     pub(crate) panes: Vec<Pane>,
     /// The agent Herdr detects in the tab, the most pressing first.
     pub(crate) agent: Option<TerminalAgent>,
+    /// What the tab's menu offers to move into a chat
+    /// (`POST /api/v2/term/{pane}/convert`); absent when nothing can, and
+    /// from older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) convert: Option<ConvertOffer>,
+}
+
+/// A terminal agent a phone may move into a chat: its pane, and the agent
+/// it is, which the request names back so a replaced agent is refused.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConvertOffer {
+    /// Herdr's name for the agent, such as `claude`.
+    pub(crate) agent: String,
+    pub(crate) pane: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -324,6 +338,10 @@ fn terminal(terminal: &hub::Terminal) -> Terminal {
             pane: Some(agent.pane.clone()),
             title: agent.title.clone(),
             changed_ms: agent.changed_ms,
+        }),
+        convert: terminal.convert.as_ref().map(|(pane, agent)| ConvertOffer {
+            agent: agent.name().to_owned(),
+            pane: pane.clone(),
         }),
     }
 }

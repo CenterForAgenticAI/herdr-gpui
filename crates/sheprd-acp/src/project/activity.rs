@@ -18,6 +18,11 @@ use sheprd_chat_protocol::{
 /// The `_meta` key the bridges' tags live under.
 const KEY: &str = "herdr";
 
+/// What the program sends a bridge to end an activity: `{"callId": "..."}`.
+/// Only a bridge that reported the activity stoppable receives it, so an
+/// ACP agent never does.
+pub(crate) const STOP_METHOD: &str = "herdr/stop_activity";
+
 /// What a bridge says about a call beyond ACP.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct Tag {
@@ -40,6 +45,9 @@ pub(crate) struct Report {
     pub(crate) label: Option<String>,
     #[serde(default)]
     pub(crate) state: ActivityState,
+    /// The bridge can end it, from now on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) stoppable: bool,
 }
 
 impl Report {
@@ -49,6 +57,15 @@ impl Report {
             kind,
             label: None,
             state,
+            stoppable: false,
+        }
+    }
+
+    /// It runs, and the bridge can now end it.
+    pub(crate) fn stoppable(kind: ActivityKind) -> Self {
+        Self {
+            stoppable: true,
+            ..Self::new(kind, ActivityState::Running)
         }
     }
 }
@@ -143,6 +160,7 @@ pub(crate) fn record(
         ),
         started_ms: known.map_or(now, |known| known.started_ms),
         state: report.state,
+        stoppable: running && (report.stoppable || known.is_some_and(|known| known.stoppable)),
     };
     (Some(&activity) != known).then_some(Change::Activity { activity })
 }
@@ -175,6 +193,7 @@ pub(crate) fn kill_all(transcript: &Transcript, now: u64) -> Vec<Change> {
             activity: Activity {
                 finished_ms: Some(now),
                 state: ActivityState::Killed,
+                stoppable: false,
                 ..activity.clone()
             },
         })

@@ -7,6 +7,7 @@ use sheprd_chat_protocol::{
 };
 
 use super::{ConnId, Pending, Session, Update};
+use crate::project::STOP_METHOD;
 
 /// Prompts waiting behind a turn, and their text in bytes: the queue is
 /// copied into every change and snapshot, so it stays well inside a frame.
@@ -33,6 +34,7 @@ impl<R: FnMut(Update)> Session<R> {
                 self.set_auto_accept(on);
                 Ok(())
             }
+            Command::StopActivity { call_id } => self.stop_activity(&call_id),
         }
         .err();
         self.ack(conn, id, rejected);
@@ -148,6 +150,26 @@ impl<R: FnMut(Update)> Session<R> {
             && let Err(error) = self
                 .outbox
                 .notify("session/cancel", &wire::CancelNotification::new(session))
+        {
+            self.fail(&error.to_string());
+            return Err(Rejection::AgentUnavailable);
+        }
+        Ok(())
+    }
+
+    /// Asks the bridge to end an activity. It reports how it ended like any
+    /// other, so nothing here marks it stopped.
+    fn stop_activity(&mut self, call_id: &str) -> Result<(), Rejection> {
+        let stoppable = self
+            .transcript
+            .activity(call_id)
+            .is_some_and(|activity| activity.is_running() && activity.stoppable);
+        if !stoppable {
+            return Err(Rejection::UnknownActivity);
+        }
+        if let Err(error) = self
+            .outbox
+            .notify(STOP_METHOD, &serde_json::json!({ "callId": call_id }))
         {
             self.fail(&error.to_string());
             return Err(Rejection::AgentUnavailable);

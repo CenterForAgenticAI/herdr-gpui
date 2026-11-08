@@ -106,10 +106,18 @@ struct RootView: View {
         }
         .onChange(of: model.pendingRoute) { _, route in
             guard let route else { return }
+            let replaced = model.pendingRouteReplaces
+            model.pendingRouteReplaces = nil
             if wide {
                 selection = route
+            } else if replaced != nil, tab == .workspaces, !workspacesPath.isEmpty {
+                // The terminal being replaced is the one on screen, on top
+                // of this tab's stack; the route takes its place there.
+                workspacesPath.removeLast()
+                workspacesPath.append(route)
             } else {
                 tab = .home
+                if let replaced { homePath.removeAll { $0.showsTerminal(replaced) } }
                 homePath.append(route)
             }
             model.pendingRoute = nil
@@ -257,6 +265,7 @@ extension Route {
         case let .chat(key, title): ChatScreen(key: key, title: title)
         case let .term(key, title): TerminalScreen(key: key, title: title)
         case let .workspace(key): WorkspaceScreen(key: key)
+        case let .changes(key): ChangesScreen(key: key)
         }
     }
 }

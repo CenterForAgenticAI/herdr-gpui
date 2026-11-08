@@ -62,6 +62,12 @@ impl SheprdWindow {
             .application
             .as_ref()
             .and_then(|menu| menu.return_focus.clone());
+        // The Overview shows no terminal, which must not take the keys next.
+        let section = self
+            .activity
+            .section_focus
+            .clone()
+            .filter(|_| self.menu.page == Some(Page::OverviewReply));
         // A page that animates out keeps what it reads from the reset.
         if let Some(page) = self.menu.page.filter(|page| super::appear::leaves(*page)) {
             let kept = super::appear::Kept::take(&mut self.menu);
@@ -69,7 +75,8 @@ impl SheprdWindow {
         }
         self.menu.reset();
         self.apply_shared_theme(cx);
-        window.focus(return_focus.as_ref().unwrap_or(&self.focus), cx);
+        let focus = return_focus.or(section);
+        window.focus(focus.as_ref().unwrap_or(&self.focus), cx);
         cx.notify();
     }
 
@@ -418,27 +425,21 @@ impl SheprdWindow {
                     .overflow_hidden()
                     .shadow_lg()
             })
-            .when(
-                matches!(
-                    page,
-                    Page::Git | Page::GitCommit | Page::PrReview | Page::PrComment | Page::PrMerge
-                ),
-                |panel| {
-                    panel
-                        .w((viewport.width - px(24.))
-                            .max(px(0.))
-                            .min(px(if page == Page::Git { 340. } else { 420. })))
-                        .max_h((viewport.height - px(24.)).max(px(0.)))
-                        .when(page == Page::Git, |panel| {
-                            let top = crate::titlebar::HEIGHT + 6.;
-                            panel
-                                .max_h((viewport.height - px(top + 12.)).max(px(0.)))
-                                .shadow_lg()
-                        })
-                        // Its lists scroll inside; the panel never outgrows the window.
-                        .when(page == Page::PrReview, |panel| panel.overflow_hidden())
-                },
-            )
+            .when(page.popover_sized(), |panel| {
+                panel
+                    .w((viewport.width - px(24.))
+                        .max(px(0.))
+                        .min(px(if page == Page::Git { 340. } else { 420. })))
+                    .max_h((viewport.height - px(24.)).max(px(0.)))
+                    .when(page == Page::Git, |panel| {
+                        let top = crate::titlebar::HEIGHT + 6.;
+                        panel
+                            .max_h((viewport.height - px(top + 12.)).max(px(0.)))
+                            .shadow_lg()
+                    })
+                    // Its lists scroll inside; the panel never outgrows the window.
+                    .when(page == Page::PrReview, |panel| panel.overflow_hidden())
+            })
             .when(
                 matches!(
                     page,
@@ -519,6 +520,7 @@ impl SheprdWindow {
                         | Page::AppUpdate
                         | Page::GitHub
                         | Page::GitLab
+                        | Page::AzureDevOps
                         | Page::AddDevice
                         | Page::AddWsl
                         | Page::Usage(_)
@@ -569,14 +571,17 @@ impl SheprdWindow {
                         .min(px(crate::remote::MENU_WIDTH)))
                     .shadow_lg()
             })
-            .when(matches!(page, Page::GitHub | Page::GitLab), |panel| {
-                panel
-                    .w((viewport.width - px(32.)).max(px(0.)).min(px(400.)))
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .shadow_lg()
-            })
+            .when(
+                matches!(page, Page::GitHub | Page::GitLab | Page::AzureDevOps),
+                |panel| {
+                    panel
+                        .w((viewport.width - px(32.)).max(px(0.)).min(px(400.)))
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .shadow_lg()
+                },
+            )
             .when(
                 matches!(
                     page,
@@ -695,6 +700,8 @@ impl SheprdWindow {
             panel = panel.child(self.render_github_auth(cx));
         } else if page == Page::GitLab {
             panel = panel.child(self.render_gitlab_page(cx));
+        } else if page == Page::AzureDevOps {
+            panel = panel.child(self.render_azure_page(cx));
         } else if page == Page::RemoteDevices {
             panel = panel.child(self.render_remote_menu(cx));
         } else if page == Page::Workspace {
@@ -725,6 +732,8 @@ impl SheprdWindow {
             panel = panel.child(self.render_pr_comment(cx));
         } else if page == Page::PrMerge {
             panel = panel.child(self.render_pr_merge(cx));
+        } else if page == Page::OverviewReply {
+            panel = panel.child(self.render_overview_reply(cx));
         } else if matches!(
             page,
             Page::Host

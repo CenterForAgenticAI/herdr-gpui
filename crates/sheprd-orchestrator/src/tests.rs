@@ -3,8 +3,12 @@ use chrono::{DateTime, Utc};
 
 mod actions;
 mod azure;
+mod azure_account;
 mod azure_html;
 mod azure_organization;
+// The private credential file these save to is Unix-only.
+#[cfg(unix)]
+mod azure_saved;
 mod azure_token;
 mod beads;
 mod beads_claim;

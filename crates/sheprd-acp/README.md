@@ -116,6 +116,11 @@ The mirror's native-log format support is best effort because those storage
 formats can change. A missing or unreadable source ends the watcher with an
 error. It never repairs or writes to the transcript.
 
+Explicit exit and error fields and background command or script ids refine a
+logged tool's status: a command still running stays so until a poll of the same
+id ends it. Returning from a delegation or wait call does not establish that a
+child agent finished, and unknown results are not read as evidence of an end.
+
 ## What it tells Herdr
 
 Inside a Herdr pane (`HERDR_PANE_ID` and `HERDR_SOCKET_PATH` set), it reports
@@ -228,6 +233,20 @@ The same holds for two more agents, each through a translator of its own
   its models and thinking levels are the session's settings. `--load` passes
   pi's `--session`; earlier messages are not shown again.
 
+Tools report as they run through the same bounded batching: the first change
+of a call shows at once, later ones share a 50 ms deadline, and an idle bridge
+has no timer. Up to 16 calls stream at a time; the rest show their start and
+their end.
+
+- **Codex** command output deltas extend the running card, and the final output
+  replaces them.
+- **pi** partial tool results replace each other, since each tool defines what
+  its partial result means, and the final result replaces the last one.
+- **Claude Code** reports how long a tool has run, shown in its title, and the
+  progress of background tasks, each on a card of its own that can outlive its
+  turn. These report progress, not stdout: a command's output still arrives with
+  its result, and a task's `output_file` is never read.
+
 ### Enterprise endpoints
 
 `sheprd-acp` starts the agent with its own environment, untouched, so each
@@ -278,7 +297,9 @@ session's earlier prompts, whichever client sent them.
     notification for its agent id. A `Bash` call with `run_in_background`,
     or one Claude Code moved to the background after a timeout, keeps running
     past its turn until a task notification, a `TaskStop`, or a
-    `TaskOutput` result that reports an exit says how it ended.
+    `TaskOutput` result that reports an exit says how it ended. A `Monitor`
+    call is a monitor, which ends the same way. Each can be stopped, with
+    Claude Code's `stop_task`, once it has a task id.
   - **Claude** through the ACP adapter: only sub-agents in the foreground and
     their calls. The adapter drops Claude Code's task notifications, so the
     end of background work cannot be known there and it stays an ordinary
@@ -287,7 +308,18 @@ session's earlier prompts, whichever client sent them.
     under it, and it ends with its thread's turn, a collab call that reports
     its state, or a `subAgentActivity` item. Codex does not say a command went
     to the background: a command still running when its turn ends is listed
-    from then on, until it completes.
+    from then on, until it completes. A sub-agent can be stopped, by
+    interrupting its thread's turn, once that turn is known; a command
+    cannot, as Codex has no request for one inside a thread.
+  - **Copilot** and **OpenCode**: a call whose input names an agent and a
+    prompt is a sub-agent, ending with its call, or with its turn if the agent
+    never says. One sent to the background stays an ordinary card, as its end
+    cannot be known. OpenCode marks a child session's updates in `_meta`: its
+    calls show under the sub-agent while only one runs, since nothing names
+    which it belongs to, and its words stay out of the conversation. Copilot
+    sends none of its sub-agent's steps. Neither can be stopped, as ACP has no
+    request for it.
+  - **Gemini** and **Pi** report no sub-agents or background shells.
   - Anything still running when the agent exits is marked as stopped.
 
 ## Limits

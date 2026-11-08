@@ -34,16 +34,14 @@ impl Code {
         }
     }
 
-    fn request(&self, visuals: &mut Visuals) {
-        if !self.language.is_empty() && self.source.len() <= crate::chat::rich::MAX_CODE_BYTES {
-            visuals.want(
-                self.id,
-                Source::Code {
-                    language: self.language.clone(),
-                    source: self.source.clone(),
-                },
-            );
-        }
+    /// What a grammar draws this from; plain or oversized source has none.
+    fn visual(&self) -> Option<Source> {
+        (!self.language.is_empty() && self.source.len() <= crate::chat::rich::MAX_CODE_BYTES).then(
+            || Source::Code {
+                language: self.language.clone(),
+                source: self.source.clone(),
+            },
+        )
     }
 }
 
@@ -63,7 +61,19 @@ impl Preview {
     }
 
     pub(super) fn request(&self, visuals: &mut Visuals) {
-        self.codes().for_each(|code| code.request(visuals));
+        for code in self.codes() {
+            if let Some(source) = code.visual() {
+                visuals.want(code.id, source);
+            }
+        }
+    }
+
+    pub(super) fn request_visible(&self, visuals: &Visuals) {
+        for code in self.codes() {
+            if let Some(source) = code.visual() {
+                visuals.request_visible(code.id, source);
+            }
+        }
     }
 
     fn plain(label: String, source: Arc<str>) -> Self {
@@ -119,11 +129,14 @@ pub(super) fn preview(
                 changes.extend(shown.change());
                 return Some(shown.into_preview(original));
             }
-            let (added, removed) = diff_counts(old.as_deref().unwrap_or(""), new);
-            changes.push(DiffSummary {
-                path: path.clone(),
-                added,
-                removed,
+            // Sides that were not compared have no honest count, though the
+            // file still changed; a whole new file's is just its lines.
+            changes.push(match old {
+                Some(_) => DiffSummary {
+                    path: path.clone(),
+                    lines: None,
+                },
+                None => DiffSummary::counted(path.clone(), new.lines().count(), 0),
             });
             Some(changed_text(path, old.as_deref(), new, original))
         }
@@ -164,11 +177,7 @@ fn text_preview(
     {
         let added = content.lines().count();
         let preview = changed_text(&path, None, &content, original);
-        changes.push(DiffSummary {
-            path,
-            added,
-            removed: 0,
-        });
+        changes.push(DiffSummary::counted(path, added, 0));
         return preview;
     }
     let (label, language, source) = text_source(&original);
@@ -237,15 +246,8 @@ fn patch_changes(source: &str) -> Vec<DiffSummary> {
             continue;
         }
         match changes.iter_mut().find(|change| change.path == path) {
-            Some(change) => {
-                change.added += added;
-                change.removed += removed;
-            }
-            None => changes.push(DiffSummary {
-                path: path.to_owned(),
-                added,
-                removed,
-            }),
+            Some(change) => change.merge(Some(LineChanges { added, removed })),
+            None => changes.push(DiffSummary::counted(path.to_owned(), added, removed)),
         }
     }
     changes

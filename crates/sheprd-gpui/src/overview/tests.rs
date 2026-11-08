@@ -1,16 +1,25 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+mod acting;
+mod alert_shelf;
 mod boot_fence;
 mod closed;
 mod closed_page;
 mod en_xa;
+mod excerpt;
 mod hosts;
+mod idle_fold;
 mod marks;
 mod mutes;
 mod page;
 mod poll;
 mod presets;
+mod replies;
+// Only these clients open the dialog; see `pane_move::refusal`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod reply_dialog;
 mod sections;
+mod selection;
 
 use super::{Key, Open, Row, State, model::Pr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
