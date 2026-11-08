@@ -80,3 +80,16 @@ fn the_pane_in_use_moves_only_to_a_pane_of_its_tab() {
     assert!(!terminals.set_active(TabId::test(9), id("t1")));
     assert!(terminals.set_active(TabId::test(1), id("t2")));
 }
+
+#[test]
+fn a_core_that_does_not_answer_reports_no_agent() {
+    let mut terminals = terminals();
+    let mut working = info("t1");
+    working.agent = AgentStatus::Working;
+    terminals.infos.insert(working);
+
+    // Its last list stays known for the panes' chrome, but no agent in it
+    // is counted until the core answers again.
+    assert!(terminals.infos.get(&id("t1")).is_some());
+    assert!(terminals.reported(&id("t1")).is_none());
+}

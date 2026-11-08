@@ -136,13 +136,14 @@ impl CoreTerminals {
     }
 
     /// Reads what each core reports while any of its tabs is known, for
-    /// split chrome and the sidebar's rows, and this computer's while
-    /// `local` asks for it too. True when what is known changed.
-    pub(super) fn poll_infos(&mut self, local: bool, now: Instant) -> bool {
+    /// split chrome and the sidebar's rows. True when what is known changed.
+    pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for host in self.hosts() {
-            let listed = (local && host == Host::Local)
-                || self.tabs.values().any(|shown| shown.host == host);
+            // This computer's stand-in shell runs agents too.
+            let listed = self.tabs.values().any(|shown| shown.host == host)
+                || (host == Host::Local
+                    && matches!(self.fallback, super::fallback::Fallback::Shown(_)));
             let backend = listed.then(|| self.backend_of(&host).cloned()).flatten();
             if let Some(infos) = self.infos_of_mut(&host) {
                 changed |= infos.poll(backend.as_ref(), now);
