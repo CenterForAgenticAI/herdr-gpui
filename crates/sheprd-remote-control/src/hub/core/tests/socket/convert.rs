@@ -1,0 +1,233 @@
+//! Moving the agent in a Herdr 2 terminal into a chat from a phone, with a
+//! stand-in core and the session record Claude Code keeps of itself.
+
+use super::*;
+use crate::hub::{
+    Workspace,
+    convert::{Error as ConvertError, Result as ConvertResult},
+};
+use sheprd_chat_protocol::Agent;
+use std::{path::PathBuf, sync::atomic::AtomicBool};
+
+const SESSION: &str = "0c6f0c39-3c1e-4b7e-9a51-6d1b8e2d7f10";
+const PID: i32 = 4242;
+
+/// `t1` running Claude Code until Ctrl+C reaches it, then its shell.
+fn agent_record(stopped: bool, status: &str) -> Value {
+    let (name, argv) = if stopped {
+        ("zsh", json!(["-zsh"]))
+    } else {
+        ("claude", json!(["claude", "--model", "opus"]))
+    };
+    json!({"address": "t1", "cols": 80, "rows": 24, "cwd": "/work/app", "state": "live",
+        "pid": 100, "status": {"state": status, "app": "claude"},
+        "foreground": {"pid": if stopped { 100 } else { PID }, "name": name,
+            "argv": argv, "cwd": "/work/app"}})
+}
+
+struct Stand {
+    _dir: tempfile::TempDir,
+    home: PathBuf,
+    source: Arc<Source>,
+    /// What reached the core: `terminal.keys` and `terminal.send` params.
+    asked: mpsc::Receiver<(String, Value)>,
+    server: thread::JoinHandle<()>,
+}
+
+fn stand(status: &'static str) -> Stand {
+    let dir = tempfile::Builder::new()
+        .prefix("rv")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let home = dir.path().join("home");
+    let sessions = home.join(".claude").join("sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    std::fs::write(
+        sessions.join(format!("{PID}.json")),
+        format!(r#"{{"pid":{PID},"sessionId":"{SESSION}","cwd":"/work/app"}}"#),
+    )
+    .unwrap();
+    let path = dir.path().join("core.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let (sent, asked) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut hello = String::new();
+        BufReader::new(&mut socket).read_line(&mut hello).unwrap();
+        let hello: Value = serde_json::from_str(&hello).unwrap();
+        let response = json!({"jsonrpc": "2.0", "id": hello["id"], "result": {
+            "generation": 1, "version": "0.1.18", "framed": true,
+            "core": {"id": "fake-core", "name": "test"},
+            "methods": Method::ALL.iter().map(|method| method.as_str()).collect::<Vec<_>>()}});
+        writeln!(socket, "{response}").unwrap();
+        let mut decoder = Decoder::default();
+        let mut stopped = false;
+        while let Some(frame) = receive(&mut socket, &mut decoder) {
+            if frame.kind != Kind::Data || frame.channel != 0 {
+                continue;
+            }
+            let request: Value = serde_json::from_slice(&frame.payload).unwrap();
+            let method = request["method"].as_str().unwrap().to_owned();
+            let result = match method.as_str() {
+                "terminal.list" => json!({"terminals": [agent_record(stopped, status)]}),
+                "terminal.keys" => {
+                    stopped = true;
+                    json!({})
+                }
+                "terminal.send" => json!({"turn": 1}),
+                method => panic!("unexpected method {method}"),
+            };
+            if method != "terminal.list" {
+                sent.send((method, request["params"].clone())).unwrap();
+            }
+            let response = json!({"jsonrpc": "2.0", "id": request["id"], "result": result});
+            socket
+                .write_all(&encode(0, Kind::Data, &serde_json::to_vec(&response).unwrap()).unwrap())
+                .unwrap();
+        }
+    });
+    let core = Core::connect(&Endpoint {
+        socket: path,
+        session: "test".into(),
+    })
+    .unwrap();
+    let source = Arc::new(Source {
+        connected: AtomicBool::new(true),
+        endpoint: Default::default(),
+        poller: Mutex::default(),
+        scope: None,
+        state: Mutex::new(State {
+            core: Some(Arc::new(core)),
+            terminals: vec![serde_json::from_value(agent_record(false, status)).unwrap()],
+            ..State::default()
+        }),
+        tabs: None,
+    });
+    Stand {
+        _dir: dir,
+        home,
+        source,
+        asked,
+        server,
+    }
+}
+
+/// A hub listing `t1` as the core projects it, with its move offered.
+fn hub_on(stand: &Stand) -> Arc<Hub> {
+    let record = serde_json::from_value(agent_record(false, "idle")).unwrap();
+    let terminal = projection::terminal("fake-core", &id("t1"), "", &[&record], |_| 0).unwrap();
+    let layout = Layout {
+        boot: "core:fake-core".into(),
+        connected: true,
+        working: 0,
+        workspaces: vec![Workspace {
+            branch: None,
+            chats: Vec::new(),
+            cwd: "/work/app".into(),
+            id: UNLISTED.into(),
+            label: "Herdr 2".into(),
+            session: None,
+            terminals: vec![terminal],
+            worktree: None,
+        }],
+    };
+    let mut hub = Hub::offline_in(layout, None, None);
+    hub.core = Some(stand.source.clone());
+    hub.program = Some(PathBuf::from("/opt/sheprd/sheprd-acp"));
+    Arc::new(hub)
+}
+
+#[test]
+fn a_terminal_running_a_movable_agent_offers_it() {
+    let record = serde_json::from_value(agent_record(false, "working")).unwrap();
+    let terminal = projection::terminal("fake-core", &id("t1"), "", &[&record], |_| 0).unwrap();
+    // Offered however busy: the move itself waits for the turn to end.
+    assert_eq!(terminal.convert, Some((id("t1"), Agent::Claude)));
+    let shell = serde_json::from_value(record_of_shell()).unwrap();
+    let terminal = projection::terminal("fake-core", &id("t1"), "", &[&shell], |_| 0).unwrap();
+    assert_eq!(terminal.convert, None);
+}
+
+fn record_of_shell() -> Value {
+    json!({"address": "t1", "cols": 80, "rows": 24, "cwd": "/work/app", "state": "live",
+        "foreground": {"pid": 100, "name": "zsh", "argv": ["-zsh"], "cwd": "/work/app"}})
+}
+
+#[test]
+fn an_idle_agent_stops_on_ctrl_c_and_continues_as_a_chat() {
+    let stand = stand("idle");
+    let cancelled = AtomicBool::new(false);
+    let program = std::path::Path::new("/opt/sheprd/sheprd-acp");
+    stand
+        .source
+        .convert(&id("t1"), Agent::Claude, program, &stand.home, &cancelled)
+        .unwrap();
+    let (method, params) = stand.asked.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(method, "terminal.keys");
+    assert_eq!(params, json!({"terminal": "t1", "keys": ["ctrl+c"]}));
+    let (method, params) = stand.asked.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(method, "terminal.send");
+    let line = params["text"].as_str().unwrap();
+    assert!(line.contains("/opt/sheprd/sheprd-acp"), "{line}");
+    assert!(line.contains(SESSION), "{line}");
+    let Stand { source, server, .. } = stand;
+    drop(source);
+    server.join().unwrap();
+}
+
+#[test]
+fn a_busy_agent_is_left_running() {
+    let stand = stand("working");
+    let refused: ConvertResult<()> = stand.source.convert(
+        &id("t1"),
+        Agent::Claude,
+        std::path::Path::new("/opt/sheprd/sheprd-acp"),
+        &stand.home,
+        &AtomicBool::new(false),
+    );
+    assert!(matches!(
+        refused,
+        Err(ConvertError::Refused(
+            sheprd_client::herdr::convert::Error::Busy(Agent::Claude)
+        ))
+    ));
+    assert!(
+        stand.asked.try_recv().is_err(),
+        "nothing was pressed or typed"
+    );
+    let Stand { source, server, .. } = stand;
+    drop(source);
+    server.join().unwrap();
+}
+
+#[tokio::test]
+async fn a_phone_moves_the_agent_its_herdr_2_tab_offers() {
+    let stand = stand("idle");
+    let hub = hub_on(&stand);
+    // The phone names an agent the tab does not run: refused, untouched.
+    assert!(matches!(
+        hub.convert_to_chat(&id("t1"), Agent::Codex).await,
+        Err(ConvertError::Refused(
+            sheprd_client::herdr::convert::Error::Moved
+        ))
+    ));
+    assert!(stand.asked.try_recv().is_err());
+    let moved = hub.convert_to_chat(&id("t1"), Agent::Claude).await;
+    // The daemon's own HOME holds no record of this test's agent unless
+    // the login environment points elsewhere, so either it moved or it was
+    // refused before anything was pressed.
+    match moved {
+        Ok(()) => {}
+        Err(ConvertError::Refused(_) | ConvertError::Home) => {
+            assert!(stand.asked.try_recv().is_err());
+        }
+        Err(error) => panic!("{error:?}"),
+    }
+    drop(hub);
+    let Stand { source, server, .. } = stand;
+    drop(source);
+    server.join().unwrap();
+}

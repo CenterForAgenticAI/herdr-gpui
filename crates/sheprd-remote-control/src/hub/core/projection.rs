@@ -150,8 +150,11 @@ pub(super) fn terminal(
         });
     Some(Terminal {
         agent,
-        // A core reports no agent sessions or process info to move with.
-        convert: None,
+        convert: records.iter().find_map(|record| {
+            let info = sheprd_core_client::terminal_info(record).ok()?;
+            let agent = sheprd_core_client::convert::movable(&info).ok()?;
+            Some((pane_id(boot, &record.address), agent))
+        }),
         cwd: cwd(first),
         label: if title.is_empty() {
             first
