@@ -12,6 +12,7 @@
 //! screens.
 
 mod commands;
+mod context;
 mod error;
 mod fallback;
 mod hub;
@@ -264,18 +265,19 @@ impl SheprdWindow {
             return;
         };
         self.dismiss_menu(window, cx);
-        self.start_core_program(Purpose::Tab { scope, workspace }, Spawn::default());
+        self.start_core_program(Purpose::Tab { scope, workspace }, Spawn::default(), cx);
     }
 
-    /// Starts `spawn` in herdr-core for `purpose`, once the hub connects.
-    pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn) {
+    /// Starts `spawn` in herdr-core for `purpose`, once the hub connects, in
+    /// the folder and with the Herdr variables of where it opens.
+    pub(crate) fn start_core_program(&mut self, purpose: Purpose, mut spawn: Spawn, cx: &App) {
+        self.give_core_context(&purpose, &mut spawn, cx);
         self.core_terminals.wanted = Some((purpose, spawn));
         self.core_terminals.hub.connect(Start::IfMissing);
         self.start_core_shell();
     }
 
-    /// Starts the wanted shell once the hub is connected, in the folder of
-    /// the pane it splits when herdr-core knows it.
+    /// Starts the wanted shell once the hub is connected.
     fn start_core_shell(&mut self) {
         let terminals = &mut self.core_terminals;
         if terminals.starting.is_some() {
@@ -284,14 +286,9 @@ impl SheprdWindow {
         let Some(backend) = terminals.hub.backend().cloned() else {
             return;
         };
-        let Some((purpose, mut spawn)) = terminals.wanted.take() else {
+        let Some((purpose, spawn)) = terminals.wanted.take() else {
             return;
         };
-        if spawn.cwd.is_none()
-            && let Purpose::Split { at, .. } = &purpose
-        {
-            spawn.cwd = terminals.infos.get(at).and_then(|info| info.cwd.clone());
-        }
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let spawned = std::thread::Builder::new()
             .name("herdr-core-spawn".into())
