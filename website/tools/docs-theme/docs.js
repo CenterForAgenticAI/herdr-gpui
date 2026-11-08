@@ -58,13 +58,24 @@
   /* Search: page titles first, then section titles, then section text. The
      index holds every section's full text, so it loads on first use. */
   var entries = [], loading = null;
+  var failed = false;
+  /* A failed load clears itself, so opening search again retries. */
   function loadIndex(done) {
     if (window.SHEPRD_DOCS_INDEX) return done();
     if (!loading) {
       loading = [];
+      failed = false;
       var s = document.createElement("script");
       s.src = "/docs/search.js";
-      s.onload = function () { loading.forEach(function (f) { f(); }); };
+      var settle = function (ok) {
+        var waiting = loading;
+        loading = null;
+        failed = !ok;
+        if (!ok) s.remove();
+        waiting.forEach(function (f) { f(); });
+      };
+      s.onload = function () { settle(!!window.SHEPRD_DOCS_INDEX); };
+      s.onerror = function () { settle(false); };
       document.head.appendChild(s);
     }
     loading.push(done);
@@ -107,7 +118,10 @@
           .sort(function (a, b) { return b[0] - a[0]; }).slice(0, 12).map(function (r) { return r[1]; })
       : entries.filter(function (e) { return !e.text; }).slice(0, 12);
     active = 0;
-    if (!entries.length) { list.innerHTML = '<li class="pal-none">Loading…</li>'; return; }
+    if (!entries.length) {
+      list.innerHTML = '<li class="pal-none">' + (failed ? "Search could not load. Close it and try again." : "Loading…") + "</li>";
+      return;
+    }
     list.innerHTML = results.length ? results.map(function (e, n) {
       return '<li><a href="' + esc(e.url) + '"' + (n ? "" : ' class="on"') + "><b>" + esc(e.title) + "</b><span>" + esc(snippet(e, words)) + "</span></a></li>";
     }).join("") : '<li class="pal-none">No page matches.</li>';
