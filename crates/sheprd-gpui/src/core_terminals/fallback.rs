@@ -106,6 +106,11 @@ impl SheprdWindow {
     }
 
     /// The shell shown in place of Herdr 1's terminal, while it is.
+    /// The terminal of the shell shown in place of Herdr 1.
+    pub(super) fn core_fallback_terminal(&self, cx: &App) -> Option<TerminalId> {
+        Some(self.core_fallback_view()?.read(cx).terminal().clone())
+    }
+
     pub(crate) fn core_fallback_view(&self) -> Option<Entity<CoreTerminalView>> {
         match &self.core_terminals.fallback {
             Fallback::Shown(view) => Some(view.clone()),

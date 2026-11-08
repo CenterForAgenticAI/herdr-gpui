@@ -233,3 +233,51 @@ fn a_mirror_takes_no_drop(cx: &mut TestAppContext) {
             .any(|command| matches!(command, Command::Input(_)))
     );
 }
+
+#[gpui::test]
+fn a_release_off_the_pane_opens_nothing(cx: &mut TestAppContext) {
+    let (view, cx, _, asked) = shown(cx, &[&format!("see {URL} now")], false);
+    let link = at(&view, cx, 8, 0);
+    cx.simulate_mouse_move(link, None, link_modifier());
+    cx.simulate_mouse_down(link, MouseButton::Left, link_modifier());
+    // Above the first row, which the cell lookup would hold on that row.
+    let above = link - point(px(0.), px(40.));
+    cx.simulate_mouse_up(above, MouseButton::Left, link_modifier());
+    assert!(opened(&asked).is_empty());
+}
+
+#[gpui::test]
+fn a_relative_path_is_read_again_once_the_folder_is_known(cx: &mut TestAppContext) {
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("notes.txt"), "hi").unwrap();
+    let (view, cx, _, _) = shown(cx, &["see notes.txt"], false);
+    let path = at(&view, cx, 6, 0);
+    cx.simulate_mouse_move(path, None, link_modifier());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(view.read(cx).link_rows().is_empty()));
+    // The folder arrives later than the screen, with the pointer still there.
+    cx.update(|_, cx| view.update(cx, |view, cx| view.set_cwd(Some(folder.path()), cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(view.read(cx).link_rows(), [(0, 4..13)]));
+}
+
+#[test]
+fn a_terminal_found_by_name_has_its_details() {
+    let mut infos = crate::core_terminals::infos::Infos::default();
+    let mut shell = sheprd_backend::TerminalInfo {
+        agent: sheprd_client::protocol::AgentStatus::Unknown,
+        cwd: Some("/w".into()),
+        id: TerminalId::new("t4").unwrap(),
+        labels: Default::default(),
+        name: Some("herdr-ui".into()),
+        state: sheprd_backend::RunState::Running,
+        title: None,
+    };
+    infos.insert(shell.clone());
+    let by_name = TerminalId::new("herdr-ui").unwrap();
+    assert_eq!(infos.named(&by_name), Some(&shell));
+    assert_eq!(infos.named(&shell.id), Some(&shell));
+    shell.name = None;
+    infos.insert(shell);
+    assert_eq!(infos.named(&by_name), None);
+}

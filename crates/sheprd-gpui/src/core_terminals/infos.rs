@@ -30,6 +30,16 @@ impl Infos {
         self.known.get(id)
     }
 
+    /// The terminal `id` names: its address, or else its name, as a terminal
+    /// found by name is shown under it.
+    pub(super) fn named(&self, id: &TerminalId) -> Option<&TerminalInfo> {
+        self.get(id).or_else(|| {
+            self.known
+                .values()
+                .find(|info| info.name.as_deref() == Some(id.as_str()))
+        })
+    }
+
     /// Records a terminal just started, until the next list replaces it,
     /// and hands it back.
     pub(super) fn insert(&mut self, info: TerminalInfo) -> TerminalInfo {

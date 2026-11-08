@@ -124,7 +124,7 @@ impl SheprdWindow {
                 .get(&terminal)
                 .and_then(|info| info.cwd.as_deref());
             view.update(cx, |view, cx| {
-                view.set_cwd(cwd);
+                view.set_cwd(cwd, cx);
                 view.poll(cx);
             });
             let split = self
