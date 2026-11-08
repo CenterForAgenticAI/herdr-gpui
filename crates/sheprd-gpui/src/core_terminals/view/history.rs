@@ -15,32 +15,44 @@ use sheprd_client::{
 };
 
 /// A read of the text between two points, and the text revision the view
-/// showed when it asked.
+/// showed when it asked, or the one a search match was found at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Reading {
     pub(super) id: u64,
     revision: u64,
+    /// The text must be that of `revision`, as a search match's is: output
+    /// may have rewritten it in place, even with no row moved.
+    exact: bool,
 }
 
 impl CoreTerminalView {
     /// Reads the text of `range` from the history.
     pub(super) fn read(&mut self, range: TextRange) -> Reading {
+        let revision = self.screen.revision;
+        self.read_at(range, revision, false)
+    }
+
+    /// Reads the text of `range`, as it was at the text revision `revision`
+    /// when `exact`, else wherever its rows still hold the same lines.
+    pub(super) fn read_at(&mut self, range: TextRange, revision: u64, exact: bool) -> Reading {
         Reading {
             id: self.ask(History::Read {
                 anchor: range.start,
                 cursor: range.end,
             }),
-            revision: self.screen.revision,
+            revision,
+            exact,
         }
     }
 
-    /// Whether the rows `reading` named may now hold other text: output
-    /// into a full history dropped its oldest lines since it was asked.
-    /// The worker shows each output's screen before it answers anything
-    /// after it, and the screen is taken before the answers, so the
-    /// revision here is never older than the one the read saw.
+    /// Whether the rows `reading` named may now hold other text: any output
+    /// since an exact read's revision, or output into a full history, which
+    /// dropped its oldest lines, since it was asked. The worker shows each
+    /// output's screen before it answers anything after it, and the screen
+    /// is taken before the answers, so the revision here is never older
+    /// than the one the read saw.
     fn moved(&self, reading: Reading) -> bool {
-        self.screen.history.full && self.screen.revision != reading.revision
+        (reading.exact || self.screen.history.full) && self.screen.revision != reading.revision
     }
 
     /// Whether a copy waits on its text.
