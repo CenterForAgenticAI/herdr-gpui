@@ -104,7 +104,8 @@ impl CoreTerminals {
 
     /// Uses `hub` for the core of the host `scope` names, as the first ask
     /// for it would, so a test never dials a real host.
-    #[cfg(test)]
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
     pub(crate) fn set_remote_hub_for_test(
         &mut self,
         scope: Scope,
@@ -124,7 +125,8 @@ impl CoreTerminals {
 
     /// A terminal for `purpose` on `host` that started as `outcome` says,
     /// waiting to be placed.
-    #[cfg(test)]
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
     pub(crate) fn start_for_test(
         &mut self,
         purpose: Purpose,
@@ -137,7 +139,8 @@ impl CoreTerminals {
     }
 
     /// Whether a started terminal waits to be placed.
-    #[cfg(test)]
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
     pub(crate) fn is_starting(&self) -> bool {
         self.starting.is_some()
     }
