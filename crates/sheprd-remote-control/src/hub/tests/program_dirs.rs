@@ -40,5 +40,8 @@ fn a_file_without_the_execute_bit_is_passed_over() {
     assert!(!crate::hub::runnable(&file));
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(crate::hub::runnable(&file));
-    assert!(!crate::hub::runnable(dir.path()), "a folder is not a program");
+    assert!(
+        !crate::hub::runnable(dir.path()),
+        "a folder is not a program"
+    );
 }
