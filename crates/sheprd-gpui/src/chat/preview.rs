@@ -25,6 +25,7 @@ use super::{
 use crate::{SheprdWindow, config::ChatLayoutMode};
 
 mod input_resize;
+mod progress;
 mod running;
 mod selection;
 mod steps;
@@ -123,6 +124,8 @@ impl Options {
                 | "input-resize"
                 | "tools"
                 | "turns"
+                | "progress"
+                | "progress-before"
                 | "running"
                 | "running-open"
                 | "steps"
@@ -130,7 +133,7 @@ impl Options {
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, input-resize, tools, turns, running, running-open, steps, steps-open, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -439,6 +442,9 @@ fn install(
     if options.case.starts_with("steps") {
         transcript.entries = steps::entries(super::now_ms());
     }
+    if options.case.starts_with("progress") {
+        transcript.entries = progress::entries(options.case == "progress");
+    }
     if options.case.starts_with("running") {
         transcript.entries = running::entries();
         transcript.activities = running::activities(super::now_ms());
@@ -523,6 +529,13 @@ fn install(
     {
         pane.expanded.insert(EntryId(3));
         pane.running.set(true, crate::motion::now(), true);
+    }
+    // The running command's output and the task's progress, open.
+    if options.case.starts_with("progress")
+        && let Some(pane) = view.chats.pane_mut(PANE)
+    {
+        pane.toggle_expanded(EntryId(3));
+        pane.toggle_expanded(EntryId(4));
     }
     // Every running step in full, from the working row.
     if options.case == "steps-open"
