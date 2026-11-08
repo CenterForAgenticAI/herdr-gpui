@@ -154,10 +154,8 @@ impl SheprdWindow {
     pub(super) fn poll_core_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((tab, terminal)) = self.core_terminals.focused_pane(window, cx)
             && let Some(shown) = self.core_terminals.tabs.get_mut(&tab)
-            && shown.active != terminal
+            && shown.activate(terminal)
         {
-            shown.active = terminal;
-            shown.unsaved = true;
             cx.notify();
         }
         let views: Vec<((TabId, TerminalId), Entity<CoreTerminalView>)> = self
@@ -222,7 +220,7 @@ impl SheprdWindow {
     ) {
         let placed = match self.core_terminals.tabs.get_mut(&tab) {
             Some(shown) => shown.panes.split(at, axis, new.clone()).map(|()| {
-                shown.active = new.clone();
+                shown.activate(new.clone());
                 shown.set_zoom(None);
                 shown.unsaved = true;
             }),
@@ -272,6 +270,9 @@ impl SheprdWindow {
         }
         if &shown.active == terminal {
             shown.active = next.unwrap_or_else(|| shown.panes.first().clone());
+        }
+        if shown.previous.as_ref() == Some(terminal) {
+            shown.previous = None;
         }
         shown.unsaved = true;
         self.core_terminals.views.remove(&(tab, terminal.clone()));

@@ -227,6 +227,55 @@ impl Node {
         }
     }
 
+    /// Puts `b` where `a` was and `a` where `b` was.
+    fn swap(&mut self, a: &TerminalId, b: &TerminalId) {
+        match self {
+            Self::Leaf(leaf) if leaf == a => *leaf = b.clone(),
+            Self::Leaf(leaf) if leaf == b => *leaf = a.clone(),
+            Self::Leaf(_) => {}
+            Self::Split { first, second, .. } => {
+                first.swap(a, b);
+                second.swap(a, b);
+            }
+        }
+    }
+
+    /// How many panes lie side by side along `axis`: a split along it adds
+    /// its sides up, anything else counts once.
+    fn span(&self, axis: Axis) -> u16 {
+        match self {
+            Self::Split {
+                axis: own,
+                first,
+                second,
+                ..
+            } if *own == axis => first.span(axis).saturating_add(second.span(axis)),
+            _ => 1,
+        }
+    }
+
+    /// Gives every pane along each split an equal part; true when a share
+    /// changed.
+    fn equalize(&mut self) -> bool {
+        let Self::Split {
+            axis,
+            share,
+            first,
+            second,
+        } = self
+        else {
+            return false;
+        };
+        let (a, b) = (first.span(*axis), second.span(*axis));
+        let total = u32::from(a) + u32::from(b);
+        let even = Share::from(u16::try_from(u32::from(a) * 1000 / total.max(1)).unwrap_or(HALF));
+        let changed = *share != even;
+        *share = even;
+        let first = first.equalize();
+        let second = second.equalize();
+        changed || first || second
+    }
+
     fn rects(&self, rect: Rect, out: &mut Vec<(TerminalId, Rect)>) {
         match self {
             Self::Leaf(id) => out.push((id.clone(), rect)),
@@ -427,6 +476,36 @@ impl Panes {
         let changed = moved != *share;
         *share = moved;
         changed
+    }
+
+    /// Trades the places of panes `a` and `b`; false unless both are here
+    /// and differ.
+    pub fn swap(&mut self, a: &TerminalId, b: &TerminalId) -> bool {
+        if a == b || !self.contains(a) || !self.contains(b) {
+            return false;
+        }
+        self.root.swap(a, b);
+        true
+    }
+
+    /// Sizes the panes so those side by side along a split share it
+    /// equally; true when anything moved.
+    pub fn equalize(&mut self) -> bool {
+        self.root.equalize()
+    }
+
+    /// The pane after `id` in layout order, or before it when not
+    /// `forward`, wrapping around at either end.
+    pub fn cycle(&self, id: &TerminalId, forward: bool) -> Option<TerminalId> {
+        let terminals = self.terminals();
+        let index = terminals.iter().position(|pane| *pane == id)?;
+        let count = terminals.len();
+        let next = if forward {
+            (index + 1) % count
+        } else {
+            (index + count - 1) % count
+        };
+        Some(terminals[next].clone())
     }
 
     /// Each pane's part of the unit square.

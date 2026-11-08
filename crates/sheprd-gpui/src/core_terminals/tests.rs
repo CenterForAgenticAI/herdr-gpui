@@ -3,6 +3,7 @@ mod chats;
 mod commands;
 mod focus;
 mod keys;
+mod pane_keys;
 mod paste;
 mod restore;
 mod saved_tabs;

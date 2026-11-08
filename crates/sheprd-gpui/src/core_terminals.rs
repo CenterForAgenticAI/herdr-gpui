@@ -72,6 +72,8 @@ struct TabPanes {
     /// A mirror tab only watches: it neither types nor splits.
     observe: bool,
     panes: Panes,
+    /// The pane in use before the current one, which Last Pane goes back to.
+    previous: Option<TerminalId>,
     unsaved: bool,
     /// How far the zoomed pane has grown over the tab; it shrinks back to
     /// its place when unzoomed.
@@ -87,6 +89,7 @@ impl TabPanes {
             active: panes.first().clone(),
             observe,
             panes,
+            previous: None,
             unsaved: false,
             zoom: crate::motion::Toggle::default(),
             zoomed: None,
@@ -124,6 +127,17 @@ impl TabPanes {
             active: Some(self.active.clone()),
             zoomed: self.zoomed.clone().filter(|_| self.zoom.is_open()),
         }
+    }
+
+    /// Makes `terminal` the pane in use, remembering the one it replaces;
+    /// whether that changed.
+    fn activate(&mut self, terminal: TerminalId) -> bool {
+        if self.active == terminal || !self.panes.contains(&terminal) {
+            return false;
+        }
+        self.previous = Some(std::mem::replace(&mut self.active, terminal));
+        self.unsaved = true;
+        true
     }
 
     /// Zooms `terminal`, or unzooms, animating from where the zoom is now.
@@ -248,15 +262,9 @@ impl CoreTerminals {
 
     /// Makes `terminal` the pane in use in `tab`; whether that changed.
     pub(crate) fn set_active(&mut self, tab: TabId, terminal: TerminalId) -> bool {
-        let Some(shown) = self.tabs.get_mut(&tab) else {
-            return false;
-        };
-        if shown.active == terminal || !shown.panes.contains(&terminal) {
-            return false;
-        }
-        shown.active = terminal;
-        shown.unsaved = true;
-        true
+        self.tabs
+            .get_mut(&tab)
+            .is_some_and(|shown| shown.activate(terminal))
     }
 
     /// The tab whose panes hold `terminal`, among tabs that drive them.

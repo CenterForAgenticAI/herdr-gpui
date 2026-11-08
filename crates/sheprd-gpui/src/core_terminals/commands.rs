@@ -1,7 +1,8 @@
 //! The window's pane commands, run on a herdr-core tab's panes while one
-//! holds the keyboard: split, move focus, resize, zoom, and close. The same
-//! shortcuts work on Herdr panes, so a herdr-core tab handles them here
-//! rather than letting them reach Herdr; one it cannot run says so.
+//! holds the keyboard: split, move focus, swap, resize, equalize, zoom, and
+//! close. The same shortcuts work on Herdr panes, so a herdr-core tab
+//! handles them here rather than letting them reach Herdr; one it cannot
+//! run says so.
 
 use super::{
     Purpose,
@@ -39,10 +40,12 @@ impl SheprdWindow {
             return true;
         }
         let direction = |command: Command| match command {
-            Command::FocusLeft | Command::ResizeLeft => Some(Direction::Left),
-            Command::FocusRight | Command::ResizeRight => Some(Direction::Right),
-            Command::FocusUp | Command::ResizeUp => Some(Direction::Up),
-            Command::FocusDown | Command::ResizeDown => Some(Direction::Down),
+            Command::FocusLeft | Command::ResizeLeft | Command::SwapLeft => Some(Direction::Left),
+            Command::FocusRight | Command::ResizeRight | Command::SwapRight => {
+                Some(Direction::Right)
+            }
+            Command::FocusUp | Command::ResizeUp | Command::SwapUp => Some(Direction::Up),
+            Command::FocusDown | Command::ResizeDown | Command::SwapDown => Some(Direction::Down),
             _ => None,
         };
         match command {
@@ -60,20 +63,56 @@ impl SheprdWindow {
                     sheprd_backend::Spawn::default(),
                 );
             }
-            Command::FocusLeft | Command::FocusRight | Command::FocusUp | Command::FocusDown => {
-                let Some(next) = direction(command)
-                    .and_then(|direction| shown.panes.neighbor(&terminal, direction))
-                else {
+            Command::FocusLeft
+            | Command::FocusRight
+            | Command::FocusUp
+            | Command::FocusDown
+            | Command::NextPane
+            | Command::PreviousPane
+            | Command::LastPane => {
+                let next = match command {
+                    Command::NextPane | Command::PreviousPane => shown
+                        .panes
+                        .cycle(&terminal, command == Command::NextPane)
+                        .filter(|next| *next != terminal),
+                    // As Herdr's: the pane must still be there and not in use.
+                    Command::LastPane => shown
+                        .previous
+                        .clone()
+                        .filter(|last| *last != terminal && shown.panes.contains(last)),
+                    _ => direction(command)
+                        .and_then(|direction| shown.panes.neighbor(&terminal, direction)),
+                };
+                let Some(next) = next else {
                     return true;
                 };
                 // Moving on from a zoomed pane shows the split again.
                 if shown.zoom.is_open() {
                     shown.set_zoom(None);
                 }
-                shown.active = next;
-                shown.unsaved = true;
+                shown.activate(next);
                 self.focus_core_terminal(tab, window, cx);
                 cx.notify();
+            }
+            // The pane in use trades places with its neighbor and keeps the
+            // keyboard, as Herdr's directional swaps do.
+            Command::SwapLeft | Command::SwapRight | Command::SwapUp | Command::SwapDown => {
+                let swapped = direction(command)
+                    .and_then(|direction| shown.panes.neighbor(&terminal, direction))
+                    .is_some_and(|other| shown.panes.swap(&terminal, &other));
+                if swapped {
+                    if shown.zoom.is_open() {
+                        shown.set_zoom(None);
+                    }
+                    shown.unsaved = true;
+                    cx.notify();
+                }
+            }
+            Command::EqualizeSplits => {
+                if shown.panes.equalize() {
+                    shown.unsaved = true;
+                    cx.notify();
+                }
             }
             Command::ResizeLeft
             | Command::ResizeRight
@@ -105,17 +144,7 @@ impl SheprdWindow {
             }
             // Pane and tab commands herdr-core panes cannot run yet say so,
             // rather than reaching the Herdr pane behind them.
-            Command::SwapLeft
-            | Command::SwapRight
-            | Command::SwapUp
-            | Command::SwapDown
-            | Command::NextPane
-            | Command::PreviousPane
-            | Command::LastPane
-            | Command::EqualizeSplits
-            | Command::RenamePane
-            | Command::RenameTab
-            | Command::MovePane => {
+            Command::RenamePane | Command::RenameTab | Command::MovePane => {
                 self.show_flash(Flash::warning(fl!("core-terminals-unsupported")), cx);
             }
             _ => return false,
