@@ -15,6 +15,13 @@ use std::{
     sync::Arc,
 };
 
+/// Where workspace w0 started: absolute on this platform, as Herdr reports.
+const ROOT: &str = if cfg!(windows) {
+    r"C:\src\app"
+} else {
+    "/src/app"
+};
+
 fn id(name: &str) -> TerminalId {
     TerminalId::new(name).unwrap()
 }
@@ -40,7 +47,7 @@ fn env<'a>(spawn: &'a Spawn, name: &str) -> Option<&'a str> {
 }
 
 /// A window on a daemon whose client socket is `herdr-client.sock`, its
-/// workspace w0's first tab's pane in `/src/app`.
+/// workspace w0's first tab's pane in [`ROOT`].
 fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestContext) {
     cx.add_window_view(|window, cx| {
         let mut view = fixture_window(window, cx);
@@ -51,10 +58,11 @@ fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestCont
             true,
         );
         let snapshot = Arc::make_mut(view.live.snapshot.as_mut().unwrap());
+        let sub = Path::new(ROOT).join("sub");
         snapshot.panes.push(
             serde_json::from_value(serde_json::json!({
                 "pane_id": "p0", "workspace_id": "w0", "tab_id": "t0", "label": null,
-                "cwd": "/src/app", "foreground_cwd": "/src/app/sub", "focused": true,
+                "cwd": ROOT, "foreground_cwd": sub, "focused": true,
                 "right_click_passthrough": false
             }))
             .unwrap(),
@@ -85,9 +93,13 @@ fn a_tab_in_a_herdr_workspace_starts_where_the_workspace_did(cx: &mut TestAppCon
     );
     // Where the workspace started, as Herdr's own new tabs do, not where
     // its pane's program is now.
-    assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/src/app")));
+    assert_eq!(spawn.cwd.as_deref(), Some(Path::new(ROOT)));
     assert_eq!(env(&spawn, "HERDR_WORKSPACE_ID"), Some("w0"));
-    assert_eq!(env(&spawn, "HERDR_SOCKET_PATH"), Some("/run/h/herdr.sock"));
+    // Compared as paths: Windows joins the name with its own separator.
+    assert_eq!(
+        env(&spawn, "HERDR_SOCKET_PATH").map(Path::new),
+        Some(Path::new("/run/h/herdr.sock"))
+    );
     assert_eq!(env(&spawn, "HERDR_PANE_ID"), Some(""));
 }
 
