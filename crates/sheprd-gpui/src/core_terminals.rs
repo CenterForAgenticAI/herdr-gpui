@@ -17,6 +17,7 @@ mod fallback;
 mod hosts;
 mod hub;
 mod infos;
+mod requests;
 mod screen;
 mod selection;
 mod sidebar;

@@ -3,6 +3,7 @@ mod chats;
 mod focus;
 mod keys;
 mod paste;
+mod requests;
 mod saved_tabs;
 mod screen;
 mod selection;

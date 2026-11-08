@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     io::{self, Read, Write},
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
@@ -209,6 +209,14 @@ impl Core {
 
     pub fn kill(&self, terminal: &str) -> Result<Terminal> {
         self.typed(Method::TerminalKill, &json!({"terminal": terminal}))
+    }
+
+    /// Sets `terminal`'s labels; an empty value removes that label.
+    pub fn label(&self, terminal: &str, labels: &BTreeMap<&str, &str>) -> Result<Terminal> {
+        self.typed(
+            Method::TerminalLabel,
+            &json!({"terminal": terminal, "labels": labels}),
+        )
     }
 
     pub fn doc_get(&self, name: &str) -> Result<Doc> {

@@ -43,6 +43,9 @@ pub(super) struct Remote {
     pub(super) infos: Infos,
     /// The saved device the hub dials, to tell when it was edited.
     pub(super) target: ConnectTarget,
+    /// Browser request labels already on the core's terminals when this
+    /// window first listed them, which it never serves; `None` until then.
+    pub(super) old_requests: Option<std::collections::HashSet<String>>,
 }
 
 impl CoreTerminals {
@@ -108,8 +111,15 @@ impl CoreTerminals {
         target: ConnectTarget,
         hub: Hub,
     ) {
-        let infos = Infos::default();
-        self.remote.insert(scope, Remote { hub, infos, target });
+        self.remote.insert(
+            scope,
+            Remote {
+                hub,
+                infos: Infos::default(),
+                old_requests: None,
+                target,
+            },
+        );
     }
 
     /// A terminal for `purpose` on `host` that started as `outcome` says,
@@ -277,6 +287,7 @@ impl SheprdWindow {
                 Remote {
                     hub: Hub::remote(target.clone()),
                     infos: Infos::default(),
+                    old_requests: None,
                     target,
                 },
             );
