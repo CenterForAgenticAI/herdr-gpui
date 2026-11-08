@@ -1,9 +1,9 @@
 //! Installing the pinned herdr-core on a saved device, from its menu: the
 //! user's explicit ask, run on a background thread through the device's own
 //! connection (`sheprd_remote::core_install`). A device that already has a
-//! core is left as it is. Once the core is there, the host's hub is
-//! dropped, so the next Herdr 2 tab dials it again rather than remembering
-//! that the host had none.
+//! core is left as it is. Once the core is there, every window that could
+//! not reach the host drops its hub, so the next Herdr 2 tab dials it again
+//! rather than remembering that the host had none.
 
 use super::Host;
 use crate::{
@@ -121,12 +121,33 @@ impl SheprdWindow {
             .spawn(async move { install(&target) });
         cx.spawn(async move |this, cx| {
             let result = background.await;
+            let installed = result.is_ok();
             let _ = cx.update(|cx| cx.default_global::<Running>().0.remove(&id));
             let _ = this.update(cx, |view, cx| {
-                view.core_install_ended(host, &device, result, cx)
+                view.core_install_ended(host.clone(), &device, result, cx)
             });
+            // Every other window that found the host without a core dials
+            // it again too.
+            if installed {
+                cx.update(|cx| {
+                    for handle in cx.windows() {
+                        if let Some(handle) = handle.downcast::<SheprdWindow>() {
+                            let _ = handle.update(cx, |view, _, _| view.core_installed(&host));
+                        }
+                    }
+                });
+            }
         })
         .detach();
+    }
+
+    /// Forgets what this window found of `host` once it has a core. Only a
+    /// host the window could not reach is dialed anew; a connected core
+    /// keeps its views and their history.
+    fn core_installed(&mut self, host: &Host) {
+        if self.core_terminals.backend_of(host).is_none() {
+            self.core_terminals.forget_host(host);
+        }
     }
 
     pub(crate) fn core_install_ended(
@@ -138,11 +159,7 @@ impl SheprdWindow {
     ) {
         let flash = match result {
             Ok(outcome) => {
-                // Only a host the window could not reach is dialed anew; a
-                // connected core keeps its views and their history.
-                if self.core_terminals.backend_of(&host).is_none() {
-                    self.core_terminals.forget_host(&host);
-                }
+                self.core_installed(&host);
                 let version = core_install::pinned()
                     .map(|pinned| pinned.version)
                     .unwrap_or_default();

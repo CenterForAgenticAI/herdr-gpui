@@ -130,6 +130,15 @@ impl CoreTerminals {
         }
     }
 
+    /// Shows `terminal` of `host`'s core in `tab`, as a restored tab would.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn show_on_host_for_test(&mut self, tab: TabId, host: Host, terminal: TerminalId) {
+        let panes = super::panes::Panes::single(terminal);
+        self.tabs
+            .insert(tab, super::TabPanes::new(host, panes, false));
+    }
+
     /// A terminal for `purpose` on `host` that started as `outcome` says,
     /// waiting to be placed.
     // Only the lifecycle tests, which need Unix sockets, use it.
@@ -196,9 +205,13 @@ impl CoreTerminals {
     }
 
     /// How many agents `host`'s core last reported working, for ranking
-    /// hosts by how busy they are. The list is read while the window shows
-    /// a tab of that core, so a core it never showed counts none.
+    /// hosts by how busy they are. The list is only kept current while the
+    /// window has a tab of that core, so without one it counts none rather
+    /// than agents that may have stopped since.
     pub(crate) fn working(&self, host: &Host) -> u32 {
+        if !self.tabs.values().any(|shown| shown.host == *host) {
+            return 0;
+        }
         self.infos_of(host).map_or(0, Infos::working)
     }
 

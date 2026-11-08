@@ -93,6 +93,14 @@ fn a_hosts_working_herdr_core_agents_count_when_ranking_it(cx: &mut gpui::TestAp
             view.core_terminals
                 .record_for_test(&host, agent(id, status));
         }
+        // Without a tab of that core here, its list is not kept current,
+        // so agents that may have stopped since do not count.
+        assert_eq!(view.core_terminals.working(&host), 0);
+        view.core_terminals.show_on_host_for_test(
+            crate::browser::TabId::test(1),
+            host.clone(),
+            TerminalId::new("t1").unwrap(),
+        );
         assert_eq!(view.core_terminals.working(&host), 2);
         if !cfg!(any(target_os = "linux", target_os = "macos")) {
             return;
@@ -147,4 +155,51 @@ fn a_second_install_on_a_device_waits_for_the_first(cx: &mut gpui::TestAppContex
             crate::i18n::fl!("core-terminals-install-started", device = "box")
         );
     });
+}
+
+#[gpui::test]
+fn an_install_clears_the_missing_core_in_every_window(cx: &mut gpui::TestAppContext) {
+    fn installed(
+        _: &ConnectTarget,
+    ) -> std::result::Result<
+        sheprd_remote::core_install::Outcome,
+        crate::core_terminals::install::Failed,
+    > {
+        Ok(sheprd_remote::core_install::Outcome::Installed)
+    }
+    let host = Host::Remote(scope());
+    let mut views = Vec::new();
+    let mut servers = Vec::new();
+    for _ in 0..2 {
+        let (view, window) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+        let (mut remote, server) = connected_endpoint("ssh:fixture");
+        remote.connection.target = ssh();
+        servers.push(server);
+        view.update_in(window, |view, window, cx| {
+            view.endpoints.push(remote);
+            view.core_terminals
+                .set_remote_hub_for_test(scope(), ssh(), Hub::with_join(missing));
+            view.core_terminals
+                .hub_of_mut_for_test(&host)
+                .unwrap()
+                .connect(Start::IfMissing);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !view.core_terminals.lacks_core(&host) {
+                assert!(Instant::now() < deadline, "the attempt never finished");
+                view.poll_core_terminals(window, cx);
+                std::thread::yield_now();
+            }
+        });
+        views.push(view);
+    }
+    views[0].update(cx, |view, cx| {
+        view.install_core_with("ssh:fixture", installed, cx);
+    });
+    cx.run_until_parked();
+    for view in &views {
+        view.update(cx, |view, _| {
+            assert!(!view.core_terminals.lacks_core(&host));
+            assert!(view.core_terminals.hub_of(&host).is_none());
+        });
+    }
 }

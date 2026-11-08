@@ -75,7 +75,7 @@ Once the destination is ready, the source workspace's programs stop: its tabs ar
 
 When more than one host is connected, the **New worktree** dialog and the **New workspace** dialog for a Git checkout offer a host for the new checkout. The three hosts with the most room are tiles, best first; every other host opens from the **Other** field. The host the window shows stays chosen until you pick another, so Enter still creates where it always did.
 
-Hosts rank by spare cores: cores less the 5 minute load average. Each agent working there, in a Herdr pane or a Herdr 2 terminal Sheprd has shown, takes half a core off, a host that would have to clone the repository first takes one, memory above 90% halves its room, and recent checkouts of the same repository on a host add a little. The tiles stop moving after a few seconds so they do not shift under the pointer.
+Hosts rank by spare cores: cores less the 5 minute load average. Each agent working there, in a Herdr pane or in a Herdr 2 terminal on a host whose Herdr 2 tabs the window has open, takes half a core off, a host that would have to clone the repository first takes one, memory above 90% halves its room, and recent checkouts of the same repository on a host add a little. The tiles stop moving after a few seconds so they do not shift under the pointer.
 
 Choosing another host creates the checkout there through the same steps as Teleport: the repository is found, opened, or cloned, and the base commit is sent only when that host lacks it. The window switches to the new workspace when it is ready, and the repository's setup script asks for trust as a local creation does.
 
