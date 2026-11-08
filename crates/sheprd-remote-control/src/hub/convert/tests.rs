@@ -1,8 +1,11 @@
 use super::*;
 use crate::hub::{Layout, Workspace, layout_terminal};
-use std::{path::PathBuf, sync::mpsc};
+use std::path::PathBuf;
+#[cfg(unix)]
+use std::sync::mpsc;
 
 /// A Claude session as Herdr's own integration reports it.
+#[cfg(unix)]
 const SESSION: &str = "0c6f0c39-3c1e-4b7e-9a51-6d1b8e2d7f10";
 
 /// A layout whose one terminal tab offers its pane `t2-p1` to move, with
@@ -35,6 +38,7 @@ fn hub(layout: Layout, client_socket: Option<PathBuf>) -> Arc<Hub> {
     Arc::new(hub)
 }
 
+#[cfg(unix)]
 fn pane_answer(status: &str) -> Value {
     json!({"type": "pane_info", "pane": {
         "pane_id": "t2-p1", "tab_id": "t2", "cwd": "/shell", "agent": "claude",
@@ -45,6 +49,7 @@ fn pane_answer(status: &str) -> Value {
     }})
 }
 
+#[cfg(unix)]
 fn processes(front: u32) -> Value {
     json!({"type": "pane_process_info", "process_info": {
         "pane_id": "t2-p1", "shell_pid": 10, "foreground_process_group_id": front,
