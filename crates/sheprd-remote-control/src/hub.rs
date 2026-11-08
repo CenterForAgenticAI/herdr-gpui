@@ -7,6 +7,7 @@
 mod api;
 mod attach;
 mod chat;
+mod convert;
 mod core;
 mod daemon;
 mod layout;
@@ -15,6 +16,7 @@ mod sessions;
 
 pub(crate) use api::ApiMethod;
 pub(crate) use chat::{Chat, Event, Summary, View};
+pub(crate) use convert::Error as ConvertError;
 #[cfg(test)]
 pub(crate) use layout::TerminalAgent;
 pub(crate) use layout::{Chat as ChatRow, Layout, Terminal, TerminalPane, Workspace};
@@ -46,6 +48,8 @@ pub enum Error {
     Busy,
     #[error("the chat program cannot be reached")]
     ChatUnavailable,
+    #[error(transparent)]
+    Convert(#[from] convert::Error),
     #[error(transparent)]
     Core(#[from] core::Error),
     #[error("Herdr refused: {0}")]
@@ -87,6 +91,8 @@ pub(crate) struct Hub {
     chats: Mutex<HashMap<String, (EndpointId, Arc<Chat>)>>,
     core: Option<Arc<core::Source>>,
     layout: watch::Receiver<Arc<Layout>>,
+    /// Terminal agents moving into chats now.
+    moving: convert::Moving,
     /// The primary session's own layout, to tell whether it answers.
     primary: watch::Receiver<Arc<Layout>>,
     program: Option<PathBuf>,
@@ -142,6 +148,7 @@ impl Hub {
             chats: Mutex::new(HashMap::new()),
             core: Some(core),
             layout,
+            moving: convert::Moving::default(),
             primary: daemon_layout,
             program: locate_program(),
             sessions,
@@ -224,6 +231,7 @@ impl Hub {
             chat_dir,
             chats: Mutex::new(HashMap::new()),
             core: None,
+            moving: convert::Moving::default(),
             primary: receiver.clone(),
             layout: receiver,
             program: None,
@@ -679,6 +687,7 @@ pub(crate) fn layout_terminal(tab: &str, label: &str) -> Terminal {
         }],
         zoomed: false,
         agent: None,
+        convert: None,
     }
 }
 

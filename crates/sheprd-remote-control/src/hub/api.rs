@@ -24,6 +24,7 @@ pub(crate) enum ApiMethod {
     // keep-sorted start
     PaneClose,
     PaneGet,
+    PaneProcessInfo,
     PaneRead,
     PaneRename,
     PaneSendInput,
@@ -45,6 +46,7 @@ impl ApiMethod {
         match self {
             Self::PaneClose => "pane.close",
             Self::PaneGet => "pane.get",
+            Self::PaneProcessInfo => "pane.process_info",
             Self::PaneRead => "pane.read",
             Self::PaneRename => "pane.rename",
             Self::PaneSendInput => "pane.send_input",

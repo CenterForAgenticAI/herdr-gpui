@@ -94,6 +94,10 @@
               "pane": "p2",
               "title": "Fix the build",
               "changed_ms": 1770000000000
+            },
+            "convert": {
+              "agent": "claude",
+              "pane": "p2"
             }
           }
         ]

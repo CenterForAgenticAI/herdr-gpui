@@ -2,7 +2,7 @@
 //! terminal tabs, projected from a snapshot. Pure, so it is tested without
 //! a daemon.
 
-use sheprd_chat_protocol::{EndpointId, TOKEN};
+use sheprd_chat_protocol::{Agent, EndpointId, TOKEN};
 use sheprd_client::protocol::{
     AgentStatus, ClientShellAgent, ClientShellSnapshot, ClientShellWorktree,
 };
@@ -65,6 +65,9 @@ pub(crate) struct Terminal {
     /// The agent Herdr detects in it, such as `claude` run in a shell: the
     /// most pressing when several panes hold one.
     pub(crate) agent: Option<TerminalAgent>,
+    /// The pane whose agent its menu offers to move into a chat, with that
+    /// agent; `None` when none can (`sheprd_client::herdr::convert`).
+    pub(crate) convert: Option<(String, Agent)>,
 }
 
 /// An agent Herdr detects in a terminal tab, outside any chat.
@@ -280,6 +283,8 @@ pub(crate) fn project_with(snapshot: &ClientShellSnapshot, listed: Chats) -> Lay
                         zoomed: tab.zoomed,
                         panes,
                         agent,
+                        convert: sheprd_client::herdr::convert::tab_pane(snapshot, id, &tab.tab_id)
+                            .map(|(pane, agent)| (pane.to_owned(), agent)),
                     };
                     let cwd = terminal.first_pane()?.cwd.clone();
                     Some(Terminal { cwd, ..terminal })

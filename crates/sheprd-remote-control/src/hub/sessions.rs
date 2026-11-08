@@ -421,6 +421,9 @@ pub(super) fn prefix_layout(layout: &mut Layout, name: &str) {
             if let Some(agent) = &mut terminal.agent {
                 agent.pane = tag(name, &agent.pane);
             }
+            if let Some((pane, _)) = &mut terminal.convert {
+                *pane = tag(name, pane);
+            }
         }
     }
 }

@@ -4,12 +4,14 @@
 //! routes, so one rate limit and `Origin` policy covers every write.
 
 pub(crate) mod changes;
+mod convert;
 mod create;
 mod live;
 mod model;
 mod search;
 mod wire;
 
+pub(crate) use convert::convert;
 pub(crate) use create::{create_workspace, new_options, start_chat};
 pub(crate) use search::search;
 
