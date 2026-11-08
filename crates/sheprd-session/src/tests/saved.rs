@@ -57,3 +57,28 @@ fn saved_tabs_are_bounded() {
     assert!(matches!(SavedTabs::parse(&many), Err(Error::Many)));
     assert!(matches!(SavedTabs::parse(b"{"), Err(Error::Format(_))));
 }
+
+#[test]
+fn kept_workspaces_of_the_scope_are_listed_in_order() {
+    let saved = SavedTabs::parse(
+        &serde_json::to_vec(&json!({
+            "tabs": [],
+            "workspaces": [
+                {"id": "space-2", "scope": "s", "label": "B", "cwd": "/b"},
+                {"id": "space-1", "scope": "other", "label": "A", "cwd": "/a"},
+                {"id": "", "scope": "s", "label": "bad", "cwd": ""},
+                {"id": "space-3", "scope": "s", "label": "C", "cwd": "/c"},
+            ],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let ids: Vec<_> = saved.workspaces("s").map(|w| w.id.as_str()).collect();
+    assert_eq!(ids, ["space-2", "space-3"]);
+}
+
+#[test]
+fn a_file_from_before_kept_workspaces_has_none() {
+    let saved = parse(json!([]));
+    assert_eq!(saved.workspaces("s").count(), 0);
+}

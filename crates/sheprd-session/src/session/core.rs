@@ -2,7 +2,7 @@
 //! in them, and the core reports each terminal's agent.
 
 use super::{Agent, Keeper, Session, Tab, Workspace, most_pressing};
-use crate::CoreTab;
+use crate::{CoreTab, SavedWorkspace};
 use sheprd_backend::{AgentStatus, TerminalId, TerminalInfo};
 
 /// A workspace the app keeps for herdr-core terminals.
@@ -11,6 +11,16 @@ pub struct CoreWorkspace<'a> {
     pub cwd: &'a str,
     pub id: &'a str,
     pub label: &'a str,
+}
+
+impl<'a> From<&'a SavedWorkspace> for CoreWorkspace<'a> {
+    fn from(saved: &'a SavedWorkspace) -> Self {
+        Self {
+            cwd: &saved.cwd,
+            id: &saved.id,
+            label: &saved.label,
+        }
+    }
 }
 
 impl Session {
@@ -30,6 +40,7 @@ impl Session {
             workspaces: workspaces
                 .into_iter()
                 .map(|workspace| Workspace {
+                    ahead_behind: None,
                     branch: None,
                     cwd: workspace.cwd.to_owned(),
                     custom_label: true,
@@ -38,6 +49,7 @@ impl Session {
                     label: workspace.label.to_owned(),
                     status: AgentStatus::Unknown,
                     tabs: Vec::new(),
+                    tokens: Vec::new(),
                     worktree: None,
                 })
                 .collect(),

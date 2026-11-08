@@ -4,7 +4,6 @@
 use crate::{
     SheprdWindow,
     browser::{Location, Scope, Store, scope},
-    i18n::fl,
     session_model::Sessions,
 };
 use gpui::App;
@@ -13,19 +12,18 @@ use std::sync::Arc;
 
 impl SheprdWindow {
     /// Rebuilds the herdr-core session of the selected host when it is this
-    /// computer, from the store's tabs and what the core last reported.
-    pub(super) fn refresh_core_session(&mut self, cx: &App) {
-        // Built while the core answers: a core out of reach has no agents
-        // to count, and the overview shows the host as it shows Herdr 1.
-        let local = !self.selected_is_remote() && self.core_terminals.hub.backend().is_some();
-        let built = local
-            .then(|| cx.try_global::<Store>())
-            .flatten()
-            .map(|store| {
-                let scope = scope(&self.endpoints[self.selected_endpoint]);
-                let session = self.core_session_of(store, &scope);
-                (scope, Arc::new(session))
-            });
+    /// computer, from the store's workspaces and tabs and what the core last
+    /// reported.
+    pub(crate) fn refresh_core_session(&mut self, cx: &mut App) {
+        let built = (!self.selected_is_remote()).then(|| {
+            let scope = scope(&self.endpoints[self.selected_endpoint]);
+            self.keep_default_workspace(&scope, cx);
+            let session = cx
+                .try_global::<Store>()
+                .map(|store| self.core_session_of(store, &scope))
+                .unwrap_or_default();
+            (scope, Arc::new(session))
+        });
         let unchanged = match (&self.core_terminals.session, &built) {
             (Some((old_scope, old)), Some((scope, new))) => old_scope == scope && old == new,
             (None, None) => true,
@@ -37,14 +35,7 @@ impl SheprdWindow {
     }
 
     fn core_session_of(&self, store: &Store, scope: &Scope) -> Session {
-        let label = fl!("core-terminals-sidebar");
-        // With no Herdr 1 installed, the app keeps the window's one
-        // workspace; otherwise core tabs open in Herdr 1's workspaces.
-        let workspaces = self.live.missing_installation.then_some(CoreWorkspace {
-            cwd: "",
-            id: super::WORKSPACE,
-            label: &label,
-        });
+        let workspaces = store.kept_workspaces(scope).map(CoreWorkspace::from);
         let tabs = store.in_scope(scope).filter_map(|tab| match &tab.location {
             Some(Location::CoreTerminal {
                 panes,
@@ -57,8 +48,13 @@ impl SheprdWindow {
             }),
             _ => None,
         });
-        let focused = self.browser_key().map(|(_, workspace)| workspace);
-        Session::core(workspaces, tabs, focused.as_deref(), |terminal| {
+        let focused = self
+            .core_terminals
+            .in_front
+            .as_ref()
+            .filter(|(front, _)| front == scope)
+            .map(|(_, id)| id.as_str());
+        Session::core(workspaces, tabs, focused, |terminal| {
             self.core_terminals.infos.get(terminal)
         })
     }
@@ -79,6 +75,7 @@ impl SheprdWindow {
             .map(|(_, session)| session.clone());
         Sessions {
             core,
+            core_answers: self.core_terminals.hub.backend().is_some(),
             herdr_1: live.session(),
         }
     }

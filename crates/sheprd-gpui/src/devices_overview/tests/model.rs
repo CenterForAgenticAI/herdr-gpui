@@ -76,6 +76,7 @@ fn only_a_reachable_device_is_counted() {
     let tally = |endpoint: &crate::endpoint::Endpoint, live: &crate::state::LiveState| {
         let sessions = crate::session_model::Sessions {
             core: None,
+            core_answers: false,
             herdr_1: live.session(),
         };
         online_tally(endpoint, live, &sessions)
@@ -155,6 +156,7 @@ fn herdr_2_agents_count_on_a_computer_without_herdr_1() {
     );
     let sessions = crate::session_model::Sessions {
         core: Some(std::sync::Arc::new(core)),
+        core_answers: true,
         herdr_1: None,
     };
     assert_eq!(

@@ -1,0 +1,145 @@
+//! Workspaces the app keeps for Herdr 2: listed beside Herdr 1's, brought
+//! to the front without a daemon, and renamed, moved, and closed by the app.
+
+use crate::{
+    SheprdWindow,
+    browser::{Location, Store},
+    core_terminals::{WORKSPACE, panes::Panes},
+    reorder::Beside,
+    sidebar::layout_tests::{SidebarFixture, fixture_window, snapshot},
+};
+use gpui::{Entity, TestAppContext, VisualTestContext, prelude::*};
+use sheprd_backend::TerminalId;
+use std::{path::Path, sync::Arc};
+
+fn window(
+    cx: &mut TestAppContext,
+    herdr_1: bool,
+) -> (Entity<SheprdWindow>, &mut VisualTestContext) {
+    let (fixture, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| fixture_window(window, cx));
+        SidebarFixture(view)
+    });
+    let view = cx.update(|_, cx| fixture.read(cx).0.clone());
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            if herdr_1 {
+                let mut snapshot = snapshot(2);
+                snapshot.focused_workspace_id = Some("w0".into());
+                view.live.snapshot = Some(Arc::new(snapshot));
+            } else {
+                view.live.snapshot = None;
+                view.live.missing_installation = true;
+            }
+            view.refresh_core_session(cx);
+        })
+    });
+    (view, cx)
+}
+
+fn front(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext) -> String {
+    view.read_with(cx, |view, _| view.browser_key().unwrap().1)
+}
+
+fn listed(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext) -> Vec<String> {
+    view.read_with(cx, |view, _| {
+        view.sidebar_workspaces()
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect()
+    })
+}
+
+fn core_tab(id: &str) -> Location {
+    Location::CoreTerminal {
+        panes: Panes::single(TerminalId::new(id).unwrap()),
+        observe: false,
+    }
+}
+
+#[gpui::test]
+fn without_herdr_1_the_window_keeps_its_workspaces(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, false);
+    assert_eq!(listed(&view, cx), [WORKSPACE]);
+    assert_eq!(front(&view, cx), WORKSPACE);
+    let folder = Path::new("/src/api");
+    let id = cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_kept_workspace(None, folder, core_tab("t1"), window, cx)
+        })
+    });
+    let id = id.unwrap();
+    assert_eq!(listed(&view, cx), [WORKSPACE, id.as_str()]);
+    assert_eq!(front(&view, cx), id, "a new workspace comes to the front");
+    view.read_with(cx, |view, cx| {
+        assert_eq!(view.kept_workspace_at(folder).as_deref(), Some(id.as_str()));
+        assert_eq!(view.kept_workspace_at(Path::new("/src/web")), None);
+        let session = view.sessions(0).core.unwrap();
+        assert_eq!(session.workspace(&id).unwrap().label, "api");
+        let store = cx.global::<Store>();
+        let scope = crate::browser::scope(&view.endpoints[0]);
+        assert_eq!(store.in_workspace(&scope, &id).count(), 1);
+    });
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            assert!(view.navigate(crate::NavigationTarget::Workspace(WORKSPACE), cx));
+        })
+    });
+    assert_eq!(front(&view, cx), WORKSPACE, "no daemon needs to answer");
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.rename_kept_workspace(&id, "backend", cx);
+            assert!(view.move_kept_workspace(&id, Beside::Before(WORKSPACE), cx));
+        })
+    });
+    assert_eq!(listed(&view, cx), [id.as_str(), WORKSPACE]);
+    view.read_with(cx, |view, _| {
+        let session = view.sessions(0).core.unwrap();
+        assert_eq!(session.workspace(&id).unwrap().label, "backend");
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.navigate(crate::NavigationTarget::Workspace(&id), cx);
+            view.close_kept_workspace(&id, window, cx);
+        })
+    });
+    assert_eq!(listed(&view, cx), [WORKSPACE]);
+    assert_eq!(front(&view, cx), WORKSPACE, "the front falls back");
+}
+
+#[gpui::test]
+fn with_herdr_1_kept_workspaces_list_after_its_own(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, true);
+    assert_eq!(listed(&view, cx), ["w0", "w1"], "none kept until asked");
+    view.read_with(cx, |view, _| {
+        assert!(view.kept_in_front().is_none());
+        assert!(!view.new_workspaces_use_core(), "the setting is off");
+    });
+    let id = cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_kept_workspace(
+                Some("tools"),
+                Path::new("/src/tools"),
+                core_tab("t2"),
+                window,
+                cx,
+            )
+        })
+    });
+    let id = id.unwrap();
+    assert_eq!(listed(&view, cx), ["w0", "w1", id.as_str()]);
+    assert_eq!(front(&view, cx), id);
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.herdr_workspace_in_front(), None);
+        assert!(
+            view.new_tabs_use_core(),
+            "a tab in a kept workspace is Herdr 2's"
+        );
+    });
+    // Choosing anything of Herdr 1's hands it the front back.
+    cx.update(|_, cx| view.update(cx, |view, _| view.leave_kept_workspace()));
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.browser_key().unwrap().1, "w0");
+        assert_eq!(view.herdr_workspace_in_front(), Some("w0"));
+    });
+}

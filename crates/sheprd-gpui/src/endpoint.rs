@@ -831,6 +831,12 @@ impl SheprdWindow {
         }
         self.pending_toast = None;
         self.pending_navigation = None;
+        // A workspace the app keeps for Herdr 2 needs no daemon to answer.
+        if let NavigationTarget::Workspace(id) = target
+            && self.focus_kept_workspace(id, cx)
+        {
+            return true;
+        }
         if self.input_ready() {
             self.navigate(target, cx);
         } else {

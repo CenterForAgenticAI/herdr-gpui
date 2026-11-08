@@ -1,6 +1,7 @@
 mod accessibility;
 mod chats;
 mod focus;
+mod kept_workspaces;
 mod keys;
 mod paste;
 mod saved_tabs;

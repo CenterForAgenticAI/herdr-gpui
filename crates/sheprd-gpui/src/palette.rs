@@ -40,7 +40,7 @@ pub(crate) use resume::Resume;
 mod search;
 
 use agent_filter::AgentFilter;
-use go_to::{destination_exists, go_to_entries, note_entries};
+use go_to::{destination_exists, go_to_entries, kept_go_to_entries, note_entries};
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -714,6 +714,11 @@ impl SheprdWindow {
                 .find(|endpoint| endpoint.id == source.endpoint)
                 .map(|endpoint| endpoint.label.as_str());
             go_to_entries(&source.endpoint, host, snapshot, &mut entries);
+        }
+        let selected = &self.endpoints[self.selected_endpoint];
+        if let Some(core) = self.sessions(self.selected_endpoint).core {
+            let host = (self.endpoints.len() > 1).then_some(selected.label.as_str());
+            kept_go_to_entries(&selected.id, host, &core, &mut entries);
         }
         entries.extend(
             COMMANDS

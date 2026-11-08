@@ -35,6 +35,8 @@ pub struct Session {
 /// A workspace: a folder and the tabs opened in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workspace {
+    /// Commits the branch is ahead of and behind its upstream.
+    pub ahead_behind: Option<(usize, usize)>,
     pub branch: Option<String>,
     /// Where a new terminal in it starts.
     pub cwd: String,
@@ -48,6 +50,8 @@ pub struct Workspace {
     pub status: AgentStatus,
     /// In strip order.
     pub tabs: Vec<Tab>,
+    /// Named values the sidebar's row layouts show, such as `$branch`.
+    pub tokens: Vec<(String, String)>,
     pub worktree: Option<Worktree>,
 }
 

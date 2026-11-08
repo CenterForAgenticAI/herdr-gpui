@@ -7,7 +7,7 @@ mod error;
 pub use error::Error;
 
 use crate::panes::Panes;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 /// The largest saved tabs file read.
@@ -18,7 +18,41 @@ pub const MAX_SAVED_TABS: usize = 256;
 #[derive(Debug, Deserialize)]
 pub struct SavedTabs {
     tabs: Vec<SavedTab>,
+    /// Files from before the app kept workspaces have none.
+    #[serde(default)]
+    workspaces: Vec<SavedWorkspace>,
 }
+
+/// A workspace the app keeps for herdr-core terminals, which keep none. The
+/// app writes them beside its tabs in the order the user arranged them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedWorkspace {
+    /// Where its new terminals start.
+    pub cwd: String,
+    /// Unique among the app's workspaces; its tabs name it.
+    pub id: String,
+    pub label: String,
+    /// The host it belongs to, as the app names hosts in its saved tabs.
+    pub scope: String,
+}
+
+impl SavedWorkspace {
+    /// Whether a saved workspace is one the app could have written.
+    pub fn valid(&self) -> bool {
+        !self.id.is_empty()
+            && self.id.len() <= MAX_ID_BYTES
+            && !self.scope.is_empty()
+            && self.label.chars().count() <= MAX_LABEL_CHARS
+            && self.cwd.len() <= MAX_CWD_BYTES
+    }
+}
+
+/// The longest workspace ID kept, as for a tab's workspace.
+pub const MAX_ID_BYTES: usize = 256;
+/// The longest workspace name kept.
+pub const MAX_LABEL_CHARS: usize = 200;
+/// The longest folder kept for a workspace.
+pub const MAX_CWD_BYTES: usize = 4096;
 
 #[derive(Debug, Deserialize)]
 struct SavedTab {
@@ -65,10 +99,18 @@ impl SavedTabs {
             return Err(Error::Large);
         }
         let saved: Self = serde_json::from_slice(bytes)?;
-        if saved.tabs.len() > MAX_SAVED_TABS {
+        if saved.tabs.len() > MAX_SAVED_TABS || saved.workspaces.len() > MAX_SAVED_TABS {
             return Err(Error::Many);
         }
         Ok(saved)
+    }
+
+    /// `scope`'s workspaces the app keeps, in the user's order. One that
+    /// fails to read is left out.
+    pub fn workspaces<'a>(&'a self, scope: &'a str) -> impl Iterator<Item = &'a SavedWorkspace> {
+        self.workspaces
+            .iter()
+            .filter(move |workspace| workspace.scope == scope && workspace.valid())
     }
 
     /// `scope`'s tabs in a workspace, in saved order. Mirrors are left out:

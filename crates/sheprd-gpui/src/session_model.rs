@@ -23,7 +23,14 @@ pub(crate) fn of_snapshot(snapshot: &ClientShellSnapshot) -> Session {
                 workspace: agent.workspace_id.clone(),
             })
             .collect(),
-        focused: snapshot.focused_workspace_id.clone(),
+        // The daemon marks its focused workspace both ways; either does.
+        focused: snapshot.focused_workspace_id.clone().or_else(|| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.focused)
+                .map(|workspace| workspace.workspace_id.clone())
+        }),
         workspaces: snapshot
             .workspaces
             .iter()
@@ -34,6 +41,7 @@ pub(crate) fn of_snapshot(snapshot: &ClientShellSnapshot) -> Session {
 
 fn of_workspace(snapshot: &ClientShellSnapshot, workspace: &ClientShellWorkspace) -> Workspace {
     Workspace {
+        ahead_behind: workspace.git_ahead_behind,
         branch: workspace.branch.clone(),
         cwd: workspace.new_workspace_cwd.clone(),
         custom_label: workspace.custom_label,
@@ -52,6 +60,7 @@ fn of_workspace(snapshot: &ClientShellSnapshot, workspace: &ClientShellWorkspace
                 status: tab.agent_status,
             })
             .collect(),
+        tokens: workspace.tokens.clone(),
         worktree: workspace.worktree.as_ref().map(|worktree| Worktree {
             key: worktree.key.clone(),
             label: worktree.label.clone(),
@@ -85,12 +94,43 @@ impl SnapshotSession {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Sessions {
     pub(crate) core: Option<Arc<Session>>,
+    /// Whether the core behind `core` answers, which a host with no Herdr 1
+    /// installed is online by.
+    pub(crate) core_answers: bool,
     pub(crate) herdr_1: Option<Arc<Session>>,
 }
 
 impl Sessions {
-    fn each(&self) -> impl Iterator<Item = &Session> {
+    /// Herdr 1's session, then herdr-core's.
+    pub(crate) fn each(&self) -> impl Iterator<Item = &Session> {
         self.herdr_1.iter().chain(&self.core).map(Arc::as_ref)
+    }
+
+    /// The workspace of `session`, kept by `keeper`, that shows as focused
+    /// while `kept_front` is the kept workspace in front, if any: Herdr 1's
+    /// own focus unless a kept workspace stands in front of it.
+    pub(crate) fn front_of<'a>(
+        keeper: Keeper,
+        session: &'a Session,
+        kept_front: Option<&'a str>,
+    ) -> Option<&'a str> {
+        match keeper {
+            Keeper::Herdr1 => kept_front
+                .is_none()
+                .then_some(session.focused.as_deref())
+                .flatten(),
+            Keeper::App => kept_front,
+        }
+    }
+
+    /// Each session with who keeps its workspaces.
+    pub(crate) fn keyed(&self) -> impl Iterator<Item = (Keeper, &Session)> {
+        let herdr_1 = self
+            .herdr_1
+            .as_deref()
+            .map(|session| (Keeper::Herdr1, session));
+        let core = self.core.as_deref().map(|session| (Keeper::App, session));
+        herdr_1.into_iter().chain(core)
     }
 
     pub(crate) fn agents(&self) -> impl Iterator<Item = &Agent> {
@@ -106,7 +146,11 @@ impl Sessions {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.herdr_1.is_none() && self.core.is_none()
+        self.herdr_1.is_none()
+            && self
+                .core
+                .as_ref()
+                .is_none_or(|core| core.workspaces.is_empty())
     }
 }
 

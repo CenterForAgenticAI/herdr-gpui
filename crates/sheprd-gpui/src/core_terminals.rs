@@ -24,6 +24,7 @@ mod split;
 mod tabs;
 mod view;
 mod worker;
+mod workspaces;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -125,6 +126,10 @@ pub(crate) struct CoreTerminals {
     infos: infos::Infos,
     /// How the views draw now, to tell when the window's look changed.
     look: Option<Look>,
+    /// The kept workspace the user brought to the front, by its host.
+    in_front: Option<(Scope, String)>,
+    /// A kept workspace just came to the front: show one of its tabs.
+    reveal: bool,
     /// The session over herdr-core of the selected host, by its scope,
     /// while that host is this computer.
     session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
@@ -251,7 +256,15 @@ impl SheprdWindow {
     /// computer, so a tab on another host stays with that host's Herdr, where
     /// its shell starts on the host and in the workspace's folder.
     pub(crate) fn new_tabs_use_core(&self) -> bool {
-        self.config.herdr_2_terminals && !self.selected_is_remote()
+        self.new_workspaces_use_core() || self.kept_in_front().is_some()
+    }
+
+    /// Whether a new workspace is one the app keeps for Herdr 2: with Herdr
+    /// 2 chosen for new terminals, or with no Herdr 1 installed, on this
+    /// computer.
+    pub(crate) fn new_workspaces_use_core(&self) -> bool {
+        (self.config.herdr_2_terminals || self.live.missing_installation)
+            && !self.selected_is_remote()
     }
 
     /// The `new_core_terminal` command: starts a shell in herdr-core and
@@ -369,6 +382,7 @@ impl SheprdWindow {
             self.save_core_panes(cx);
         }
         self.refresh_core_session(cx);
+        self.reveal_kept_workspace(window, cx);
         // A zoom in motion draws a frame each tick until it lands.
         let now = crate::motion::now();
         if self
