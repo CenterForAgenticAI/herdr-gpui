@@ -243,13 +243,9 @@ impl SheprdRegion {
             };
             report(host.sizes(window, cx));
             let wake = shared.borrow().wake.clone();
-            // Sheprd's window draws inside this view, so its notify only
-            // reaches Moonframe through this one: a terminal frame then
-            // replays the Luau layout around it rather than building it.
-            host.observe_sizes(window, cx, move |_, sizes, cx| {
+            host.observe_sizes(window, cx, move |_, sizes, _| {
                 let _ = wake.try_send(());
                 report(sizes);
-                cx.notify();
             })
         });
         let overlay = region.is_none().then(|| host.region(Region::Overlay, cx));
