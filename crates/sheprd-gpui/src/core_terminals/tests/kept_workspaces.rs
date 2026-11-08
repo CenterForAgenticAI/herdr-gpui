@@ -151,7 +151,7 @@ fn a_new_tab_starts_in_its_kept_workspaces_folder(cx: &mut TestAppContext) {
         view.update(cx, |view, cx| {
             view.open_kept_workspace(None, Path::new("/src/tools"), core_tab("t3"), window, cx);
             view.new_core_terminal(window, cx);
-            let (purpose, spawn) = view.core_terminals.wanted.clone().unwrap();
+            let (purpose, spawn) = view.core_terminals.wanted.back().cloned().unwrap();
             assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/src/tools")));
             let crate::core_terminals::Purpose::Tab { scope, workspace } = purpose else {
                 panic!("a tab");
@@ -162,6 +162,60 @@ fn a_new_tab_starts_in_its_kept_workspaces_folder(cx: &mut TestAppContext) {
             view.close_kept_workspace(&workspace, window, cx);
             assert!(view.kept_workspace_gone(&scope, &workspace, cx));
             assert!(!view.kept_workspace_gone(&scope, "w0", cx), "Herdr 1's");
+        })
+    });
+}
+
+#[gpui::test]
+fn workspaces_made_in_a_row_each_start_a_shell(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, false);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.new_kept_workspace(Some("api"), Some("/src/api".into()), cx);
+            view.new_kept_workspace(Some("web"), Some("/src/web".into()), cx);
+            // No core answers in tests, so both wait their turn in order
+            // rather than the second replacing the first.
+            let folders: Vec<_> = view
+                .core_terminals
+                .wanted
+                .iter()
+                .map(|(_, spawn)| spawn.cwd.clone().unwrap())
+                .collect();
+            assert_eq!(folders, [Path::new("/src/api"), Path::new("/src/web")]);
+        })
+    });
+}
+
+#[gpui::test]
+fn a_workspace_whose_first_tab_cannot_open_is_not_kept(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, false);
+    cx.update(|_, cx| {
+        let scope = crate::browser::scope(&view.read(cx).endpoints[0]);
+        Store::update(cx, |store| {
+            while store.open(scope.clone(), WORKSPACE, None, None).is_some() {}
+        });
+    });
+    let id = cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_kept_workspace(None, Path::new("/src/api"), core_tab("t1"), window, cx)
+        })
+    });
+    assert_eq!(id, None, "no tab could show it");
+    assert_eq!(listed(&view, cx), [WORKSPACE]);
+    assert_eq!(front(&view, cx), WORKSPACE);
+}
+
+#[gpui::test]
+fn closing_the_default_workspace_lets_its_shell_go(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, false);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            assert!(view.default_workspace_kept(cx), "its shell is shown");
+            view.new_kept_workspace(Some("api"), None, cx);
+            view.close_kept_workspace(WORKSPACE, window, cx);
+            // The shell standing in for Herdr 1 is ended on the next poll,
+            // and none starts while the workspace is not kept.
+            assert!(!view.default_workspace_kept(cx));
         })
     });
 }

@@ -113,7 +113,7 @@ impl SheprdWindow {
             .filter(|(front, _)| front == scope)
             .map(|(_, id)| id.as_str());
         Session::core(workspaces, tabs, focused, |terminal| {
-            self.core_terminals.infos.get(terminal)
+            self.core_terminals.reported(terminal)
         })
     }
 

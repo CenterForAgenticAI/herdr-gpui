@@ -91,7 +91,11 @@ impl SheprdWindow {
     /// Keeps a new workspace for a checkout at `cwd` whose first tab shows
     /// `location`, such as a herdr-core terminal a worker already started,
     /// and brings it to the front. Answers its ID, or `None` when it could
-    /// not be kept, which a flash says.
+    /// not be kept or its tab not opened, which a flash says. Then nothing
+    /// is left behind: the workspace is not kept, and the terminals
+    /// `location` drives end, since no tab would show them.
+    // Callers come with opening worktrees and dispatching agents to Herdr 2.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn open_kept_workspace(
         &mut self,
         label: Option<&str>,
@@ -100,17 +104,36 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let id = self.keep_new_workspace(label, Some(cwd), cx)?;
+        let Some(id) = self.keep_new_workspace(label, Some(cwd), cx) else {
+            self.end_location(&location);
+            return None;
+        };
         let scope = scope_of(self);
-        let tab = Store::update(cx, |store| store.open(scope, &id, Some(location), None));
-        match tab {
-            Some(tab) => {
-                self.sync_core_views(cx);
-                self.show_browser_tab(tab, window, cx);
-            }
-            None => self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx),
-        }
+        let shown = location.clone();
+        let tab = Store::update(cx, |store| store.open(scope, &id, Some(shown), None));
+        let Some(tab) = tab else {
+            self.close_kept_workspace(&id, window, cx);
+            self.end_location(&location);
+            self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
+            return None;
+        };
+        self.sync_core_views(cx);
+        self.show_browser_tab(tab, window, cx);
         Some(id)
+    }
+
+    /// Ends the herdr-core terminals `location` drives; a mirror only
+    /// watches.
+    fn end_location(&self, location: &Location) {
+        if let Location::CoreTerminal {
+            panes,
+            observe: false,
+        } = location
+        {
+            for terminal in panes.terminals() {
+                self.end_core_terminal(terminal.clone());
+            }
+        }
     }
 
     /// The kept workspace on the selected host whose folder is `cwd`.
@@ -186,16 +209,8 @@ impl SheprdWindow {
     ) {
         let scope = scope_of(self);
         let tabs = Store::update(cx, |store| store.forget_kept(&scope, id));
-        for tab in &tabs {
-            if let Some(Location::CoreTerminal {
-                panes,
-                observe: false,
-            }) = &tab.location
-            {
-                for terminal in panes.terminals() {
-                    self.end_core_terminal(terminal.clone());
-                }
-            }
+        for location in tabs.iter().filter_map(|tab| tab.location.as_ref()) {
+            self.end_location(location);
         }
         self.forget_browser_tabs(|gone| tabs.iter().any(|tab| tab.id == gone));
         if self
@@ -274,6 +289,13 @@ impl SheprdWindow {
         if let Some(tab) = first {
             self.show_browser_tab(tab, window, cx);
         }
+    }
+
+    /// Whether the selected host still keeps the workspace a window with
+    /// no Herdr 1 installed starts with, whose shell stands in for Herdr 1's.
+    pub(super) fn default_workspace_kept(&self, cx: &App) -> bool {
+        cx.try_global::<Store>()
+            .is_none_or(|store| store.kept_workspace(&scope_of(self), WORKSPACE).is_some())
     }
 
     /// Keeps the workspace a window with no Herdr 1 installed gathers its
