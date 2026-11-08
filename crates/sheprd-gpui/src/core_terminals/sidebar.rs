@@ -43,10 +43,10 @@ impl SheprdWindow {
         let hover = theme.active;
         let rows = panes.into_iter().map(|(tab, terminal)| {
             let (title, status) = self.core_pane_label(tab, &terminal, cx);
+            // The tab's host's record: IDs repeat across machines.
             let agent = self
                 .core_terminals
-                .infos
-                .get(&terminal)
+                .info(tab, &terminal)
                 .and_then(sheprd_core_client::agent_kind);
             let id = SharedString::from(format!("core-sidebar-{}-{terminal}", u64::from(tab)));
             let clicked = terminal.clone();
