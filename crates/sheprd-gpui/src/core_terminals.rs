@@ -44,7 +44,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use panes::{Axis, Panes};
 use sheprd_backend::{Backend as _, Spawn, TerminalId, TerminalInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// The workspace of a window with no Herdr 1 installed. herdr-core has no
 /// workspaces of its own, so its tabs gather here until the app keeps them.
@@ -118,6 +118,9 @@ impl TabPanes {
     }
 }
 
+/// The most terminals waiting to start at once.
+const MAX_WANTED: usize = 16;
+
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
@@ -141,9 +144,10 @@ pub(crate) struct CoreTerminals {
     starting: Option<(Purpose, Started)>,
     tabs: HashMap<TabId, TabPanes>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
-    /// A terminal to start once the hub connects: a shell, or the program
-    /// its spawn names.
-    wanted: Option<(Purpose, Spawn)>,
+    /// Terminals to start, one after another, once the hub connects: a
+    /// shell, or the program its spawn names. Several workspaces made in a
+    /// row each wait their turn rather than replace one another.
+    wanted: VecDeque<(Purpose, Spawn)>,
 }
 
 impl CoreTerminals {
@@ -306,7 +310,12 @@ impl SheprdWindow {
 
     /// Starts `spawn` in herdr-core for `purpose`, once the hub connects.
     pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn) {
-        self.core_terminals.wanted = Some((purpose, spawn));
+        let wanted = &mut self.core_terminals.wanted;
+        if wanted.len() >= MAX_WANTED {
+            tracing::warn!("Too many herdr-core terminals waiting to start; dropped one");
+            return;
+        }
+        wanted.push_back((purpose, spawn));
         self.core_terminals.hub.connect(Start::IfMissing);
         self.start_core_shell();
     }
@@ -321,7 +330,7 @@ impl SheprdWindow {
         let Some(backend) = terminals.hub.backend().cloned() else {
             return;
         };
-        let Some((purpose, mut spawn)) = terminals.wanted.take() else {
+        let Some((purpose, mut spawn)) = terminals.wanted.pop_front() else {
             return;
         };
         if spawn.cwd.is_none()
@@ -357,7 +366,7 @@ impl SheprdWindow {
                 self.core_terminals.views.clear();
             }
             if let State::Unavailable(error) = self.core_terminals.hub.state()
-                && self.core_terminals.wanted.take().is_some()
+                && !std::mem::take(&mut self.core_terminals.wanted).is_empty()
             {
                 let reason = error.to_string();
                 self.show_flash(
@@ -369,6 +378,8 @@ impl SheprdWindow {
             cx.notify();
         }
         self.place_started_core_terminal(window, cx);
+        // The next terminal waiting starts once the last one answered.
+        self.start_core_shell();
         self.sync_core_views(cx);
         if let Some(tab) = self.core_terminals.focus_wanted
             && self.core_pane_view(tab).is_some()
