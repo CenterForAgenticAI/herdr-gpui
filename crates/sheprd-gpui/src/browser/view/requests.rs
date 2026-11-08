@@ -76,6 +76,14 @@ impl SheprdWindow {
         Some((index, workspace.to_owned()))
     }
 
+    /// Whether one of this window's herdr-core tabs holds `terminal`.
+    pub(crate) fn holds_core_terminal(&self, terminal: &str) -> bool {
+        sheprd_backend::TerminalId::new(terminal)
+            .ok()
+            .and_then(|terminal| self.core_terminals.tab_of(&terminal))
+            .is_some()
+    }
+
     /// Whether the host this window shows is the daemon at `daemon`, listing
     /// workspaces or not, connected or not. Window-wide commands act on the
     /// shown host, so only that one may stand for the caller's daemon.

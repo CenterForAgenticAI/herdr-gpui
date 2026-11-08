@@ -164,6 +164,23 @@ pub(super) fn window_for(
     }
     if let Some(workspace) = &caller.workspace_id {
         let target = target(caller);
+        // Several windows may show the workspace of a herdr-core terminal
+        // in a Herdr workspace; the one holding its tab is the caller's.
+        if let Some(terminal) = caller.terminal_id.as_deref() {
+            for strict in target.strictness() {
+                let holder = windows.iter().find(|handle| {
+                    handle
+                        .read_with(cx, |view, _| {
+                            view.holds_core_terminal(terminal)
+                                && view.control_target(&target, *strict).is_some()
+                        })
+                        .unwrap_or(false)
+                });
+                if let Some(handle) = holder {
+                    return Ok(*handle);
+                }
+            }
+        }
         for strict in target.strictness() {
             for handle in &windows {
                 let shows = handle
