@@ -616,7 +616,10 @@ original actor, or source repository to be the owner. An owner rerun only change
 Pushes and manual dispatches remain restricted to owner-triggered `main` runs.
 The final **Format, lint, and test** gate requires successful platform checks for
 code changes, and the macOS optimized builds on pull requests, and permits
-skipped platform jobs only for confirmed non-code edits.
+skipped platform jobs only for confirmed non-code edits. It also requires the
+Python-only **Website and docs** job whenever the website, a Markdown file, or
+code changed, so a website-only pull request runs that job and no native one
+(`scripts/ci-changes.sh` decides both).
 
 Fork PR execution uses GitHub-hosted runners and read-only permissions. GitHub
 withholds repository secrets from fork `pull_request` runs, including after
