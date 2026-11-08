@@ -60,7 +60,10 @@ impl SheprdWindow {
             return self.listening_ports.poll(Vec::new());
         }
         let hosts = self.watched_hosts();
-        let changed = self.listening_ports.poll(hosts);
+        let mut changed = self.listening_ports.poll(hosts);
+        changed |= self
+            .listening_ports
+            .place_terminals(self.core_terminals.terminal_workspaces());
         // A tunnel lives as long as its remote port is listed at the address
         // it dials and its SSH child runs; either ending removes its close
         // button.

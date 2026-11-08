@@ -8,6 +8,7 @@
 //! blocks rendering or delays another host.
 // i18n: migrated
 
+mod core;
 mod error;
 mod render;
 mod scan;
@@ -271,6 +272,8 @@ pub(crate) struct Listed<'a> {
 /// Every scanned host's listening ports, keyed by host.
 #[derive(Default)]
 pub(crate) struct ListeningPorts {
+    /// This computer's herdr-core terminals' ports, by workspace.
+    core: core::Placed,
     monitors: HashMap<Host, Monitor>,
 }
 

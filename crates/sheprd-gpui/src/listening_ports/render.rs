@@ -49,15 +49,30 @@ impl SheprdWindow {
             return None;
         }
         let endpoint = self.endpoints.get(self.selected_endpoint)?;
-        let workspace = self
-            .live
-            .snapshot
-            .as_ref()?
-            .focused_workspace_id
-            .as_deref()?;
+        let Some(snapshot) = self.live.snapshot.as_ref() else {
+            // A workspace of herdr-core tabs alone, on this computer.
+            let workspace = self.core_ports_workspace()?;
+            let listed = self.listening_ports.core_ports(workspace)?;
+            return Some((endpoint.id.as_str(), workspace, listed));
+        };
+        let workspace = snapshot.focused_workspace_id.as_deref()?;
         let daemon = super::Daemon::of(&endpoint.connection.target)?;
-        let listed = self.listening_ports.get(&daemon, workspace)?;
+        let listed = self.listening_ports.get(&daemon, workspace);
+        // A herdr-core tab in a Herdr workspace names the workspace itself;
+        // a terminal started outside the app is placed by its tab.
+        let listed = listed.or_else(|| {
+            (!endpoint.connection.target.is_remote())
+                .then(|| self.listening_ports.core_ports(workspace))
+                .flatten()
+        })?;
         Some((endpoint.id.as_str(), workspace, listed))
+    }
+
+    /// The workspace a window with no Herdr state shows, when it is one of
+    /// herdr-core tabs on this computer.
+    fn core_ports_workspace(&self) -> Option<&'static str> {
+        (self.live.missing_installation && !self.selected_is_remote())
+            .then_some(crate::core_terminals::WORKSPACE)
     }
 
     /// Opens a port's page in a browser tab of `workspace`, through a tunnel

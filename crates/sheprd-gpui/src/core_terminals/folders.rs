@@ -27,6 +27,24 @@ impl CoreTerminals {
     }
 }
 
+impl CoreTerminals {
+    /// Each known tab's terminals and the workspace the tab is in, by
+    /// address, for what names a terminal but not its workspace.
+    pub(crate) fn terminal_workspaces(&self) -> Vec<(String, String)> {
+        self.tabs
+            .values()
+            .filter_map(|shown| Some((shown, &shown.workspace.as_ref()?.1)))
+            .flat_map(|(shown, workspace)| {
+                shown
+                    .panes
+                    .terminals()
+                    .into_iter()
+                    .map(move |terminal| (terminal.as_str().to_owned(), workspace.clone()))
+            })
+            .collect()
+    }
+}
+
 impl SheprdWindow {
     /// The folder of the pane the user works in: the herdr-core pane the
     /// active group shows, else Herdr's focused pane, where its program is
