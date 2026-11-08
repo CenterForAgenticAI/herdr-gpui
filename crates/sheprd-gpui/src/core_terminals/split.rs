@@ -47,12 +47,12 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(shown) = self.core_terminals.tabs.get(&tab.id) else {
-            return self.core_placeholder();
+            return self.core_placeholder(&super::Host::of(&tab.scope));
         };
         if shown.panes.count() == 1 {
             let key = (tab.id, shown.panes.first().clone());
             let Some(view) = self.core_terminals.views.get(&key).cloned() else {
-                return self.core_placeholder();
+                return self.core_placeholder(&super::Host::of(&tab.scope));
             };
             view.update(cx, |view, _| view.set_pane(None));
             return self.core_pane_body(key.0, &key.1, &view, cx);
@@ -249,7 +249,7 @@ impl SheprdWindow {
                 veil: (!is_active).then(|| chrome.veil()),
             }))
         });
-        let info = self.core_terminals.infos.get(terminal);
+        let info = self.core_terminals.info(tab, terminal);
         let shown = view.read(cx);
         let (title, status) = self.core_pane_label(tab, terminal, cx);
         let face = PaneFace {
@@ -277,7 +277,7 @@ impl SheprdWindow {
         terminal: &TerminalId,
         cx: &App,
     ) -> (String, AgentStatus) {
-        let info = self.core_terminals.infos.get(terminal);
+        let info = self.core_terminals.info(tab, terminal);
         let view = self
             .core_terminals
             .views
@@ -326,9 +326,9 @@ impl SheprdWindow {
     }
 
     /// What a herdr-core tab shows before its panes have views.
-    fn core_placeholder(&self) -> AnyElement {
-        let note = match self.core_terminals.hub.state() {
-            State::Unavailable(error) => {
+    fn core_placeholder(&self, host: &super::Host) -> AnyElement {
+        let note = match self.core_terminals.hub_of(host).map(super::Hub::state) {
+            Some(State::Unavailable(error)) => {
                 let reason = error.to_string();
                 fl!("core-terminals-unavailable", reason = reason)
             }

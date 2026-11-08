@@ -14,7 +14,7 @@ const PATH_MARKER: &str = "herdr-windows-path:";
 /// Whether a remote shell exit before the bridge was ready means the host
 /// could not run `/bin/sh`. `ssh` exits 255 for its own failures and the
 /// bridge script 127 when it found no Herdr; anything else is the shell.
-pub(super) fn rejected_posix(code: Option<i32>) -> bool {
+pub(crate) fn rejected_posix(code: Option<i32>) -> bool {
     code.is_some_and(|code| !matches!(code, 0 | 127 | 255))
 }
 
@@ -94,7 +94,7 @@ pub(super) fn bridge_command(path: &str, session: &str, idle_timeout: bool) -> S
 
 /// `script` as a `powershell.exe` command line, encoded as UTF-16LE base64
 /// so neither `cmd.exe` nor PowerShell as the login shell reinterprets it.
-fn encoded_command(script: &str) -> String {
+pub(crate) fn encoded_command(script: &str) -> String {
     let utf16 = script
         .encode_utf16()
         .flat_map(u16::to_le_bytes)
@@ -105,7 +105,7 @@ fn encoded_command(script: &str) -> String {
     )
 }
 
-fn quote_powershell_arg(value: &str) -> String {
+pub(crate) fn quote_powershell_arg(value: &str) -> String {
     if !value.is_empty()
         && !value.starts_with('-')
         && value.bytes().all(|byte| {
