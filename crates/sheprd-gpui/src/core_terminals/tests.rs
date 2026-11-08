@@ -10,3 +10,14 @@ mod screen;
 mod selection;
 mod wanted;
 mod worker;
+
+impl crate::SheprdWindow {
+    /// Stands in for the herdr-core session the window builds each tick.
+    pub(crate) fn set_core_session(
+        &mut self,
+        scope: crate::browser::Scope,
+        session: sheprd_session::Session,
+    ) {
+        self.core_terminals.session = Some((scope, std::sync::Arc::new(session)));
+    }
+}
