@@ -82,6 +82,20 @@ class HostChats(unittest.TestCase):
             # Only the archive is left to publish.
             self.assertEqual([path.name for path in root.iterdir()], [output.name])
 
+    def test_a_build_changed_to_the_same_length_is_refused_and_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_builds(root)
+            updater.create(root, "20261017.1", host_chats=True)
+            (root / "host-chat-manifest.sig").write_bytes(bytes(64))
+            build = root / updater.host_chat_name("20261017.1", updater.HOST_TARGETS[0])
+            original = build.read_bytes()
+            build.write_bytes(bytes(len(original)))
+            with self.assertRaises(ValueError):
+                updater.pack_host_chats(root, "20261017.1")
+            self.assertTrue(build.exists(), "nothing is deleted")
+            self.assertFalse((root / "sheprd-acp-20261017.1-linux-musl.tar.gz").exists())
+
     def test_a_build_that_differs_from_its_manifest_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

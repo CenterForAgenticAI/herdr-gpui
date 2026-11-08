@@ -35,6 +35,16 @@ class HostChatArchive(unittest.TestCase):
         entries = MANIFEST.verify_manifest(directory, VERSION, optional=(ARCHIVE,))
         self.assertEqual(set(entries), set(names))
 
+    def test_an_older_release_is_verified_by_its_own_contract(self):
+        self.assertNotIn(ARCHIVE, MANIFEST.base_names(VERSION, host_chats=False))
+        names = MANIFEST.asset_names(VERSION, host_chats=False)
+        directory = self.checksums(names)
+        entries = MANIFEST.verify_manifest(directory, VERSION, host_chats=False)
+        self.assertEqual(set(entries), set(names))
+        # The current contract still requires it.
+        with self.assertRaises(ValueError):
+            MANIFEST.verify_manifest(directory, VERSION)
+
     def test_an_unknown_asset_is_refused_even_when_one_may_be_missing(self):
         names = [*MANIFEST.asset_names(VERSION), "surprise.bin"]
         with self.assertRaises(ValueError):

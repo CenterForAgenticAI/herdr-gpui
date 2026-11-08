@@ -226,6 +226,11 @@ def pack_host_chats(directory, release):
         path = directory / asset["name"]
         if path.is_symlink() or not path.is_file() or path.stat().st_size != asset["size"]:
             raise ValueError(f"host chat build does not match its manifest: {asset['name']}")
+        # Bytes changed since the manifest was written would be refused by
+        # every client: refuse them here, before anything is deleted.
+        with path.open("rb") as source:
+            if hashlib.file_digest(source, "sha256").hexdigest() != asset["sha256"]:
+                raise ValueError(f"host chat build does not match its manifest: {asset['name']}")
         members.append((path, f"{asset['target']}/sheprd-acp"))
     output = directory / host_chat_archive(release)
     with output.open("xb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
