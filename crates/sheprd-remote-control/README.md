@@ -92,7 +92,7 @@ questions about workspaces (`control::layout`), and the window holding the tab
 makes it as its own commands do. A split is answered once its shell is in the
 tab (it takes that window's keyboard, as a split there does), and refused as
 busy while another terminal is starting; a zoom makes the zoomed pane the one in
-use; a close drops the tab, and the daemon then ends its terminals. With Sheprd
+use; a close ends the tab's terminals, then Sheprd drops the tab. With Sheprd
 closed the phone is told it is not open (a close still ends the terminals); a
 pane of the Herdr desktop app's spaces, or one no tab holds, cannot be split.
 The daemon keeps at most 16 shared core attachments and releases each after

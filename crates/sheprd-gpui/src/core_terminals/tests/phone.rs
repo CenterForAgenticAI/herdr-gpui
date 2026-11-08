@@ -152,3 +152,13 @@ fn a_mirror_never_splits_and_a_pane_elsewhere_is_gone() {
     // Another window may hold a tab this one does not.
     assert!(terminals.phone_change(&ask(9, "t1", Op::Zoom)).is_none());
 }
+
+#[test]
+fn a_tab_closes_even_after_its_panes_ended() {
+    let mut terminals = terminals();
+    // The daemon ended the terminals first; the pane it names may be gone.
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t404", Op::Close)),
+        Some(Change::Close(tab)) if tab == TabId::test(1)
+    ));
+}

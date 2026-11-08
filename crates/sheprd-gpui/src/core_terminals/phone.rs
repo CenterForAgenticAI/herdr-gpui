@@ -45,6 +45,11 @@ impl CoreTerminals {
     /// does not, so another window may. A zoom is made here.
     pub(super) fn phone_change(&mut self, ask: &Ask) -> Option<Change> {
         let tab = *self.tabs.keys().find(|tab| tab.number() == ask.tab)?;
+        // The tab goes whole: its panes may have left already, their
+        // terminals ended first.
+        if ask.op == Op::Close {
+            return Some(Change::Close(tab));
+        }
         let busy = self.starting.is_some() || self.wanted.is_some() || self.phone_split.is_some();
         let shown = self.tabs.get_mut(&tab)?;
         let Some(terminal) = TerminalId::new(ask.terminal.as_str())
