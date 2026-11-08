@@ -424,18 +424,24 @@ impl SheprdWindow {
                 || Scope::endpoint(&outcome.endpoint_id),
                 crate::browser::scope,
             );
-        let opened = Store::update(cx, |store| {
-            outcome.core_tabs.iter().all(|panes| {
-                let location = Location::CoreTerminal {
-                    panes: panes.clone(),
-                    observe: false,
-                };
-                store
-                    .open(scope.clone(), &outcome.workspace_id, Some(location), None)
-                    .is_some()
-            })
+        // Checked before the move, so only tabs opened meanwhile can leave
+        // one out; the rest still open.
+        let missed = Store::update(cx, |store| {
+            outcome
+                .core_tabs
+                .iter()
+                .filter(|panes| {
+                    let location = Location::CoreTerminal {
+                        panes: (*panes).clone(),
+                        observe: false,
+                    };
+                    store
+                        .open(scope.clone(), &outcome.workspace_id, Some(location), None)
+                        .is_none()
+                })
+                .count()
         });
-        if !opened {
+        if missed > 0 {
             self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
         }
         cx.notify();
@@ -528,12 +534,28 @@ impl SheprdWindow {
     }
 
     fn submit_teleport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let room = cx.try_global::<Store>().map_or(usize::MAX, Store::room);
         let Some(teleport) = &mut self.teleport else {
             return;
         };
-        match teleport.stage {
+        match &teleport.stage {
             Stage::Choosing => teleport.review(),
-            Stage::Ready(..) => teleport.teleport(),
+            Stage::Ready(_, review) => {
+                // The tabs rebuilt in Herdr 2 must all open once the move
+                // ends, when the source's own Herdr 2 tabs have closed: a
+                // program without a tab would run unseen.
+                let opening = review
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.into == Generation::Herdr2)
+                    .count();
+                if opening > room.saturating_add(teleport.closing.len()) {
+                    let flash = fl!("teleport-too-many-tabs", count = opening);
+                    self.show_flash(Flash::warning(flash), cx);
+                    return;
+                }
+                teleport.teleport();
+            }
             Stage::Failed(_) => {
                 self.teleport = None;
                 self.dismiss_menu(window, cx);

@@ -18,7 +18,12 @@ use super::{
 use sheprd_backend::Generation;
 use sheprd_client::{protocol::ClientShellSnapshot, shell_quote};
 use sheprd_session::panes::Panes;
-use std::{collections::HashMap, io::Seek, sync::atomic::AtomicBool, time::Duration};
+use std::{
+    collections::HashMap,
+    io::Seek,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 mod discover;
 pub(super) mod plan;
@@ -597,8 +602,13 @@ fn rebuild_tabs(
             let mut terminals = HashMap::new();
             for source_pane in &build.slots {
                 let cwd = cwd_of(tab.pane(source_pane));
-                let terminal = core::start_shell(to, &cwd, cancelled)?;
+                // A start is not cancelled midway, so every terminal the
+                // core starts is known to `spawned`, which ends them.
+                let terminal = core::start_shell(to, &cwd, &AtomicBool::new(false))?;
                 spawned.push(terminal.clone());
+                if cancelled.load(Ordering::Acquire) {
+                    return Err(Error::Cancelled);
+                }
                 terminals.insert(source_pane.clone(), terminal.clone());
                 let target = Target {
                     generation: Generation::Herdr2,
