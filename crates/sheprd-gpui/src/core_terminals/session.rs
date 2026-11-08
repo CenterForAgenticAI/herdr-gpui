@@ -89,7 +89,7 @@ impl SheprdWindow {
             .flatten()
             .map(|(_, workspace)| workspace);
         Session::core(workspaces, tabs, focused.as_deref(), |terminal| {
-            self.core_terminals.infos.get(terminal)
+            self.core_terminals.reported(terminal)
         })
     }
 
