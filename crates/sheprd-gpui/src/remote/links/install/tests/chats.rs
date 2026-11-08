@@ -72,6 +72,52 @@ fn a_source_build_builds_the_chat_program_without_needing_it() {
     assert!(script.contains(
         "if CARGO_TARGET_DIR=\"$cache/target\" cargo build --release --locked -p sheprd-acp"
     ));
-    assert!(script.contains("mv -f \"$dir/.sheprd-acp.part\" \"$dir/sheprd-acp\""));
+    assert!(script.contains("chat_part=\"$dir/.sheprd-acp.part.$$\""));
     assert!(!script.contains("$HOME/.local/bin/sheprd-acp"));
+}
+
+/// The source build's chat step alone, from its comment to its `fi`.
+#[cfg(unix)]
+fn chat_step(script: &str) -> &str {
+    let start = script
+        .find("# The phone's chats run")
+        .unwrap_or_else(|| panic!("no chat step in {script}"));
+    let end = script[start..]
+        .find("\nfi\n")
+        .map(|end| start + end + 4)
+        .unwrap_or_else(|| panic!("unterminated chat step"));
+    &script[start..end]
+}
+
+#[cfg(unix)]
+#[test]
+fn a_chat_program_that_fails_to_copy_leaves_pairing_going_and_nothing_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    // A cargo that builds nothing: the copy that follows fails.
+    std::fs::write(bin.join("cargo"), "#!/bin/sh\nexit 0\n").unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(bin.join("cargo"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = dir.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let script = format!(
+        "set -eu\ncache={cache}\ndir={out}\n{step}echo carried-on\n",
+        cache = dir.path().join("cache").display(),
+        out = out.display(),
+        step = chat_step(&build_script("dev-0123456789ab")),
+    );
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&script)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "carried-on");
+    assert_eq!(
+        std::fs::read_dir(&out).unwrap().count(),
+        0,
+        "no part file left"
+    );
 }
