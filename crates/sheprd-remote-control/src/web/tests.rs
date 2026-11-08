@@ -19,6 +19,7 @@ mod changes;
 mod convert;
 #[cfg(unix)]
 mod echo;
+mod empty_core;
 mod handoff;
 mod hosts;
 mod indicators;

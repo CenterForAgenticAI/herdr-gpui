@@ -102,8 +102,9 @@ pub(crate) struct Hub {
     /// without restarting it. Tests leave it off.
     search_program: bool,
     sessions: Arc<sessions::Sessions>,
-    /// Held while this machine's core starts, so phones start one at most.
-    waking: tokio::sync::Mutex<()>,
+    /// Held while this machine's core starts, so phones start one at most;
+    /// when the last start failed.
+    waking: tokio::sync::Mutex<Option<std::time::Instant>>,
     /// Where new checkouts go for work on a core.
     worktrees: Option<PathBuf>,
 }
@@ -301,7 +302,7 @@ impl Hub {
             .ok_or(Error::UnknownWorkspace)?
             .cwd
             .clone();
-        if let Some(core) = self.core_for_work().await {
+        if let Some(core) = self.core_for_work().await? {
             let (cwd, program) = (cwd.unwrap_or(&folder).to_owned(), program.to_owned());
             return on_core(move || core.open_chat(agent, &program, &cwd)).await;
         }
@@ -347,7 +348,7 @@ impl Hub {
         }
         let program = self.program().ok_or(Error::ProgramMissing)?;
         let program = program.as_path();
-        if let Some(core) = self.core_for_work().await {
+        if let Some(core) = self.core_for_work().await? {
             let (cwd, program) = (cwd.to_owned(), program.to_owned());
             let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
             let pane = on_core(move || match branch {
@@ -432,7 +433,7 @@ impl Hub {
         if sessions::in_wsl(workspace) {
             return Ok(None);
         }
-        let Some(core) = self.core_for_work().await else {
+        let Some(core) = self.core_for_work().await? else {
             return Ok(None);
         };
         let cwd = self
