@@ -68,13 +68,35 @@ pub const MAX_ID_BYTES: usize = 256;
 /// of that workspace, and the remote control daemon lists it there.
 pub const WORKSPACE_LABEL: &str = "sheprd.workspace";
 
+/// With [`WORKSPACE_LABEL`], the named Herdr 1 session on this computer
+/// whose workspace it is; absent for the primary session or the app's own.
+pub const SESSION_LABEL: &str = "sheprd.session";
+
+/// A workspace a terminal was started for, as its labels name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Labelled<'a> {
+    /// The workspace's id within its session.
+    pub id: &'a str,
+    /// The named Herdr 1 session, or `None` for the primary or the app.
+    pub session: Option<&'a str>,
+}
+
 /// The workspace a terminal's `labels` name, when it is one the app could
 /// keep a tab in: a Herdr 1 workspace or one the app keeps.
-pub fn labelled_workspace(labels: &std::collections::BTreeMap<String, String>) -> Option<&str> {
-    labels
+pub fn labelled_workspace(
+    labels: &std::collections::BTreeMap<String, String>,
+) -> Option<Labelled<'_>> {
+    let id = labels
         .get(WORKSPACE_LABEL)
         .map(String::as_str)
-        .filter(|id| tab_workspace(id))
+        .filter(|id| tab_workspace(id))?;
+    let session = match labels.get(SESSION_LABEL) {
+        Some(name) if name.is_empty() || name.len() > MAX_ID_BYTES || name.contains(':') => {
+            return None;
+        }
+        session => session.map(String::as_str),
+    };
+    Some(Labelled { id, session })
 }
 
 /// Whether `id` names a workspace the app could keep a tab in, rather than

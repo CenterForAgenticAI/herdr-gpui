@@ -431,6 +431,20 @@ pub(super) fn prefix_layout(layout: &mut Layout, name: &str) {
 /// The session a request's ids name, with the request as that session knows
 /// it; `None` when they name the primary's (or nothing). A request naming two
 /// sessions, or the primary and a session, is refused.
+/// A phone-facing workspace id as its session and its own id: `None` for
+/// the primary's or the app's.
+pub(super) fn split_id(id: &str) -> (Option<&str>, &str) {
+    id.strip_prefix(PREFIX)
+        .and_then(|rest| rest.split_once(':'))
+        .filter(|(name, id)| !name.is_empty() && !id.is_empty())
+        .map_or((None, id), |(name, id)| (Some(name), id))
+}
+
+/// `id` of the session `name`, as a phone sees it.
+pub(super) fn join_id(name: Option<&str>, id: &str) -> String {
+    name.map_or_else(|| id.to_owned(), |name| format!("{PREFIX}{name}:{id}"))
+}
+
 pub(super) fn owner(params: &Value) -> Result<Option<(String, Value)>> {
     let mut owner: Option<&str> = None;
     let mut primary = false;

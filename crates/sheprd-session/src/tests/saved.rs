@@ -87,11 +87,27 @@ fn a_file_from_before_kept_workspaces_has_none() {
 
 #[test]
 fn a_terminal_labelled_for_a_workspace_names_one_a_tab_can_be_in() {
-    use crate::{WORKSPACE_LABEL, labelled_workspace};
+    use crate::{Labelled, SESSION_LABEL, WORKSPACE_LABEL, labelled_workspace};
     use std::collections::BTreeMap;
     let labels = |id: &str| BTreeMap::from([(WORKSPACE_LABEL.to_owned(), id.to_owned())]);
-    assert_eq!(labelled_workspace(&labels("space-3")), Some("space-3"));
-    assert_eq!(labelled_workspace(&labels("w1")), Some("w1"));
+    let primary = |id| Some(Labelled { id, session: None });
+    assert_eq!(labelled_workspace(&labels("space-3")), primary("space-3"));
+    assert_eq!(labelled_workspace(&labels("w1")), primary("w1"));
+    let mut named = labels("w1");
+    named.insert(SESSION_LABEL.to_owned(), "dev".to_owned());
+    assert_eq!(
+        labelled_workspace(&named),
+        Some(Labelled {
+            id: "w1",
+            session: Some("dev")
+        })
+    );
+    named.insert(SESSION_LABEL.to_owned(), "a:b".to_owned());
+    assert_eq!(
+        labelled_workspace(&named),
+        None,
+        "a session name has no colon"
+    );
     assert_eq!(labelled_workspace(&labels("")), None);
     assert_eq!(labelled_workspace(&labels("core:terminals")), None);
     assert_eq!(labelled_workspace(&labels(&"x".repeat(257))), None);

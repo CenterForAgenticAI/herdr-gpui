@@ -11,7 +11,7 @@ use crate::hub::Layout;
 use serde_json::{Value, json};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN};
 use sheprd_core_client::wire::Run;
-use sheprd_session::WORKSPACE_LABEL;
+use sheprd_session::{Labelled, SESSION_LABEL, WORKSPACE_LABEL};
 use std::{
     collections::{BTreeMap, HashMap},
     path::Path,
@@ -25,7 +25,11 @@ const PANE_ENV: &str = "HERDR_PANE_ID";
 impl Source {
     /// A shell in `cwd`, or the core's default folder when it is empty,
     /// labelled for `workspace` so Sheprd puts it in a tab there.
-    pub(in crate::hub) fn open_shell(&self, cwd: &str, workspace: Option<&str>) -> Result<String> {
+    pub(in crate::hub) fn open_shell(
+        &self,
+        cwd: &str,
+        workspace: Option<Labelled<'_>>,
+    ) -> Result<String> {
         self.run(&Run {
             cwd: Some(cwd).filter(|cwd| !cwd.is_empty()),
             keep: true,
@@ -40,7 +44,7 @@ impl Source {
         agent: Agent,
         program: &Path,
         cwd: &str,
-        workspace: Option<&str>,
+        workspace: Option<Labelled<'_>>,
     ) -> Result<String> {
         let endpoint = EndpointId::random().to_string();
         let mut labels = workspace_label(workspace);
@@ -154,10 +158,15 @@ pub(super) fn tab_panes(layout: &Layout) -> HashMap<String, Vec<String>> {
     tabs
 }
 
-/// The label naming `workspace`, when it is one Sheprd could keep a tab in.
-fn workspace_label(workspace: Option<&str>) -> BTreeMap<&'static str, &str> {
-    workspace
-        .filter(|id| sheprd_session::tab_workspace(id))
-        .map(|id| BTreeMap::from([(WORKSPACE_LABEL, id)]))
-        .unwrap_or_default()
+/// The labels naming `workspace`, when it is one Sheprd could keep a tab in.
+fn workspace_label<'a>(workspace: Option<Labelled<'a>>) -> BTreeMap<&'static str, &'a str> {
+    let Some(workspace) = workspace.filter(|workspace| sheprd_session::tab_workspace(workspace.id))
+    else {
+        return BTreeMap::new();
+    };
+    let mut labels = BTreeMap::from([(WORKSPACE_LABEL, workspace.id)]);
+    if let Some(session) = workspace.session {
+        labels.insert(SESSION_LABEL, session);
+    }
+    labels
 }

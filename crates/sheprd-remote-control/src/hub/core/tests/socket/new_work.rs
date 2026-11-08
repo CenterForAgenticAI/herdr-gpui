@@ -252,6 +252,23 @@ async fn a_new_tab_opens_a_shell_in_the_workspace_folder_and_answers_its_pane() 
     fake.server.join().unwrap();
 }
 
+#[tokio::test]
+async fn a_new_tab_in_a_named_session_names_the_session_apart() {
+    let records = vec![record("t1"), record("t9")];
+    let (source, fake) = fake_with_doc(false, Value::Null, records);
+    let mut layout = source.poll().unwrap();
+    layout
+        .workspaces
+        .push(workspace("herdr:dev:w1", "/code/one"));
+    let hub = hub_on(&source, layout);
+    hub.new_core_tab("herdr:dev:w1").await.unwrap().unwrap();
+    let labels = &request(&fake)["params"]["labels"];
+    assert_eq!(labels[sheprd_session::WORKSPACE_LABEL], "w1");
+    assert_eq!(labels[sheprd_session::SESSION_LABEL], "dev");
+    drop((hub, source));
+    fake.server.join().unwrap();
+}
+
 #[test]
 fn closing_ends_one_named_terminal_and_refuses_a_tab_of_several() {
     let (source, fake) = fake();

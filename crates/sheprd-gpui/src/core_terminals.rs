@@ -138,6 +138,8 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// When terminals labelled for a workspace were last looked at.
+    adopt_checked: Option<std::time::Instant>,
     /// Terminals labelled for a workspace that were put in a tab, so each
     /// is put in one only once.
     adopted: std::collections::HashSet<TerminalId>,
@@ -419,8 +421,14 @@ impl SheprdWindow {
             view.update(cx, |view, cx| view.poll(cx));
         }
         self.poll_core_panes(window, cx);
-        if self.core_terminals.poll_infos(std::time::Instant::now()) {
-            self.adopt_labelled_terminals(cx);
+        // While a phone may start work here, this computer's core is joined
+        // (never started) to see it, with or without a tab of its own.
+        if crate::remote::supervisor::Supervisor::enabled(cx) {
+            self.core_terminals.hub.connect(Start::Join);
+        }
+        let listed = self.core_terminals.poll_infos(std::time::Instant::now());
+        self.adopt_labelled_terminals(listed, cx);
+        if listed {
             cx.notify();
         }
         if !cx.has_active_drag() {

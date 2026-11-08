@@ -102,3 +102,15 @@ fn a_terminal_started_for_a_workspace_is_listed_there_before_it_has_a_tab() {
     // A label naming the daemon's own groups is not one a tab can be in.
     assert_eq!(rows, vec![("space-2", 1), (UNLISTED, 1)]);
 }
+
+#[test]
+fn a_terminal_started_for_a_named_sessions_workspace_is_listed_under_its_phone_id() {
+    let mut phone = record("t1");
+    phone["labels"] = json!({
+        sheprd_session::WORKSPACE_LABEL: "w1",
+        sheprd_session::SESSION_LABEL: "dev",
+    });
+    let records = [serde_json::from_value(phone).unwrap()];
+    let layout = projection::project("fake-core", &records, None, None);
+    assert_eq!(layout.workspaces[0].id, "herdr:dev:w1");
+}

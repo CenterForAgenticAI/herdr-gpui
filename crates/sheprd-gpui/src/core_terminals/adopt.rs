@@ -1,8 +1,9 @@
 //! Herdr 2 terminals started outside the app for one of its workspaces, as
 //! a phone's new tab or chat is: herdr-core labels each with the workspace
-//! (`sheprd_session::WORKSPACE_LABEL`), and the app puts it in a tab of its
-//! own there, once, as if it had started it. A terminal some tab already
-//! holds is left where it is.
+//! and, for a named Herdr 1 session, the session
+//! (`sheprd_session::labelled_workspace`), and the app puts it in a tab of
+//! its own there, once, as if it had started it. A terminal some tab on
+//! this computer already holds is left where it is.
 
 use crate::{
     SheprdWindow,
@@ -10,73 +11,110 @@ use crate::{
 };
 use gpui::Context;
 use sheprd_backend::TerminalId;
+use sheprd_client::ConnectTarget;
 use sheprd_session::panes::Panes;
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
-impl SheprdWindow {
-    /// Puts each terminal labelled for one of this computer's workspaces,
-    /// and in no tab yet, in a new tab of that workspace.
-    pub(super) fn adopt_labelled_terminals(&mut self, cx: &mut Context<Self>) {
-        let Some(index) = self.core_host() else {
-            return;
-        };
-        let scope = scope(&self.endpoints[index]);
-        let wanted = {
-            let Some(store) = cx.try_global::<Store>() else {
-                return;
-            };
-            let held = held_terminals(store);
-            let herdr = self.live_at(index).snapshot.clone();
-            let known = |workspace: &str| {
-                store.kept_workspace(&scope, workspace).is_some()
-                    || herdr.as_ref().is_some_and(|snapshot| {
-                        snapshot
-                            .workspaces
-                            .iter()
-                            .any(|row| row.workspace_id == workspace)
-                    })
-            };
-            self.core_terminals
-                .infos
-                .all()
-                .filter(|info| !held.contains(&info.id))
-                .filter(|info| !self.core_terminals.adopted.contains(&info.id))
-                .filter_map(|info| {
-                    let workspace = sheprd_session::labelled_workspace(&info.labels)?;
-                    known(workspace).then(|| (info.id.clone(), workspace.to_owned()))
-                })
-                .collect::<Vec<_>>()
-        };
-        for (terminal, workspace) in wanted {
-            // Once: a tab the user closes later ends it, and one moved
-            // elsewhere stays there.
-            self.core_terminals.adopted.insert(terminal.clone());
-            let location = Location::CoreTerminal {
-                panes: Panes::single(terminal),
-                observe: false,
-            };
-            let opened = Store::update(cx, |store| {
-                store.open(scope.clone(), &workspace, Some(location), None)
-            });
-            if opened.is_none() {
-                tracing::warn!(%workspace, "No room for a tab a phone started");
-            }
-        }
-        if self.core_terminals.adopted.len() > MAX_ADOPTED {
-            self.core_terminals.adopted.clear();
-        }
-        self.sync_core_views(cx);
-    }
-}
-
+/// How often terminals waiting for a tab are looked at again: a workspace
+/// may become known, or a tab may close to make room, while the terminal
+/// itself stays the same.
+const EVERY: Duration = Duration::from_secs(1);
 /// How many adopted terminals are remembered; past it the list starts over,
 /// and a terminal no tab holds by then may be adopted again.
 const MAX_ADOPTED: usize = 1024;
 
-/// Every terminal some tab of the app holds, mirrors included.
+impl SheprdWindow {
+    /// Puts each terminal labelled for one of this computer's workspaces,
+    /// and in no tab here yet, in a new tab of that workspace. At most once
+    /// a second, unless `changed` says the core's list just changed.
+    pub(super) fn adopt_labelled_terminals(&mut self, changed: bool, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let due = self
+            .core_terminals
+            .adopt_checked
+            .is_none_or(|checked| now.saturating_duration_since(checked) >= EVERY);
+        if !changed && !due {
+            return;
+        }
+        self.core_terminals.adopt_checked = Some(now);
+        let Some(store) = cx.try_global::<Store>() else {
+            return;
+        };
+        let held = held_terminals(store);
+        let wanted: Vec<_> = self
+            .core_terminals
+            .infos
+            .all()
+            .filter(|info| {
+                !held.contains(&info.id) && !self.core_terminals.adopted.contains(&info.id)
+            })
+            .filter_map(|info| {
+                let labelled = sheprd_session::labelled_workspace(&info.labels)?;
+                let index = self.endpoint_of_session(labelled.session)?;
+                let scope = scope(&self.endpoints[index]);
+                let known = store.kept_workspace(&scope, labelled.id).is_some()
+                    || self
+                        .live_at(index)
+                        .snapshot
+                        .as_ref()
+                        .is_some_and(|snapshot| {
+                            snapshot
+                                .workspaces
+                                .iter()
+                                .any(|row| row.workspace_id == labelled.id)
+                        });
+                known.then(|| (info.id.clone(), scope, labelled.id.to_owned()))
+            })
+            .collect();
+        let mut opened = false;
+        for (terminal, scope, workspace) in wanted {
+            let location = Location::CoreTerminal {
+                panes: Panes::single(terminal.clone()),
+                observe: false,
+            };
+            let tab = Store::update(cx, |store| {
+                store.open(scope, &workspace, Some(location), None)
+            });
+            if tab.is_none() {
+                // Tried again once a tab closes to make room.
+                tracing::warn!(%workspace, "No room for a tab a phone started");
+                continue;
+            }
+            opened = true;
+            // Once: a tab the user closes later ends it, and one moved
+            // elsewhere stays there.
+            if self.core_terminals.adopted.len() >= MAX_ADOPTED {
+                self.core_terminals.adopted.clear();
+            }
+            self.core_terminals.adopted.insert(terminal);
+        }
+        if opened {
+            self.sync_core_views(cx);
+        }
+    }
+
+    /// This computer's endpoint for the Herdr 1 session `name`, or for the
+    /// window's own session when `None`.
+    fn endpoint_of_session(&self, name: Option<&str>) -> Option<usize> {
+        let Some(name) = name else {
+            return self.core_host();
+        };
+        self.endpoints.iter().position(|endpoint| {
+            matches!(&endpoint.connection.target,
+                ConnectTarget::Session { name: session, .. } if session == name)
+        })
+    }
+}
+
+/// Every terminal some tab on this computer holds, mirrors included. A tab
+/// of another host holds that host's terminals, whose IDs mean others here.
 fn held_terminals(store: &Store) -> HashSet<TerminalId> {
     store
         .tabs()
+        .filter(|tab| tab.scope.is_local())
         .filter_map(|tab| match tab.location.as_ref()? {
             Location::CoreTerminal { panes, .. } => Some(panes.terminals()),
             _ => None,

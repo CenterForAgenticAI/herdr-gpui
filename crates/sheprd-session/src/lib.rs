@@ -11,7 +11,7 @@ mod tests;
 
 pub use error::{Error, Result};
 pub use saved::{
-    CoreTab, MAX_SAVED_BYTES, MAX_SAVED_TABS, SavedTabs, SavedWorkspace, WORKSPACE_LABEL,
-    labelled_workspace, tab_workspace,
+    CoreTab, Labelled, MAX_SAVED_BYTES, MAX_SAVED_TABS, SESSION_LABEL, SavedTabs, SavedWorkspace,
+    WORKSPACE_LABEL, labelled_workspace, tab_workspace,
 };
 pub use session::{Agent, CoreWorkspace, Keeper, Session, Tab, Workspace, Worktree};

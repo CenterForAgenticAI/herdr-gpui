@@ -69,16 +69,24 @@ fn tabs_of(cx: &mut VisualTestContext, terminal: &str) -> Vec<String> {
 fn a_terminal_labelled_for_a_workspace_gets_a_tab_there_once(cx: &mut TestAppContext) {
     let (view, cx) = window(cx);
     cx.update(|_, cx| {
+        // Another host's tab holds its own `t5`, another terminal.
+        Store::update(cx, |store| {
+            let location = Location::CoreTerminal {
+                panes: sheprd_session::panes::Panes::single(id("t5")),
+                observe: false,
+            };
+            store.open(crate::browser::Scope::endpoint("box"), "w9", Some(location), None)
+        });
         view.update(cx, |view, cx| {
             let infos = &mut view.core_terminals.infos;
             infos.insert(listed("t5", Some("w1")));
             // Not labelled, or for a workspace this computer does not have.
             infos.insert(listed("t6", None));
             infos.insert(listed("t7", Some("gone")));
-            view.adopt_labelled_terminals(cx);
+            view.adopt_labelled_terminals(true, cx);
         })
     });
-    assert_eq!(tabs_of(cx, "t5"), ["w1"]);
+    assert_eq!(tabs_of(cx, "t5"), ["w9", "w1"]);
     assert!(tabs_of(cx, "t6").is_empty());
     assert!(tabs_of(cx, "t7").is_empty());
     // Once, even after the user closes its tab.
@@ -89,7 +97,7 @@ fn a_terminal_labelled_for_a_workspace_gets_a_tab_there_once(cx: &mut TestAppCon
                 store.close(tab);
             }
         });
-        view.update(cx, |view, cx| view.adopt_labelled_terminals(cx));
+        view.update(cx, |view, cx| view.adopt_labelled_terminals(true, cx));
     });
     assert!(tabs_of(cx, "t5").is_empty());
 }

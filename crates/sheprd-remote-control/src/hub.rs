@@ -291,7 +291,10 @@ impl Hub {
             let (cwd, program) = (cwd.unwrap_or(&folder).to_owned(), program.to_owned());
             // Labelled for its workspace, so Sheprd puts it in a tab there.
             let workspace = workspace.to_owned();
-            return on_core(move || core.open_chat(agent, &program, &cwd, Some(&workspace))).await;
+            return on_core(move || {
+                core.open_chat(agent, &program, &cwd, Some(labelled(&workspace)))
+            })
+            .await;
         }
         let response = self
             .call(
@@ -427,7 +430,7 @@ impl Hub {
             .workspace(workspace)
             .map_or_else(String::new, |workspace| workspace.cwd.clone());
         let workspace = workspace.to_owned();
-        let pane = on_core(move || core.open_shell(&cwd, Some(&workspace))).await?;
+        let pane = on_core(move || core.open_shell(&cwd, Some(labelled(&workspace)))).await?;
         let mut layout = self.layout.clone();
         let listed = layout.wait_for(|layout| layout.terminal(&pane).is_some());
         // An unlisted tab is still made: the phone reloads and finds it.
@@ -597,6 +600,13 @@ fn locate_named_program(program: &str) -> Option<PathBuf> {
                 .map(|dir| dir.join(program)),
         )
         .find(|candidate| candidate.is_file())
+}
+
+/// A phone-facing workspace id as the labels name it: its own id, and its
+/// Herdr 1 session when it is a named one's.
+fn labelled(workspace: &str) -> sheprd_session::Labelled<'_> {
+    let (session, id) = sessions::split_id(workspace);
+    sheprd_session::Labelled { id, session }
 }
 
 /// Runs blocking core work off the runtime.
