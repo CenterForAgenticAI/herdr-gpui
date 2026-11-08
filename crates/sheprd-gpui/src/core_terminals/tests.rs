@@ -1,5 +1,6 @@
 mod accessibility;
 mod chats;
+mod copy_mode;
 mod focus;
 mod history;
 mod keys;

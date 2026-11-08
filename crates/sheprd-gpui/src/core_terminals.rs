@@ -373,7 +373,7 @@ impl SheprdWindow {
         self.poll_core_fallback(cx);
         self.refresh_core_looks(cx);
         if let Some(view) = self.core_fallback_view() {
-            view.update(cx, |view, cx| view.poll(cx));
+            view.update(cx, |view, cx| view.poll(window, cx));
         }
         self.poll_core_panes(window, cx);
         self.poll_core_edits(cx);

@@ -1,5 +1,6 @@
 use crate::core_terminals::selection::{Cell, Selection};
 use sheprd_backend::FrameData;
+use sheprd_backend::TextPoint;
 use sheprd_client::protocol::CellData;
 
 /// A frame showing `rows`, each padded with blanks to `width`.
@@ -34,35 +35,54 @@ fn at(row: u16, column: u16) -> Cell {
     Cell { row, column }
 }
 
+fn point(row: u16, column: u16) -> TextPoint {
+    at(row, column).point(0)
+}
+
 #[test]
 fn a_press_that_never_moves_selects_nothing() {
     let shown = frame(8, &["hello"]);
-    let selection = Selection::at(at(0, 2));
+    let selection = Selection::at(point(0, 2));
     assert!(selection.is_empty());
     assert!(selection.rows(8).is_empty());
-    assert_eq!(selection.text(&shown), "");
+    assert_eq!(selection.text(&shown, 0).unwrap(), "");
 }
 
 #[test]
 fn a_drag_selects_to_the_ends_of_rows_between_and_reads_either_way() {
     let shown = frame(8, &["ab cd", "efgh", "ij kl"]);
-    let mut forward = Selection::at(at(0, 3));
-    forward.extend(at(2, 1));
+    let mut forward = Selection::at(point(0, 3));
+    forward.extend(point(2, 1));
     assert_eq!(forward.rows(8), [(0, 3..8), (1, 0..8), (2, 0..2)]);
-    assert_eq!(forward.text(&shown), "cd\nefgh\nij");
-    let mut backward = Selection::at(at(2, 1));
-    backward.extend(at(0, 3));
-    assert_eq!(backward.text(&shown), forward.text(&shown));
+    assert_eq!(forward.text(&shown, 0).unwrap(), "cd\nefgh\nij");
+    let mut backward = Selection::at(point(2, 1));
+    backward.extend(point(0, 3));
+    assert_eq!(
+        backward.text(&shown, 0).unwrap(),
+        forward.text(&shown, 0).unwrap()
+    );
 }
 
 #[test]
 fn double_and_triple_clicks_take_a_word_and_a_line() {
     let shown = frame(16, &["git push origin"]);
-    assert_eq!(Selection::word(&shown, at(0, 6)).text(&shown), "push");
-    assert_eq!(Selection::word(&shown, at(0, 0)).text(&shown), "git");
-    assert!(Selection::word(&shown, at(0, 3)).is_empty());
     assert_eq!(
-        Selection::line(&shown, at(0, 6)).text(&shown),
+        Selection::word(&shown, 0, at(0, 6))
+            .text(&shown, 0)
+            .unwrap(),
+        "push"
+    );
+    assert_eq!(
+        Selection::word(&shown, 0, at(0, 0))
+            .text(&shown, 0)
+            .unwrap(),
+        "git"
+    );
+    assert!(Selection::word(&shown, 0, at(0, 3)).is_empty());
+    assert_eq!(
+        Selection::line(&shown, 0, at(0, 6))
+            .text(&shown, 0)
+            .unwrap(),
         "git push origin"
     );
 }
@@ -73,17 +93,42 @@ fn a_wide_character_is_copied_once() {
     let mut shown = frame(4, &["界x a"]);
     shown.cells[1].skip = true;
     shown.cells[1].symbol = String::new();
-    let mut selection = Selection::at(at(0, 0));
-    selection.extend(at(0, 3));
-    assert_eq!(selection.text(&shown), "界 a");
+    let mut selection = Selection::at(point(0, 0));
+    selection.extend(point(0, 3));
+    assert_eq!(selection.text(&shown, 0).unwrap(), "界 a");
 }
 
 #[test]
 fn a_one_letter_word_or_line_is_still_selected() {
     let shown = frame(3, &["x y"]);
-    let word = Selection::word(&shown, at(0, 0));
+    let word = Selection::word(&shown, 0, at(0, 0));
     assert!(!word.is_empty());
-    assert_eq!(word.text(&shown), "x");
+    assert_eq!(word.text(&shown, 0).unwrap(), "x");
     let narrow = frame(1, &["z"]);
-    assert_eq!(Selection::line(&narrow, at(0, 0)).text(&narrow), "z");
+    assert_eq!(
+        Selection::line(&narrow, 0, at(0, 0))
+            .text(&narrow, 0)
+            .unwrap(),
+        "z"
+    );
+}
+
+#[test]
+fn a_selection_keeps_its_history_rows_as_the_view_scrolls() {
+    // Rows 10 and 11 of the history, on a screen whose top row is 10.
+    let shown = frame(6, &["one", "two"]);
+    let mut selection = Selection::at(at(0, 0).point(10));
+    selection.extend(at(1, 2).point(10));
+    assert_eq!(selection.visible_rows(6, 10, 2), [(0, 0..6), (1, 0..3)]);
+    assert_eq!(selection.text(&shown, 10).unwrap(), "one\ntwo");
+    // Scrolled down a row, only the second row shows, as the top row.
+    assert_eq!(selection.visible_rows(6, 11, 2), [(0, 0..3)]);
+    // Part of it is off the screen: only the history can read it.
+    assert_eq!(selection.text(&shown, 11), None);
+    assert_eq!(
+        selection
+            .range()
+            .map(|range| (range.start.row, range.end.row)),
+        Some((10, 11))
+    );
 }

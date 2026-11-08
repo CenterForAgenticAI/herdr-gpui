@@ -13,7 +13,13 @@ use gpui::{prelude::*, *};
 use sheprd_backend::{
     ClientMouseButton, ClientMouseKind, ClientMousePosition, ClientPaneInputEvent,
 };
-use std::num::NonZeroU16;
+use std::{
+    num::NonZeroU16,
+    time::{Duration, Instant},
+};
+
+/// How often a drag held past the top or bottom edge scrolls a row.
+const AUTOSCROLL: Duration = Duration::from_millis(50);
 
 /// Where a press is going: to the program, or into a selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +45,12 @@ fn modifier_bits(modifiers: Modifiers) -> u8 {
 }
 
 impl CoreTerminalView {
+    /// The history row at the top of the screen.
+    pub(crate) fn top(&self) -> u32 {
+        let history = self.screen.history;
+        u32::try_from(history.history.saturating_sub(history.offset)).unwrap_or(u32::MAX)
+    }
+
     /// The cell under `position`, held inside the screen.
     fn cell_at(&self, position: Point<Pixels>) -> Option<Cell> {
         let bounds = self.bounds?;
@@ -90,12 +102,14 @@ impl CoreTerminalView {
         let Some(frame) = self.screen.frame.as_deref() else {
             return;
         };
+        let top = self.top();
         self.selection = Some(match event.click_count {
-            2 => Selection::word(frame, cell),
-            count if count >= 3 => Selection::line(frame, cell),
-            _ => Selection::at(cell),
+            2 => Selection::word(frame, top, cell),
+            count if count >= 3 => Selection::line(frame, top, cell),
+            _ => Selection::at(cell.point(top)),
         });
         self.press = Some(Press::Selecting);
+        self.dragged_to = Some(event.position);
         cx.notify();
     }
 
@@ -113,8 +127,10 @@ impl CoreTerminalView {
                 self.report(ClientMouseKind::Drag(pressed), cell, event.modifiers, 1);
             }
             Some(Press::Selecting) if event.pressed_button == Some(MouseButton::Left) => {
+                self.dragged_to = Some(event.position);
+                let top = self.top();
                 if let Some(selection) = &mut self.selection {
-                    selection.extend(cell);
+                    selection.extend(cell.point(top));
                     cx.notify();
                 }
             }
@@ -139,6 +155,66 @@ impl CoreTerminalView {
             self.report(ClientMouseKind::Up(pressed), cell, event.modifiers, 1);
         }
         self.press = None;
+        self.dragged_to = None;
+    }
+
+    /// A move outside the view while a selection is dragged, which the
+    /// view's own listener, firing only while hovered, does not see.
+    pub(super) fn drag_outside(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let outside = self
+            .bounds
+            .is_some_and(|bounds| !bounds.contains(&event.position));
+        if !outside
+            || self.press != Some(Press::Selecting)
+            || event.pressed_button != Some(MouseButton::Left)
+        {
+            return;
+        }
+        self.dragged_to = Some(event.position);
+        let top = self.top();
+        if let (Some(cell), Some(selection)) =
+            (self.cell_at(event.position), self.selection.as_mut())
+        {
+            selection.extend(cell.point(top));
+            cx.notify();
+        }
+    }
+
+    /// Runs every tick while a selection is dragged: a pointer held above
+    /// or below the screen scrolls the history a row at a time, and the
+    /// selection follows to the row that comes into view.
+    pub(super) fn follow_drag(&mut self, cx: &mut Context<Self>) {
+        let (Some(Press::Selecting), Some(pointer), Some(bounds)) =
+            (self.press, self.dragged_to, self.bounds)
+        else {
+            return;
+        };
+        let up = pointer.y < bounds.top();
+        if !up && pointer.y <= bounds.bottom() {
+            return;
+        }
+        let top = self.top();
+        if let (Some(cell), Some(selection)) = (self.cell_at(pointer), self.selection.as_mut()) {
+            selection.extend(cell.point(top));
+            cx.notify();
+        }
+        let now = Instant::now();
+        if self
+            .scrolled_at
+            .is_some_and(|at| now.saturating_duration_since(at) < AUTOSCROLL)
+        {
+            return;
+        }
+        let history = self.screen.history;
+        let offset = if up {
+            history.offset.saturating_add(1).min(history.history)
+        } else {
+            history.offset.saturating_sub(1)
+        };
+        if offset != history.offset {
+            self.scroll_history(offset);
+            self.scrolled_at = Some(now);
+        }
     }
 
     /// Whole rows of wheel motion, the remainder kept for the next event,
@@ -170,29 +246,38 @@ impl CoreTerminalView {
         self.report(kind, cell, event.modifiers, lines);
     }
 
-    /// Copies the selection; false when nothing is selected.
-    pub(super) fn copy_selection(&self, cx: &mut App) -> bool {
-        let Some(frame) = self.screen.frame.as_deref() else {
+    /// Copies the selection; false when nothing is selected. What the
+    /// screen shows is copied at once; a selection reaching into the
+    /// history is read from it and copied when the text arrives.
+    pub(crate) fn copy_selection(&mut self, cx: &mut App) -> bool {
+        let Some(selection) = self.selection.filter(|selection| !selection.is_empty()) else {
             return false;
         };
-        let Some(text) = self
-            .selection
-            .filter(|selection| !selection.is_empty())
-            .map(|selection| selection.text(frame))
-        else {
-            return false;
-        };
-        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        let shown = self
+            .screen
+            .frame
+            .as_deref()
+            .and_then(|frame| selection.text(frame, self.top()));
+        match (shown, selection.range()) {
+            (Some(text), _) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
+            (None, Some(range)) => self.copy_range(range),
+            (None, None) => return false,
+        }
         true
     }
 
     /// The selection as the painter tints it.
     pub(super) fn highlights(&self) -> Vec<Highlight> {
-        let width = self.screen.frame.as_ref().map_or(0, |frame| frame.width);
+        let (width, height) = self
+            .screen
+            .frame
+            .as_ref()
+            .map_or((0, 0), |frame| (frame.width, frame.height));
+        let top = self.top();
         self.selection
             .map(|selection| {
                 selection
-                    .rows(width)
+                    .visible_rows(width, top, height)
                     .into_iter()
                     .map(|(row, columns)| Highlight {
                         row,

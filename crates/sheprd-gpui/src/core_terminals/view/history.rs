@@ -30,6 +30,18 @@ impl CoreTerminalView {
             if self.awaits_find(id) {
                 self.find_answered(id, answer);
                 cx.notify();
+            } else if self.awaits_copy_mode(id) {
+                self.copy_mode_answered(id, answer);
+                cx.notify();
+            } else if self.copying == Some(id) {
+                self.copying = None;
+                match answer {
+                    Ok(HistoryAnswer::Text(text)) => {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                    }
+                    Ok(_) => tracing::warn!("A herdr-core history read answered no text"),
+                    Err(error) => tracing::warn!(%error, "Could not read a herdr-core history"),
+                }
             } else if self.editing == Some(id) {
                 self.editing = None;
                 self.edit_ready = Some(match answer {

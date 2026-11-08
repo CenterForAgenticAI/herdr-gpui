@@ -116,7 +116,7 @@ impl SheprdWindow {
             .collect();
         let mut ended = Vec::new();
         for ((tab, terminal), view) in views {
-            view.update(cx, |view, cx| view.poll(cx));
+            view.update(cx, |view, cx| view.poll(window, cx));
             let split = self
                 .core_terminals
                 .tabs

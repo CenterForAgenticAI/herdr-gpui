@@ -50,6 +50,7 @@ impl SheprdWindow {
                 view.find_again(command == Command::FindPrevious, window, cx)
             }),
             Command::ClearPane => view.update(cx, |view, cx| view.clear_history(cx)),
+            Command::CopyMode => view.update(cx, |view, cx| view.enter_copy_mode(window, cx)),
             Command::EditScrollback => view.update(cx, |view, _| view.request_edit()),
             _ => return false,
         }

@@ -10,6 +10,8 @@
 //! the socket.
 // i18n: migrated
 
+pub(crate) mod badge;
+
 use crate::{
     scrollback::{match_count, push_matches, push_range, refresh_from, viewport_top},
     terminal_painter::{Highlight, Tint},

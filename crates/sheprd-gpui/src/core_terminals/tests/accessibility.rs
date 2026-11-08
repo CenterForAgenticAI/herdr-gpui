@@ -160,7 +160,7 @@ fn a_failed_terminal_stops_offering_insertion(cx: &mut TestAppContext) {
         })
     });
     until(|| {
-        cx.update(|_, cx| view.update(cx, |view, cx| view.poll(cx)))
+        cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx)))
             .then_some(())
     });
     cx.update(|window, cx| {

@@ -3,6 +3,7 @@
 //! any number may show the same terminal, as observers.
 
 mod accessibility;
+mod copy_mode;
 mod find;
 mod history;
 pub(super) mod keys;
@@ -63,6 +64,9 @@ pub(crate) struct PaneLook {
 pub(crate) struct CoreTerminalView {
     /// Where the cells were last painted, for the IME's candidate window.
     bounds: Option<Bounds<Pixels>>,
+    copy_mode: Option<copy_mode::CopyModeState>,
+    /// The history read whose text goes to the clipboard.
+    copying: Option<u64>,
     /// The history text asked for an editor, once it arrived.
     edit_ready: Option<Result<String, super::Error>>,
     /// The history request whose text goes to an editor.
@@ -73,6 +77,9 @@ pub(crate) struct CoreTerminalView {
     focus: FocusHandle,
     /// Releases for keys pressed while the program asked for them.
     held_keys: HeldKeys,
+    /// Where the pointer is while it drags a selection, which scrolls the
+    /// history while it is held past the screen.
+    dragged_to: Option<Point<Pixels>>,
     /// The cell a button-less pointer last reported, so movement inside
     /// one cell is not reported again.
     hovered: Option<Cell>,
@@ -90,6 +97,8 @@ pub(crate) struct CoreTerminalView {
     pane: Option<PaneLook>,
     /// Where the button held down is going.
     press: Option<pointer::Press>,
+    /// When a drag past the screen last scrolled the history.
+    scrolled_at: Option<std::time::Instant>,
     selection: Option<Selection>,
     /// The last frame painted with its cursor hidden, and the frame it came
     /// from, so a veiled pane copies a frame once rather than every paint.
@@ -112,8 +121,11 @@ impl CoreTerminalView {
     ) -> Self {
         Self {
             bounds: None,
+            copy_mode: None,
+            copying: None,
             edit_ready: None,
             editing: None,
+            dragged_to: None,
             find: None,
             find_query: String::new(),
             focus: cx.focus_handle(),
@@ -128,6 +140,7 @@ impl CoreTerminalView {
             painter,
             pane: None,
             press: None,
+            scrolled_at: None,
             selection: None,
             sleeping: None,
             screen: Screen::default(),
@@ -193,7 +206,7 @@ impl CoreTerminalView {
     /// Takes what the worker produced; true when there was a new screen.
     /// The screen is taken before the answers, so an answer arriving
     /// between the two wakes the next poll.
-    pub(crate) fn poll(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn poll(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let screen = self.link.mailbox.take();
         let changed = screen.is_some();
         if let Some(screen) = screen {
@@ -204,6 +217,8 @@ impl CoreTerminalView {
         if self.find.is_some() {
             self.poll_find();
         }
+        self.poll_copy_mode(window, cx);
+        self.follow_drag(cx);
         changed
     }
 
@@ -236,8 +251,13 @@ impl CoreTerminalView {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // Typing in the find bar is the field's, not the terminal's.
-        if self.find_focused(window, cx) {
+        // Typing in the find bar or copy mode's prompt is the field's, not
+        // the terminal's.
+        if self.find_focused(window, cx) || self.copy_search_focused(window, cx) {
+            return;
+        }
+        if self.copy_mode_active() {
+            self.copy_mode_key(event, window, cx);
             return;
         }
         let modifiers = event.keystroke.modifiers;
@@ -343,12 +363,15 @@ impl Render for CoreTerminalView {
         let look = self.look.clone();
         let frame = self.frame_to_paint();
         let mut highlights = self.find_highlights();
+        highlights.extend(self.copy_mode_highlights());
         highlights.extend(self.highlights());
         let find_bar = self.render_find(cx);
+        let copy_badge = self.render_copy_mode(cx);
         let pane = self.pane;
         let background = self.look.background;
         let focus = self.focus.clone();
         let status = self.status();
+        let selecting = self.press == Some(pointer::Press::Selecting);
         let body = div()
             .relative()
             .flex_1()
@@ -359,6 +382,16 @@ impl Render for CoreTerminalView {
                 canvas(
                     move |bounds, _, cx| fitting.update(cx, |view, _| view.fit(bounds)),
                     move |bounds, _, window, cx| {
+                        // A selection dragged past the view's edges keeps
+                        // following the pointer, which no longer hovers it.
+                        if selecting {
+                            let dragging = entity.clone();
+                            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                                if phase == DispatchPhase::Bubble {
+                                    dragging.update(cx, |view, cx| view.drag_outside(event, cx));
+                                }
+                            });
+                        }
                         window.handle_input(
                             &focus,
                             crate::input::TerminalInputHandler::new(bounds, entity, false),
@@ -396,6 +429,7 @@ impl Render for CoreTerminalView {
                 )
             })
             .when_some(find_bar, |body, bar| body.child(bar))
+            .when_some(copy_badge, |body, badge| body.child(badge))
             .when_some(status, |body, status| {
                 body.child(
                     div()
@@ -439,7 +473,10 @@ impl Render for CoreTerminalView {
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
             .on_action(cx.listener(|this, _: &crate::actions::Paste, window, cx| {
-                if !this.find_focused(window, cx) {
+                if !this.find_focused(window, cx)
+                    && !this.copy_search_focused(window, cx)
+                    && !this.copy_mode_active()
+                {
                     this.paste_clipboard(cx);
                 }
             }))
@@ -496,10 +533,15 @@ impl EntityInputHandler for CoreTerminalView {
         &mut self,
         _: Option<Range<usize>>,
         text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.marked.clear();
+        if self.copy_mode_active() {
+            self.copy_mode_text(text, window, cx);
+            cx.notify();
+            return;
+        }
         if !text.is_empty() {
             self.send(ClientPaneInputEvent::TextCommit(text.into()));
         }
