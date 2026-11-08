@@ -14,13 +14,19 @@ use std::{
 };
 
 pub(super) struct Sandbox {
-    pub(super) dir: tempfile::TempDir,
+    _dir: tempfile::TempDir,
     pub(super) binary: OsString,
     child: Child,
     pub(super) vars: Vec<(&'static str, OsString)>,
 }
 
 impl Sandbox {
+    /// The private folder holding the core's home and socket.
+    #[cfg(unix)]
+    pub(super) fn dir(&self) -> &Path {
+        self._dir.path()
+    }
+
     pub(super) fn start(binary: OsString) -> Self {
         let parent = std::env::var_os("HERDR_TEST_TMPDIR").unwrap_or_else(|| "/tmp".into());
         let dir = tempfile::Builder::new()
@@ -43,7 +49,7 @@ impl Sandbox {
             .spawn()
             .unwrap();
         Self {
-            dir,
+            _dir: dir,
             binary,
             child,
             vars,
