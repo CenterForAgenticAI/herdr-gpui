@@ -10,6 +10,8 @@ error-orchestrator-azure-forbidden = The token cannot read { $repository }; it n
 error-orchestrator-azure-json = Azure DevOps's answer is not the expected JSON: { $error }
 # $origin is the address tried, https://dev.azure.com.
 error-orchestrator-azure-network = Azure DevOps could not be reached at { $origin }: { $error }
+# Acting on a pull request listed from Azure DevOps alone, with no checkout of its repository open.
+error-orchestrator-azure-no-checkout = Open a checkout of { $repository } as a workspace to act on its pull requests
 error-orchestrator-azure-no-keyring = No desktop keyring is running to save an Azure DevOps token in. Start GNOME Keyring, KWallet, or KeePassXC, set [azure_devops] allow_plaintext_credentials = true, or use AZURE_DEVOPS_EXT_PAT
 error-orchestrator-azure-no-organization = Azure DevOps has no organization { $organization }, or the token cannot see it
 error-orchestrator-azure-no-store = No secure credential store is available to save an Azure DevOps token in. Set [azure_devops] allow_plaintext_credentials = true, or use AZURE_DEVOPS_EXT_PAT
@@ -17,6 +19,7 @@ error-orchestrator-azure-not-found = Azure DevOps has no repository { $repositor
 error-orchestrator-azure-organization = { $organization } is not an Azure DevOps organization name
 error-orchestrator-azure-rate-limit = Azure DevOps rate limit reached; it is read again later
 error-orchestrator-azure-read = Azure DevOps's answer could not be read: { $error }
+error-orchestrator-azure-reader = Azure DevOps did not say who the token belongs to, so its pull requests cannot be found
 error-orchestrator-azure-record = The saved Azure DevOps tokens are not in the expected form
 error-orchestrator-azure-record-size = The saved Azure DevOps tokens would be too large to read back; forget an organization or use a shorter token
 error-orchestrator-azure-sign-in = Connect Azure DevOps from the account menu to read { $repository }, run `az login`, or set AZURE_DEVOPS_EXT_PAT in your shell and restart Sheprd

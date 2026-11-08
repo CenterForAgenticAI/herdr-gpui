@@ -21,7 +21,7 @@ use sheprd_github::Tokens;
 use sheprd_remote::teleport::{AgentKind, Host};
 use sources::{recognize, replaced_by, statuses};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -34,9 +34,11 @@ use std::{
 mod azure_source;
 mod github_source;
 mod gitlab_source;
+pub mod remote;
 mod schedule;
 mod sources;
 
+pub use remote::{RemoteRequest, RemoteScope};
 pub use sources::sources;
 
 /// How often other applications' writes (agent-launcher's runs) are looked for.
@@ -90,7 +92,7 @@ const MAX_ACTIONS: usize = 4;
 const MAX_NOTICES: usize = 8;
 
 /// Where the tokens pasted in the account menu are saved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Stores {
     pub azure: sheprd_credentials::Store,
     pub gitlab: sheprd_credentials::Store,
@@ -218,6 +220,15 @@ pub struct Snapshot {
     /// Each open pull request's review and checks, by repository and number,
     /// as the last sync of its source read them. Never stored.
     pub pr_status: Arc<HashMap<(String, u64), PrStatus>>,
+    /// The name a forge other than GitHub shows for the reader, as it names
+    /// authors, once a sync has read it: Azure DevOps's display name.
+    pub viewer: Option<String>,
+    /// The canonical keys of the Azure DevOps pull requests the reader
+    /// created, matched by identity id for Mine. Never stored.
+    pub authored: Arc<HashSet<String>>,
+    /// An Azure DevOps organization's projects and repositories, which a
+    /// remote worker of its reader's pull requests reads to browse.
+    pub catalog: Option<Arc<azure::organization::Catalog>>,
 }
 
 pub struct Service {

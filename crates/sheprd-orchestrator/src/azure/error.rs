@@ -28,6 +28,8 @@ pub enum Error {
         #[source]
         source: Box<ureq::Error>,
     },
+    #[error("Open a checkout of {repository} as a workspace to act on its pull requests")]
+    NoCheckout { repository: String },
     #[cfg(target_os = "linux")]
     #[error(
         "No desktop keyring is running to save an Azure DevOps token in. Start GNOME Keyring, KWallet, or KeePassXC, set [azure_devops] allow_plaintext_credentials = true, or use AZURE_DEVOPS_EXT_PAT"
@@ -49,6 +51,10 @@ pub enum Error {
     Read(#[source] std::io::Error),
     #[error("The saved Azure DevOps tokens are not in the expected form")]
     Record,
+    #[error(
+        "Azure DevOps did not say who the token belongs to, so its pull requests cannot be found"
+    )]
+    Reader,
     #[error(
         "The saved Azure DevOps tokens would be too large to read back; forget an organization or use a shorter token"
     )]

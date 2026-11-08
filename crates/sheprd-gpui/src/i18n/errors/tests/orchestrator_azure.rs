@@ -17,6 +17,9 @@ fn every_azure_variant_has_a_message() {
             origin: "https://dev.azure.com".into(),
             source: Box::new(ureq::Error::HostNotFound),
         },
+        azure::Error::NoCheckout {
+            repository: repository(),
+        },
         azure::Error::NoOrganization("contoso".into()),
         azure::Error::NoStore(sheprd_credentials::Error::Policy),
         azure::Error::NotFound {
@@ -25,6 +28,7 @@ fn every_azure_variant_has_a_message() {
         azure::Error::Organization("two words".into()),
         azure::Error::RateLimit,
         azure::Error::Read(std::io::Error::other("pipe closed")),
+        azure::Error::Reader,
         azure::Error::Record,
         azure::Error::RecordSize,
         azure::Error::SignIn {

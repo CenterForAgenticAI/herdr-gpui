@@ -29,6 +29,10 @@ impl Localize for Error {
                 origin = origin.as_str(),
                 error = source.to_string()
             ),
+            Self::NoCheckout { repository } => fl!(
+                "error-orchestrator-azure-no-checkout",
+                repository = repository.as_str()
+            ),
             #[cfg(target_os = "linux")]
             Self::NoKeyring(_) => fl!("error-orchestrator-azure-no-keyring"),
             Self::NoOrganization(organization) => fl!(
@@ -46,6 +50,7 @@ impl Localize for Error {
             ),
             Self::RateLimit => fl!("error-orchestrator-azure-rate-limit"),
             Self::Read(error) => fl!("error-orchestrator-azure-read", error = error.to_string()),
+            Self::Reader => fl!("error-orchestrator-azure-reader"),
             Self::Record => fl!("error-orchestrator-azure-record"),
             Self::RecordSize => fl!("error-orchestrator-azure-record-size"),
             Self::SignIn { repository } => fl!(
