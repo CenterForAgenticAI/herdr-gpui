@@ -68,6 +68,8 @@ fn kept_workspaces_of_the_scope_are_listed_in_order() {
                 {"id": "space-1", "scope": "other", "label": "A", "cwd": "/a"},
                 {"id": "", "scope": "s", "label": "bad", "cwd": ""},
                 {"id": "space-3", "scope": "s", "label": "C", "cwd": "/c"},
+                {"id": "space-4", "scope": "s", "label": 7},
+                "not a workspace",
             ],
         }))
         .unwrap(),

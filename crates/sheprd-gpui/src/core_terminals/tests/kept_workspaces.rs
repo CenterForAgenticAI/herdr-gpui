@@ -143,3 +143,25 @@ fn with_herdr_1_kept_workspaces_list_after_its_own(cx: &mut TestAppContext) {
         assert_eq!(view.herdr_workspace_in_front(), Some("w0"));
     });
 }
+
+#[gpui::test]
+fn a_new_tab_starts_in_its_kept_workspaces_folder(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, true);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_kept_workspace(None, Path::new("/src/tools"), core_tab("t3"), window, cx);
+            view.new_core_terminal(window, cx);
+            let (purpose, spawn) = view.core_terminals.wanted.clone().unwrap();
+            assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/src/tools")));
+            let crate::core_terminals::Purpose::Tab { scope, workspace } = purpose else {
+                panic!("a tab");
+            };
+            // Closing the workspace while its shell starts leaves the shell
+            // nowhere to go: it is ended once it answers.
+            assert!(!view.kept_workspace_gone(&scope, &workspace, cx));
+            view.close_kept_workspace(&workspace, window, cx);
+            assert!(view.kept_workspace_gone(&scope, &workspace, cx));
+            assert!(!view.kept_workspace_gone(&scope, "w0", cx), "Herdr 1's");
+        })
+    });
+}
