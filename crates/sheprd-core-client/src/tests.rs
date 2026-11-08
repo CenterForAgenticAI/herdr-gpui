@@ -7,6 +7,7 @@ mod event;
 mod frame;
 mod hello;
 mod identity;
+mod label;
 mod labels;
 mod live;
 #[cfg(unix)]

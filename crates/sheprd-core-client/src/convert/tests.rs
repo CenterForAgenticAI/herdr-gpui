@@ -52,12 +52,72 @@ fn only_an_idle_known_agent_moves() {
     ));
 }
 
+const ENDPOINT: &str = "0123456789abcdef0123456789abcdef";
+
+fn labelled(mut info: TerminalInfo) -> TerminalInfo {
+    info.labels.insert(TOKEN.to_owned(), ENDPOINT.into());
+    info
+}
+
 #[test]
 fn a_chat_does_not_move_again() {
-    let mut chat = claude(AgentStatus::Idle);
-    chat.labels
-        .insert(TOKEN.to_owned(), "0123456789abcdef0123456789abcdef".into());
+    let chat = labelled(info(
+        AgentStatus::Idle,
+        Some(process(7, &["/opt/sheprd/sheprd-acp", "--resume", "s"])),
+    ));
     assert!(matches!(check(&chat), Err(convert::Error::AlreadyChat)));
+}
+
+#[test]
+fn a_label_is_a_chat_only_while_a_chat_program_is_in_front() {
+    let endpoint = Some(ENDPOINT.parse().unwrap());
+    // Started by a core that reports no process.
+    assert_eq!(
+        chat_endpoint(&labelled(info(AgentStatus::Idle, None))),
+        endpoint
+    );
+    for program in [
+        "/opt/sheprd/sheprd-acp",
+        "/opt/herdr/herdr-acp",
+        "herdr-acp.exe",
+    ] {
+        let chat = labelled(info(AgentStatus::Idle, Some(process(7, &[program]))));
+        assert_eq!(chat_endpoint(&chat), endpoint, "{program}");
+    }
+    // The chat ended and the shell it was typed into is back, or the agent
+    // was started there again: the label is left over.
+    let shell = labelled(info(AgentStatus::Idle, Some(process(9, &["zsh"]))));
+    assert_eq!(chat_endpoint(&shell), None);
+    let again = labelled(claude(AgentStatus::Idle));
+    assert_eq!(chat_endpoint(&again), None);
+    assert_eq!(check(&again).unwrap(), Agent::Claude);
+    // No label, or one that names no endpoint.
+    assert_eq!(chat_endpoint(&info(AgentStatus::Idle, None)), None);
+    let mut odd = info(AgentStatus::Idle, None);
+    odd.labels.insert(TOKEN.to_owned(), "not an id".into());
+    assert_eq!(chat_endpoint(&odd), None);
+}
+
+#[test]
+fn the_chat_line_names_its_endpoint_and_no_herdr_pane() {
+    let resume = Resume {
+        agent: Agent::Claude,
+        cwd: "/work/app".into(),
+        flags: vec!["--model".into(), "opus".into()],
+        session: "abc-123".into(),
+    };
+    let endpoint: EndpointId = ENDPOINT.parse().unwrap();
+    let line = chat_line(&resume, Path::new("/opt/sheprd/sheprd-acp"), &endpoint).unwrap();
+    let words = format!(
+        "'env' 'HERDR_PANE_ID=' 'HERDR_ACP_ENDPOINT={ENDPOINT}' '/opt/sheprd/sheprd-acp' '--resume' 'abc-123'"
+    );
+    assert!(line.starts_with(" sh -c "), "{line}");
+    assert!(line.contains(&words), "{line}");
+    assert!(line.contains("'--model' 'opus'"), "{line}");
+    assert!(matches!(
+        chat_line(&resume, Path::new("/it's/sheprd-acp"), &endpoint),
+        Err(convert::Error::Line)
+    ));
 }
 
 #[test]

@@ -12,14 +12,14 @@ pub enum Error {
     Busy,
     #[error(transparent)]
     Compat(#[from] hello::Mismatch),
-    #[error(transparent)]
-    Convert(#[from] sheprd_client::herdr::convert::Error),
     #[error("cannot reach herdr-core at {}", path.display())]
     Connect {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
+    #[error(transparent)]
+    Convert(#[from] sheprd_client::herdr::convert::Error),
     #[error(transparent)]
     Frame(#[from] frame::Error),
     #[error("herdr-core sent an invalid {0} answer")]

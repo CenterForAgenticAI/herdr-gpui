@@ -5,7 +5,9 @@
 //! Only an idle agent moves, and everything that could refuse is checked
 //! before it is touched. It stops on Ctrl+C (`terminal.keys`) until the shell
 //! that started it is back in front, and the `sheprd-acp --resume` line is
-//! then typed into that shell (`terminal.send`).
+//! then typed into that shell (`terminal.send`). The line names the chat's
+//! endpoint, and the terminal is labelled with it (`terminal.label`), as a
+//! chat started in a terminal of its own is, so every client finds it.
 //!
 //! herdr-core reports no agent session, unlike Herdr 1's integrations. Claude
 //! Code records its own in `~/.claude/sessions/<pid>.json`, by the process
@@ -16,7 +18,7 @@
 use crate::{Core, Result, agent_kind, backend::info};
 use serde::Deserialize;
 use sheprd_backend::{AgentStatus, Process, TerminalId, TerminalInfo};
-use sheprd_chat_protocol::{Agent, EndpointId, TOKEN, restore};
+use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN, restore};
 use sheprd_client::herdr::{
     AgentKind,
     convert::{self, Resume},
@@ -27,14 +29,29 @@ use std::{
     sync::atomic::AtomicBool,
 };
 
+/// The names a chat program runs under, as the OS reports them.
+const CHAT_PROGRAMS: &[&str] = &["herdr-acp", "sheprd-acp"];
+
+/// Herdr 1's pane variable, cleared so a chat in a herdr-core terminal never
+/// reports to a Herdr 1 pane the core happened to inherit.
+const PANE_ENV: &str = "HERDR_PANE_ID";
+
+/// The chat endpoint `info` runs: its token label, unless herdr-core reports
+/// another program than a chat in front. A terminal an agent moved out of
+/// keeps the label once its chat ends and its shell is back in front.
+pub fn chat_endpoint(info: &TerminalInfo) -> Option<EndpointId> {
+    let endpoint = info.labels.get(TOKEN)?.parse().ok()?;
+    let chat = info.foreground.as_ref().is_none_or(|process| {
+        let name = process.name.strip_suffix(".exe").unwrap_or(&process.name);
+        CHAT_PROGRAMS.contains(&name)
+    });
+    chat.then_some(endpoint)
+}
+
 /// Whether the terminal's agent is one that can move at all, however busy
 /// it is.
 pub fn movable(info: &TerminalInfo) -> Result<Agent, convert::Error> {
-    let chat = info
-        .labels
-        .get(TOKEN)
-        .is_some_and(|value| value.parse::<EndpointId>().is_ok());
-    if chat {
+    if chat_endpoint(info).is_some() {
         return Err(convert::Error::AlreadyChat);
     }
     let kind = agent_kind(info).ok_or(convert::Error::NoAgent)?;
@@ -143,6 +160,21 @@ pub fn resume(
     })
 }
 
+/// The line that starts `program` on `resume`'s session at `endpoint` in a
+/// Unix shell, through `env`, so the variables reach it whatever the shell.
+pub fn chat_line(
+    resume: &Resume,
+    program: &Path,
+    endpoint: &EndpointId,
+) -> Result<String, convert::Error> {
+    let program = program.to_str().ok_or(convert::Error::Line)?;
+    let endpoint = format!("{ENDPOINT_ENV}={endpoint}");
+    let pane = format!("{PANE_ENV}=");
+    let mut words = vec!["env", pane.as_str(), endpoint.as_str(), program];
+    words.extend(resume.words());
+    sheprd_client::quoted_line(&words).ok_or(convert::Error::Line)
+}
+
 /// What the core reports of `terminal` now.
 fn current(core: &Core, terminal: &TerminalId) -> Result<TerminalInfo> {
     let listed = core.list(false)?;
@@ -157,7 +189,8 @@ fn current(core: &Core, terminal: &TerminalId) -> Result<TerminalInfo> {
 /// Blocking: moves the agent in `terminal`, which a client last saw as
 /// `agent`, into a chat run by `program`, a path on this machine. `home`
 /// holds the agent's own records. Refusals before the agent stops leave it
-/// running; `cancelled` ends the move between rounds.
+/// running; `cancelled` ends the move between rounds. Returns the chat's
+/// endpoint, which the terminal is labelled with.
 pub fn run(
     core: &Core,
     terminal: &TerminalId,
@@ -165,13 +198,14 @@ pub fn run(
     program: &Path,
     home: &Path,
     cancelled: &AtomicBool,
-) -> Result<()> {
+) -> Result<EndpointId> {
     let found = current(core, terminal)?;
     if check(&found)? != agent {
         return Err(convert::Error::Moved.into());
     }
     let resume = resume(&found, agent, home, |path| std::fs::read_to_string(path))?;
-    let line = resume.local_line(program)?;
+    let endpoint = EndpointId::random();
+    let line = chat_line(&resume, program, &endpoint)?;
     convert::stop(
         agent,
         || current(core, terminal).map(|now| shell_in_front(&now, agent)),
@@ -180,7 +214,8 @@ pub fn run(
         cancelled,
     )?;
     core.send(terminal.as_str(), &line)?;
-    Ok(())
+    core.label(terminal.as_str(), &[(TOKEN, endpoint.as_str())])?;
+    Ok(endpoint)
 }
 
 #[cfg(test)]

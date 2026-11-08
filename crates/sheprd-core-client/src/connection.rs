@@ -229,6 +229,20 @@ impl Core {
         .map(drop)
     }
 
+    /// Sets `labels` on `terminal`, keeping its others; an empty value
+    /// removes one.
+    pub fn label(&self, terminal: &str, labels: &[(&str, &str)]) -> Result<()> {
+        let labels: serde_json::Map<String, Value> = labels
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), Value::from(*value)))
+            .collect();
+        self.call(
+            Method::TerminalLabel,
+            &json!({"terminal": terminal, "labels": labels}),
+        )
+        .map(drop)
+    }
+
     pub fn kill(&self, terminal: &str) -> Result<Terminal> {
         self.typed(Method::TerminalKill, &json!({"terminal": terminal}))
     }
