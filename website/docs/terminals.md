@@ -17,13 +17,15 @@ A Herdr daemon owns every terminal, so closing Sheprd leaves your terminals and 
 
 Nothing moves from one to the other: Herdr 1 tabs stay Herdr 1 tabs.
 
-To open a Herdr 2 terminal, run **New Herdr 2 Terminal** in the command palette, or `sheprd run new_core_terminal`. To make every new tab on this computer a Herdr 2 terminal, turn on **Settings > Tabs > New terminals use Herdr 2**:
+To open a Herdr 2 terminal, run **New Herdr 2 Terminal** in the command palette, or `sheprd run new_core_terminal`. To make every new tab a Herdr 2 terminal, turn on **Settings > Tabs > New terminals use Herdr 2**:
 
 ```toml
 herdr_2_terminals = true
 ```
 
-herdr-core runs only on this computer, so a new tab in a workspace on an SSH, WSL or cloud host stays a Herdr tab on that host. Sheprd joins a herdr-core that is already running, or starts your own `herdr-core` or the bundled one when a Herdr 2 terminal is first needed. `herdr-core ls` lists its terminals. If Herdr 1 is not installed, the window opens a herdr-core shell instead of asking you to install Herdr.
+On this computer, Sheprd joins a herdr-core that is already running, or starts your own `herdr-core` or the bundled one when a Herdr 2 terminal is first needed. `herdr-core ls` lists its terminals.
+
+A Herdr 2 terminal in a workspace on an SSH host, cloud machine, or WSL distribution runs in that host's herdr-core. Sheprd opens the connection itself, the same way it reaches the host's Herdr, and runs `herdr-core connect` there, which starts the host's core when none is running. Sheprd looks for `herdr-core` on the host's `PATH`, then in `~/.local/bin` and the usual Homebrew and Nix locations. A host without herdr-core keeps its new tabs in its Herdr. If Herdr 1 is not installed, the window opens a herdr-core shell instead of asking you to install Herdr.
 
 **Mirror Herdr 2 Pane** opens a watch-only view of the focused pane in a new tab. In the sidebar, a Herdr 2 list under the agents shows each pane of the workspace's Herdr 2 tabs with its status.
 

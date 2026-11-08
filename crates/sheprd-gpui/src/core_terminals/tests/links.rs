@@ -261,6 +261,37 @@ fn a_relative_path_is_read_again_once_the_folder_is_known(cx: &mut TestAppContex
     cx.update(|_, cx| assert_eq!(view.read(cx).link_rows(), [(0, 4..13)]));
 }
 
+#[gpui::test]
+fn another_hosts_paths_are_no_links_but_its_addresses_are(cx: &mut TestAppContext) {
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("notes.txt"), "hi").unwrap();
+    let (view, cx, _, asked) = shown(cx, &[&format!("notes.txt {URL}")], false);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.set_cwd(Some(folder.path()), cx);
+            view.set_remote(true, cx);
+        });
+    });
+    // The same name on this disk is not the file the other host printed.
+    let path = at(&view, cx, 2, 0);
+    cx.simulate_mouse_move(path, None, link_modifier());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(view.read(cx).link_rows().is_empty()));
+    cx.simulate_mouse_down(path, MouseButton::Left, link_modifier());
+    cx.simulate_mouse_up(path, MouseButton::Left, link_modifier());
+    assert!(opened(&asked).is_empty());
+    let address = at(&view, cx, 14, 0);
+    cx.simulate_mouse_move(address, None, link_modifier());
+    cx.simulate_mouse_down(address, MouseButton::Left, link_modifier());
+    cx.simulate_mouse_up(address, MouseButton::Left, link_modifier());
+    assert_eq!(opened(&asked).len(), 1);
+    // Back on this computer's core, the file is a link again.
+    cx.update(|_, cx| view.update(cx, |view, cx| view.set_remote(false, cx)));
+    cx.simulate_mouse_move(path, None, link_modifier());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(view.read(cx).link_rows(), [(0, 0..9)]));
+}
+
 #[test]
 fn a_terminal_found_by_name_has_its_details() {
     let mut infos = crate::core_terminals::infos::Infos::default();

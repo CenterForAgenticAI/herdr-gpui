@@ -4,8 +4,9 @@
 //! over a Herdr pane, nothing is read or drawn until the link modifier is
 //! held; then the text under the pointer is verified (a path once a check off
 //! the UI thread finds it on disk) and underlined, and only a click with the
-//! modifier held opens it, through the window's own opener. herdr-core runs
-//! on this computer, so its paths are this computer's.
+//! modifier held opens it, through the window's own opener. A path is only
+//! a link in a pane of this computer's core: another host's paths are not on
+//! this disk, so there, as in a remote Herdr pane, they are plain text.
 
 use super::CoreTerminalView;
 use crate::{
@@ -42,9 +43,11 @@ pub(super) struct Links {
 }
 
 impl CoreTerminalView {
-    /// The link at `cell`, whatever its kind.
+    /// The link at `cell`: any kind in a pane of this computer's core, and
+    /// no file path in another host's.
     fn link_at(&self, cell: Cell) -> Option<RowLink> {
         frame_link_at(self.screen.frame.as_deref()?, cell.column, cell.row)
+            .filter(|link| !self.remote || !matches!(link.target, RowTarget::Path { .. }))
     }
 
     fn file_link(&self, target: &RowTarget) -> Option<FileLink> {

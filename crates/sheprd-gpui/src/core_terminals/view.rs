@@ -89,6 +89,8 @@ pub(crate) struct CoreTerminalView {
     pane: Option<PaneLook>,
     /// Where the button held down is going.
     press: Option<pointer::Press>,
+    /// Whether the terminal runs in another host's core.
+    remote: bool,
     selection: Option<Selection>,
     /// The last frame painted with its cursor hidden, and the frame it came
     /// from, so a veiled pane copies a frame once rather than every paint.
@@ -126,6 +128,7 @@ impl CoreTerminalView {
             painter,
             pane: None,
             press: None,
+            remote: false,
             selection: None,
             sleeping: None,
             screen: Screen::default(),
@@ -148,6 +151,15 @@ impl CoreTerminalView {
         let cwd = cwd.and_then(std::path::Path::to_str);
         if self.cwd.as_deref() != cwd {
             self.cwd = cwd.map(str::to_owned);
+            self.rehover_link(cx);
+        }
+    }
+
+    /// Whether the pane's terminal runs in another host's core, whose
+    /// printed paths are no link to a file on this computer.
+    pub(crate) fn set_remote(&mut self, remote: bool, cx: &mut Context<Self>) {
+        if self.remote != remote {
+            self.remote = remote;
             self.rehover_link(cx);
         }
     }
