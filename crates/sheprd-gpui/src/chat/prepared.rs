@@ -13,8 +13,8 @@ use crate::{
     release_notes::{self, Line},
 };
 use sheprd_chat_protocol::{
-    Author, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, QuestionAnswer,
-    ToolContent, ToolKind, Transcript,
+    Author, EDIT_OMITTED, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT,
+    QuestionAnswer, Tool, ToolContent, ToolKind, ToolStatus, Transcript,
 };
 use std::{
     borrow::Cow,
@@ -27,9 +27,6 @@ pub(crate) mod tool;
 
 /// Lines of a tool call's text output shown under it.
 const TOOL_LINES: usize = 6;
-/// Bytes of a diff's sides compared line by line; past them it is counted
-/// as changed without its lines.
-const DIFF_BYTES: usize = 512 * 1024;
 /// How much of one answer is drawn: as much text as the program keeps for
 /// an entry, with room for long code. A longer answer ends with a note.
 pub(super) const MESSAGE: release_notes::Limits = release_notes::Limits {
@@ -70,8 +67,62 @@ const TOOL_IMAGES: usize = 4;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiffSummary {
     pub(crate) path: String,
+    /// Absent when the two sides were not compared: the file changed, but
+    /// by how much is unknown.
+    pub(crate) lines: Option<LineChanges>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LineChanges {
     pub(crate) added: usize,
     pub(crate) removed: usize,
+}
+
+impl std::ops::Add for LineChanges {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            added: self.added + other.added,
+            removed: self.removed + other.removed,
+        }
+    }
+}
+
+impl DiffSummary {
+    pub(crate) fn counted(path: String, added: usize, removed: usize) -> Self {
+        Self {
+            path,
+            lines: Some(LineChanges { added, removed }),
+        }
+    }
+
+    /// Adds another change to the same file. One unknown count makes the
+    /// total unknown: a partial sum would read as the whole change.
+    fn merge(&mut self, lines: Option<LineChanges>) {
+        self.lines = self.lines.zip(lines).map(|(a, b)| a + b);
+    }
+}
+
+/// The lines these changes add up to, unless one of them was not counted.
+pub(crate) fn total_lines(diffs: &[DiffSummary]) -> Option<LineChanges> {
+    diffs
+        .iter()
+        .try_fold(LineChanges::default(), |total, diff| {
+            Some(total + diff.lines?)
+        })
+}
+
+/// The files a finished edit changed without saying how, as when its sides
+/// were too large to send: the file still changed. Locations are listed as
+/// reported: a `:line` an agent added cannot be told from a name ending in
+/// `:digits`, so neither is cut.
+fn unshown_edits(tool: &Tool) -> &[String] {
+    if tool.kind == ToolKind::Edit && tool.status == ToolStatus::Completed {
+        &tool.locations
+    } else {
+        &[]
+    }
 }
 
 /// Characters of a tool call's header.
@@ -116,6 +167,9 @@ pub(crate) struct ToolSummary {
     /// What each content item shows once the card opens.
     pub(crate) previews: Vec<tool::Preview>,
     pub(crate) diffs: Vec<DiffSummary>,
+    /// An edit of the call was too large to send, so its files changed by
+    /// amounts nobody counted, even where another edit was counted.
+    pub(crate) omitted: bool,
     /// The first lines of its text output.
     pub(crate) lines: Vec<String>,
     /// Pictures it returned, the first [`TOOL_IMAGES`] of them.
@@ -362,17 +416,24 @@ impl Prepared {
             let Body::Tool(summary) = &**body else {
                 continue;
             };
-            for diff in &summary.diffs {
+            let unshown = match &entry.kind {
+                EntryKind::Tool(tool) if summary.diffs.is_empty() || summary.omitted => {
+                    unshown_edits(tool)
+                }
+                _ => &[],
+            };
+            let unshown = unshown.iter().map(|location| DiffSummary {
+                path: location.clone(),
+                lines: None,
+            });
+            for diff in summary.diffs.iter().cloned().chain(unshown) {
                 match self
                     .changed
                     .iter_mut()
                     .find(|known| known.path == diff.path)
                 {
-                    Some(known) => {
-                        known.added += diff.added;
-                        known.removed += diff.removed;
-                    }
-                    None => self.changed.push(diff.clone()),
+                    Some(known) => known.merge(diff.lines),
+                    None => self.changed.push(diff),
                 }
             }
         }
@@ -646,26 +707,15 @@ pub(crate) fn summarize(
         }
         summary.previews.extend(preview);
     }
+    summary.omitted = content
+        .iter()
+        .any(|item| matches!(item, ToolContent::Text { text } if text == EDIT_OMITTED));
+    if summary.omitted {
+        // A fragment that fit is only part of the change; its count alone
+        // would read as the whole.
+        for diff in &mut summary.diffs {
+            diff.lines = None;
+        }
+    }
     summary
-}
-
-/// Lines added and removed between two versions of a file too large to
-/// align, by counting each distinct line on both sides.
-pub(crate) fn diff_counts(old: &str, new: &str) -> (usize, usize) {
-    if old.len() + new.len() > DIFF_BYTES {
-        return (new.lines().count(), old.lines().count());
-    }
-    let mut counts: HashMap<&str, isize> = HashMap::new();
-    for line in old.lines() {
-        *counts.entry(line).or_default() -= 1;
-    }
-    for line in new.lines() {
-        *counts.entry(line).or_default() += 1;
-    }
-    counts
-        .values()
-        .fold((0, 0), |(added, removed), &count| match count {
-            count if count > 0 => (added + count.unsigned_abs(), removed),
-            count => (added, removed + count.unsigned_abs()),
-        })
 }

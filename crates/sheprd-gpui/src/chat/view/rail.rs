@@ -6,7 +6,11 @@
 mod activity;
 
 use self::activity::{Group, running_height};
-use super::{super::chats::ChatPane, Hues, disclosure::chevron};
+use super::{
+    super::{chats::ChatPane, prepared::total_lines},
+    Hues,
+    disclosure::chevron,
+};
 use crate::i18n::fl;
 use crate::{
     SheprdWindow, chat::rail_folds::RailSection, config::corners, motion, notifications::safe_text,
@@ -405,12 +409,13 @@ impl SheprdWindow {
         let hues = Hues::of(theme);
         let small = self.chat_small_text();
         let count = fl!("chat-rail-files", count = changed.len());
-        let summary = if chat.rail_folds.is_open(RailSection::Changed, busy) {
-            count
-        } else {
-            let added: usize = changed.iter().map(|diff| diff.added).sum();
-            let removed: usize = changed.iter().map(|diff| diff.removed).sum();
-            format!("{count} +{added} \u{2212}{removed}")
+        // One uncounted file makes the total unknown: a partial sum would
+        // read as the whole change.
+        let summary = match total_lines(changed) {
+            Some(lines) if !chat.rail_folds.is_open(RailSection::Changed, busy) => {
+                format!("{count} +{} \u{2212}{}", lines.added, lines.removed)
+            }
+            _ => count,
         };
         let body = div()
             .debug_selector(|| "chat-changed".into())
@@ -437,18 +442,18 @@ impl SheprdWindow {
                             .truncate()
                             .child(safe_text(short_path(&diff.path), 200)),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(rgb(hues.green))
-                            .child(format!("+{}", diff.added)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(rgb(hues.red))
-                            .child(format!("\u{2212}{}", diff.removed)),
-                    )
+                    .children(diff.lines.iter().flat_map(|lines| {
+                        [
+                            div()
+                                .flex_none()
+                                .text_color(rgb(hues.green))
+                                .child(format!("+{}", lines.added)),
+                            div()
+                                .flex_none()
+                                .text_color(rgb(hues.red))
+                                .child(format!("\u{2212}{}", lines.removed)),
+                        ]
+                    }))
             }))
             .children(self.chat_rail_more(changed.len()));
         Some(self.render_chat_rail_section(

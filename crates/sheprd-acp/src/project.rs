@@ -8,10 +8,10 @@ use std::collections::{HashMap, HashSet};
 
 use acp::v1 as wire;
 use sheprd_chat_protocol::{
-    ActivityKind, ActivityState, Author, Change, Choice, ConfigOption, Cost, Entry, EntryId,
-    EntryKind, Image, Mode, Modes, NoticeLevel, OptionCategory, OptionKind, OptionValue, PlanEntry,
-    PlanPriority, PlanStatus, SessionInfo, SlashCommand, Tokens, Tool, ToolContent, ToolKind,
-    ToolStatus, Transcript, TurnSummary, Usage,
+    ActivityKind, ActivityState, Author, Change, Choice, ConfigOption, Cost, EDIT_OMITTED, Entry,
+    EntryId, EntryKind, Image, Mode, Modes, NoticeLevel, OptionCategory, OptionKind, OptionValue,
+    PlanEntry, PlanPriority, PlanStatus, SessionInfo, SlashCommand, Tokens, Tool, ToolContent,
+    ToolKind, ToolStatus, Transcript, TurnSummary, Usage,
 };
 
 /// Sub-agents whose step counts are kept before forgetting those that left
@@ -828,9 +828,22 @@ fn tool_content(content: wire::ToolCallContent) -> ToolContent {
                 text: bounded(block_text(&content.content)),
             },
         },
+        // A clipped side changes the diff's meaning: what was cut from the
+        // new text reads as deleted. Keep both sides whole or neither.
+        wire::ToolCallContent::Diff(diff)
+            if diff.new_text.len() > MAX_ENTRY_TEXT
+                || diff
+                    .old_text
+                    .as_ref()
+                    .is_some_and(|old| old.len() > MAX_ENTRY_TEXT) =>
+        {
+            ToolContent::Text {
+                text: EDIT_OMITTED.to_owned(),
+            }
+        }
         wire::ToolCallContent::Diff(diff) => ToolContent::Diff {
-            new: bounded(diff.new_text),
-            old: diff.old_text.map(bounded),
+            new: diff.new_text,
+            old: diff.old_text,
             path: diff.path.display().to_string(),
         },
         wire::ToolCallContent::Terminal(terminal) => ToolContent::Terminal {
