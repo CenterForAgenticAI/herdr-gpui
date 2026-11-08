@@ -132,7 +132,7 @@ impl SheprdWindow {
             .map(|tab| (tab.tab_id.clone(), tab.label.clone()))
             .collect();
         // The workspace's Herdr 2 tabs, whose terminals the host's core runs.
-        let (core_tab_ids, core_tabs) = core_tabs(cx, &crate::browser::scope(selected), &target.id);
+        let moving = core_tabs(cx, &crate::browser::scope(selected), &target.id);
         let source = Source {
             place: Place {
                 endpoint_id: selected.id.clone(),
@@ -147,7 +147,7 @@ impl SheprdWindow {
             repo_label: worktree.label.clone(),
             branch: target.branch.clone(),
             tab_labels,
-            core_tabs,
+            core_tabs: moving.iter().map(|(_, panes)| panes.clone()).collect(),
         };
         // Every enabled host, connected or not: Teleport reaches each over its
         // own SSH. A connected host's snapshot saves a round trip; the others
@@ -201,7 +201,7 @@ impl SheprdWindow {
         let label = target.label.clone();
         self.menu.page = Some(Page::Teleport);
         self.menu.error = None;
-        self.teleport = Some(Teleport::start(source, label, hosts).closing(core_tab_ids));
+        self.teleport = Some(Teleport::start(source, label, hosts).closing(moving));
         window.focus(&self.menu.focus, cx);
         cx.notify();
     }
@@ -213,9 +213,9 @@ pub(crate) fn core_tabs(
     cx: &App,
     scope: &Scope,
     workspace: &str,
-) -> (Vec<TabId>, Vec<sheprd_session::panes::Panes>) {
+) -> Vec<(TabId, sheprd_session::panes::Panes)> {
     let Some(store) = cx.try_global::<Store>() else {
-        return Default::default();
+        return Vec::new();
     };
     store
         .in_workspace(scope, workspace)
@@ -226,7 +226,7 @@ pub(crate) fn core_tabs(
             }) => Some((tab.id, panes.clone())),
             _ => None,
         })
-        .unzip()
+        .collect()
 }
 
 #[cfg(test)]

@@ -28,9 +28,7 @@ fn the_workspaces_herdr_2_tabs_move_with_it(cx: &mut gpui::TestAppContext) {
             let other = store.open(scope.clone(), "w5", Some(core(&elsewhere, false)), None);
             (moving, other)
         });
-        let (ids, tabs) = core_tabs(cx, &scope, "w4");
-        assert_eq!(ids, [moving]);
-        assert_eq!(tabs, [split]);
-        assert!(core_tabs(cx, &Scope::endpoint("other"), "w4").0.is_empty());
+        assert_eq!(core_tabs(cx, &scope, "w4"), [(moving, split)]);
+        assert!(core_tabs(cx, &Scope::endpoint("other"), "w4").is_empty());
     });
 }

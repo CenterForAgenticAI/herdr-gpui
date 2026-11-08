@@ -4,7 +4,7 @@
 //! `herdr` CLI reads a Herdr 1 pane.
 
 use super::{
-    error::{Result, Step},
+    error::{Result, Step, decode},
     host::Host,
     launch::{AgentKind, Work},
     layout::Node,
@@ -101,8 +101,9 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// Each of `terminals` as its host's core reports it. One that cannot be
-/// read is left out, and its pane becomes an idle shell.
+/// Each of `terminals` as its host's core reports it. One the core no
+/// longer knows is left out, and its pane becomes an idle shell; any other
+/// failure fails the review, so a running program is never taken for one.
 pub(super) fn terminals(
     host: &Host,
     terminals: &[String],
@@ -115,24 +116,31 @@ pub(super) fn terminals(
         .iter()
         .map(|id| {
             format!(
-                "printf '\\036%s\\n' {id}\ncore_cli get --json {id} 2>/dev/null || :\nprintf '\\n'\n",
+                // herdr-core prints its errors as JSON on stdout too, so
+                // only a record is passed on.
+                "printf '\\036%s\\n' {id}\nif record=$(core_cli get --json {id}); then printf '%s\\n' \"$record\"; else status=$?; [ \"$status\" -eq {NOT_FOUND} ] || {{ printf '%s\\n' \"$record\" >&2; exit \"$status\"; }}; fi\n",
                 id = shell_quote(id)
             )
         })
         .collect::<String>();
     let output = host.query(Step::Review, &body, &[], cancelled)?;
-    Ok(parse_terminals(&String::from_utf8_lossy(&output)))
+    parse_terminals(&String::from_utf8_lossy(&output))
 }
 
-fn parse_terminals(output: &str) -> HashMap<String, Terminal> {
-    output
-        .split('\u{1e}')
-        .filter_map(|section| {
-            let (id, json) = section.split_once('\n')?;
-            let terminal = serde_json::from_str::<Terminal>(json.trim()).ok()?;
-            Some((id.to_owned(), terminal))
-        })
-        .collect()
+/// One section per terminal: its ID, then its record, or nothing when the
+/// core does not know it.
+fn parse_terminals(output: &str) -> Result<HashMap<String, Terminal>> {
+    let mut found = HashMap::new();
+    for section in output.split('\u{1e}').filter(|section| !section.is_empty()) {
+        let (id, json) = section.split_once('\n').unwrap_or((section, ""));
+        let json = json.trim();
+        if json.is_empty() {
+            continue;
+        }
+        let terminal = serde_json::from_str::<Terminal>(json).map_err(decode(Step::Review))?;
+        found.insert(id.to_owned(), terminal);
+    }
+    Ok(found)
 }
 
 /// Ask the agent in `terminal` for a handoff note and wait for its turn to

@@ -90,9 +90,9 @@ pub(crate) struct Teleport {
     selected: Option<usize>,
     cancelled: Arc<AtomicBool>,
     events: mpsc::Receiver<Event>,
-    /// The app's Herdr 2 tabs moving with the workspace, closed here once
-    /// the move has stopped their terminals.
-    closing: Vec<crate::browser::TabId>,
+    /// The app's Herdr 2 tabs moving with the workspace, and the panes
+    /// that move, closed here once the move has stopped their terminals.
+    closing: Vec<(crate::browser::TabId, sheprd_session::panes::Panes)>,
     /// The move got past stopping the source's programs.
     retired: bool,
 }
@@ -152,19 +152,31 @@ impl Teleport {
     }
 
     /// Closes `tabs` once a move has stopped their terminals.
-    pub(crate) fn closing(mut self, tabs: Vec<crate::browser::TabId>) -> Self {
+    pub(crate) fn closing(
+        mut self,
+        tabs: Vec<(crate::browser::TabId, sheprd_session::panes::Panes)>,
+    ) -> Self {
         self.closing = tabs;
         self
     }
 
-    /// The Herdr 2 tabs to close now that the move is over: all of them
-    /// when it stopped their terminals, else none.
-    fn closed_tabs(&mut self, finished: bool) -> Vec<crate::browser::TabId> {
-        if finished || self.retired {
-            std::mem::take(&mut self.closing)
-        } else {
-            Vec::new()
+    /// The Herdr 2 tabs to close now that the move is over: those it
+    /// stopped every terminal of, else none. `now` gives a tab's panes
+    /// today; one split or closed during the move keeps a pane that did not
+    /// move, or lost one, so it stays for the user to see.
+    fn closed_tabs(
+        &mut self,
+        finished: bool,
+        now: impl Fn(crate::browser::TabId) -> Option<sheprd_session::panes::Panes>,
+    ) -> Vec<crate::browser::TabId> {
+        if !finished && !self.retired {
+            return Vec::new();
         }
+        std::mem::take(&mut self.closing)
+            .into_iter()
+            .filter(|(tab, moved)| now(*tab).as_ref() == Some(moved))
+            .map(|(tab, _)| tab)
+            .collect()
     }
 
     #[cfg(test)]
@@ -329,7 +341,13 @@ impl SheprdWindow {
         };
         let destination = teleport.destination_label().unwrap_or_default().to_owned();
         let source = teleport.source.clone();
-        for tab in teleport.closed_tabs(result.is_ok()) {
+        let store = cx.try_global::<crate::browser::Store>();
+        let panes = |tab| match store?.get(tab)?.location.as_ref()? {
+            crate::browser::Location::CoreTerminal { panes, .. } => Some(panes.clone()),
+            _ => None,
+        };
+        let closed = teleport.closed_tabs(result.is_ok(), panes);
+        for tab in closed {
             self.close_browser_tab(tab, window, cx);
         }
         let outcome = match result {

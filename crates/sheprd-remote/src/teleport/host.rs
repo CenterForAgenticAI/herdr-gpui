@@ -29,6 +29,18 @@ enum Route {
     },
 }
 
+/// What herdr-core reads to choose the session and socket its CLI talks to,
+/// as `sheprd_core_client::Endpoint` resolves them.
+const CORE_ENV: &[&str] = &[
+    // keep-sorted start
+    "HC_SESSION",
+    "HC_SOCKET",
+    "XDG_CONFIG_HOME",
+    "XDG_RUNTIME_DIR",
+    "XDG_STATE_HOME",
+    // keep-sorted end
+];
+
 /// Largest bundle, session, or archive Teleport will carry.
 pub const TRANSFER_OUTPUT: u64 = 4 * 1024 * 1024 * 1024;
 /// Bulk Git work (bundling, fetching) can be quiet for a while.
@@ -165,20 +177,49 @@ export PATH
     /// `core_cli`, the host's herdr-core (Herdr 2) CLI: the user's own
     /// `herdr-core`, else, on this machine, the copy bundled beside the app,
     /// which is how the app itself starts a core when none runs.
+    ///
+    /// On this machine it runs with the login shell's values of what picks
+    /// a core session, as the app resolves the core it joins, so a launch
+    /// from the desktop never reaches another session's core.
     fn core_cli(&self) -> String {
-        let bundled = self
-            .is_local()
-            .then(|| std::env::current_exe().ok())
-            .flatten()
+        if !self.is_local() {
+            return r#"core_cli() { herdr-core "$@"; }"#.to_owned();
+        }
+        let bundled = std::env::current_exe()
+            .ok()
             .and_then(|exe| Some(exe.parent()?.join("herdr-core")))
             .filter(|path| path.is_file())
             .map(|path| shell_quote(&path.to_string_lossy()));
-        match bundled {
+        let program = match bundled {
             Some(bundled) => format!(
-                r#"core_cli() {{ if command -v herdr-core >/dev/null 2>&1; then herdr-core "$@"; else {bundled} "$@"; fi; }}"#
+                r#"if command -v herdr-core >/dev/null 2>&1; then herdr-core "$@"; else {bundled} "$@"; fi"#
             ),
-            None => r#"core_cli() { herdr-core "$@"; }"#.to_owned(),
-        }
+            None => r#"herdr-core "$@""#.to_owned(),
+        };
+        let exports = CORE_ENV
+            .iter()
+            .filter(|name| !self.sets(name))
+            .filter_map(|name| {
+                let value = sheprd_client::login_env::var(name)?;
+                Some(format!(
+                    "{name}={}; export {name}; ",
+                    shell_quote(&value.to_string_lossy())
+                ))
+            })
+            .collect::<String>();
+        // A subshell keeps the exports to the core's CLI.
+        format!("core_cli() ( {exports}{program} )")
+    }
+
+    /// Whether a test host's environment sets `name` itself.
+    #[cfg(any(test, feature = "test-support"))]
+    fn sets(&self, name: &str) -> bool {
+        self.env.iter().any(|(key, _)| key == name)
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    fn sets(&self, _: &str) -> bool {
+        false
     }
 
     /// Run `body` after the prelude, streaming `input` and `output`.
