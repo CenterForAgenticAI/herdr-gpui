@@ -4,7 +4,12 @@
 # or profiles in the repository) and uploads the export itself.
 #
 # Needs: APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, and ASC_KEY_P8 (the .p8
-# file's contents). BUILD_NUMBER defaults to one more than the highest
+# file's contents). In CI it also needs IOS_SIGNING_P12_BASE64 and
+# IOS_SIGNING_P12_PASSWORD: one Apple Development certificate the archive
+# signs with. A runner's keychain starts empty, so without one Xcode creates a
+# new certificate on every upload until the team reaches Apple's limit and
+# every archive fails. Distribution needs no certificate here: the export
+# signs with the team's cloud-managed one. BUILD_NUMBER defaults to one more than the highest
 # build App Store Connect has for the app (next-build.py). The build's "What
 # to Test" lists the commits since the last build (testflight_notes.py), so
 # this needs the checkout's full history. Without the key it says so and
@@ -18,10 +23,46 @@ if [ -z "${ASC_KEY_P8:-}" ] || [ -z "${ASC_KEY_ID:-}" ] || [ -z "${ASC_ISSUER_ID
 fi
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+keychain=""
+cleanup() {
+    if [ -n "$keychain" ]; then security delete-keychain "$keychain" 2>/dev/null || true; fi
+    rm -rf "$work"
+}
+trap cleanup EXIT
 key="$work/AuthKey.p8"
 umask 077
 printf '%s\n' "$ASC_KEY_P8" > "$key"
+
+if [ -n "${IOS_SIGNING_P12_BASE64:-}" ]; then
+    if [ -z "${IOS_SIGNING_P12_PASSWORD:-}" ]; then
+        echo "IOS_SIGNING_P12_BASE64 is set without IOS_SIGNING_P12_PASSWORD." >&2
+        exit 1
+    fi
+    echo "Adding the development certificate to a keychain of its own…"
+    keychain="$work/signing.keychain-db"
+    keychain_password=$(openssl rand -hex 24)
+    security create-keychain -p "$keychain_password" "$keychain"
+    # Locked keychains stop codesign mid-archive; six hours outlasts the job.
+    security set-keychain-settings -lut 21600 "$keychain"
+    security unlock-keychain -p "$keychain_password" "$keychain"
+    printf '%s' "$IOS_SIGNING_P12_BASE64" | base64 --decode > "$work/signing.p12"
+    security import "$work/signing.p12" -k "$keychain" -P "$IOS_SIGNING_P12_PASSWORD" \
+        -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+    rm -f "$work/signing.p12"
+    security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+        -k "$keychain_password" "$keychain" >/dev/null
+    # Searched first, ahead of the user's own keychains.
+    # shellcheck disable=SC2046
+    security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+    if ! security find-identity -v -p codesigning "$keychain" | grep -q "Apple Development"; then
+        echo "IOS_SIGNING_P12_BASE64 holds no Apple Development identity with its private key." >&2
+        exit 1
+    fi
+elif [ -n "${CI:-}" ]; then
+    echo "TestFlight upload refused: set IOS_SIGNING_P12_BASE64 and IOS_SIGNING_P12_PASSWORD." >&2
+    echo "Without them Xcode makes a new certificate on every run (see the top of this file)." >&2
+    exit 1
+fi
 bundle_id=so.pen.herdr.remote
 if [ -z "${BUILD_NUMBER:-}" ]; then
     echo "Asking App Store Connect for the last build number…"
