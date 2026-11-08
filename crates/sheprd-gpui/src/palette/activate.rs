@@ -69,7 +69,10 @@ impl SheprdWindow {
         if let Action::Core { tab, terminal } = &action {
             remember(cx);
             self.dismiss_menu(window, cx);
-            self.show_core_pane(*tab, terminal, window, cx);
+            match terminal {
+                Some(terminal) => self.show_core_pane(*tab, terminal, window, cx),
+                None => self.show_browser_tab(*tab, window, cx),
+            }
             return;
         }
         if let Action::Mod { name, id } = action {

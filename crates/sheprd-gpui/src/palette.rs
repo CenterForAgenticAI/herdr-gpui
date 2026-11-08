@@ -145,10 +145,11 @@ enum Action {
         boot: String,
         workspace: String,
     },
-    /// A Herdr 2 (herdr-core) pane, shown in its tab with the keyboard.
+    /// A Herdr 2 (herdr-core) tab, or one of its panes, shown with the
+    /// keyboard.
     Core {
         tab: crate::browser::TabId,
-        terminal: sheprd_backend::TerminalId,
+        terminal: Option<sheprd_backend::TerminalId>,
     },
     /// A command a mod declares; choosing it sends the mod `command:<id>`.
     Mod {
@@ -224,7 +225,7 @@ enum Identity {
     Project(std::path::PathBuf),
     NewProject(std::path::PathBuf),
     Note(String, String),
-    Core(crate::browser::TabId, sheprd_backend::TerminalId),
+    Core(crate::browser::TabId, Option<sheprd_backend::TerminalId>),
     Mod(String, String),
 }
 

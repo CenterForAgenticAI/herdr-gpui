@@ -113,6 +113,7 @@ fn command_badges_mark_daemon_commands_and_go_to_badges_mark_agent_status(cx: &m
                     Action::Project(_) => "Project",
                     Action::NewProject(_) => "Project",
                     Action::Note { .. } => "Note",
+                    Action::Core { terminal: None, .. } => "Tab",
                     Action::Core { .. } => "Terminal",
                     Action::Mod { .. } => "Mod",
                 };

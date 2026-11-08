@@ -219,21 +219,41 @@ pub(super) fn go_to_entries(
 }
 
 impl crate::SheprdWindow {
-    /// Go To rows for the focused workspace's Herdr 2 panes, as the sidebar
-    /// lists them: named as their chrome names them, with their tab and
-    /// folder, and their agent's status when one runs.
+    /// Go To rows for the focused workspace's Herdr 2 tabs and panes, as
+    /// Herdr's are listed: a tab row when there is a choice of tabs or the
+    /// user named it, then its panes, named as their chrome names them, with
+    /// their agent's status when one runs.
     pub(super) fn core_palette_entries(&self, cx: &gpui::App) -> Vec<Entry> {
         let store = cx.try_global::<crate::browser::Store>();
-        self.listed_core_panes(cx)
-            .into_iter()
-            .map(|(tab, terminal)| {
-                let (label, status) = self.core_pane_label(tab, &terminal, cx);
-                let tab_label = store
-                    .and_then(|store| store.get(tab))
-                    .map(crate::browser::Tab::label);
-                let detail = [tab_label.as_deref(), Some(terminal.as_str())]
+        let panes = self.listed_core_panes(cx);
+        let mut tabs: Vec<crate::browser::TabId> = panes.iter().map(|(tab, _)| *tab).collect();
+        tabs.dedup();
+        let keywords = |status| [status_keyword(status), "herdr-core", "Herdr 2"].join(" "); // i18n: data
+        let mut entries: Vec<Entry> = Vec::new();
+        for tab in tabs {
+            let tab_label = store
+                .and_then(|store| store.get(tab))
+                .map(crate::browser::Tab::label)
+                .unwrap_or_default();
+            let named = self.core_terminals.tab_named(tab);
+            let parent = (tabs_choice(&panes) || named).then(|| {
+                entries.push(Entry::with_keywords(
+                    tab_label.clone(),
+                    String::new(),
+                    fl!("palette-go-to-tab"),
+                    Action::Core {
+                        tab,
+                        terminal: None,
+                    },
+                    None,
+                    &keywords(AgentStatus::Unknown),
+                ));
+                entries.len() - 1
+            });
+            for (_, terminal) in panes.iter().filter(|(shown, _)| *shown == tab) {
+                let (label, status) = self.core_pane_label(tab, terminal, cx);
+                let detail = [tab_label.as_str(), terminal.as_str()]
                     .into_iter()
-                    .flatten()
                     .filter(|text| !text.is_empty() && *text != label)
                     .collect::<Vec<_>>()
                     .join("  ");
@@ -241,20 +261,28 @@ impl crate::SheprdWindow {
                     AgentStatus::Unknown => fl!("palette-go-to-terminal"),
                     status => status_badge(status),
                 };
-                let keywords = [status_keyword(status), "herdr-core", "Herdr 2"].join(" "); // i18n: data
                 let mut entry = Entry::with_keywords(
                     label,
                     detail,
                     badge,
-                    Action::Core { tab, terminal },
-                    None,
-                    &keywords,
+                    Action::Core {
+                        tab,
+                        terminal: Some(terminal.clone()),
+                    },
+                    parent,
+                    &keywords(status),
                 );
                 entry.status = (status != AgentStatus::Unknown).then_some(status);
-                entry
-            })
-            .collect()
+                entries.push(entry);
+            }
+        }
+        entries
     }
+}
+
+/// Whether the panes listed lie in more than one tab, so a tab is a choice.
+fn tabs_choice(panes: &[(crate::browser::TabId, sheprd_backend::TerminalId)]) -> bool {
+    panes.windows(2).any(|pair| pair[0].0 != pair[1].0)
 }
 
 /// A row for each open workspace whose checkout has a note, most recently

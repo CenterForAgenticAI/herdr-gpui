@@ -321,6 +321,13 @@ impl CoreTerminals {
             .unwrap_or(AgentStatus::Unknown)
     }
 
+    /// Whether the user named `tab`.
+    pub(crate) fn tab_named(&self, tab: TabId) -> bool {
+        self.tabs
+            .get(&tab)
+            .is_some_and(|shown| shown.name.is_some())
+    }
+
     /// The tab and pane whose view holds the keyboard.
     pub(crate) fn focused_pane(&self, window: &Window, cx: &App) -> Option<(TabId, TerminalId)> {
         self.views
