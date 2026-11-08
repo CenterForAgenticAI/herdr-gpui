@@ -72,7 +72,9 @@ remote `--state-dir`
 desktop state context instead of the service environment. Only tabs for the
 selected local Herdr 1 endpoint are used. The workspaces Sheprd keeps for
 Herdr 2 terminals in the same file come first, in the user's order, with
-their names and folders, even before they hold a tab.
+their names and folders, even before they hold a tab. A tab or chat a phone
+starts in a workspace is labelled with it (`sheprd.workspace`): the daemon
+lists it there at once, and Sheprd gives it a tab of its own there.
 Other core terminals appear in a **Herdr 2** workspace, including terminals
 created by `hc` and the desktop's shell when Herdr 1 is absent. Status comes
 from the core's terminal records. The phone reports **Herdr not running**
