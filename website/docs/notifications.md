@@ -119,7 +119,7 @@ sound = false     # play the system alert sound
 
 A burst rings at most once per 500 ms. **QA > Ring Bell in 3 Seconds** previews both, giving you time to switch to another app.
 
-Herdr 2 terminals ring the same way while their tab is in the workspace shown. A mirror tab never rings: the tab driving the terminal does.
+Herdr 2 terminals ring the same way while their tab is in the workspace shown; a tab in another workspace stays quiet. A mirror tab never rings: the tab driving the terminal does.
 
 ## Dock and taskbar badges
 

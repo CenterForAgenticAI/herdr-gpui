@@ -30,19 +30,26 @@ impl Effects {
 }
 
 impl SheprdWindow {
-    /// Takes new screens from `views` and what they ask of the window.
+    /// Takes new screens from `views` and what they ask of the window. A
+    /// view whose tab is in another workspace than the one shown keeps its
+    /// screen current but rings nothing, as its tab is out of sight; its
+    /// clipboard writes still land, as Herdr's do from any pane.
     pub(super) fn poll_core_views(
         &mut self,
-        views: impl IntoIterator<Item = Entity<CoreTerminalView>>,
+        views: impl IntoIterator<Item = (Entity<CoreTerminalView>, bool)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let mut effects = Effects::default();
-        for view in views {
-            effects.merge(view.update(cx, |view, cx| {
+        for (view, shown) in views {
+            let mut taken = view.update(cx, |view, cx| {
                 view.poll(cx);
                 view.take_effects()
-            }));
+            });
+            if !shown {
+                taken.bells = 0;
+            }
+            effects.merge(taken);
         }
         self.apply_core_effects(effects, window, cx);
     }

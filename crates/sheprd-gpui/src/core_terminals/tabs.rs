@@ -114,7 +114,20 @@ impl SheprdWindow {
             .iter()
             .map(|(key, view)| (key.clone(), view.clone()))
             .collect();
-        self.poll_core_views(views.iter().map(|(_, view)| view.clone()), window, cx);
+        let in_sight: std::collections::HashSet<TabId> = self
+            .browser_key()
+            .zip(cx.try_global::<Store>())
+            .map(|((scope, workspace), store)| {
+                store
+                    .in_workspace(&scope, &workspace)
+                    .map(|tab| tab.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let polled = views
+            .iter()
+            .map(|((tab, _), view)| (view.clone(), in_sight.contains(tab)));
+        self.poll_core_views(polled, window, cx);
         let mut ended = Vec::new();
         for ((tab, terminal), view) in views {
             let split = self

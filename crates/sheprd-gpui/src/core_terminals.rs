@@ -347,7 +347,11 @@ impl SheprdWindow {
         }
         self.poll_core_fallback(cx);
         self.refresh_core_looks(cx);
-        self.poll_core_views(self.core_fallback_view(), window, cx);
+        self.poll_core_views(
+            self.core_fallback_view().map(|view| (view, true)),
+            window,
+            cx,
+        );
         self.poll_core_panes(window, cx);
         // Split chrome and the sidebar's rows name panes from what herdr-core
         // reports, so it is read while any herdr-core tab is known.

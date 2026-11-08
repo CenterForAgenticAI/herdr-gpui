@@ -84,3 +84,37 @@ fn the_mailbox_delivers_bells_and_the_clipboard_once() {
         (0, None, Some("vim"))
     );
 }
+
+/// What a view takes from a bell and a clipboard write, twice.
+fn effects_of_a_view(cx: &mut gpui::TestAppContext, observe: bool) -> (Effects, Effects) {
+    let backend = Scripted::default();
+    backend.push(vec![
+        SurfaceUpdate::Bell,
+        SurfaceUpdate::Clipboard("copied".into()),
+    ]);
+    let (view, cx, _) = super::accessibility::open_on(cx, backend, observe);
+    until(|| {
+        cx.update(|_, cx| view.update(cx, |view, cx| view.poll(cx)))
+            .then_some(())
+    });
+    cx.update(|_, cx| view.update(cx, |view, _| (view.take_effects(), view.take_effects())))
+}
+
+#[gpui::test]
+fn a_driving_view_hands_its_effects_over_once(cx: &mut gpui::TestAppContext) {
+    let (first, second) = effects_of_a_view(cx, false);
+    assert_eq!(
+        first,
+        Effects {
+            bells: 1,
+            clipboard: Some("copied".into()),
+        }
+    );
+    assert_eq!(second, Effects::default());
+}
+
+#[gpui::test]
+fn a_mirror_neither_rings_nor_copies(cx: &mut gpui::TestAppContext) {
+    let (first, second) = effects_of_a_view(cx, true);
+    assert_eq!((first, second), (Effects::default(), Effects::default()));
+}
