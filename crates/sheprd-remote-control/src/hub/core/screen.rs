@@ -290,10 +290,12 @@ impl Screen {
 /// past the whole history counts one short of it, which still takes any
 /// scrolled view to the top. The emulator is left live.
 pub(super) fn feed(emulator: &mut Emulator, bytes: &[u8]) -> u64 {
-    let before = emulator.scroll_metrics().history;
-    if before == 0 {
+    // Without history (a new screen, or a full-screen program's) no view
+    // is scrolled, so nothing needs counting: and leaving a full-screen
+    // program brings back history that is not new.
+    if emulator.scroll_metrics().history == 0 {
         emulator.feed(bytes);
-        return emulator.scroll_metrics().history as u64;
+        return 0;
     }
     emulator.scroll(Scroll::Bottom);
     emulator.scroll(Scroll::Lines(1));

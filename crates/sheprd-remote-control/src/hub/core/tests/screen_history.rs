@@ -68,8 +68,9 @@ fn a_screen_without_history_reads_only_itself() {
 #[test]
 fn feeding_counts_the_lines_pushed_into_history() {
     let mut emulator = Emulator::new(Size::new(10, 3).unwrap(), 5);
-    // Into an empty history, then into one that has lines.
-    assert_eq!(screen::feed(&mut emulator, b"1\r\n2\r\n3\r\n4"), 1);
+    // Nothing counts into an empty history, where no view is scrolled.
+    assert_eq!(screen::feed(&mut emulator, b"1\r\n2\r\n3\r\n4"), 0);
+    assert_eq!(emulator.scroll_metrics().history, 1);
     assert_eq!(screen::feed(&mut emulator, b"\r\n5\r\n6"), 2);
     // A full history still counts what passes through it.
     assert_eq!(screen::feed(&mut emulator, b"\r\n7\r\n8"), 2);
@@ -107,4 +108,18 @@ fn a_scrolled_view_stays_on_its_lines_as_output_arrives() {
         since + pushed,
     );
     assert_eq!(plain(&read), ["10", "11", "12"]);
+}
+
+#[test]
+fn leaving_a_full_screen_program_moves_no_view() {
+    let mut emulator = numbered(10);
+    // Into the alternate screen, which has no history, and out again.
+    assert_eq!(screen::feed(&mut emulator, b"\x1b[?1049h\x1b[2Jvim"), 0);
+    assert_eq!(emulator.scroll_metrics().history, 0);
+    assert_eq!(screen::feed(&mut emulator, b"\x1b[?1049l"), 0);
+    assert_eq!(
+        emulator.scroll_metrics().history,
+        7,
+        "the shell's history is back"
+    );
 }
