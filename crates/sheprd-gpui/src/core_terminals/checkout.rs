@@ -35,7 +35,9 @@ impl Checkout {
     /// Whether Git has answered about `folder`, with a branch or without.
     #[cfg(test)]
     pub(super) fn answered(&self, folder: &Path) -> bool {
-        self.known.as_ref().is_some_and(|(known, ..)| known == folder)
+        self.known
+            .as_ref()
+            .is_some_and(|(known, ..)| known == folder)
     }
 
     /// Takes Git's answer and asks again about `folder` when it is new or
