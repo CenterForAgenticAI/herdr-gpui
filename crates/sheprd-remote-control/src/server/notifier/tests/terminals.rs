@@ -4,15 +4,20 @@ use super::*;
 use crate::hub::{TerminalAgent, Workspace, layout_terminal};
 use sheprd_client::protocol::AgentStatus;
 
+fn agent(pane: &str, name: Option<&str>, status: AgentStatus) -> TerminalAgent {
+    TerminalAgent {
+        name: name.map(str::to_owned),
+        status,
+        pane: pane.to_owned(),
+        title: Some("\u{2733} Fix the flaky test".to_owned()),
+        changed_ms: None,
+    }
+}
+
 fn layout(name: Option<&str>) -> Layout {
     let mut terminal = layout_terminal("t1", "server");
-    terminal.agent = Some(TerminalAgent {
-        name: name.map(str::to_owned),
-        status: AgentStatus::Blocked,
-        pane: "t1-p1".to_owned(),
-        title: Some("Fix the flaky test".to_owned()),
-        changed_ms: None,
-    });
+    terminal.agent = Some(agent("t1-p1", name, AgentStatus::Blocked));
+    terminal.agents = vec![agent("t1-p1", name, AgentStatus::Blocked)];
     let plain = layout_terminal("t2", "shell");
     Layout {
         workspaces: vec![Workspace {
@@ -41,7 +46,34 @@ fn only_tabs_with_an_agent_count_named_as_people_read_them() {
     assert_eq!(agent.chat.title, "server");
     assert_eq!(agent.chat.workspace, "herdr-gpui");
     assert_eq!(agent.status, AgentStatus::Blocked);
-    assert_eq!(agent.task, Some("Fix the flaky test"));
+    assert_eq!(
+        agent.task,
+        Some("Fix the flaky test"),
+        "without the spinner"
+    );
+}
+
+#[test]
+fn each_pane_of_a_split_is_its_own_agent() {
+    let mut layout = layout(Some("claude"));
+    let terminal = &mut layout.workspaces[0].terminals[0];
+    terminal.agents = vec![
+        agent("t1-p1", Some("claude"), AgentStatus::Done),
+        agent("t1-p2", Some("codex"), AgentStatus::Working),
+    ];
+    let names = agent_names(&layout);
+    let seen = terminal_agents(&layout, &names);
+    let panes: Vec<_> = seen
+        .iter()
+        .map(|agent| (agent.chat.pane, agent.chat.agent, agent.status))
+        .collect();
+    assert_eq!(
+        panes,
+        [
+            ("t1-p1", "Claude", AgentStatus::Done),
+            ("t1-p2", "Codex", AgentStatus::Working),
+        ]
+    );
 }
 
 #[test]

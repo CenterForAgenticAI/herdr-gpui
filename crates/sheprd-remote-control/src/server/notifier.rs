@@ -165,10 +165,20 @@ fn terminal_changes(
     let layout = state.hub.layout();
     let names = agent_names(&layout);
     let seen = terminal_agents(&layout, &names);
+    let moves = agents.step(seen.iter().copied(), now);
+    if moves.is_empty() {
+        return Vec::new();
+    }
+    let wanting = state.attention();
     let mut alerts = Vec::new();
-    for moved in agents.step(seen.iter().copied(), now) {
+    for moved in moves {
         let agent = seen.iter().find(|agent| agent.chat.pane == moved.pane);
         live.terminal(state, &moved, agent, now);
+        // A finish a phone opened while it settled was seen: its clear
+        // went out already, and nothing would close a later alert.
+        if !wanting.contains(&moved.pane) {
+            continue;
+        }
         if let Some(alert) = agent.and_then(|agent| decide_terminal(agent, &moved, state.privacy)) {
             alerts.push(alert);
         }
@@ -182,7 +192,7 @@ fn agent_names(layout: &Layout) -> HashMap<&str, String> {
         .workspaces
         .iter()
         .flat_map(|workspace| &workspace.terminals)
-        .filter_map(|terminal| terminal.agent.as_ref())
+        .flat_map(|terminal| &terminal.agents)
         .map(|agent| {
             let name = agent.name.as_deref().map_or_else(
                 || "The agent".to_owned(),
@@ -198,7 +208,8 @@ fn agent_names(layout: &Layout) -> HashMap<&str, String> {
         .collect()
 }
 
-/// The agents in `layout`'s terminal tabs.
+/// The agents in `layout`'s terminal tabs, one per pane: a split's panes
+/// each finish or ask on their own.
 pub(super) fn terminal_agents<'a>(
     layout: &'a Layout,
     names: &'a HashMap<&str, String>,
@@ -207,9 +218,8 @@ pub(super) fn terminal_agents<'a>(
         .workspaces
         .iter()
         .flat_map(|workspace| {
-            workspace.terminals.iter().filter_map(move |terminal| {
-                let agent = terminal.agent.as_ref()?;
-                Some(SeenAgent {
+            workspace.terminals.iter().flat_map(move |terminal| {
+                terminal.agents.iter().map(move |agent| SeenAgent {
                     chat: Chat {
                         agent: names
                             .get(agent.pane.as_str())
@@ -219,11 +229,17 @@ pub(super) fn terminal_agents<'a>(
                         workspace: &workspace.label,
                     },
                     status: agent.status,
-                    task: agent.title.as_deref(),
+                    task: agent.title.as_deref().map(task),
                 })
             })
         })
         .collect()
+}
+
+/// What a terminal's title says the agent works on, without the spinner
+/// or status mark an agent puts before it, which changes as it works.
+fn task(title: &str) -> &str {
+    title.trim_start_matches(|c: char| !c.is_alphanumeric())
 }
 
 /// Offers `notification` to every subscribed device's throttle and sends

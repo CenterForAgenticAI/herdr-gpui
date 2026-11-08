@@ -10,6 +10,7 @@
 //! | to waiting, from not running | start, question |
 //! | to waiting, while working | update, question, alert |
 //! | to working, from waiting | update, working |
+//! | a new task while running | update with the step, no alert |
 //! | to done, while running | end, finished, lingers |
 //! | to idle, or gone, while running | end, finished, dismissed at once |
 
@@ -61,6 +62,12 @@ pub(crate) fn decide(
                 state(Phase::Working),
             ))
         }
+        Some(AgentStatus::Working) if moved.from == AgentStatus::Working => {
+            Some(live(Event::Update { alert: None }, state(Phase::Working)))
+        }
+        Some(AgentStatus::Blocked) if moved.from == AgentStatus::Blocked => {
+            Some(live(Event::Update { alert: None }, state(Phase::Question)))
+        }
         Some(AgentStatus::Blocked) => {
             let agent = agent?;
             let event = if running {
@@ -95,6 +102,7 @@ fn start(agent: &SeenAgent<'_>, alert: Alert, computer: &str, fingerprint: &str)
             computer: excerpt(computer),
             computer_id: computer_id(fingerprint),
             pane: chat.pane.to_owned(),
+            terminal: true,
             workspace: excerpt(chat.workspace),
         },
     }

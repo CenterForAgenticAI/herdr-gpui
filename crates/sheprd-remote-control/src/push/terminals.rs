@@ -5,7 +5,9 @@
 //! A status counts once it held for [`SETTLE_MS`]: detection can flicker
 //! between working and waiting, and an agent the user answers at the
 //! computer at once needs no push. What was there when the daemon first
-//! saw a pane is never announced.
+//! saw a pane is never announced. While a run goes on, a new task (what the
+//! terminal's title says it works on) is a move to the same status, which
+//! updates a Live Activity's step and alerts nobody.
 
 use super::{Chat, Kind, Notification, Privacy, triggers};
 use sheprd_client::protocol::AgentStatus;
@@ -23,7 +25,8 @@ pub(crate) struct Seen<'a> {
     pub task: Option<&'a str>,
 }
 
-/// A settled status change of one terminal agent.
+/// A settled status change of one terminal agent, or a new task in a run
+/// (`from` and `to` the same).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Moved {
     pub pane: String,
@@ -40,6 +43,7 @@ struct Pane {
     raw: (AgentStatus, u64),
     settled: AgentStatus,
     started_ms: Option<u64>,
+    task: Option<String>,
 }
 
 /// Every terminal agent's settled status.
@@ -69,6 +73,7 @@ impl Agents {
                         raw: (agent.status, now_ms),
                         settled: agent.status,
                         started_ms: running.then_some(now_ms),
+                        task: agent.task.map(str::to_owned),
                     },
                 );
                 continue;
@@ -77,7 +82,22 @@ impl Agents {
                 tracked.raw = (agent.status, now_ms);
             }
             let (status, since) = tracked.raw;
-            if status == tracked.settled || now_ms.saturating_sub(since) < SETTLE_MS {
+            let task_moved = tracked.task.as_deref() != agent.task;
+            if task_moved {
+                tracked.task = agent.task.map(str::to_owned);
+            }
+            if status == tracked.settled {
+                if task_moved && is_running(status) {
+                    moved.push(Moved {
+                        pane: pane.to_owned(),
+                        from: status,
+                        to: Some(status),
+                        started_ms: tracked.started_ms,
+                    });
+                }
+                continue;
+            }
+            if now_ms.saturating_sub(since) < SETTLE_MS {
                 continue;
             }
             let from = std::mem::replace(&mut tracked.settled, status);
@@ -118,6 +138,9 @@ pub(crate) fn is_running(status: AgentStatus) -> bool {
 /// waiting for the user, or it finished work it was doing. Clearing an
 /// answered one is the badge's business, as for a chat's question.
 pub(crate) fn decide(agent: &Seen<'_>, moved: &Moved, privacy: Privacy) -> Option<Notification> {
+    if moved.to == Some(moved.from) {
+        return None;
+    }
     let excerpt = agent
         .task
         .filter(|_| privacy == Privacy::Excerpt)

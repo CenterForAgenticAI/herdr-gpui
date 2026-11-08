@@ -357,9 +357,11 @@ final class AppModel {
             return
         }
         let key = PaneKey(device: computer.device, pane: link.pane)
-        // An agent in a plain terminal alerts too, and opens its terminal.
-        if let item = fleet.terminalItems.first(where: { $0.computer.device == computer.device && $0.terminal.panes.contains { $0.pane == link.pane } }) {
-            pendingRoute = .term(key, title: item.terminal.label)
+        // An agent in a plain terminal alerts too, and opens its terminal,
+        // even before this phone has heard of a new one.
+        let terminal = fleet.terminalItems.first { $0.computer.device == computer.device && $0.terminal.panes.contains { $0.pane == link.pane } }
+        if link.terminal || terminal != nil {
+            pendingRoute = .term(key, title: terminal?.terminal.label ?? "Terminal")
             return
         }
         let title = fleet.chatItems.first { $0.computer.device == computer.device && $0.chat.pane == link.pane }?.chat.title

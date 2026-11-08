@@ -220,7 +220,7 @@ fn working(state: &State) -> u32 {
         .workspaces
         .iter()
         .flat_map(|workspace| &workspace.terminals)
-        .filter_map(|terminal| terminal.agent.as_ref())
+        .flat_map(|terminal| &terminal.agents)
         .filter(|agent| agent.status == sheprd_client::protocol::AgentStatus::Working)
         .count();
     u32::try_from(chats + terminals).unwrap_or(u32::MAX)

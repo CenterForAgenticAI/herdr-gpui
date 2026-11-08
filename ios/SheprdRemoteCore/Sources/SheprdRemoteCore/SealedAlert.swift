@@ -20,6 +20,9 @@ public struct SealedAlert: Codable, Hashable, Sendable {
         public init(from decoder: Decoder) throws {
             self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
         }
+
+        /// Whether it is about an agent in a plain terminal.
+        public var isTerminal: Bool { self == .terminalAsking || self == .terminalDone }
     }
 
     public struct Permission: Codable, Hashable, Sendable {

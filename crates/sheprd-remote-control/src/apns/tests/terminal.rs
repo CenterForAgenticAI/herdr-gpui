@@ -79,14 +79,19 @@ fn finishing_lingers_and_anything_else_ends_at_once() {
 
 #[test]
 fn nothing_runs_nothing_to_end() {
-    for (from, to) in [
-        (Idle, Some(Done)),
-        (Done, Some(Idle)),
-        (Idle, None),
-        (Working, Some(Working)),
-    ] {
+    for (from, to) in [(Idle, Some(Done)), (Done, Some(Idle)), (Idle, None)] {
         assert!(decide(from, to).is_none(), "{from:?} to {to:?}");
     }
+}
+
+#[test]
+fn a_new_task_moves_the_step_without_an_alert() {
+    let live = decide(Working, Some(Working)).unwrap();
+    assert_eq!(live.event, Event::Update { alert: None });
+    assert_eq!(live.state.step, "Fix the flaky test");
+    let live = decide(Blocked, Some(Blocked)).unwrap();
+    assert_eq!(live.event, Event::Update { alert: None });
+    assert_eq!(live.state.phase, Phase::Question);
 }
 
 #[test]
@@ -100,4 +105,25 @@ fn without_a_title_the_step_is_the_default() {
     )
     .unwrap();
     assert_eq!(live.state.step, DEFAULT_STEP);
+}
+
+#[test]
+fn a_terminal_activity_says_so_and_a_chat_leaves_it_out() {
+    let live = decide(Idle, Some(Working)).unwrap();
+    let Event::Start { attributes, .. } = &live.event else {
+        panic!("{:?}", live.event);
+    };
+    assert!(attributes.terminal);
+    let json = serde_json::to_value(attributes).unwrap();
+    assert_eq!(json["terminal"], true);
+    let chat = Attributes {
+        terminal: false,
+        ..attributes.clone()
+    };
+    assert!(
+        serde_json::to_value(chat)
+            .unwrap()
+            .get("terminal")
+            .is_none()
+    );
 }

@@ -174,3 +174,42 @@ fn a_terminal_question_skips_the_wait_and_lasts_a_day() {
     assert!(throttle.offer(alert.clone(), 10).is_some());
     assert_eq!(Delivery::for_notification(&alert).ttl_s, 24 * 60 * 60);
 }
+
+fn titled(status: AgentStatus, task: &'static str) -> SeenAgent<'static> {
+    SeenAgent {
+        task: Some(task),
+        ..seen(status)
+    }
+}
+
+#[test]
+fn a_new_task_in_a_run_moves_at_once_and_alerts_nobody() {
+    use AgentStatus::{Idle, Working};
+    let mut agents = TerminalAgents::default();
+    agents.step([titled(Working, "one")], 0);
+    let moved = agents.step([titled(Working, "two")], 100);
+    assert_eq!(moved.len(), 1);
+    assert_eq!((moved[0].from, moved[0].to), (Working, Some(Working)));
+    assert!(decide_terminal(&titled(Working, "two"), &moved[0], Privacy::Excerpt).is_none());
+    assert!(
+        agents.step([titled(Working, "two")], 200).is_empty(),
+        "once"
+    );
+    // Out of a run, a title is nobody's business.
+    let mut agents = TerminalAgents::default();
+    agents.step([titled(Idle, "one")], 0);
+    assert!(agents.step([titled(Idle, "two")], 100).is_empty());
+}
+
+#[test]
+fn a_new_task_on_the_way_to_another_status_rides_with_it() {
+    use AgentStatus::{Blocked, Working};
+    let mut agents = TerminalAgents::default();
+    agents.step([titled(Working, "one")], 0);
+    // Asking under a new title: one move once the status held, whose
+    // activity update shows the new title.
+    assert!(agents.step([titled(Blocked, "two")], 100).is_empty());
+    let moved = agents.step([titled(Blocked, "two")], 100 + SETTLE_MS);
+    assert_eq!(moved.len(), 1);
+    assert_eq!((moved[0].from, moved[0].to), (Working, Some(Blocked)));
+}
