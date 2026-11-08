@@ -14,6 +14,7 @@ pub enum ActivityPanel {
     Tasks,
     Security,
     Automations,
+    Ports,
     Usage,
 }
 
@@ -26,6 +27,7 @@ impl ActivityPanel {
         Self::Tasks,
         Self::Security,
         Self::Automations,
+        Self::Ports,
         Self::Usage,
     ];
 
@@ -39,6 +41,7 @@ impl ActivityPanel {
             Self::Tasks => "tasks",
             Self::Security => "security",
             Self::Automations => "automations",
+            Self::Ports => "ports",
             Self::Usage => "usage",
         }
     }
@@ -145,6 +148,13 @@ pub enum UiOp {
     Panel {
         panel: ActivityPanel,
     },
+    /// The agents panel's coordinator groups, and the one it shows.
+    AgentGroups,
+    /// Narrows the agents panel to a coordinator group; none lists them all.
+    AgentGroup {
+        #[serde(default)]
+        name: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,9 +206,20 @@ pub struct HostInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reply {
-    Windows { windows: Vec<WindowInfo> },
-    Size { width: f32, height: f32 },
-    FontSize { points: f32 },
+    Windows {
+        windows: Vec<WindowInfo>,
+    },
+    Size {
+        width: f32,
+        height: f32,
+    },
+    FontSize {
+        points: f32,
+    },
+    AgentGroups {
+        current: Option<String>,
+        groups: Vec<String>,
+    },
 }
 
 #[cfg(test)]
