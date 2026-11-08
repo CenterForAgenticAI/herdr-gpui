@@ -22,3 +22,6 @@ core-terminals-watching = Watching
 # The sidebar's list of herdr-core panes, under the agents.
 core-terminals-sidebar = Herdr 2
 core-terminals-edit-failed = Could not open the history in an editor
+# Editing scrollback saves it on this computer, so it is refused for a pane
+# running on another machine's Herdr 2.
+core-terminals-edit-remote = Editing scrollback works only for panes on this computer
