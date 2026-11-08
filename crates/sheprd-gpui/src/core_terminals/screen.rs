@@ -1,6 +1,6 @@
 //! What one attached terminal shows, built from its backend's updates.
 
-use sheprd_backend::{Exit, FrameData, KeyReporting, SurfaceUpdate};
+use sheprd_backend::{Exit, FrameData, KeyReporting, ScrollMetrics, SurfaceUpdate};
 use std::sync::Arc;
 
 /// The latest screen of one terminal. The worker applies updates to it and
@@ -13,10 +13,14 @@ pub(crate) struct Screen {
     /// Why the terminal could not be shown, for its tab to say.
     pub(crate) failure: Option<String>,
     pub(crate) frame: Option<Arc<FrameData>>,
+    /// Where the view is in its history.
+    pub(crate) history: ScrollMetrics,
     /// The key events the program asked for beyond typed text.
     pub(crate) keys: KeyReporting,
     /// Whether the program reads the mouse, so presses go to it.
     pub(crate) mouse_reporting: bool,
+    /// How often the text changed; history points hold for one revision.
+    pub(crate) revision: u64,
     pub(crate) title: Option<String>,
 }
 
@@ -49,6 +53,10 @@ impl Screen {
                     }
                 }
                 frame.cursor = cursor;
+            }
+            SurfaceUpdate::Scroll { metrics, revision } => {
+                self.history = metrics;
+                self.revision = revision;
             }
             SurfaceUpdate::Title(title) => {
                 self.title = Some(title).filter(|title| !title.is_empty())

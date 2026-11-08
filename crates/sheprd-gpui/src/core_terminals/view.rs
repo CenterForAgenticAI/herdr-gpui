@@ -3,6 +3,8 @@
 //! any number may show the same terminal, as observers.
 
 mod accessibility;
+mod find;
+mod history;
 pub(super) mod keys;
 pub(super) mod paste;
 mod pointer;
@@ -13,7 +15,7 @@ use super::{
     worker::{Command, Link},
 };
 use crate::{
-    config::{OptionAsAlt, Padding},
+    config::{FontConfig, OptionAsAlt, Padding, Theme},
     i18n::fl,
     terminal::{HeldKeys, key_input, viewport},
     terminal_painter::{Ground, TerminalPainter},
@@ -29,10 +31,19 @@ pub(crate) struct Look {
     pub(crate) background: Hsla,
     pub(crate) cell_height: f32,
     pub(crate) cell_width: f32,
+    /// The window's own look, for what the view draws over its cells.
+    pub(crate) chrome: Rc<Chrome>,
     pub(crate) font: Font,
     pub(crate) ground: Ground,
     pub(crate) option_as_alt: OptionAsAlt,
     pub(crate) padding: Padding,
+}
+
+/// The window's colors and interface font, for the find bar a view draws.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Chrome {
+    pub(crate) theme: Theme,
+    pub(crate) ui: FontConfig,
 }
 
 /// The least room a split's cells keep from their pane's edges, across
@@ -52,6 +63,13 @@ pub(crate) struct PaneLook {
 pub(crate) struct CoreTerminalView {
     /// Where the cells were last painted, for the IME's candidate window.
     bounds: Option<Bounds<Pixels>>,
+    /// The history text asked for an editor, once it arrived.
+    edit_ready: Option<Result<String, super::Error>>,
+    /// The history request whose text goes to an editor.
+    editing: Option<u64>,
+    find: Option<find::Find>,
+    /// The query the find bar last held, for the next one.
+    find_query: String,
     focus: FocusHandle,
     /// Releases for keys pressed while the program asked for them.
     held_keys: HeldKeys,
@@ -63,6 +81,8 @@ pub(crate) struct CoreTerminalView {
     look: Look,
     /// Text an IME is composing; committed text goes to the terminal.
     marked: String,
+    /// The last history request's ID.
+    next_request: u64,
     /// A mirror's view: it watches and never types.
     observe: bool,
     painter: Rc<RefCell<TerminalPainter>>,
@@ -92,6 +112,10 @@ impl CoreTerminalView {
     ) -> Self {
         Self {
             bounds: None,
+            edit_ready: None,
+            editing: None,
+            find: None,
+            find_query: String::new(),
             focus: cx.focus_handle(),
             held_keys: HeldKeys::default(),
             hovered: None,
@@ -99,6 +123,7 @@ impl CoreTerminalView {
             link,
             look,
             marked: String::new(),
+            next_request: 0,
             observe,
             painter,
             pane: None,
@@ -165,18 +190,26 @@ impl CoreTerminalView {
         self.link.mailbox.changed()
     }
 
-    /// Takes what the worker produced; true when there was something.
+    /// Takes what the worker produced; true when there was a new screen.
+    /// The screen is taken before the answers, so an answer arriving
+    /// between the two wakes the next poll.
     pub(crate) fn poll(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(screen) = self.link.mailbox.take() else {
-            return false;
-        };
-        self.screen = screen;
-        cx.notify();
-        true
+        let screen = self.link.mailbox.take();
+        let changed = screen.is_some();
+        if let Some(screen) = screen {
+            self.screen = screen;
+            cx.notify();
+        }
+        self.take_answers(cx);
+        if self.find.is_some() {
+            self.poll_find();
+        }
+        changed
     }
 
     pub(crate) fn set_look(&mut self, look: Look, cx: &mut Context<Self>) {
         self.look = look;
+        self.restyle_find(cx);
         cx.notify();
     }
 
@@ -203,6 +236,10 @@ impl CoreTerminalView {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Typing in the find bar is the field's, not the terminal's.
+        if self.find_focused(window, cx) {
+            return;
+        }
         let modifiers = event.keystroke.modifiers;
         // Cmd-C copies a selection, as the window's copy does a Herdr pane's.
         if modifiers.platform
@@ -305,7 +342,9 @@ impl Render for CoreTerminalView {
         let painter = self.painter.clone();
         let look = self.look.clone();
         let frame = self.frame_to_paint();
-        let highlights = self.highlights();
+        let mut highlights = self.find_highlights();
+        highlights.extend(self.highlights());
+        let find_bar = self.render_find(cx);
         let pane = self.pane;
         let background = self.look.background;
         let focus = self.focus.clone();
@@ -356,6 +395,7 @@ impl Render for CoreTerminalView {
                         .bg(background.opacity(f32::from(veil) / 255.)),
                 )
             })
+            .when_some(find_bar, |body, bar| body.child(bar))
             .when_some(status, |body, status| {
                 body.child(
                     div()
@@ -398,8 +438,10 @@ impl Render for CoreTerminalView {
             })
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
-            .on_action(cx.listener(|this, _: &crate::actions::Paste, _, cx| {
-                this.paste_clipboard(cx);
+            .on_action(cx.listener(|this, _: &crate::actions::Paste, window, cx| {
+                if !this.find_focused(window, cx) {
+                    this.paste_clipboard(cx);
+                }
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::mouse_down))

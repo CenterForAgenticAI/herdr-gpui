@@ -4,6 +4,7 @@ mod cursor;
 mod damage;
 mod events;
 mod fragmentation;
+mod history;
 mod links;
 mod scroll;
 mod size;

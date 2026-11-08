@@ -5,9 +5,11 @@
 
 use super::screen::Screen;
 use sheprd_backend::{
-    Backend, ClientPaneInputEvent, Role, Size, SurfaceUpdate, Terminal, TerminalId,
+    Backend, ClientPaneInputEvent, History, HistoryAnswer, Role, Size, SurfaceUpdate, Terminal,
+    TerminalId,
 };
 use std::{
+    collections::VecDeque,
     sync::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -20,11 +22,24 @@ const POLL: Duration = Duration::from_millis(8);
 /// Commands queued for one terminal; typing faster than this drops keys
 /// with a warning rather than growing without bound.
 const MAX_COMMANDS: usize = 256;
+/// History answers the view has not taken. A view keeps a request or two
+/// outstanding, so more than this means it stopped reading; the oldest go.
+const MAX_ANSWERS: usize = 8;
+
+/// A history request's answer, or why the terminal could not give one. The
+/// backend's error type is erased here, where answers cross to the UI.
+pub(crate) type Answer = Result<HistoryAnswer, Arc<dyn std::error::Error + Send + Sync>>;
 
 /// What the view asks of its terminal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Focus(bool),
+    /// A question about, or change to, the view's history, answered under
+    /// `id` in the mailbox.
+    History {
+        id: u64,
+        request: History,
+    },
     Input(ClientPaneInputEvent),
     Resize(Size),
 }
@@ -32,6 +47,7 @@ pub(crate) enum Command {
 /// The latest screen, and whether the window has seen it.
 #[derive(Default)]
 pub(crate) struct Mailbox {
+    answers: Mutex<VecDeque<(u64, Answer)>>,
     changed: AtomicBool,
     screen: Mutex<Screen>,
     stop: AtomicBool,
@@ -41,6 +57,25 @@ impl Mailbox {
     fn update(&self, change: impl FnOnce(&mut Screen)) {
         change(&mut self.screen.lock().unwrap_or_else(PoisonError::into_inner));
         self.changed.store(true, Ordering::Release);
+    }
+
+    fn answer(&self, id: u64, answer: Answer) {
+        let mut answers = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
+        if answers.len() == MAX_ANSWERS {
+            answers.pop_front();
+        }
+        answers.push_back((id, answer));
+        drop(answers);
+        self.changed.store(true, Ordering::Release);
+    }
+
+    /// The history answers that arrived since the last take, oldest first.
+    pub(crate) fn take_answers(&self) -> Vec<(u64, Answer)> {
+        self.answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect()
     }
 
     pub(crate) fn changed(&self) -> bool {
@@ -113,6 +148,14 @@ fn run<B: Backend>(
         for command in queue.try_iter() {
             let applied = match command {
                 Command::Focus(focused) => terminal.focus(focused),
+                // A failed answer is the view's to show; the terminal goes on.
+                Command::History { id, request } => {
+                    let answer = terminal
+                        .history(&request)
+                        .map_err(|error| Arc::new(error) as Arc<_>);
+                    mailbox.answer(id, answer);
+                    Ok(())
+                }
                 Command::Input(input) => terminal.input(&input),
                 Command::Resize(size) => terminal.resize(size),
             };

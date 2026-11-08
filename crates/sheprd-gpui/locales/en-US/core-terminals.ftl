@@ -19,3 +19,4 @@ core-terminals-mirror-needs-pane = Click a Herdr 2 pane to mirror first
 core-terminals-watching = Watching
 # The sidebar's list of herdr-core panes, under the agents.
 core-terminals-sidebar = Herdr 2
+core-terminals-edit-failed = Could not open the history in an editor

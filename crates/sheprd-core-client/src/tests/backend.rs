@@ -406,3 +406,5 @@ fn the_view_is_told_which_key_events_the_program_asks_for() {
         .unwrap();
     assert_eq!(typed.payload, b"\x1b[97;1:3u");
 }
+
+mod history;

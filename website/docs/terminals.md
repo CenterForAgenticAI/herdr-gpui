@@ -73,6 +73,8 @@ Right-click opens the pane menu, unless the pane routes right-clicks to its prog
 - **Find** (Cmd-F, or Ctrl+Shift+F) searches the focused pane's whole scrollback. Enter and Shift-Enter, or Cmd-G and Cmd-Shift-G, step through matches. A query with an uppercase letter is case-sensitive.
 - **Copy Mode** (Cmd-Shift-C, or Ctrl+Alt+Shift+C) moves a block cursor through the scrollback from the keyboard: `h` `j` `k` `l` and arrows step, `w` `b` `e` move by word, `/` and `?` search, `v` or Space marks by cell and `V` by line, `y` or Enter copies, and `q` or Escape leaves.
 - **Clear Pane** (Cmd-K, or Ctrl+Shift+K) clears the screen and scrollback without sending input to the program.
+- **Edit Scrollback** opens the pane's scrollback in `$VISUAL` or `$EDITOR` (`vi` by default, Notepad on Windows). The file is removed when the editor quits.
+- In a Herdr 2 pane, Sheprd keeps the scrollback itself, so Find, Clear Pane, and Edit Scrollback work whatever Herdr 1 is installed. Clear Pane clears only that view: a mirror of the pane, or the phone, keeps what it shows. Edit Scrollback opens the editor in a new pane beside it, which closes when the editor quits.
 
 ### Annotating terminal text
 

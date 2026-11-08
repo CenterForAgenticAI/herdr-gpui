@@ -52,6 +52,8 @@ pub enum Error {
     StartFailed { status: ExitStatus, stderr: String },
     #[error("herdr-core did not start within {0:?}")]
     StartTimeout(std::time::Duration),
+    #[error(transparent)]
+    Terminal(#[from] sheprd_terminal::Error),
     #[error("herdr-core did not answer {0} in time")]
     Timeout(Method),
     // keep-sorted end

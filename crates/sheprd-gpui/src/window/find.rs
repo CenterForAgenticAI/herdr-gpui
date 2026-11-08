@@ -12,7 +12,7 @@
 use super::SheprdWindow;
 use crate::i18n::{Localize, fl};
 use crate::{
-    find::{Search, Step, memory::Left},
+    find::{Search, Step, bar, memory::Left},
     scrollback::{Inbox, reveal_offset},
     search_input::{self, SearchInput},
     terminal_painter::Highlight,
@@ -335,29 +335,19 @@ impl SheprdWindow {
         let Some(bar) = &self.find else {
             return;
         };
-        if bar.input.read(cx).is_composing() {
+        let Some(action) = bar::key_action(event, bar.input.read(cx)) else {
             return;
-        }
-        let keystroke = &event.keystroke;
-        let modifiers = keystroke.modifiers;
-        let step = match keystroke.key.as_str() {
-            "escape" if !modifiers.modified() => {
-                self.close_find(window, cx);
-                None
-            }
-            "enter" if modifiers.shift => Some(Step::Newer),
-            "enter" => Some(Step::Older),
-            "up" if !modifiers.modified() => Some(Step::Older),
-            "down" if !modifiers.modified() => Some(Step::Newer),
-            "g" if crate::keymap::secondary(&modifiers) && modifiers.shift => Some(Step::Newer),
-            "g" if crate::keymap::secondary(&modifiers) => Some(Step::Older),
-            _ => return,
         };
-        if let Some(step) = step {
-            self.find_step(step, cx);
-        }
+        self.find_action(action, window, cx);
         cx.stop_propagation();
         window.prevent_default();
+    }
+
+    fn find_action(&mut self, action: bar::Action, window: &mut Window, cx: &mut Context<Self>) {
+        match action {
+            bar::Action::Close => self.close_find(window, cx),
+            bar::Action::Step(step) => self.find_step(step, cx),
+        }
     }
 
     /// The bar, laid over the top right of its pane in the frame on screen.
@@ -370,46 +360,13 @@ impl SheprdWindow {
         let surface = surface.filter(|surface| surface.popup.is_none())?;
         let pane = pane_of(surface, bar.search.pane_id())?;
         let cell_height = self.config.terminal.line_height();
-        let theme = &self.theme;
-        let has_matches = bar.search.has_matches();
         let label = bar
             .search
             .error()
             .map_or_else(|| bar.search.label(), str::to_owned);
-        let button = |id: &'static str, icon: &'static str, step: Option<Step>| {
-            div()
-                .id(id)
-                .debug_selector(move || id.into())
-                .flex_none()
-                .size(px(22.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(crate::config::corners::CONTROL))
-                .when(step.is_none() || has_matches, |button| {
-                    button
-                        .cursor_pointer()
-                        .hover(|button| button.bg(rgba((theme.foreground << 8) | 0x14)))
-                })
-                .child(
-                    svg()
-                        .path(icon)
-                        .size(px(if step.is_none() { 12. } else { 14. }))
-                        .text_color(rgb(if step.is_none() || has_matches {
-                            theme.foreground
-                        } else {
-                            theme.muted
-                        })),
-                )
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    match step {
-                        Some(step) => this.find_step(step, cx),
-                        None => this.close_find(window, cx),
-                    }
-                }))
-        };
+        let act = std::rc::Rc::new(cx.listener(|this, action: &bar::Action, window, cx| {
+            this.find_action(*action, window, cx);
+        }));
         Some(
             div()
                 .absolute()
@@ -419,52 +376,18 @@ impl SheprdWindow {
                 .flex()
                 .justify_end()
                 .p(px(6.))
-                .child(
-                    div()
-                        .id("find-bar")
-                        .debug_selector(|| "find-bar".into())
-                        .occlude()
-                        .min_w_0()
-                        .w(px(320.))
-                        .flex_shrink(1.)
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .p(px(4.))
-                        .rounded(px(crate::config::corners::CONTROL))
-                        .border_1()
-                        .border_color(rgb(theme.active))
-                        .bg(rgb(theme.surface))
-                        .text_color(rgb(theme.foreground))
-                        .text_size(px(self.config.ui.size))
-                        .shadow_md()
-                        .on_key_down(cx.listener(Self::find_key_down))
-                        .on_scroll(|_, _, cx| cx.stop_propagation())
-                        .child(div().flex_1().min_w_0().child(bar.input.clone()))
-                        .child(
-                            div()
-                                .debug_selector(|| "find-count".into())
-                                .flex_none()
-                                .px(px(4.))
-                                .text_color(rgb(if bar.search.error().is_some() {
-                                    theme.ink(theme.palette[1])
-                                } else {
-                                    theme.muted
-                                }))
-                                .child(label),
-                        )
-                        .child(button(
-                            "find-older",
-                            "icons/chevron-up.svg",
-                            Some(Step::Older),
-                        ))
-                        .child(button(
-                            "find-newer",
-                            "icons/chevron-down.svg",
-                            Some(Step::Newer),
-                        ))
-                        .child(button("find-close", "icons/close.svg", None)),
-                ),
+                .child(bar::render(
+                    bar::Bar {
+                        input: &bar.input,
+                        label,
+                        failed: bar.search.error().is_some(),
+                        has_matches: bar.search.has_matches(),
+                        theme: &self.theme,
+                        text_size: self.config.ui.size,
+                    },
+                    cx.listener(Self::find_key_down),
+                    move |action, window, cx| act(&action, window, cx),
+                )),
         )
     }
 }

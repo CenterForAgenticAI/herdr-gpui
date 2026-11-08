@@ -14,6 +14,7 @@
 mod commands;
 mod error;
 mod fallback;
+mod history;
 mod hub;
 mod infos;
 mod screen;
@@ -350,6 +351,7 @@ impl SheprdWindow {
             view.update(cx, |view, cx| view.poll(cx));
         }
         self.poll_core_panes(window, cx);
+        self.poll_core_edits(cx);
         // Split chrome and the sidebar's rows name panes from what herdr-core
         // reports, so it is read while any herdr-core tab is known.
         let listed = !self.core_terminals.tabs.is_empty();
@@ -459,6 +461,10 @@ impl SheprdWindow {
             background: self.fill().base(self.terminal_theme().background),
             cell_height: self.config.terminal.line_height(),
             cell_width: self.cell_width,
+            chrome: std::rc::Rc::new(view::Chrome {
+                theme: self.theme.clone(),
+                ui: self.config.ui.clone(),
+            }),
             font: self.config.terminal.font(),
             ground: self.ground(),
             option_as_alt: self.config.option_as_alt,

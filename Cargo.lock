@@ -9097,6 +9097,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sheprd-backend",
  "sheprd-chat-protocol",
  "sheprd-protocol",
  "tempfile",

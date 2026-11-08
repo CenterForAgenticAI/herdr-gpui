@@ -16,11 +16,15 @@ use gpui::{
 use sheprd_backend::{ClientPaneInputEvent, Role as AttachRole, TerminalId};
 use std::{cell::RefCell, rc::Rc};
 
-fn look() -> Look {
+pub(super) fn look() -> Look {
     Look {
         background: hsla(0., 0., 0., 1.),
         cell_height: 17.,
         cell_width: 8.5,
+        chrome: Rc::new(crate::core_terminals::view::Chrome {
+            theme: Default::default(),
+            ui: crate::config::Config::default().ui,
+        }),
         font: gpui::font("Menlo"),
         ground: Default::default(),
         option_as_alt: Default::default(),
@@ -35,7 +39,7 @@ fn open(
     open_on(cx, Scripted::default(), observe)
 }
 
-fn open_on(
+pub(super) fn open_on(
     cx: &mut TestAppContext,
     backend: Scripted,
     observe: bool,

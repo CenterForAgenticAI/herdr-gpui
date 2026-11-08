@@ -1,4 +1,6 @@
-use crate::{AgentStatus, CursorState, Error, FrameData, PaneSurfacePatchRow, Result};
+use crate::{
+    AgentStatus, CursorState, Error, FrameData, PaneSurfacePatchRow, Result, ScrollMetrics,
+};
 use std::{collections::BTreeMap, fmt, path::PathBuf};
 
 /// The longest side a terminal may have, matching the app's viewport clamp.
@@ -176,6 +178,12 @@ pub enum SurfaceUpdate {
     Rows {
         cursor: Option<CursorState>,
         rows: Vec<PaneSurfacePatchRow>,
+    },
+    /// Where the view is in its history, and its content revision: a count
+    /// of changes to its text, which history coordinates hold for.
+    Scroll {
+        metrics: ScrollMetrics,
+        revision: u64,
     },
     Title(String),
 }

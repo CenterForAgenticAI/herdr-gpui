@@ -352,7 +352,9 @@ impl SheprdWindow {
         {
             self.input_probe.actions += 1;
         }
-        if self.core_pane_command(command, window, cx) {
+        if self.core_pane_command(command, window, cx)
+            || self.core_history_command(command, window, cx)
+        {
             return;
         }
         match command {

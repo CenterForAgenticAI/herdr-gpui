@@ -1,0 +1,95 @@
+//! The view's questions to the history its emulator keeps, asked through
+//! the worker and answered in its mailbox: searches for the find bar, the
+//! text an editor opens, scrolling to a line, and clearing.
+
+use super::CoreTerminalView;
+pub(super) use crate::core_terminals::worker::Answer;
+use crate::core_terminals::{Error, worker::Command};
+use gpui::Context;
+use sheprd_backend::{History, HistoryAnswer};
+use sheprd_client::protocol::{PaneSurfacePane, PaneSurfaceScrollMetrics, SurfaceRect};
+
+impl CoreTerminalView {
+    /// Sends `request` to the worker; its answer comes back under the ID.
+    pub(super) fn ask(&mut self, request: History) -> u64 {
+        self.next_request = self.next_request.wrapping_add(1);
+        let id = self.next_request;
+        self.link.send(Command::History { id, request });
+        id
+    }
+
+    /// Hands each answer to what asked for it. Scrolls and clears answer
+    /// only that they were done.
+    pub(super) fn take_answers(&mut self, cx: &mut Context<Self>) {
+        for (id, answer) in self.link.mailbox.take_answers() {
+            if self.awaits_find(id) {
+                self.find_answered(id, answer);
+                cx.notify();
+            } else if self.editing == Some(id) {
+                self.editing = None;
+                self.edit_ready = Some(match answer {
+                    Ok(HistoryAnswer::Text(text)) => Ok(text),
+                    Ok(_) => Err(Error::Answer),
+                    Err(error) => Err(Error::History(error)),
+                });
+            }
+        }
+    }
+
+    /// The view as the shared find and copy mode read a pane: its own grid
+    /// from the top left, its place in its history, and its text revision,
+    /// doubled because those count an odd revision as a write in progress.
+    pub(super) fn surface_pane(&self) -> Option<PaneSurfacePane> {
+        let frame = self.screen.frame.as_ref()?;
+        let history = self.screen.history;
+        let rect = SurfaceRect {
+            x: 0,
+            y: 0,
+            width: frame.width,
+            height: frame.height,
+        };
+        Some(PaneSurfacePane {
+            pane_id: self.id.to_string(),
+            content_revision: self.screen.revision.wrapping_mul(2),
+            rect,
+            inner_rect: rect,
+            scrollbar_rect: None,
+            scroll: Some(PaneSurfaceScrollMetrics {
+                offset_from_bottom: u64::try_from(history.offset).unwrap_or(u64::MAX),
+                max_offset_from_bottom: u64::try_from(history.history).unwrap_or(u64::MAX),
+                viewport_rows: u64::from(frame.height),
+            }),
+            focused: true,
+            mouse_reporting: self.screen.mouse_reporting,
+            sgr_pixel_mouse: false,
+            alternate_screen_active: false,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+    }
+
+    /// Scrolls the view to `offset` lines above the live screen.
+    pub(super) fn scroll_history(&mut self, offset: usize) {
+        self.ask(History::ScrollTo { offset });
+    }
+
+    /// Clears this view's history and the screen above the prompt, as the
+    /// `clear_pane` command does to a Herdr 1 pane. Only this view changes:
+    /// the program and the terminal's other views keep what they show.
+    pub(crate) fn clear_history(&mut self, cx: &mut Context<Self>) {
+        self.selection = None;
+        self.ask(History::Clear);
+        cx.notify();
+    }
+
+    /// Asks for the whole text to open in an editor; [`Self::take_edit`]
+    /// has it once it arrives.
+    pub(crate) fn request_edit(&mut self) {
+        self.editing = Some(self.ask(History::Text));
+    }
+
+    /// The text [`Self::request_edit`] asked for, once.
+    pub(crate) fn take_edit(&mut self) -> Option<Result<String, Error>> {
+        self.edit_ready.take()
+    }
+}

@@ -1,7 +1,7 @@
 use crate::{Attachment, Core, End, Error, Result, wire::Attach};
 use sheprd_backend::{
-    ClientMouseKind, ClientPaneInputEvent, Exit, KeyReporting, Role, Size, SurfaceUpdate,
-    TerminalId,
+    ClientMouseKind, ClientPaneInputEvent, Exit, History, HistoryAnswer, KeyReporting, Role,
+    ScrollMetrics, Size, SurfaceUpdate, TerminalId,
 };
 use sheprd_terminal::{Damage, Emulator, Event, MouseReporting, Scroll};
 use std::{
@@ -27,6 +27,9 @@ pub struct CoreTerminal {
     /// Whether the program read the mouse when the view was last told.
     reporting: Option<bool>,
     role: Role,
+    /// Where the view was in its history, and the revision of its text,
+    /// when the view was last told.
+    scroll: Option<(ScrollMetrics, u64)>,
     /// An observer's core and when it last read the terminal's size there;
     /// an active view sets the size itself.
     sizing: Option<(Arc<Core>, Instant)>,
@@ -63,6 +66,7 @@ impl CoreTerminal {
             keys: None,
             reporting: None,
             role,
+            scroll: None,
             sizing: (role == Role::Observer).then(|| (Arc::clone(core), Instant::now())),
             sync_since: None,
         })
@@ -203,6 +207,14 @@ impl sheprd_backend::Terminal for CoreTerminal {
             self.reporting = Some(reporting);
             updates.push(SurfaceUpdate::MouseReporting(reporting));
         }
+        let scroll = (self.emulator.scroll_metrics(), self.emulator.revision());
+        if self.scroll != Some(scroll) {
+            self.scroll = Some(scroll);
+            updates.push(SurfaceUpdate::Scroll {
+                metrics: scroll.0,
+                revision: scroll.1,
+            });
+        }
         match self.emulator.take_damage() {
             Damage::Full(frame) => updates.push(SurfaceUpdate::Frame(frame)),
             damage if damage.is_empty() => {}
@@ -221,5 +233,11 @@ impl sheprd_backend::Terminal for CoreTerminal {
             None => {}
         }
         Ok(updates)
+    }
+
+    /// Answered from this view's emulator, an observer's too: scrolling
+    /// and clearing change what this view shows, never the program.
+    fn history(&mut self, request: &History) -> Result<HistoryAnswer> {
+        Ok(self.emulator.history(request)?)
     }
 }

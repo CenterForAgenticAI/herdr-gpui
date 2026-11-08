@@ -3,8 +3,8 @@
 
 use crate::core_terminals::worker::{self, Command};
 use sheprd_backend::{
-    Backend, Changes, ClientPaneInputEvent, FrameData, Generation, Role, Size, Spawn,
-    SurfaceUpdate, Terminal, TerminalId, TerminalInfo,
+    Backend, Changes, ClientPaneInputEvent, FrameData, Generation, History, HistoryAnswer, Role,
+    Size, Spawn, SurfaceUpdate, Terminal, TerminalId, TerminalInfo,
 };
 use std::{
     sync::{Arc, Mutex},
@@ -21,10 +21,18 @@ pub(super) struct Scripted {
     pub(super) received: Arc<Mutex<Vec<Command>>>,
     /// Updates for the terminal to hand out, one batch per `next`.
     updates: Arc<Mutex<Vec<Vec<SurfaceUpdate>>>>,
+    /// Answers to history requests other than a clear, first in first out;
+    /// with none left, a request is done.
+    pub(super) answers: Arc<Mutex<Vec<HistoryAnswer>>>,
     fail_attach: bool,
 }
 
 impl Scripted {
+    /// Hands `batch` to the terminal's next `next`.
+    pub(super) fn push(&self, batch: Vec<SurfaceUpdate>) {
+        self.updates.lock().unwrap().insert(0, batch);
+    }
+
     /// A backend whose terminals never attach.
     pub(super) fn failing_attach() -> Self {
         Self {
@@ -112,6 +120,23 @@ impl Terminal for ScriptedTerminal {
             std::thread::sleep(timeout);
         }
         Ok(batch.unwrap_or_default())
+    }
+
+    /// Clears fail; everything else takes the next scripted answer.
+    fn history(&mut self, request: &History) -> Result<HistoryAnswer, Failure> {
+        self.0.received.lock().unwrap().push(Command::History {
+            id: 0,
+            request: request.clone(),
+        });
+        if *request == History::Clear {
+            return Err(Failure);
+        }
+        let mut answers = self.0.answers.lock().unwrap();
+        Ok(if answers.is_empty() {
+            HistoryAnswer::Done
+        } else {
+            answers.remove(0)
+        })
     }
 }
 
@@ -229,3 +254,5 @@ fn an_ended_terminal_keeps_its_screen_and_stops_its_worker() {
     until(|| (Arc::strong_count(&backend.received) == 1).then_some(()));
     drop(link);
 }
+
+mod history;
