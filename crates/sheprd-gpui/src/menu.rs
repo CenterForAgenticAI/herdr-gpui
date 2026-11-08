@@ -20,6 +20,7 @@ pub(crate) mod gitlab;
 mod mute;
 mod open_checkout;
 mod open_link;
+mod overview_reply;
 mod page;
 mod page_title;
 mod port_signal;
@@ -72,6 +73,7 @@ pub(crate) use {
 
 use crate::direction::Logical;
 pub(crate) use devices::{DeviceScope, SettingsHint, enter as enter_key};
+pub(crate) use overview_reply::open_overview_reply;
 use page::WorkspaceMenuAction;
 use state::Submission;
 use workspace::WorkspaceTarget;

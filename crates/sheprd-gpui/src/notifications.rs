@@ -16,8 +16,11 @@ const RECHECK: Duration = Duration::from_millis(50);
 static ARRIVAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 mod context;
+mod history;
 #[cfg(test)]
 mod policy_tests;
+
+pub(crate) use history::{Alert, History, LIMIT as HISTORY_LIMIT};
 
 #[derive(Clone)]
 pub(crate) struct Notice {
@@ -40,6 +43,9 @@ pub(crate) struct Notice {
     ready: bool,
     pub(crate) visible: bool,
     checked: Option<Instant>,
+    /// Quiet hours held it while it waited out the delay. Such a notice stays
+    /// in the history only, even when the delay ends after the quiet hours.
+    hushed: bool,
     displayed: Option<(Instant, bool)>,
     suppression_target: Option<crate::navigation::OwnedNavigationTarget>,
     /// Handed to the OS notification center. Retained only so a click can
@@ -159,6 +165,7 @@ impl Notice {
             ready: false,
             visible: false,
             checked: None,
+            hushed: false,
             displayed: None,
             suppression_target,
             posted: false,
@@ -277,6 +284,8 @@ pub(crate) struct Toasts {
     pub entries: VecDeque<(u64, Notice)>,
     next_id: u64,
     pub(crate) enabled_since: Option<Instant>,
+    /// The alerts that passed the policy, whether or not they were shown.
+    pub(crate) history: History,
 }
 
 impl Toasts {
@@ -318,6 +327,9 @@ impl Toasts {
 /// A daemon notice about a workspace or tab the user muted is dropped at any
 /// stage short of being posted to the OS, so muting also takes away a toast
 /// already showing. One dropped while muted never comes back on unmuting.
+///
+/// An alert that passes the policy joins the host's history whether or not it
+/// is presented: `quiet` hours and delivery being off hold it back there.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick(
     endpoints: &mut [crate::endpoint::Endpoint],
@@ -326,6 +338,7 @@ pub(crate) fn tick(
     mutes: Option<&crate::notification_mutes::Mutes>,
     hidden: bool,
     focused: bool,
+    quiet: bool,
     pending_navigation: Option<u64>,
     now: Instant,
 ) -> bool {
@@ -347,7 +360,7 @@ pub(crate) fn tick(
         endpoint.toasts.entries.retain_mut(|(id, n)| {
             let keep = (|| {
                 if !n.client_local
-                    && (delivery == Delivery::Off
+                    && ((delivery == Delivery::Off && (n.ready || n.visible || n.posted))
                         || (n.kind == Kind::Finished && !config.finished)
                         || endpoint
                             .toasts
@@ -390,9 +403,12 @@ pub(crate) fn tick(
                     return paused || now < n.expires;
                 }
                 if n.ready {
-                    return true;
+                    // Not on screen yet, so quiet hours take it too, or it
+                    // would appear once the toast or menu before it left.
+                    return n.client_local || !quiet;
                 }
                 if !n.client_local {
+                    n.hushed |= quiet;
                     let delay = if n.kind == Kind::Custom {
                         0
                     } else {
@@ -441,6 +457,13 @@ pub(crate) fn tick(
                             _ => false,
                         })
                     {
+                        return false;
+                    }
+                    endpoint
+                        .toasts
+                        .history
+                        .record(n, std::time::SystemTime::now());
+                    if quiet || n.hushed || delivery == Delivery::Off {
                         return false;
                     }
                 }
