@@ -11,9 +11,10 @@ use crate::{
     i18n::{Localize, fl},
     window::Flash,
 };
-use gpui::Context;
+use gpui::{Context, Global};
 use sheprd_client::{ConnectTarget, ScriptHost, SshLane};
 use sheprd_remote::core_install::{self, Outcome, Target};
+use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 
 /// Why the install did not finish.
@@ -69,13 +70,42 @@ fn install(target: &ConnectTarget) -> Result<Outcome, Failed> {
     }
 }
 
+/// Devices with an install running, from any window, so a second ask waits
+/// for the first rather than racing it.
+#[derive(Default)]
+struct Running(HashSet<String>);
+
+impl Global for Running {}
+
 impl SheprdWindow {
     /// Installs the pinned herdr-core on the saved device `id`, saying when
-    /// it starts and how it ended.
+    /// it starts and how it ended. Refused while one runs there.
     pub(crate) fn install_core_on(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.install_core_with(id, install, cx);
+    }
+
+    /// [`Self::install_core_on`] running `install`, which tests replace.
+    pub(crate) fn install_core_with(
+        &mut self,
+        id: &str,
+        install: fn(&ConnectTarget) -> Result<Outcome, Failed>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(endpoint) = self.endpoints.iter().find(|endpoint| endpoint.id == id) else {
             return;
         };
+        if !cx.default_global::<Running>().0.insert(id.to_owned()) {
+            let device = endpoint.label.clone();
+            self.show_flash(
+                Flash::hint(fl!(
+                    "core-terminals-install-running",
+                    device = device.as_str()
+                )),
+                cx,
+            );
+            return;
+        }
+        let id = id.to_owned();
         let target = endpoint.connection.target.clone();
         let device = endpoint.label.clone();
         let host = Host::of(&crate::browser::scope(endpoint));
@@ -91,6 +121,7 @@ impl SheprdWindow {
             .spawn(async move { install(&target) });
         cx.spawn(async move |this, cx| {
             let result = background.await;
+            let _ = cx.update(|cx| cx.default_global::<Running>().0.remove(&id));
             let _ = this.update(cx, |view, cx| {
                 view.core_install_ended(host, &device, result, cx)
             });
@@ -107,7 +138,11 @@ impl SheprdWindow {
     ) {
         let flash = match result {
             Ok(outcome) => {
-                self.core_terminals.forget_host(&host);
+                // Only a host the window could not reach is dialed anew; a
+                // connected core keeps its views and their history.
+                if self.core_terminals.backend_of(&host).is_none() {
+                    self.core_terminals.forget_host(&host);
+                }
                 let version = core_install::pinned()
                     .map(|pinned| pinned.version)
                     .unwrap_or_default();

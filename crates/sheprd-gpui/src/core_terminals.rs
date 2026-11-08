@@ -17,7 +17,7 @@ mod fallback;
 mod hosts;
 mod hub;
 mod infos;
-mod install;
+pub(crate) mod install;
 mod screen;
 mod selection;
 mod sidebar;

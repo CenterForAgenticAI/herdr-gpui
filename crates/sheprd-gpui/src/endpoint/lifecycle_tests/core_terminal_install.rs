@@ -105,3 +105,46 @@ fn a_hosts_working_herdr_core_agents_count_when_ranking_it(cx: &mut gpui::TestAp
         assert_eq!(candidate.working, 2);
     });
 }
+
+#[gpui::test]
+fn a_second_install_on_a_device_waits_for_the_first(cx: &mut gpui::TestAppContext) {
+    fn present(
+        _: &ConnectTarget,
+    ) -> std::result::Result<
+        sheprd_remote::core_install::Outcome,
+        crate::core_terminals::install::Failed,
+    > {
+        Ok(sheprd_remote::core_install::Outcome::Present)
+    }
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    let (mut remote, _server) = connected_endpoint("ssh:fixture");
+    remote.connection.target = ssh();
+    remote.label = "box".into();
+    view.update(cx, |view, cx| {
+        view.endpoints.push(remote);
+        view.install_core_with("ssh:fixture", present, cx);
+        view.install_core_with("ssh:fixture", present, cx);
+        let (flash, _) = view.flash.as_ref().unwrap();
+        assert_eq!(
+            flash.text,
+            crate::i18n::fl!("core-terminals-install-running", device = "box")
+        );
+    });
+    cx.run_until_parked();
+    view.update(cx, |view, _| {
+        let (flash, _) = view.flash.as_ref().unwrap();
+        assert_eq!(
+            flash.text,
+            crate::i18n::fl!("core-terminals-install-present", device = "box")
+        );
+    });
+    // Once it ended, the device takes another.
+    view.update(cx, |view, cx| {
+        view.install_core_with("ssh:fixture", present, cx);
+        let (flash, _) = view.flash.as_ref().unwrap();
+        assert_eq!(
+            flash.text,
+            crate::i18n::fl!("core-terminals-install-started", device = "box")
+        );
+    });
+}
