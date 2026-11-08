@@ -121,12 +121,6 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let existing = self.kept_workspace_at(&project.path);
-        if let Some(workspace) = existing {
-            self.dismiss_menu(window, cx);
-            self.navigate(NavigationTarget::Workspace(&workspace), cx);
-            return;
-        }
         let validation = cx.background_executor().spawn(async move {
             projects::validate(&project)?;
             Ok::<_, crate::Error>(project)
@@ -136,7 +130,7 @@ impl SheprdWindow {
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(project) => {
                     this.dismiss_menu(window, cx);
-                    this.new_kept_workspace(Some(&project.label), Some(project.path), cx);
+                    this.open_local_kept_folder(&project.label, project.path, cx);
                 }
                 Err(error) => this.palette_project_error(error, cx),
             });
@@ -164,7 +158,8 @@ impl SheprdWindow {
         let Some(palette) = &self.menu.palette else {
             return;
         };
-        if self.new_workspaces_use_core() {
+        // A project is on this computer, whichever host is shown.
+        if self.local_workspaces_use_core() {
             self.activate_kept_project(project, window, cx);
             return;
         }
@@ -252,7 +247,7 @@ impl SheprdWindow {
             return;
         };
         // A workspace the app keeps needs no daemon to open the folder in.
-        if !self.new_workspaces_use_core() {
+        if !self.local_workspaces_use_core() {
             let Some(target) = palette.local_target.clone() else {
                 self.palette_project_error(Error::HostUnavailable.into(), cx);
                 return;

@@ -715,10 +715,13 @@ impl SheprdWindow {
                 .map(|endpoint| endpoint.label.as_str());
             go_to_entries(&source.endpoint, host, snapshot, &mut entries);
         }
-        let selected = &self.endpoints[self.selected_endpoint];
-        if let Some(core) = self.sessions(self.selected_endpoint).core {
-            let host = (self.endpoints.len() > 1).then_some(selected.label.as_str());
-            kept_go_to_entries(&selected.id, host, &core, &mut entries);
+        // This computer's kept workspaces, whichever host is shown.
+        if let Some(index) = self.core_host()
+            && let Some(core) = self.sessions(index).core
+        {
+            let local = &self.endpoints[index];
+            let host = (self.endpoints.len() > 1).then_some(local.label.as_str());
+            kept_go_to_entries(&local.id, host, &core, &mut entries);
         }
         entries.extend(
             COMMANDS

@@ -219,3 +219,34 @@ fn closing_the_default_workspace_lets_its_shell_go(cx: &mut TestAppContext) {
         })
     });
 }
+
+#[gpui::test]
+fn a_local_project_opens_in_herdr_2_while_another_host_is_shown(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, true);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.config.herdr_2_terminals = true;
+            let remote = crate::endpoint::Endpoint::new(
+                "ssh:test".into(),
+                "Remote".into(),
+                sheprd_client::ConnectTarget::Ssh {
+                    target: "unused".into(),
+                    session: "default".into(),
+                },
+                true,
+            );
+            view.endpoints.push(remote);
+            view.endpoints[0].live = std::mem::take(&mut view.live);
+            view.selected_endpoint = 1;
+            assert!(!view.new_workspaces_use_core(), "the shown host is remote");
+            assert!(view.local_workspaces_use_core(), "a project is local");
+            view.open_local_kept_folder("api", "/src/api".into(), cx);
+            assert_eq!(view.selected_endpoint, 0, "this computer is shown");
+            let id = view.kept_workspace_at(Path::new("/src/api")).unwrap();
+            assert_eq!(view.kept_in_front(), Some(id.as_str()));
+            // Opening it again finds the same workspace.
+            view.open_local_kept_folder("api", "/src/api".into(), cx);
+            assert_eq!(view.kept_workspace_at(Path::new("/src/api")), Some(id));
+        })
+    });
+}
