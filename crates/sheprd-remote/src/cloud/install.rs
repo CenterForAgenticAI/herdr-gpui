@@ -35,6 +35,23 @@ exit 3"#;
 const INSTALL: &str = r#"command -v curl >/dev/null 2>&1 || { echo "curl is required to install Herdr" >&2; exit 4; }
 curl -fsSL https://herdr.dev/install.sh | sh"#;
 
+/// [`INSTALL`], then the pinned herdr-core beside Herdr unless the machine
+/// has a core, so the machine runs Herdr 2 terminals too. A core that cannot
+/// be installed leaves Herdr working: the machine's new tabs stay with it.
+fn install_script() -> String {
+    match crate::core_install::script(crate::core_install::Dir::UserBin) {
+        Ok(core) => format!(
+            "{INSTALL} || exit $?
+/bin/sh -c {} || echo 'herdr-core was not installed; Herdr 2 terminals stay unavailable here' >&2",
+            quote(&core)
+        ),
+        Err(error) => {
+            tracing::warn!(%error, "No herdr-core to install beside Herdr");
+            INSTALL.to_owned()
+        }
+    }
+}
+
 /// Why Herdr is not ready on a cloud machine after the probe or the
 /// installer ran. Only [`Failure::Output`] holds text from the machine; the
 /// rest are this crate's own reasons, so the app can translate each whole.
@@ -244,13 +261,14 @@ pub fn reach(ssh: Command, cancelled: &impl Fn() -> bool) -> Result<Finished> {
     run(ssh, PROBE_TIMEOUT, cancelled)
 }
 
-/// Run Herdr's installer on the machine. Only called after the user approved it.
+/// Run Herdr's installer on the machine, then add the pinned herdr-core.
+/// Only called after the user approved it.
 pub fn install(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
     tracing::info!(
         category = "cloud_install",
         "Installing Herdr on a cloud machine"
     );
-    ssh.arg(remote(INSTALL));
+    ssh.arg(remote(&install_script()));
     let finished = run(ssh, INSTALL_TIMEOUT, cancelled)?;
     match finished.code {
         Some(0) => Ok(()),

@@ -25,8 +25,10 @@ pub use error::Error;
 
 /// The core's install locations, searched the way the Herdr 1 bridge searches
 /// for `herdr`: PATH first, then the known roots. Paths stay in shell
-/// variables; nothing discovered is eval'd.
-const CANDIDATES: &str = r#"candidate=$(command -v herdr-core 2>/dev/null || :)
+/// variables; nothing discovered is eval'd. It opens a `for path in ...; do`
+/// loop, which the script using it closes, so an installer checks the same
+/// places the bridge runs from.
+pub const CANDIDATES: &str = r#"candidate=$(command -v herdr-core 2>/dev/null || :)
 case "$candidate" in /*) ;; *) candidate=;; esac
 linuxbrew=
 case "$(PATH=/usr/bin:/bin uname -s)" in Linux) linuxbrew=/home/linuxbrew/.linuxbrew/bin/herdr-core;; esac

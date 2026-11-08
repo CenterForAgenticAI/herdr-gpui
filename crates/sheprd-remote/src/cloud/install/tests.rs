@@ -88,3 +88,30 @@ fn output_is_bounded() {
     };
     assert!(text.len() <= OUTPUT_LIMIT);
 }
+
+#[test]
+fn a_core_that_cannot_be_installed_leaves_herdr_installed() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let tools = home.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // Herdr's installer works; the core's download fails.
+    let curl = tools.join("curl");
+    std::fs::write(
+        &curl,
+        r##"#!/bin/sh
+case "$*" in
+*herdr.dev/install.sh*) printf '%s\n' 'mkdir -p "$HOME/.local/bin" && printf "#!/bin/sh\n" > "$HOME/.local/bin/herdr" && chmod 755 "$HOME/.local/bin/herdr"';;
+*) exit 22;;
+esac
+"##,
+    )
+    .unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = local(home.path());
+    command.env("PATH", format!("{}:/usr/bin:/bin", tools.display()));
+    install(command, &|| false).unwrap();
+    assert!(home.path().join(".local/bin/herdr").exists());
+    assert!(!home.path().join(".local/bin/herdr-core").exists());
+    assert!(installed(local(home.path()), &|| false).unwrap());
+}
