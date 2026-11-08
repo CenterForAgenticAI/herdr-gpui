@@ -119,7 +119,7 @@ impl Filter {
                     Action::Native(_) | Action::Configured(..) | Action::Mod { .. } => {
                         Self::Commands
                     }
-                    Action::Go { .. } => Self::Navigation,
+                    Action::Go { .. } | Action::Core { .. } => Self::Navigation,
                     Action::Project(_) | Action::NewProject(_) => Self::Projects,
                     Action::Note { .. } => Self::Notes,
                 }
@@ -144,6 +144,11 @@ enum Action {
         endpoint: String,
         boot: String,
         workspace: String,
+    },
+    /// A Herdr 2 (herdr-core) pane, shown in its tab with the keyboard.
+    Core {
+        tab: crate::browser::TabId,
+        terminal: sheprd_backend::TerminalId,
     },
     /// A command a mod declares; choosing it sends the mod `command:<id>`.
     Mod {
@@ -219,6 +224,7 @@ enum Identity {
     Project(std::path::PathBuf),
     NewProject(std::path::PathBuf),
     Note(String, String),
+    Core(crate::browser::TabId, sheprd_backend::TerminalId),
     Mod(String, String),
 }
 
@@ -261,6 +267,7 @@ impl Action {
                 workspace,
                 ..
             } => Identity::Note(endpoint.clone(), workspace.clone()),
+            Self::Core { tab, terminal } => Identity::Core(*tab, terminal.clone()),
             Self::Mod { name, id } => Identity::Mod(name.clone(), id.clone()),
         }
     }
@@ -665,7 +672,7 @@ impl SheprdWindow {
                 .map_or_else(Default::default, |history| history.boosts(frecency::now())),
             _subscription: subscription,
         };
-        self.prepare_palette_entries(&mut palette, crate::worktree_notes::Notes::of(cx));
+        self.prepare_palette_entries(&mut palette, crate::worktree_notes::Notes::of(cx), cx);
         self.menu.palette = Some(palette);
         self.rank_palette(Selection::Keep, cx);
         self.load_palette_projects(window, cx);
@@ -698,6 +705,7 @@ impl SheprdWindow {
         &self,
         palette: &mut Palette,
         notes: Option<&crate::worktree_notes::Notes>,
+        cx: &App,
     ) {
         let mut entries = Vec::new();
         let sources = self.palette_sources();
@@ -715,6 +723,7 @@ impl SheprdWindow {
                 .map(|endpoint| endpoint.label.as_str());
             go_to_entries(&source.endpoint, host, snapshot, &mut entries);
         }
+        entries.extend(self.core_palette_entries(cx));
         entries.extend(
             COMMANDS
                 .iter()
@@ -840,7 +849,11 @@ impl SheprdWindow {
                 palette.configuration = self.config.palette.clone();
                 palette.projects = projects::Collection::default();
                 palette.loading_projects = !self.config.palette.project_roots.is_empty();
-                self.prepare_palette_entries(&mut palette, crate::worktree_notes::Notes::of(cx));
+                self.prepare_palette_entries(
+                    &mut palette,
+                    crate::worktree_notes::Notes::of(cx),
+                    cx,
+                );
                 self.menu.palette = Some(palette);
                 self.rank_palette(Selection::Keep, cx);
                 self.load_palette_projects(window, cx);
@@ -866,7 +879,7 @@ impl SheprdWindow {
                     }
             });
         if changed && let Some(mut palette) = self.menu.palette.take() {
-            self.prepare_palette_entries(&mut palette, notes);
+            self.prepare_palette_entries(&mut palette, notes, cx);
             self.menu.palette = Some(palette);
             self.rank_palette(Selection::Keep, cx);
         }

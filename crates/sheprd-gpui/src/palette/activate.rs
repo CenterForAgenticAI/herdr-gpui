@@ -66,6 +66,12 @@ impl SheprdWindow {
             self.command(command, window, cx);
             return;
         }
+        if let Action::Core { tab, terminal } = &action {
+            remember(cx);
+            self.dismiss_menu(window, cx);
+            self.show_core_pane(*tab, terminal, window, cx);
+            return;
+        }
         if let Action::Mod { name, id } = action {
             self.dismiss_menu(window, cx);
             self.send_to_mod(
@@ -137,6 +143,7 @@ impl SheprdWindow {
                 | Action::Project(_)
                 | Action::NewProject(_)
                 | Action::Note { .. }
+                | Action::Core { .. }
                 | Action::Mod { .. } => unreachable!(),
             }
         })();
