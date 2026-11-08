@@ -59,3 +59,23 @@ fn the_agent_is_named_by_its_report_else_its_process() {
         None
     );
 }
+
+#[test]
+fn an_unknown_program_that_reports_a_status_is_named_by_its_report() {
+    let mut value = terminal("t1");
+    value["status"] = json!({"state": "idle", "app": "my\u{202e}bot"});
+    assert_eq!(
+        crate::agent_name(&info(&record(value.clone())).unwrap()).as_deref(),
+        Some("mybot")
+    );
+    value["status"] = json!({"state": "idle", "app": "claude-code"});
+    assert_eq!(
+        crate::agent_name(&info(&record(value)).unwrap()).as_deref(),
+        Some("claude")
+    );
+    // A shell that never reported is no agent.
+    assert_eq!(
+        crate::agent_name(&info(&record(terminal("t2"))).unwrap()),
+        None
+    );
+}
