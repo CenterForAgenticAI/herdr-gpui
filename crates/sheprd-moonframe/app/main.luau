@@ -50,7 +50,15 @@ return mod {
 						grow = true,
 						gap = "none",
 						ui.column { width = state.activity_bar, shrink = false, gap = "none", style = { background = theme.sidebar }, ui.mount "activity" },
-						ui.column { grow = true, gap = "none", ui.mount "workspaces" },
+						-- The left pane: the worktrees, then the agents, each a mod.
+						ui.column {
+							class = "sheprd-left",
+							grow = true,
+							gap = "none",
+							style = { background = theme.sidebar },
+							ui.mount "worktrees",
+							ui.mount "agents",
+						},
 					},
 				},
 				ui.column {

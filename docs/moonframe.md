@@ -11,9 +11,12 @@ Everything around the terminals is Luau in `crates/sheprd-moonframe/app`:
 | `main.luau` | The layout: where each part goes |
 | `mods/header/main.luau` | Back, Forward, and the sidebar toggle |
 | `mods/activity/main.luau` | The activity bar |
-| `mods/workspaces/main.luau` | Worktree rows, grouped by repository, and agents |
+| `mods/worktrees/main.luau` | The left pane's head and worktree rows, linked worktrees under their checkout |
+| `mods/agents/main.luau` | The agents under the worktrees |
 | `mods/details/main.luau` | The right pane; open it from Details in the status bar |
 | `mods/status/main.luau` | The status bar |
+| `components/sheprd-*.luau` | What the worktrees and agents share: the status dot and the section names |
+| `style.luau` | The selected row's card and the hover looks, for every mod |
 
 The terminals, tabs, and pages stay one Rust view, placed with
 `ui.view { name = "sheprd", id = "main", props = { region = "main" } }`.
