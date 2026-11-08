@@ -81,3 +81,11 @@ fn renaming_a_kept_workspace_marks_its_name_as_chosen(cx: &mut TestAppContext) {
         assert_eq!(crate::sidebar::workspace_label(workspace, true), "api");
     });
 }
+
+#[gpui::test]
+fn pull_requests_of_kept_checkouts_are_read_without_herdr_1(cx: &mut TestAppContext) {
+    let (view, cx, _) = window(cx);
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.pr_boot().as_deref(), Some(""), "no daemon to answer");
+    });
+}

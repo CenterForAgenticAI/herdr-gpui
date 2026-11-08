@@ -56,15 +56,7 @@ impl SheprdWindow {
         let Some(view) = &self.checkpoints.view else {
             return false;
         };
-        self.live.snapshot.as_ref().is_some_and(|snapshot| {
-            snapshot.agents.iter().any(|agent| {
-                agent.workspace_id == view.workspace_id
-                    && matches!(
-                        agent.agent_status,
-                        AgentStatus::Working | AgentStatus::Blocked
-                    )
-            })
-        })
+        agent_working(&self.sessions(self.selected_endpoint), &view.workspace_id)
     }
 
     pub(crate) fn checkpoints_key(
@@ -291,6 +283,14 @@ impl SheprdWindow {
             )
             .child(footer)
     }
+}
+
+/// Whether an agent of Herdr 1 or Herdr 2 in `workspace` is mid-turn.
+pub(super) fn agent_working(sessions: &crate::session_model::Sessions, workspace: &str) -> bool {
+    sessions.agents().any(|agent| {
+        agent.workspace == workspace
+            && matches!(agent.status, AgentStatus::Working | AgentStatus::Blocked)
+    })
 }
 
 #[cfg(test)]

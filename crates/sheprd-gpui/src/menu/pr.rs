@@ -102,19 +102,32 @@ impl SheprdWindow {
             self.menu.pr_cache.suspend();
             self.menu.pr_cache_connection = Some(Arc::downgrade(&endpoint.connection.inbox));
         }
-        if let (Some(snapshot), Some(tokens), Some(origin)) =
-            (&self.live.snapshot, self.pr_tokens(), self.pr_origin())
+        if let (Some(boot), Some(tokens), Some(origin)) =
+            (self.pr_boot(), self.pr_tokens(), self.pr_origin())
         {
             let scope = (
                 self.selection_epoch,
                 self.endpoints[self.selected_endpoint].generation,
-                snapshot.boot_id.clone(),
+                boot,
             );
             // Answers belong to the whole account set: adding or signing in
             // an account may change which one reads a repository.
             let key = tokens.key();
             self.menu.pr_cache.scope(scope, tokens, &key, origin);
         }
+    }
+
+    /// The Herdr 1 boot the PR lookups belong to, or none at all while
+    /// only workspaces the app keeps for Herdr 2 are read: their checkouts
+    /// need no daemon to answer. `None` while there is nothing to read.
+    pub(crate) fn pr_boot(&self) -> Option<String> {
+        if let Some(snapshot) = &self.live.snapshot {
+            return Some(snapshot.boot_id.clone());
+        }
+        self.sessions(self.selected_endpoint)
+            .core
+            .is_some_and(|core| !core.workspaces.is_empty())
+            .then(String::new)
     }
 
     fn workspace_pr_target_current(&self) -> bool {

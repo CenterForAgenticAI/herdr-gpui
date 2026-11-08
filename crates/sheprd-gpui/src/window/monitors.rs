@@ -140,11 +140,24 @@ impl SheprdWindow {
             enabled,
             checkpoint::host_for(&sheprd_client::ConnectTarget::Local, true),
             self.core_host(),
-        ) && let Some(session) = crate::session_model::core_with_checkouts(&self.sessions(index))
-        {
-            let watch = format!("{}/herdr-2", self.endpoints[index].id);
-            self.checkpoints.observe(&watch, &host, "herdr-2", &session);
-            watched.push(watch);
+        ) {
+            let mut sessions = self.sessions(index);
+            // A Herdr 2 tab in a Herdr 1 workspace borrows that workspace's
+            // checkout, which Git then reads here: only a daemon proven to
+            // run on this computer may name one.
+            let live = if index == self.selected_endpoint {
+                &self.live
+            } else {
+                &self.endpoints[index].live
+            };
+            if !names_local_checkouts(&self.endpoints[index].connection.target, live) {
+                sessions.herdr_1 = None;
+            }
+            if let Some(session) = crate::session_model::core_with_checkouts(&sessions) {
+                let watch = format!("{}/herdr-2", self.endpoints[index].id);
+                self.checkpoints.observe(&watch, &host, "herdr-2", &session);
+                watched.push(watch);
+            }
         }
         self.checkpoints
             .retain_endpoints(|endpoint| watched.iter().any(|watched| watched == endpoint));
@@ -213,6 +226,15 @@ impl SheprdWindow {
             }
         }
     }
+}
+
+/// Whether the checkouts `target`'s Herdr 1 names are on this computer, so
+/// Git may run on them here: a socket may forward another machine's daemon.
+pub(super) fn names_local_checkouts(
+    target: &sheprd_client::ConnectTarget,
+    live: &crate::state::LiveState,
+) -> bool {
+    checkpoint::host_for(target, live.local_daemon_peer) == Some(crate::usage::Host::Local)
 }
 
 /// Why a restore failed: the error's message, then the cause a failed Git
