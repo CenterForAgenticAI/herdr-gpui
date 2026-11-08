@@ -11,9 +11,13 @@ use super::{
     snapshot::SplitDirection,
 };
 use serde::Deserialize;
+use sheprd_client::ScriptLimits;
 use sheprd_client::shell_quote;
 use sheprd_session::panes::{Axis, Node as PaneNode, Panes};
-use std::{collections::HashMap, sync::atomic::AtomicBool};
+use std::{collections::HashMap, sync::atomic::AtomicBool, time::Duration};
+
+/// How long past a handoff's own timeout its script may stay quiet.
+const PROMPT_GRACE: Duration = Duration::from_secs(30);
 
 /// The exit status `herdr-core` gives a terminal it does not know, which a
 /// stop treats as already gone.
@@ -143,22 +147,36 @@ fn parse_terminals(output: &str) -> Result<HashMap<String, Terminal>> {
     Ok(found)
 }
 
-/// Ask the agent in `terminal` for a handoff note and wait for its turn to
-/// end, as `herdr agent prompt --wait` does for a Herdr 1 pane.
+/// Ask the agent in `terminal` for a handoff note and wait at most
+/// `timeout` for its turn to end, as `herdr agent prompt --wait` does for a
+/// Herdr 1 pane. The wait prints nothing until it ends, so the script may
+/// stay quiet that long, and a little more for the core to answer.
 pub(super) fn prompt(
     host: &Host,
     terminal: &str,
     prompt: &str,
-    timeout: &str,
+    timeout: Duration,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     let line = format!(
         "core_cli send --json --wait --timeout {} {} {} >/dev/null\n",
-        shell_quote(timeout),
+        timeout.as_secs(),
         shell_quote(terminal),
         shell_quote(prompt),
     );
-    host.query(Step::Handoff, &line, &[], cancelled).map(drop)
+    let limits = ScriptLimits {
+        output: Host::QUERY_OUTPUT,
+        idle: timeout + PROMPT_GRACE,
+    };
+    host.run(
+        Step::Handoff,
+        &line,
+        &[][..],
+        std::io::sink(),
+        limits,
+        cancelled,
+    )
+    .map(drop)
 }
 
 /// End the programs of `terminals`. Their tabs belong to the app, which

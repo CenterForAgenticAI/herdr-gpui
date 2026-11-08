@@ -201,8 +201,7 @@ pub fn run(
                     cancelled,
                 ),
                 Generation::Herdr2 => {
-                    let seconds = HANDOFF_TIMEOUT.as_secs().to_string();
-                    core::prompt(from, &pane.pane_id, &prompt, &seconds, cancelled)
+                    core::prompt(from, &pane.pane_id, &prompt, HANDOFF_TIMEOUT, cancelled)
                 }
             };
             match asked {

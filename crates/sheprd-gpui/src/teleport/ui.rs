@@ -162,8 +162,9 @@ impl Teleport {
 
     /// The Herdr 2 tabs to close now that the move is over: those it
     /// stopped every terminal of, else none. `now` gives a tab's panes
-    /// today; one split or closed during the move keeps a pane that did not
-    /// move, or lost one, so it stays for the user to see.
+    /// today. The window drops ended panes by itself, so a tab with fewer
+    /// panes still closes; one split during the move holds a terminal that
+    /// did not move and stays open with it.
     fn closed_tabs(
         &mut self,
         finished: bool,
@@ -174,7 +175,14 @@ impl Teleport {
         }
         std::mem::take(&mut self.closing)
             .into_iter()
-            .filter(|(tab, moved)| now(*tab).as_ref() == Some(moved))
+            .filter(|(tab, moved)| {
+                now(*tab).is_some_and(|panes| {
+                    panes
+                        .terminals()
+                        .into_iter()
+                        .all(|terminal| moved.contains(terminal))
+                })
+            })
             .map(|(tab, _)| tab)
             .collect()
     }

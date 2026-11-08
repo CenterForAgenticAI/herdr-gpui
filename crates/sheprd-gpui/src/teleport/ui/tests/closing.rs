@@ -31,20 +31,30 @@ fn herdr_2_tabs_close_once_their_terminals_stopped() {
 }
 
 /// A tab split during the move holds a terminal that did not move, so it
-/// stays open with it; so does one already closed.
+/// stays open with it, and one already closed is left alone. A tab the
+/// window shrank as its moved panes ended still closes.
 #[test]
-fn a_tab_changed_during_the_move_stays() {
-    let tabs = vec![(TabId::test(1), panes("t1")), (TabId::test(2), panes("t2"))];
+fn only_tabs_holding_moved_terminals_alone_close() {
+    let id = |name: &str| TerminalId::new(name).unwrap();
+    let mut both = panes("t1");
+    both.split(&id("t1"), Axis::Row, id("t2")).unwrap();
+    let tabs = vec![
+        (TabId::test(1), panes("t1")),
+        (TabId::test(2), both),
+        (TabId::test(3), panes("t3")),
+    ];
     let mut teleport = Teleport::start(source(), "feature".into(), Vec::new()).closing(tabs);
-    let now = |tab: TabId| {
-        (tab == TabId::test(1)).then(|| {
+    let now = |tab: TabId| match tab {
+        // Split during the move.
+        t if t == TabId::test(1) => {
             let mut split = panes("t1");
-            let t1 = TerminalId::new("t1").unwrap();
-            split
-                .split(&t1, Axis::Row, TerminalId::new("t5").unwrap())
-                .unwrap();
-            split
-        })
+            split.split(&id("t1"), Axis::Row, id("t5")).unwrap();
+            Some(split)
+        }
+        // `t1` ended and the window dropped its pane.
+        t if t == TabId::test(2) => Some(panes("t2")),
+        // Closed by the user.
+        _ => None,
     };
-    assert!(teleport.closed_tabs(true, now).is_empty());
+    assert_eq!(teleport.closed_tabs(true, now), [TabId::test(2)]);
 }

@@ -141,7 +141,14 @@ fn terminals_are_read_and_stopped_through_the_core_cli() {
     // A terminal already gone counts as stopped; any other failure does not.
     stop(&host, &["t1".into(), "t9".into()], &cancelled).unwrap();
     assert!(stop(&host, &["t8".into()], &cancelled).is_err());
-    prompt(&host, "t1", "write a note", "300", &cancelled).unwrap();
+    prompt(
+        &host,
+        "t1",
+        "write a note",
+        Duration::from_secs(300),
+        &cancelled,
+    )
+    .unwrap();
     let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
     assert_eq!(
         calls.lines().collect::<Vec<_>>(),
