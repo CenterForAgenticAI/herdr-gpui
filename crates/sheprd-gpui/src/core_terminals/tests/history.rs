@@ -47,6 +47,7 @@ pub(super) fn shown(
                 offset: 0,
                 history: 7,
                 rows: 3,
+                full: false,
             },
             revision: 4,
         },
@@ -132,6 +133,7 @@ fn find_searches_the_views_history_and_shows_its_match(cx: &mut TestAppContext) 
             offset: 6,
             history: 7,
             rows: 3,
+            full: false,
         },
         revision: 4,
     }]);

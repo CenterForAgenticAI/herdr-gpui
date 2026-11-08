@@ -231,6 +231,7 @@ impl Emulator {
             offset: grid.display_offset(),
             history: grid.history_size(),
             rows: self.size.rows(),
+            full: grid.history_size() >= history_limit(self.size, self.scrollback_lines),
         }
     }
 
@@ -256,10 +257,16 @@ impl Emulator {
     }
 }
 
-fn config(size: Size, scrollback_lines: usize) -> Config {
+/// The history lines a terminal `size` keeps when asked for
+/// `scrollback_lines`.
+fn history_limit(size: Size, scrollback_lines: usize) -> usize {
     let cell_limit = MAX_SCROLLBACK_CELLS / usize::from(size.cols());
+    scrollback_lines.min(MAX_SCROLLBACK_LINES).min(cell_limit)
+}
+
+fn config(size: Size, scrollback_lines: usize) -> Config {
     Config {
-        scrolling_history: scrollback_lines.min(MAX_SCROLLBACK_LINES).min(cell_limit),
+        scrolling_history: history_limit(size, scrollback_lines),
         // Stands for "no program chose a style" (see `cells::cursor`).
         default_cursor_style: CursorStyle {
             shape: CursorShape::HollowBlock,

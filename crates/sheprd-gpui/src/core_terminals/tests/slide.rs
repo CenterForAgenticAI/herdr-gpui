@@ -16,6 +16,7 @@ fn scrolled(offset: usize, revision: u64) -> Vec<SurfaceUpdate> {
                 offset,
                 history: 7,
                 rows: 3,
+                full: false,
             },
             revision,
         },
@@ -58,4 +59,28 @@ fn new_output_and_long_jumps_do_not_slide(cx: &mut gpui::TestAppContext) {
             })
         })
     });
+}
+
+#[gpui::test]
+fn a_scroll_during_a_slide_goes_no_further_than_the_frame_behind(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    let lift = |cx: &mut gpui::VisualTestContext, offset| {
+        backend.push(scrolled(offset, 4));
+        until(|| {
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.poll(window, cx);
+                    (view.top() == 7 - offset as u32)
+                        .then(|| view.sliding(crate::motion::now()))
+                        .flatten()
+                })
+            })
+        })
+    };
+    lift(cx, 1);
+    // A row more while the first is still sliding: the frame behind is a
+    // row off, so the slide starts at most a row up, leaving no rows blank.
+    let sliding = lift(cx, 2);
+    assert_eq!(sliding.behind_at, 1.);
+    assert!(sliding.lift <= 1., "{}", sliding.lift);
 }

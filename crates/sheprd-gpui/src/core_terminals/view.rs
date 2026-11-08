@@ -226,6 +226,11 @@ impl CoreTerminalView {
         if let Some(screen) = screen {
             let before = std::mem::replace(&mut self.screen, screen);
             self.slide_from(&before);
+            // Output into a full history drops its oldest lines, so the
+            // rows a selection holds now hold other text.
+            if self.screen.history.full && self.screen.revision != before.revision {
+                self.selection = None;
+            }
             cx.notify();
         }
         self.take_answers(cx);
@@ -280,7 +285,7 @@ impl CoreTerminalView {
         if modifiers.platform
             && !modifiers.control
             && event.keystroke.key.eq_ignore_ascii_case("c")
-            && self.copy_selection(cx)
+            && self.copy_selection()
         {
             cx.stop_propagation();
             window.prevent_default();

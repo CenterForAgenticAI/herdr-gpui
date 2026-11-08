@@ -58,13 +58,15 @@ impl CoreTerminalView {
             return;
         }
         let now = crate::motion::now();
-        // A slide still under way goes on from where it is drawn.
+        // A slide still under way goes on from where it is drawn, as far as
+        // the frame behind, `moved` rows off, can fill what it uncovers:
+        // past that, rows it never showed would be left blank.
         let left = self.sliding(now).map_or(0., |sliding| sliding.lift);
         let moved = moved as f32;
         self.slide = Some(Slide {
             behind: behind.clone(),
             moved,
-            from: moved + left,
+            from: (moved + left).clamp(moved.min(0.), moved.max(0.)),
             since: now,
         });
     }
