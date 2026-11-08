@@ -26,6 +26,12 @@ struct Prompt {
     input: Entity<SearchInput>,
 }
 
+impl CopyModeState {
+    pub(super) fn forget_mark(&mut self) {
+        self.mode.forget_mark();
+    }
+}
+
 impl CoreTerminalView {
     /// Enters copy mode at the terminal's cursor, or at the start of the
     /// last row when the cursor is hidden.
