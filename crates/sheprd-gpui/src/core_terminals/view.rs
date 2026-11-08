@@ -4,8 +4,11 @@
 
 mod accessibility;
 pub(super) mod keys;
+mod links;
 pub(super) mod paste;
 mod pointer;
+
+pub(crate) use links::LinkClick;
 
 use super::{
     screen::Screen,
@@ -35,6 +38,18 @@ pub(crate) struct Look {
     pub(crate) padding: Padding,
 }
 
+/// What a view asks of the window it is in.
+#[derive(Debug)]
+pub(crate) enum ToWindow {
+    /// Open a link clicked with the link modifier held.
+    OpenLink(LinkClick),
+    /// Say why something the user did was refused.
+    Refused(crate::Error),
+}
+
+/// How a view reaches the window it is in.
+pub(crate) type WindowCall = Rc<dyn Fn(ToWindow, &mut Window, &mut App)>;
+
 /// The least room a split's cells keep from their pane's edges, across
 /// and down.
 const PANE_PADDING: (f32, f32) = (6., 3.);
@@ -52,6 +67,8 @@ pub(crate) struct PaneLook {
 pub(crate) struct CoreTerminalView {
     /// Where the cells were last painted, for the IME's candidate window.
     bounds: Option<Bounds<Pixels>>,
+    /// The terminal's working directory, as herdr-core last reported it.
+    cwd: Option<String>,
     focus: FocusHandle,
     /// Releases for keys pressed while the program asked for them.
     held_keys: HeldKeys,
@@ -60,6 +77,8 @@ pub(crate) struct CoreTerminalView {
     hovered: Option<Cell>,
     id: TerminalId,
     link: Link,
+    /// The link under the pointer and the one a press went down on.
+    links: links::Links,
     look: Look,
     /// Text an IME is composing; committed text goes to the terminal.
     marked: String,
@@ -77,6 +96,8 @@ pub(crate) struct CoreTerminalView {
     screen: Screen,
     sent_focus: Option<bool>,
     sent_size: Option<Size>,
+    /// The window's end; a view on its own, as in tests, has none.
+    to_window: Option<WindowCall>,
     /// Wheel motion short of a whole row, kept for the next event.
     wheel_rest: f32,
 }
@@ -92,11 +113,13 @@ impl CoreTerminalView {
     ) -> Self {
         Self {
             bounds: None,
+            cwd: None,
             focus: cx.focus_handle(),
             held_keys: HeldKeys::default(),
             hovered: None,
             id,
             link,
+            links: links::Links::default(),
             look,
             marked: String::new(),
             observe,
@@ -108,7 +131,22 @@ impl CoreTerminalView {
             screen: Screen::default(),
             sent_focus: None,
             sent_size: None,
+            to_window: None,
             wheel_rest: 0.,
+        }
+    }
+
+    /// Lets the view reach the window it is in.
+    pub(crate) fn with_window(mut self, to_window: WindowCall) -> Self {
+        self.to_window = Some(to_window);
+        self
+    }
+
+    /// Keeps the working directory a printed relative path is read against.
+    pub(crate) fn set_cwd(&mut self, cwd: Option<&std::path::Path>) {
+        let cwd = cwd.and_then(std::path::Path::to_str);
+        if self.cwd.as_deref() != cwd {
+            self.cwd = cwd.map(str::to_owned);
         }
     }
 
@@ -171,6 +209,7 @@ impl CoreTerminalView {
             return false;
         };
         self.screen = screen;
+        self.rehover_link(cx);
         cx.notify();
         true
     }
@@ -226,7 +265,7 @@ impl CoreTerminalView {
             cfg!(any(windows, target_os = "linux")),
             has_text,
         ) {
-            self.paste_clipboard(cx);
+            self.paste_clipboard(window, cx);
             cx.stop_propagation();
             window.prevent_default();
             return;
@@ -306,6 +345,8 @@ impl Render for CoreTerminalView {
         let look = self.look.clone();
         let frame = self.frame_to_paint();
         let highlights = self.highlights();
+        let link_rows = self.link_rows();
+        let on_link = !link_rows.is_empty();
         let pane = self.pane;
         let background = self.look.background;
         let focus = self.focus.clone();
@@ -343,6 +384,15 @@ impl Render for CoreTerminalView {
                                 window,
                                 cx,
                             );
+                            if !link_rows.is_empty() {
+                                painter.borrow().paint_link(
+                                    frame,
+                                    bounds.origin,
+                                    look.cell_width,
+                                    &link_rows,
+                                    window,
+                                );
+                            }
                         });
                     },
                 )
@@ -384,6 +434,8 @@ impl Render for CoreTerminalView {
             .min_w_0()
             .size_full()
             .bg(self.look.background)
+            // A hand marks the verified link a click opens.
+            .when(on_link, |root| root.cursor_pointer())
             .when_some(pane, |root, pane| {
                 // A split's cells never run into its gutter, whatever the
                 // configured padding.
@@ -398,13 +450,21 @@ impl Render for CoreTerminalView {
             })
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
-            .on_action(cx.listener(|this, _: &crate::actions::Paste, _, cx| {
-                this.paste_clipboard(cx);
+            .on_action(cx.listener(|this, _: &crate::actions::Paste, window, cx| {
+                this.paste_clipboard(window, cx);
+            }))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.drop_files(paths, window, cx);
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
+            .on_modifiers_changed(
+                cx.listener(|this, event: &ModifiersChangedEvent, window, cx| {
+                    this.hover_link(window.mouse_position(), event.modifiers, cx);
+                }),
+            )
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up(MouseButton::Right, cx.listener(Self::mouse_up))
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::mouse_up))

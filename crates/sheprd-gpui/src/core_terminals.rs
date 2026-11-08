@@ -11,6 +11,7 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod asks;
 mod commands;
 mod error;
 mod fallback;
@@ -31,7 +32,7 @@ mod tests;
 pub(crate) use error::Error;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
-pub(crate) use view::{CoreTerminalView, Look};
+pub(crate) use view::{CoreTerminalView, LinkClick, Look};
 
 use crate::{
     SheprdWindow,

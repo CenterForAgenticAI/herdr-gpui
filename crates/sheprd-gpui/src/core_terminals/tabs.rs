@@ -88,8 +88,10 @@ impl SheprdWindow {
             let painter = self.painter.clone();
             let look = look.clone();
             let observe = role == Role::Observer;
+            let to_window = super::asks::window_call(cx);
             let view = cx.new(|cx| {
                 CoreTerminalView::new(terminal.clone(), link, look, painter, observe, cx)
+                    .with_window(to_window)
             });
             self.core_terminals.views.insert((tab, terminal), view);
         }
@@ -116,7 +118,15 @@ impl SheprdWindow {
             .collect();
         let mut ended = Vec::new();
         for ((tab, terminal), view) in views {
-            view.update(cx, |view, cx| view.poll(cx));
+            let cwd = self
+                .core_terminals
+                .infos
+                .get(&terminal)
+                .and_then(|info| info.cwd.as_deref());
+            view.update(cx, |view, cx| {
+                view.set_cwd(cwd);
+                view.poll(cx);
+            });
             let split = self
                 .core_terminals
                 .tabs

@@ -97,7 +97,10 @@ impl SheprdWindow {
             }
         };
         let (look, painter) = (self.core_look(), self.painter.clone());
-        let view = cx.new(|cx| CoreTerminalView::new(terminal, link, look, painter, false, cx));
+        let to_window = super::asks::window_call(cx);
+        let view = cx.new(|cx| {
+            CoreTerminalView::new(terminal, link, look, painter, false, cx).with_window(to_window)
+        });
         self.core_terminals.fallback = Fallback::Shown(view);
         cx.notify();
     }

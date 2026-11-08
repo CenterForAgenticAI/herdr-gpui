@@ -181,6 +181,33 @@ pub(crate) fn command_line(
     ))
 }
 
+/// The program a herdr-core split runs for `target`: the script
+/// [`command_line`] types into a Herdr pane's shell, run directly, so the
+/// pane ends when the editor quits. It listens on no Neovim socket.
+pub(crate) fn argv(
+    target: &EditorTarget,
+    command: Option<&EditorCommand>,
+) -> crate::Result<Vec<String>> {
+    if !SUPPORTED {
+        return Err(Error::Unsupported.into());
+    }
+    let path = target
+        .path
+        .to_str()
+        .filter(|_| target.path.is_absolute())
+        .ok_or(Error::Path)?;
+    let line = target.line.unwrap_or(1).max(1);
+    let script = command.map_or_else(|| DEFAULT_SCRIPT.to_owned(), EditorCommand::script);
+    // i18n: data
+    Ok(vec![
+        "sh".into(),
+        "-c".into(),
+        script,
+        path.into(),
+        line.to_string(),
+    ])
+}
+
 /// An editor pane this window started with a Neovim socket, which later
 /// files for its tab open in while the pane lives.
 #[derive(Clone, Debug, PartialEq, Eq)]

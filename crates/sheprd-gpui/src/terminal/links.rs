@@ -311,6 +311,12 @@ fn link_cell(
     (cells.get(source)?.modifier & HIDDEN == 0).then_some((cells, selected, source))
 }
 
+/// The link at cell (`column`, `row`) of a frame that is one terminal's
+/// screen, as a herdr-core pane's is.
+pub(crate) fn frame_link_at(frame: &FrameData, column: u16, row: u16) -> Option<RowLink> {
+    frame_link(frame, column, row, 0..frame.width, 0..frame.height)
+}
+
 /// The link at cell (`column`, `row`) of the pane or popup that covers
 /// `columns` and `rows` of `frame`, which it never leaves.
 fn frame_link(

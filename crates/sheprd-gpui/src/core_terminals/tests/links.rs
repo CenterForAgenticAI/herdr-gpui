@@ -1,0 +1,235 @@
+//! Links in a herdr-core pane: read from its own frame, opened only by a
+//! click with the link modifier held, and handed to the window to open.
+
+use super::{
+    accessibility::look,
+    worker::{Scripted, size, until},
+};
+use crate::{
+    core_terminals::{
+        CoreTerminalView, LinkClick,
+        view::ToWindow,
+        worker::{self, Command},
+    },
+    terminal::{RowTarget, frame_link_at},
+    terminal_painter::TerminalPainter,
+};
+use gpui::{
+    Entity, ExternalPaths, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px,
+};
+use sheprd_backend::{ClientPaneInputEvent, FrameData, Role, SurfaceUpdate, TerminalId};
+use sheprd_client::protocol::CellData;
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
+
+const URL: &str = "https://example.com/a";
+
+/// A frame showing `rows`, each padded with blanks to `width`.
+fn frame(width: u16, rows: &[&str]) -> FrameData {
+    let cells = rows
+        .iter()
+        .flat_map(|row| {
+            let mut symbols: Vec<String> = row.chars().map(String::from).collect();
+            symbols.resize(usize::from(width), " ".into());
+            symbols
+        })
+        .map(|symbol| CellData {
+            symbol,
+            fg: 0,
+            bg: 0,
+            modifier: 0,
+            skip: false,
+            hyperlink: None,
+        })
+        .collect();
+    FrameData {
+        cells,
+        width,
+        height: u16::try_from(rows.len()).unwrap(),
+        cursor: None,
+        hyperlinks: Vec::new(),
+        graphics: Vec::new(),
+    }
+}
+
+#[test]
+fn a_whole_frame_reads_addresses_and_paths() {
+    let shown = frame(40, &[&format!("see {URL} now"), "edit src/main.rs:12 then"]);
+    let link = frame_link_at(&shown, 6, 0).unwrap();
+    assert_eq!(link.target, RowTarget::Web(URL.into()));
+    assert_eq!((link.row, link.columns), (0, 4..4 + URL.len() as u16));
+    let path = frame_link_at(&shown, 7, 1).unwrap();
+    assert_eq!(
+        path.target,
+        RowTarget::Path {
+            path: "src/main.rs".into(),
+            line: Some(12),
+            explicit: false,
+        }
+    );
+    // A blank is no link; any word may name a file, which a check decides.
+    assert_eq!(frame_link_at(&shown, 3, 0), None);
+    // Outside the frame is nothing.
+    assert_eq!(frame_link_at(&shown, 0, 5), None);
+}
+
+type Asked = Rc<RefCell<Vec<ToWindow>>>;
+
+/// A view showing `rows`, drawn, and what it asks of its window.
+fn shown<'a>(
+    cx: &'a mut TestAppContext,
+    rows: &[&str],
+    observe: bool,
+) -> (
+    Entity<CoreTerminalView>,
+    &'a mut VisualTestContext,
+    Scripted,
+    Asked,
+) {
+    let backend = Scripted::default();
+    backend.push(vec![SurfaceUpdate::Frame(frame(40, rows))]);
+    let link = worker::spawn(
+        backend.clone(),
+        TerminalId::new("t1").unwrap(),
+        size(40, 4),
+        Role::Active,
+    )
+    .unwrap();
+    let painter = Rc::new(RefCell::new(TerminalPainter::default()));
+    let asked: Asked = Rc::default();
+    let record = asked.clone();
+    let (view, cx) = cx.add_window_view(|_, cx| {
+        CoreTerminalView::new(
+            TerminalId::new("t1").unwrap(),
+            link,
+            look(),
+            painter,
+            observe,
+            cx,
+        )
+        .with_window(Rc::new(move |ask, _, _| record.borrow_mut().push(ask)))
+    });
+    until(|| {
+        cx.update(|_, cx| view.update(cx, |view, cx| view.poll(cx)))
+            .then_some(())
+    });
+    cx.run_until_parked();
+    (view, cx, backend, asked)
+}
+
+/// The middle of the cell at `column`, `row`.
+fn at(
+    view: &Entity<CoreTerminalView>,
+    cx: &mut VisualTestContext,
+    column: u16,
+    row: u16,
+) -> gpui::Point<gpui::Pixels> {
+    let bounds = cx.update(|_, cx| view.read(cx).bounds().unwrap());
+    let look = look();
+    bounds.origin
+        + point(
+            px((f32::from(column) + 0.5) * look.cell_width),
+            px((f32::from(row) + 0.5) * look.cell_height),
+        )
+}
+
+fn link_modifier() -> Modifiers {
+    crate::keymap::secondary_key()
+}
+
+fn opened(asked: &Asked) -> Vec<LinkClick> {
+    asked
+        .borrow()
+        .iter()
+        .filter_map(|ask| match ask {
+            ToWindow::OpenLink(click) => Some(click.clone()),
+            ToWindow::Refused(_) => None,
+        })
+        .collect()
+}
+
+#[gpui::test]
+fn a_link_modifier_click_opens_the_address(cx: &mut TestAppContext) {
+    let (view, cx, _, asked) = shown(cx, &[&format!("see {URL} now")], false);
+    let link = at(&view, cx, 8, 0);
+    cx.simulate_mouse_move(link, None, link_modifier());
+    cx.update(|_, cx| assert_eq!(view.read(cx).link_rows(), [(0, 4..4 + URL.len() as u16)]));
+    cx.simulate_mouse_down(link, MouseButton::Left, link_modifier());
+    cx.simulate_mouse_up(link, MouseButton::Left, link_modifier());
+    assert_eq!(
+        opened(&asked),
+        [LinkClick {
+            target: RowTarget::Web(URL.into()),
+            terminal: TerminalId::new("t1").unwrap(),
+            cwd: None,
+            alt: false,
+        }]
+    );
+    // Letting go of the modifier drops the underline.
+    cx.simulate_modifiers_change(Modifiers::none());
+    cx.update(|_, cx| assert!(view.read(cx).link_rows().is_empty()));
+}
+
+#[gpui::test]
+fn a_plain_click_or_a_release_elsewhere_opens_nothing(cx: &mut TestAppContext) {
+    let (view, cx, _, asked) = shown(cx, &[&format!("see {URL} now")], false);
+    let link = at(&view, cx, 8, 0);
+    cx.simulate_mouse_move(link, None, Modifiers::none());
+    cx.update(|_, cx| assert!(view.read(cx).link_rows().is_empty()));
+    cx.simulate_click(link, Modifiers::none());
+    let off = at(&view, cx, 1, 0);
+    cx.simulate_mouse_down(link, MouseButton::Left, link_modifier());
+    cx.simulate_mouse_up(off, MouseButton::Left, link_modifier());
+    assert!(opened(&asked).is_empty());
+}
+
+#[gpui::test]
+fn dropped_files_paste_their_escaped_paths(cx: &mut TestAppContext) {
+    let (view, cx, backend, _) = shown(cx, &["$"], false);
+    let paths =
+        ExternalPaths(vec![PathBuf::from("/tmp/Shot 1.png"), PathBuf::from("/tmp/a")].into());
+    cx.update(|window, cx| view.update(cx, |view, cx| view.drop_files(&paths, window, cx)));
+    let pasted = until(|| {
+        backend
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|command| match command {
+                Command::Input(ClientPaneInputEvent::Paste(text)) => Some(text.clone()),
+                _ => None,
+            })
+    });
+    assert_eq!(pasted, "/tmp/Shot\\ 1.png /tmp/a");
+}
+
+#[gpui::test]
+fn a_refused_drop_is_said_and_pastes_nothing(cx: &mut TestAppContext) {
+    let (view, cx, backend, asked) = shown(cx, &["$"], false);
+    let paths = ExternalPaths(vec![PathBuf::from("/tmp/a\nb")].into());
+    cx.update(|window, cx| view.update(cx, |view, cx| view.drop_files(&paths, window, cx)));
+    assert!(matches!(&asked.borrow()[..], [ToWindow::Refused(_)]));
+    assert!(
+        !backend
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|command| matches!(command, Command::Input(_)))
+    );
+}
+
+#[gpui::test]
+fn a_mirror_takes_no_drop(cx: &mut TestAppContext) {
+    let (view, cx, backend, asked) = shown(cx, &["$"], true);
+    let paths = ExternalPaths(vec![PathBuf::from("/tmp/a")].into());
+    cx.update(|window, cx| view.update(cx, |view, cx| view.drop_files(&paths, window, cx)));
+    assert!(asked.borrow().is_empty());
+    assert!(
+        !backend
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|command| matches!(command, Command::Input(_)))
+    );
+}

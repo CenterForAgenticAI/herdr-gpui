@@ -40,7 +40,7 @@ fn modifier_bits(modifiers: Modifiers) -> u8 {
 
 impl CoreTerminalView {
     /// The cell under `position`, held inside the screen.
-    fn cell_at(&self, position: Point<Pixels>) -> Option<Cell> {
+    pub(super) fn cell_at(&self, position: Point<Pixels>) -> Option<Cell> {
         let bounds = self.bounds?;
         let frame = self.screen.frame.as_ref()?;
         if frame.width == 0 || frame.height == 0 {
@@ -74,6 +74,9 @@ impl CoreTerminalView {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus, cx);
+        if self.press_link(event) {
+            return;
+        }
         let Some(cell) = self.cell_at(event.position) else {
             return;
         };
@@ -105,6 +108,7 @@ impl CoreTerminalView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.hover_link(event.position, event.modifiers, cx);
         let Some(cell) = self.cell_at(event.position) else {
             return;
         };
@@ -132,7 +136,15 @@ impl CoreTerminalView {
         }
     }
 
-    pub(super) fn mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    pub(super) fn mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.release_link(event, window, cx) {
+            return;
+        }
         if let Some(Press::Reported(pressed)) = self.press
             && let Some(cell) = self.cell_at(event.position)
         {
