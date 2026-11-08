@@ -188,6 +188,17 @@ jobs:
       - name: Test mockup feedback receiver
         if: matrix.features == 'default'
         run: python3 .claude/skills/gpui-mockup/scripts/test_wait.py
+      # sheprd.org/docs is built at deploy time; this catches a broken link or
+      # page in docs/ or website/docs before the deploy does.
+      - name: Check the docs site
+        if: matrix.features == 'default'
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/docs-venv"
+          "$RUNNER_TEMP/docs-venv/bin/pip" install --quiet --require-hashes -r website/requirements.txt
+          "$RUNNER_TEMP/docs-venv/bin/python" website/tools/test_docs.py
+          "$RUNNER_TEMP/docs-venv/bin/python" website/tools/docs.py --check
       - name: Lint every target and feature
         if: matrix.features == 'all'
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

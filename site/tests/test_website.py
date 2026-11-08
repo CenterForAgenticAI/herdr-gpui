@@ -1,5 +1,7 @@
 """Publishing contracts for website/site, the page Netlify serves at sheprd.org."""
 from html.parser import HTMLParser
+import importlib.util
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 import re
@@ -10,6 +12,15 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 WEBSITE = ROOT / "website/site"
+
+
+def docs_pages():
+    """sheprd.org/docs pages; site/docs is only built at deploy time."""
+    spec = importlib.util.spec_from_file_location("docs_build", ROOT / "website/tools/docs.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return {slug for _, slugs in module.NAV for slug in slugs}, module.HOME
 
 
 class Page(HTMLParser):
@@ -53,6 +64,10 @@ class WebsiteTests(unittest.TestCase):
                 if parsed.netloc and parsed.netloc != "sheprd.org":
                     continue
                 with self.subTest(page=path.name, link=link):
+                    if parsed.path.startswith("/docs/") and not (WEBSITE / "docs/index.html").is_file():
+                        slugs, home = docs_pages()
+                        self.assertIn(parsed.path.strip("/").removeprefix("docs").strip("/") or home, slugs)
+                        continue
                     if not parsed.path or parsed.path == "/":
                         target = path if not parsed.path else WEBSITE / "index.html"
                     elif parsed.path.startswith("/"):
