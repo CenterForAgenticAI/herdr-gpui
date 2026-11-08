@@ -181,6 +181,17 @@ pub(crate) fn command_line(
     ))
 }
 
+/// Whether the editor can open `target`: as [`argv`] for a herdr-core
+/// split when `core`, which takes any absolute UTF-8 path, and otherwise as
+/// [`command_line`] for a Herdr pane, which quotes fewer.
+pub(crate) fn opens(target: &EditorTarget, core: bool) -> bool {
+    if core {
+        argv(target, None).is_ok()
+    } else {
+        command_line(target, None, None).is_ok()
+    }
+}
+
 /// The program a herdr-core split runs for `target`: the script
 /// [`command_line`] types into a Herdr pane's shell, run directly, so the
 /// pane ends when the editor quits. It listens on no Neovim socket.

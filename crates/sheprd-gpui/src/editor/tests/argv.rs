@@ -51,3 +51,13 @@ fn a_relative_path_is_refused() {
         Err(crate::Error::Editor(Error::Path))
     ));
 }
+
+#[test]
+fn a_herdr_2_split_opens_paths_a_herdr_command_line_cannot() {
+    let quoted = target("/w/it's.rs", Some(3));
+    assert!(opens(&quoted, true));
+    assert!(!opens(&quoted, false));
+    let plain = target("/w/a.rs", None);
+    assert!(opens(&plain, true) && opens(&plain, false));
+    assert!(!opens(&target("a.rs", None), true));
+}
