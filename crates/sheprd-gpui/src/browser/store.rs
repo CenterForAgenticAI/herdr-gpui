@@ -2,7 +2,7 @@
 //! belongs to. Herdr has no browser panes, so these live only in this client;
 //! every window shows the same tabs for a workspace, each with its own page.
 use super::{Editor, Location, WebUrl, zoom::Zoom};
-use crate::i18n::fl;
+use crate::{core_terminals::Host, i18n::fl};
 use crate::{reorder::Beside, state_file};
 use gpui::{App, Global};
 use serde::{Deserialize, Serialize};
@@ -205,12 +205,15 @@ pub(crate) struct Store {
     pub(super) closed: super::closed::ClosedTabs,
     writer: Option<state_file::Writer<Saved>>,
     quitting: bool,
-    /// herdr-core terminals of closed tabs, for a window connected to the
-    /// core to end.
-    ending: Vec<sheprd_backend::TerminalId>,
+    /// herdr-core terminals of closed tabs and the core each runs in, for a
+    /// window connected to that core to end.
+    ending: Vec<Ending>,
 }
 
 impl Global for Store {}
+
+/// A herdr-core terminal to end, and the core it runs in.
+pub(crate) type Ending = (Host, sheprd_backend::TerminalId);
 
 /// Page titles are untrusted: one line, bounded, and free of control and
 /// bidirectional formatting characters that could disguise a tab.
@@ -333,6 +336,11 @@ impl Store {
         self.tabs
             .iter()
             .filter(move |tab| &tab.scope == scope && tab.workspace_id == workspace_id)
+    }
+
+    /// Every tab of one host, in the order they were opened.
+    pub(crate) fn in_scope<'a>(&'a self, scope: &'a Scope) -> impl Iterator<Item = &'a Tab> + 'a {
+        self.tabs.iter().filter(move |tab| &tab.scope == scope)
     }
 
     /// The workspace's VS Code tab, if it has one.
@@ -494,41 +502,48 @@ impl Store {
 
     /// The herdr-core terminals `tab` types into; none for a mirror or a
     /// page.
-    fn driven_terminals(tab: &Tab) -> Vec<sheprd_backend::TerminalId> {
+    fn driven_terminals(tab: &Tab) -> Vec<Ending> {
         match &tab.location {
             Some(Location::CoreTerminal {
                 panes,
                 observe: false,
                 ..
-            }) => panes.terminals().into_iter().cloned().collect(),
+            }) => {
+                let host = Host::of(&tab.scope);
+                panes
+                    .terminals()
+                    .into_iter()
+                    .map(|terminal| (host.clone(), terminal.clone()))
+                    .collect()
+            }
             _ => Vec::new(),
         }
     }
 
-    /// Takes the terminals closed tabs left to end, but those another tab
-    /// still types into, as one a pane moved to.
-    pub(crate) fn take_ending(&mut self) -> Vec<sheprd_backend::TerminalId> {
-        let mut ending = std::mem::take(&mut self.ending);
-        ending.sort();
-        ending.dedup();
-        ending.retain(|terminal| {
-            !self.tabs.iter().any(|tab| {
+    /// Takes the terminals closed tabs left to end, each once, but those
+    /// another tab of the same core still types into, as one a pane moved
+    /// to.
+    pub(crate) fn take_ending(&mut self) -> Vec<Ending> {
+        let mut ending: Vec<Ending> = Vec::new();
+        for queued in std::mem::take(&mut self.ending) {
+            let (host, terminal) = &queued;
+            let held = self.tabs.iter().any(|tab| {
                 matches!(
                     &tab.location,
                     Some(Location::CoreTerminal { panes, observe: false, .. })
-                        if panes.contains(terminal)
+                        if panes.contains(terminal) && Host::of(&tab.scope) == *host
                 )
-            })
-        });
+            });
+            if !held && !ending.contains(&queued) {
+                ending.push(queued);
+            }
+        }
         ending
     }
 
     /// Queues `terminals` of a tab already closed to end, as a layout split
     /// after its last save still holds.
-    pub(crate) fn end_terminals(
-        &mut self,
-        terminals: impl IntoIterator<Item = sheprd_backend::TerminalId>,
-    ) {
+    pub(crate) fn end_terminals(&mut self, terminals: impl IntoIterator<Item = Ending>) {
         self.ending.extend(terminals);
     }
 

@@ -223,9 +223,10 @@ impl SheprdWindow {
             self.close_browser_tab(tab, window, cx);
             return;
         }
-        let mirror = shown.observe;
+        // A mirror's pane stops watching; the terminal runs on.
+        let (mirror, host) = (shown.observe, shown.host.clone());
         if self.remove_core_pane(tab, &terminal, window, cx) && !mirror {
-            self.end_core_terminal(terminal);
+            self.end_core_terminal(&host, terminal);
         }
     }
 

@@ -2,7 +2,10 @@
 //! only those its last saved layout listed.
 
 use super::commands::{id, window_with_split};
-use crate::{browser::Store, core_terminals::panes::Axis};
+use crate::{
+    browser::Store,
+    core_terminals::{Host, panes::Axis},
+};
 
 #[gpui::test]
 fn a_tab_closed_before_its_split_is_saved_ends_the_new_pane(cx: &mut gpui::TestAppContext) {
@@ -17,6 +20,6 @@ fn a_tab_closed_before_its_split_is_saved_ends_the_new_pane(cx: &mut gpui::TestA
         view.update(cx, |view, cx| view.sync_core_views(cx));
         assert!(!view.read(cx).core_terminals.tabs.contains_key(&tab));
         let ending = Store::update(cx, Store::take_ending);
-        assert_eq!(ending, vec![id("a"), id("b")]);
+        assert_eq!(ending, vec![(Host::Local, id("a")), (Host::Local, id("b"))]);
     });
 }
