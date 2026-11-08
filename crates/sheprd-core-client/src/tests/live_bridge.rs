@@ -12,7 +12,7 @@ fn a_bridged_core_runs_and_lists_terminals() {
     let binary = std::env::var_os("HERDR_CORE_TEST_BINARY").expect("HERDR_CORE_TEST_BINARY");
     let sandbox = Sandbox::start(binary.clone());
     // The bridge finds the core where an install puts it on the host.
-    let home = sandbox.dir.path().join("home");
+    let home = sandbox.dir().join("home");
     std::fs::create_dir_all(home.join(".local/bin")).unwrap();
     std::os::unix::fs::symlink(&binary, home.join(".local/bin/herdr-core")).unwrap();
     let mut shell = Command::new("/bin/sh");
