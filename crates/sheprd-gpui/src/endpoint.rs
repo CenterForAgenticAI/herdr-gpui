@@ -632,7 +632,7 @@ impl SheprdWindow {
         self.pending_toast = None;
     }
 
-    pub(super) fn select_endpoint(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn select_endpoint(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
         if !self.switch_endpoint(id, cx) {
             return false;
         }

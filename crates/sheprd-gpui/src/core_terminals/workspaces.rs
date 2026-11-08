@@ -136,6 +136,46 @@ impl SheprdWindow {
         }
     }
 
+    /// Whether a new workspace on this computer, such as a project's,
+    /// is one the app keeps for Herdr 2, whichever host is shown.
+    pub(crate) fn local_workspaces_use_core(&self) -> bool {
+        let Some(index) = self.core_host() else {
+            return false;
+        };
+        let live = if index == self.selected_endpoint {
+            &self.live
+        } else {
+            &self.endpoints[index].live
+        };
+        self.config.herdr_2_terminals || live.missing_installation
+    }
+
+    /// Shows this computer and brings its kept workspace in `cwd` to the
+    /// front, keeping a new one named `label` when there is none.
+    pub(crate) fn open_local_kept_folder(
+        &mut self,
+        label: &str,
+        cwd: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_is_remote() {
+            let Some(index) = self.core_host() else {
+                return;
+            };
+            let local = self.endpoints[index].id.clone();
+            if !self.select_endpoint(&local, cx) {
+                return;
+            }
+            self.refresh_core_session(cx);
+        }
+        match self.kept_workspace_at(&cwd) {
+            Some(id) => {
+                self.focus_kept_workspace(&id, cx);
+            }
+            None => self.new_kept_workspace(Some(label), Some(cwd), cx),
+        }
+    }
+
     /// The kept workspace on the selected host whose folder is `cwd`.
     pub(crate) fn kept_workspace_at(&self, cwd: &Path) -> Option<String> {
         let (_, session) = self
