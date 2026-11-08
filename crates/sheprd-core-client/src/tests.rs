@@ -8,6 +8,8 @@ mod frame;
 mod hello;
 mod labels;
 mod live;
+#[cfg(unix)]
+mod live_bridge;
 
 use crate::frame::{Decoder, Frame, Kind, encode};
 use serde_json::{Value, json};

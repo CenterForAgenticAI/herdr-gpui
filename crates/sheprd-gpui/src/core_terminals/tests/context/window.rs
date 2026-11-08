@@ -74,7 +74,8 @@ fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestCont
 fn spawn_for(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext, purpose: Purpose) -> Spawn {
     let mut spawn = Spawn::default();
     view.update(cx, |view, cx| {
-        view.give_core_context(&purpose, &mut spawn, cx)
+        let host = view.purpose_host(&purpose);
+        view.give_core_context(&purpose, &host, &mut spawn, cx)
     });
     spawn
 }
@@ -174,4 +175,24 @@ fn without_herdr_a_tab_starts_where_the_shown_core_pane_is(cx: &mut TestAppConte
     });
     let spawn = spawn_for(&view, cx, purpose());
     assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/work/repo")));
+}
+
+#[gpui::test]
+fn a_tab_on_a_saved_host_takes_nothing_from_this_computer(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx);
+    let mut spawn = Spawn::default();
+    view.update(cx, |view, cx| {
+        let purpose = Purpose::Tab {
+            scope: crate::browser::Scope::endpoint("box"),
+            workspace: "w0".into(),
+        };
+        let host = crate::core_terminals::Host::Remote(crate::browser::Scope::endpoint("box"));
+        view.give_core_context(&purpose, &host, &mut spawn, cx)
+    });
+    // That host's core picks its own folder; this computer's daemon and
+    // folders mean nothing there.
+    assert_eq!(spawn.cwd, None);
+    assert_eq!(env(&spawn, "HERDR_SOCKET_PATH"), None);
+    assert_eq!(env(&spawn, "HERDR_WORKSPACE_ID"), Some(""));
+    assert_eq!(env(&spawn, "HERDR_PANE_ID"), Some(""));
 }

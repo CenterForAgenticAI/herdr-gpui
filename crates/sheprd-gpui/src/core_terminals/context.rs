@@ -8,7 +8,7 @@
 //! Herdr identity outright: the workspace and daemon of a Herdr workspace it
 //! opens in, and no pane or tab, which herdr-core terminals are not.
 
-use super::Purpose;
+use super::{Host, Purpose};
 use crate::{SheprdWindow, browser::Shown};
 use gpui::App;
 use sheprd_backend::{Spawn, TerminalId};
@@ -71,8 +71,27 @@ pub(super) fn api_socket(client: &Path) -> Option<PathBuf> {
 impl SheprdWindow {
     /// Gives `spawn` the folder and Herdr variables of where `purpose` opens
     /// it: a split starts where the pane it splits is, a tab in its
-    /// workspace's folder.
-    pub(super) fn give_core_context(&self, purpose: &Purpose, spawn: &mut Spawn, cx: &App) {
+    /// workspace's folder. A saved host's core knows none of this
+    /// computer's folders or daemons, so there a split alone names a folder,
+    /// its pane's on that host.
+    pub(super) fn give_core_context(
+        &self,
+        purpose: &Purpose,
+        host: &Host,
+        spawn: &mut Spawn,
+        cx: &App,
+    ) {
+        if let Host::Remote(_) = host {
+            let beside = match purpose {
+                Purpose::Split { tab, at, .. } => self
+                    .core_terminals
+                    .info(*tab, at)
+                    .and_then(|info| info.cwd.clone()),
+                Purpose::Tab { .. } => None,
+            };
+            apply(spawn, beside, None);
+            return;
+        }
         let workspace = match purpose {
             Purpose::Tab { workspace, .. } => Some(workspace.clone()),
             Purpose::Split { tab, .. } => cx
@@ -81,7 +100,7 @@ impl SheprdWindow {
                 .map(|tab| tab.workspace_id.clone()),
         };
         let beside = match purpose {
-            Purpose::Split { at, .. } => self.core_folder(at),
+            Purpose::Split { tab, at, .. } => self.core_folder(*tab, at),
             Purpose::Tab { .. } => None,
         };
         let folder = beside
@@ -95,9 +114,18 @@ impl SheprdWindow {
         apply(spawn, folder, herdr);
     }
 
-    /// The folder `terminal` is in now, as herdr-core reports it.
-    pub(crate) fn core_folder(&self, terminal: &TerminalId) -> Option<PathBuf> {
-        self.core_terminals.infos.get(terminal)?.cwd.clone()
+    /// The folder `terminal` of `tab` is in now, as this computer's
+    /// herdr-core reports it. A saved host's folder is not on this
+    /// computer, so none is named for its terminals.
+    pub(crate) fn core_folder(
+        &self,
+        tab: crate::browser::TabId,
+        terminal: &TerminalId,
+    ) -> Option<PathBuf> {
+        if self.core_terminals.host_of(tab) != Host::Local {
+            return None;
+        }
+        self.core_terminals.info(tab, terminal)?.cwd.clone()
     }
 
     /// The herdr-core tab the active group shows, and its pane in use.
@@ -124,7 +152,7 @@ impl SheprdWindow {
             let (tab, terminal) = self.shown_core_pane(cx)?;
             let shown = cx.try_global::<crate::browser::Store>()?.get(tab)?;
             (shown.workspace_id == workspace)
-                .then(|| self.core_folder(&terminal))
+                .then(|| self.core_folder(tab, &terminal))
                 .flatten()
         })
     }

@@ -260,6 +260,7 @@ fn agent_list(look: &Look, device: &Device, slot: Slot, cx: &mut Context<SheprdW
     list.children(device.agents.iter().map(|agent| {
         let (endpoint, pane) = (device.id.clone(), agent.pane_id.clone());
         let (tab, workspace) = (agent.tab_id.clone(), agent.workspace_id.clone());
+        let keeper = agent.keeper;
         div()
             .id(SharedString::from(slot.selector(&format!(
                 "devices-agent-{}-{}",
@@ -303,6 +304,10 @@ fn agent_list(look: &Look, device: &Device, slot: Slot, cx: &mut Context<SheprdW
                     .child(crate::sidebar::status_text(agent.status)),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
+                if keeper == sheprd_session::Keeper::App {
+                    this.show_core_agent(&endpoint, &workspace, &tab, &pane, window, cx);
+                    return;
+                }
                 // Read before navigating, which may switch devices.
                 let on_screen = this.endpoints[this.selected_endpoint].id == endpoint
                     && this
