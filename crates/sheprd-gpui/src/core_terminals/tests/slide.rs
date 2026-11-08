@@ -1,0 +1,61 @@
+//! Smooth scrolling in a herdr-core view: a move through the history slides
+//! into place; output and long jumps do not.
+
+use super::{
+    history::{frame, shown},
+    worker::until,
+};
+use sheprd_backend::{ScrollMetrics, SurfaceUpdate};
+use std::time::Duration;
+
+fn scrolled(offset: usize, revision: u64) -> Vec<SurfaceUpdate> {
+    vec![
+        SurfaceUpdate::Frame(frame(10, 3)),
+        SurfaceUpdate::Scroll {
+            metrics: ScrollMetrics {
+                offset,
+                history: 7,
+                rows: 3,
+            },
+            revision,
+        },
+    ]
+}
+
+#[gpui::test]
+fn a_scroll_through_the_history_slides_into_place(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    backend.push(scrolled(2, 4));
+    let sliding = until(|| {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.poll(window, cx);
+                view.sliding(crate::motion::now())
+            })
+        })
+    });
+    // It starts where the frame before it was drawn: two rows up, with
+    // that frame two rows below it.
+    assert!(sliding.lift > 1.5 && sliding.lift <= 2., "{}", sliding.lift);
+    assert_eq!(sliding.behind_at, 2.);
+    let landed = crate::motion::now() + Duration::from_secs(1);
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(view.sliding(landed).is_none())));
+}
+
+#[gpui::test]
+fn new_output_and_long_jumps_do_not_slide(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    // New text at the same time: drawn where it is.
+    backend.push(scrolled(1, 5));
+    // Further than the screen is tall: a jump.
+    backend.push(scrolled(6, 5));
+    until(|| {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.poll(window, cx);
+                assert!(view.sliding(crate::motion::now()).is_none());
+                (view.top() == 1).then_some(())
+            })
+        })
+    });
+}

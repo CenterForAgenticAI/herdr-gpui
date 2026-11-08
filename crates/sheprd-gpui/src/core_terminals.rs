@@ -494,6 +494,7 @@ impl SheprdWindow {
             ground: self.ground(),
             option_as_alt: self.config.option_as_alt,
             padding: self.config.terminal_padding,
+            smooth_scroll: self.config.smooth_scroll,
         }
     }
 

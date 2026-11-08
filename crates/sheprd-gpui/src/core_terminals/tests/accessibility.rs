@@ -29,6 +29,7 @@ pub(super) fn look() -> Look {
         ground: Default::default(),
         option_as_alt: Default::default(),
         padding: Default::default(),
+        smooth_scroll: true,
     }
 }
 

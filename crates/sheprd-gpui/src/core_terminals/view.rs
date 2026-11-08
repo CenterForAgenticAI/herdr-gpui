@@ -9,6 +9,7 @@ mod history;
 pub(super) mod keys;
 pub(super) mod paste;
 mod pointer;
+mod slide;
 
 use super::{
     screen::Screen,
@@ -38,6 +39,8 @@ pub(crate) struct Look {
     pub(crate) ground: Ground,
     pub(crate) option_as_alt: OptionAsAlt,
     pub(crate) padding: Padding,
+    /// Whether a scroll through the history slides into place.
+    pub(crate) smooth_scroll: bool,
 }
 
 /// The window's colors and interface font, for the find bar a view draws.
@@ -100,6 +103,8 @@ pub(crate) struct CoreTerminalView {
     /// When a drag past the screen last scrolled the history.
     scrolled_at: Option<std::time::Instant>,
     selection: Option<Selection>,
+    /// A scroll sliding into place.
+    slide: Option<slide::Slide>,
     /// The last frame painted with its cursor hidden, and the frame it came
     /// from, so a veiled pane copies a frame once rather than every paint.
     sleeping: Option<(Arc<FrameData>, Arc<FrameData>)>,
@@ -142,6 +147,7 @@ impl CoreTerminalView {
             press: None,
             scrolled_at: None,
             selection: None,
+            slide: None,
             sleeping: None,
             screen: Screen::default(),
             sent_focus: None,
@@ -210,7 +216,8 @@ impl CoreTerminalView {
         let screen = self.link.mailbox.take();
         let changed = screen.is_some();
         if let Some(screen) = screen {
-            self.screen = screen;
+            let before = std::mem::replace(&mut self.screen, screen);
+            self.slide_from(&before);
             cx.notify();
         }
         self.take_answers(cx);
@@ -372,6 +379,10 @@ impl Render for CoreTerminalView {
         let focus = self.focus.clone();
         let status = self.status();
         let selecting = self.press == Some(pointer::Press::Selecting);
+        let sliding = self.sliding(crate::motion::now());
+        if sliding.is_some() {
+            window.request_animation_frame();
+        }
         let body = div()
             .relative()
             .flex_1()
@@ -401,9 +412,28 @@ impl Render for CoreTerminalView {
                             return;
                         };
                         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                            let row = |rows: f32| point(px(0.), px(rows * look.cell_height));
+                            let mut origin = bounds.origin;
+                            if let Some(sliding) = &sliding {
+                                origin -= row(sliding.lift);
+                                painter.borrow_mut().paint_frame(
+                                    &sliding.behind,
+                                    origin + row(sliding.behind_at),
+                                    Some(bounds.size),
+                                    look.ground,
+                                    look.cell_width,
+                                    &look.font,
+                                    &[],
+                                    &[],
+                                    None,
+                                    None,
+                                    window,
+                                    cx,
+                                );
+                            }
                             painter.borrow_mut().paint_frame(
                                 frame,
-                                bounds.origin,
+                                origin,
                                 Some(bounds.size),
                                 look.ground,
                                 look.cell_width,
