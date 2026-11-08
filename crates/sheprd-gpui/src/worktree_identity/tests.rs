@@ -121,16 +121,22 @@ fn surfaces_switch_each_mark_on_its_own() {
     }
 }
 
-fn workspace(id: &str, worktree: Option<bool>) -> ClientShellWorkspace {
-    serde_json::from_value(serde_json::json!({
-        "workspace_id": id, "active_tab_id": "t0", "new_workspace_cwd": "/tmp",
-        "number": 1, "label": id, "custom_label": false, "branch": "main",
-        "worktree": worktree.map(|linked| serde_json::json!({
-            "key": "/repo/.git", "label": "repo", "is_linked_worktree": linked
-        })),
-        "tokens": [], "focused": false, "agent_status": "idle"
-    }))
-    .unwrap()
+fn workspace(id: &str, worktree: Option<bool>) -> sheprd_session::Workspace {
+    let workspace: sheprd_client::protocol::ClientShellWorkspace =
+        serde_json::from_value(serde_json::json!({
+            "workspace_id": id, "active_tab_id": "t0", "new_workspace_cwd": "/tmp",
+            "number": 1, "label": id, "custom_label": false, "branch": "main",
+            "worktree": worktree.map(|linked| serde_json::json!({
+                "key": "/repo/.git", "label": "repo", "is_linked_worktree": linked
+            })),
+            "tokens": [], "focused": false, "agent_status": "idle"
+        }))
+        .unwrap();
+    let mut snapshot = crate::sidebar::layout_tests::snapshot(0);
+    snapshot.workspaces.push(workspace);
+    crate::session_model::of_snapshot(&snapshot)
+        .workspaces
+        .remove(0)
 }
 
 /// Only a linked worktree is marked: not the main checkout, and not a

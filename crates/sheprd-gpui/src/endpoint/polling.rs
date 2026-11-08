@@ -154,21 +154,20 @@ impl SheprdWindow {
             // sends no new snapshot.
             let now = Instant::now();
             if endpoint.online_since().is_some()
-                && let (Some(avatars), Some(snapshot)) =
-                    (&mut self.avatars, &endpoint.live.snapshot)
+                && let (Some(avatars), Some(session)) = (&mut self.avatars, endpoint.live.session())
                 && (updated == Redraw::Window
                     || matches!(&endpoint.connection.target,
                         ConnectTarget::Ssh { target, .. } if avatars.retry_due(target, now)))
             {
                 let target = &endpoint.connection.target;
-                for workspace in &snapshot.workspaces {
+                for workspace in &session.workspaces {
                     if let Some(checkout) = Checkout::of(index == 0, target, workspace) {
                         avatars.request(checkout, now);
                     }
                 }
                 if let ConnectTarget::Ssh { target: host, .. } = target {
                     avatars.forget_unlisted(host, |dir| {
-                        snapshot.workspaces.iter().any(|workspace| {
+                        session.workspaces.iter().any(|workspace| {
                             matches!(
                                 Checkout::of(index == 0, target, workspace),
                                 Some(Checkout::Ssh { dir: listed, .. }) if listed == dir

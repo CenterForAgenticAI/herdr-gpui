@@ -189,15 +189,28 @@ pub(crate) enum PageOpened {
 }
 
 impl SheprdWindow {
-    /// The workspace tabs belong to: the one Herdr 1 focuses or, with no
-    /// Herdr 1 installed, the window's single herdr-core workspace.
+    /// The workspace tabs belong to: a workspace the app keeps for Herdr 2
+    /// when one is in front, else the one Herdr 1 focuses.
     pub(crate) fn browser_key(&self) -> Option<(Scope, String)> {
+        let endpoint = &self.endpoints[self.selected_endpoint];
+        if let Some(kept) = self.kept_in_front() {
+            return Some((scope(endpoint), kept.to_owned()));
+        }
         let workspace = match &self.live.snapshot {
             Some(snapshot) => snapshot.focused_workspace_id.clone()?,
             None if self.live.missing_installation => crate::core_terminals::WORKSPACE.to_owned(),
             None => return None,
         };
-        Some((scope(&self.endpoints[self.selected_endpoint]), workspace))
+        Some((scope(endpoint), workspace))
+    }
+
+    /// Herdr 1's focused workspace, while it is in front rather than one the
+    /// app keeps for Herdr 2.
+    pub(crate) fn herdr_workspace_in_front(&self) -> Option<&str> {
+        if self.kept_in_front().is_some() {
+            return None;
+        }
+        self.live.snapshot.as_ref()?.focused_workspace_id.as_deref()
     }
 
     /// The focused workspace's browser tabs, in the order they opened.
@@ -211,7 +224,7 @@ impl SheprdWindow {
             .collect()
     }
 
-    pub(super) fn forget_browser_tabs(&mut self, mut gone: impl FnMut(TabId) -> bool) {
+    pub(crate) fn forget_browser_tabs(&mut self, mut gone: impl FnMut(TabId) -> bool) {
         let browser = &mut self.browser;
         for layout in browser.layouts.values_mut() {
             let closed: Vec<Pick> = layout

@@ -62,7 +62,7 @@ impl CoreTerminals {
                 .unwrap_or_default();
             return Some(Change::Close(tab, left));
         }
-        let busy = self.starting.is_some() || self.wanted.is_some() || self.phone_split.is_some();
+        let busy = self.starting.is_some() || !self.wanted.is_empty() || self.phone_split.is_some();
         let shown = self.tabs.get_mut(&tab)?;
         let Some(terminal) = TerminalId::new(ask.terminal.as_str())
             .ok()
@@ -120,7 +120,7 @@ impl CoreTerminals {
                 .find(|terminal| !pending.before.contains(terminal))
                 .cloned()
         });
-        let idle = self.starting.is_none() && self.wanted.is_none();
+        let idle = self.starting.is_none() && self.wanted.is_empty();
         let late = now.saturating_duration_since(pending.since) >= SPLIT_WAIT;
         if placed.is_none() && !idle && !late {
             return None;

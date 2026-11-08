@@ -172,7 +172,12 @@ impl SheprdWindow {
     /// Otherwise macOS lists every window in the Window menu by title, and
     /// windows onto the same daemon are told apart by the space each shows.
     pub(crate) fn sync_window_title(&mut self, window: &mut Window) {
-        let title = window_title(&self.live);
+        let front = self.browser_key().map(|(_, workspace)| workspace);
+        let title = window_title(
+            &self.live,
+            &self.sessions(self.selected_endpoint),
+            front.as_deref(),
+        );
         if self.title != title {
             window.set_window_title(&title);
             self.title = title;
@@ -218,19 +223,18 @@ fn ring_bell(window: &Window, ring: crate::bell::Ring) {
     }
 }
 
-fn window_title(live: &LiveState) -> String {
+/// The window's title: what an agent set, else the app's name and the
+/// workspace in front, Herdr 1's or one the app keeps for Herdr 2.
+fn window_title(
+    live: &LiveState,
+    sessions: &crate::session_model::Sessions,
+    front: Option<&str>,
+) -> String {
     if let Some(title) = &live.window_title {
         return title.clone();
     }
-    live.snapshot
-        .as_ref()
-        .and_then(|snapshot| {
-            let focused = snapshot.focused_workspace_id.as_deref()?;
-            snapshot
-                .workspaces
-                .iter()
-                .find(|workspace| workspace.workspace_id == focused)
-        })
+    front
+        .and_then(|front| sessions.workspace(front))
         .map_or_else(
             || WINDOW_TITLE.to_owned(),
             |workspace| {
