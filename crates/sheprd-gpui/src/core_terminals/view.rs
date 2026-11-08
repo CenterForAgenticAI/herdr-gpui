@@ -9,6 +9,8 @@ mod history;
 pub(super) mod keys;
 pub(super) mod paste;
 mod pointer;
+mod quote;
+pub(crate) use quote::Quote;
 mod slide;
 
 use super::{
@@ -89,6 +91,10 @@ pub(crate) struct CoreTerminalView {
     id: TerminalId,
     link: Link,
     look: Look,
+    /// The history read whose text a note quotes.
+    quoting: Option<u64>,
+    /// The text a note quotes, once read from the history.
+    quote_ready: Option<Result<String, super::Error>>,
     /// Text an IME is composing; committed text goes to the terminal.
     marked: String,
     /// The last history request's ID.
@@ -139,6 +145,8 @@ impl CoreTerminalView {
             id,
             link,
             look,
+            quoting: None,
+            quote_ready: None,
             marked: String::new(),
             next_request: 0,
             observe,

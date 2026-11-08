@@ -5,6 +5,7 @@ mod focus;
 mod history;
 mod keys;
 mod paste;
+mod quote;
 mod saved_tabs;
 mod screen;
 mod selection;

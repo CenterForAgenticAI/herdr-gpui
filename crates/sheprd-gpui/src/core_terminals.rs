@@ -32,7 +32,7 @@ mod tests;
 pub(crate) use error::Error;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
-pub(crate) use view::{CoreTerminalView, Look};
+pub(crate) use view::{CoreTerminalView, Look, Quote};
 
 use crate::{
     SheprdWindow,

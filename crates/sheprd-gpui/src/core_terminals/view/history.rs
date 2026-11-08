@@ -42,6 +42,13 @@ impl CoreTerminalView {
                     Ok(_) => tracing::warn!("A herdr-core history read answered no text"),
                     Err(error) => tracing::warn!(%error, "Could not read a herdr-core history"),
                 }
+            } else if self.quoting == Some(id) {
+                self.quoting = None;
+                self.quote_ready = Some(match answer {
+                    Ok(HistoryAnswer::Text(text)) => Ok(text),
+                    Ok(_) => Err(Error::Answer),
+                    Err(error) => Err(Error::History(error)),
+                });
             } else if self.editing == Some(id) {
                 self.editing = None;
                 self.edit_ready = Some(match answer {
