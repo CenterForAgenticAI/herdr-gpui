@@ -36,11 +36,12 @@ impl Source {
         };
         let terminal =
             TerminalId::new(address).map_err(|_| sheprd_client::herdr::convert::Error::Moved)?;
-        sheprd_core_client::convert::run(&core, &terminal, agent, program, home, cancelled).map_err(
-            |error| match error {
+        // The chat is followed once listed: the terminal is labelled with it.
+        sheprd_core_client::convert::run(&core, &terminal, agent, program, home, cancelled)
+            .map(|_endpoint| ())
+            .map_err(|error| match error {
                 sheprd_core_client::Error::Convert(refused) => ConvertError::Refused(refused),
                 error => crate::hub::Error::from(Error::Client(error)).into(),
-            },
-        )
+            })
     }
 }

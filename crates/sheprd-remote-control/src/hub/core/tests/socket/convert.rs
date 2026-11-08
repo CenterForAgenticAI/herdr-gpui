@@ -78,6 +78,7 @@ fn stand(status: &'static str) -> Stand {
                     json!({})
                 }
                 "terminal.send" => json!({"turn": 1}),
+                "terminal.label" => json!({}),
                 method => panic!("unexpected method {method}"),
             };
             if method != "terminal.list" {
@@ -173,6 +174,14 @@ fn an_idle_agent_stops_on_ctrl_c_and_continues_as_a_chat() {
     let line = params["text"].as_str().unwrap();
     assert!(line.contains("/opt/sheprd/sheprd-acp"), "{line}");
     assert!(line.contains(SESSION), "{line}");
+    // The terminal is then labelled with the chat the line started, so the
+    // daemon lists it as a chat.
+    let (method, params) = stand.asked.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(method, "terminal.label");
+    let endpoint = params["labels"][sheprd_chat_protocol::TOKEN]
+        .as_str()
+        .unwrap();
+    assert!(line.contains(endpoint), "{line}");
     let Stand { source, server, .. } = stand;
     drop(source);
     server.join().unwrap();
@@ -230,4 +239,28 @@ async fn a_phone_moves_the_agent_its_herdr_2_tab_offers() {
     let Stand { source, server, .. } = stand;
     drop(source);
     server.join().unwrap();
+}
+
+#[test]
+fn a_moved_agents_terminal_is_a_chat_only_while_the_chat_runs() {
+    let endpoint = sheprd_chat_protocol::EndpointId::random().to_string();
+    let labelled = |front: &str| -> Terminal {
+        serde_json::from_value(json!({"address": "t1", "cols": 80, "rows": 24,
+            "cwd": "/work/app", "state": "live",
+            "labels": {sheprd_chat_protocol::TOKEN: endpoint},
+            "foreground": {"pid": 7, "name": front, "argv": [front], "cwd": "/work/app"}}))
+        .unwrap()
+    };
+    for (front, chat) in [("sheprd-acp", true), ("zsh", false)] {
+        let records = [labelled(front)];
+        let mut layout = projection::project("fake-core", &records, None, None);
+        chats::lift(&mut layout, "fake-core", &records);
+        let workspace = &layout.workspaces[0];
+        assert_eq!(workspace.chats.len(), usize::from(chat), "{front} in front");
+        assert_eq!(
+            workspace.terminals.len(),
+            usize::from(!chat),
+            "{front} in front"
+        );
+    }
 }
