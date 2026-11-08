@@ -450,30 +450,38 @@ pub(super) async fn rename(
     Path(pane): Path<String>,
     Json(request): Json<RenameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let (method, params, tab) = {
+    let (chat, tab) = {
         let layout = state.hub.layout();
-        let (target, tab) = if let Some((_, chat)) = layout.chat(&pane) {
-            (RenameTarget::Chat { pane: &pane }, chat.tab.clone())
-        } else {
-            let (_, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
-            (
-                RenameTarget::Tab { tab: &terminal.tab },
-                terminal.tab.clone(),
-            )
-        };
-        let (method, params) = rename_call(target, &request.label)?;
-        (method, params, tab)
+        match layout.chat(&pane) {
+            Some((_, chat)) => (true, chat.tab.clone()),
+            None => {
+                let (_, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
+                (false, terminal.tab.clone())
+            }
+        }
     };
-    // Sheprd keeps a Herdr 2 tab's names: it renames it.
+    let label = request.label.trim();
+    if label.chars().count() > MAX_LABEL {
+        return Err(ApiError::Invalid("that name is too long"));
+    }
+    // Sheprd keeps a Herdr 2 tab's names: it renames it. A blank name gives
+    // a tab its program's title back, as Sheprd's menu does.
     if let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)? {
-        let name = Some(request.label.trim().to_owned()).filter(|name| !name.is_empty());
-        let op = match method {
-            ApiMethod::PaneRename => crate::control::layout::Op::RenamePane(name),
-            _ => crate::control::layout::Op::RenameTab(name),
+        let name = Some(label.to_owned()).filter(|name| !name.is_empty());
+        let op = if chat {
+            crate::control::layout::Op::RenamePane(name)
+        } else {
+            crate::control::layout::Op::RenameTab(name)
         };
         crate::native::changes::change_layout(&state, saved, terminal, op).await?;
         return Ok(Json(json!({})));
     }
+    let target = if chat {
+        RenameTarget::Chat { pane: &pane }
+    } else {
+        RenameTarget::Tab { tab: &tab }
+    };
+    let (method, params) = rename_call(target, label)?;
     state.hub.call(method, params).await?;
     Ok(Json(json!({})))
 }

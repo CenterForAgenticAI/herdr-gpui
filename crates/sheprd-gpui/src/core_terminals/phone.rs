@@ -212,8 +212,11 @@ impl SheprdWindow {
         let kept = cx
             .try_global::<crate::browser::Store>()
             .is_some_and(|store| store.kept_workspace(&scope, workspace).is_some());
+        // This computer's, whichever host the window shows.
         if kept {
-            self.rename_kept_workspace(workspace, name, cx);
+            crate::browser::Store::update(cx, |store| store.rename_kept(&scope, workspace, name));
+            self.refresh_core_session(cx);
+            cx.notify();
         }
         kept
     }
