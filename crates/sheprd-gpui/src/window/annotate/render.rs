@@ -103,14 +103,19 @@ impl SheprdWindow {
             size(px(font.size * 6. + 48.), px(font.line_height() + 12.))
         };
         let bounds = placement(pane_bounds, anchor, desired);
-        Some(self.place_terminal_note(composer, bounds, &font, cx))
+        Some(
+            self.size_terminal_note(composer, bounds.size, &font, cx)
+                .absolute()
+                .left(bounds.left())
+                .top(bounds.top()),
+        )
     }
 
-    /// The note card, or the offer pill, at `bounds`.
-    pub(super) fn place_terminal_note(
+    /// The note card, or the offer pill, `size` large; the caller places it.
+    pub(super) fn size_terminal_note(
         &self,
         composer: Option<&Composer>,
-        bounds: Bounds<Pixels>,
+        size: Size<Pixels>,
         font: &crate::config::FontConfig,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -156,11 +161,8 @@ impl SheprdWindow {
                 ),
         };
         div()
-            .absolute()
-            .left(bounds.left())
-            .top(bounds.top())
-            .w(bounds.size.width)
-            .h(bounds.size.height)
+            .w(size.width)
+            .h(size.height)
             .text_font(font)
             .text_size(px(font.size))
             .line_height(px(font.line_height()))

@@ -117,3 +117,43 @@ fn only_a_view_drawn_in_the_last_frame_is_shown(cx: &mut gpui::TestAppContext) {
     terminals.start_frame();
     assert!(!terminals.shows(&view));
 }
+
+#[gpui::test]
+fn a_quote_whose_rows_moved_while_it_was_read_fails(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    cx.run_until_parked();
+    let bounds = cx.update(|_, cx| view.read(cx).bounds()).unwrap();
+    let cell =
+        |column: f32, row: f32| bounds.origin + at(px(8.5 * column + 1.), px(17. * row + 1.));
+    cx.simulate_mouse_down(cell(3., 2.), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(cell(0., 1.), Some(MouseButton::Left), Modifiers::none());
+    cx.simulate_mouse_up(cell(0., 1.), MouseButton::Left, Modifiers::none());
+    backend
+        .answers
+        .lock()
+        .unwrap()
+        .push(HistoryAnswer::Text("shifted".into()));
+    cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx)));
+    // Output into the full history reaches the worker, but not yet the
+    // view, before the quote is asked for.
+    backend.push(vec![SurfaceUpdate::Scroll {
+        metrics: ScrollMetrics {
+            offset: 0,
+            history: 7,
+            rows: 3,
+            full: true,
+        },
+        revision: 5,
+    }]);
+    until(|| cx.update(|_, cx| view.read(cx).changed().then_some(())));
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(view.quote_selection())));
+    let quote = until(|| {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.poll(window, cx);
+                view.take_quote()
+            })
+        })
+    });
+    assert!(matches!(quote, Err(crate::core_terminals::Error::Moved)));
+}

@@ -37,11 +37,12 @@ impl SheprdWindow {
             Ok(quote) => self.compose_core_note(view, quote, window, cx),
             Err(error) => {
                 tracing::warn!(%error, "Could not read a herdr-core selection to annotate");
+                let reason = match error {
+                    crate::core_terminals::Error::Moved => fl!("window-annotate-history-moved"),
+                    _ => fl!("window-annotate-history-unread"),
+                };
                 self.show_flash(
-                    Flash::warning(fl!(
-                        "window-annotate-failed",
-                        error = fl!("window-annotate-history-unread")
-                    )),
+                    Flash::warning(fl!("window-annotate-failed", error = reason)),
                     cx,
                 );
             }
@@ -64,7 +65,9 @@ impl SheprdWindow {
     }
 
     /// The card over the herdr-core pane its note is about, beside the
-    /// selection's last row the pane shows.
+    /// selection's last row the pane shows. The pane's bounds are the
+    /// window's, so the card is anchored to the window rather than to the
+    /// root, which a client-drawn window frame insets.
     pub(crate) fn render_core_note(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         if self.menu.page.is_some() {
             return None;
@@ -81,11 +84,7 @@ impl SheprdWindow {
         let mut font = self.config.ui.clone();
         font.size = font.size.max(14.);
         let bounds = render::placement(pane, anchor, render::card_size(&font));
-        Some(deferred(self.place_terminal_note(
-            Some(composer),
-            bounds,
-            &font,
-            cx,
-        )))
+        let card = self.size_terminal_note(Some(composer), bounds.size, &font, cx);
+        Some(deferred(anchored().position(bounds.origin).child(card)))
     }
 }

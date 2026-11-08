@@ -80,9 +80,10 @@ impl CoreTerminalView {
                     Ok(_) => tracing::warn!("A herdr-core history read answered no text"),
                     Err(error) => tracing::warn!(%error, "Could not read a herdr-core history"),
                 }
-            } else if self.quoting == Some(id) {
-                self.quoting = None;
+            } else if let Some(reading) = self.quoting.take_if(|reading| reading.id == id) {
                 self.quote_ready = Some(match answer {
+                    // A note must quote the text that was selected.
+                    Ok(HistoryAnswer::Text(_)) if self.moved(reading) => Err(Error::Moved),
                     Ok(HistoryAnswer::Text(text)) => Ok(text),
                     Ok(_) => Err(Error::Answer),
                     Err(error) => Err(Error::History(error)),

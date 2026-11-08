@@ -9,6 +9,8 @@ pub enum Error {
     EditFile(#[source] std::io::Error),
     #[error("Could not read the terminal's history")]
     History(#[source] std::sync::Arc<dyn std::error::Error + Send + Sync>),
+    #[error("The selected text moved before it was read")]
+    Moved,
     #[error("This build has no herdr-core beside it; install herdr-core from releases.herdr.dev")]
     NotBundled,
     #[error("Could not start a worker for the terminal: {0}")]

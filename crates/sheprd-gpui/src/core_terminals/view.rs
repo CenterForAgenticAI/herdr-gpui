@@ -91,7 +91,7 @@ pub(crate) struct CoreTerminalView {
     link: Link,
     look: Look,
     /// The history read whose text a note quotes.
-    quoting: Option<u64>,
+    quoting: Option<history::Reading>,
     /// The text a note quotes, once read from the history.
     quote_ready: Option<Result<String, super::Error>>,
     /// Text an IME is composing; committed text goes to the terminal.

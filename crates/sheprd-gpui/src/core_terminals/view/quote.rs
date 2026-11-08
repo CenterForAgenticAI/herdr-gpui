@@ -4,7 +4,6 @@
 use super::CoreTerminalView;
 use crate::core_terminals::Error;
 use gpui::{Bounds, Context, Pixels, point, px, size};
-use sheprd_backend::History;
 
 impl CoreTerminalView {
     /// Starts reading the selected text, for a note about it; false when
@@ -16,10 +15,7 @@ impl CoreTerminalView {
             self.quoting = None;
             return false;
         };
-        self.quoting = Some(self.ask(History::Read {
-            anchor: range.start,
-            cursor: range.end,
-        }));
+        self.quoting = Some(self.read(range));
         true
     }
 
