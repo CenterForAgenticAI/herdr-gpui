@@ -485,7 +485,10 @@ fn the_projects_menu_says_why_reading_failed(cx: &mut TestAppContext) {
         .chars()
         .filter(|ch| !matches!(ch, '\u{2068}' | '\u{2069}'))
         .collect();
-    assert!(plain.contains("Sign in to read contoso"), "{plain}");
+    assert!(
+        plain.contains("Connect Azure DevOps from the account menu to read contoso"),
+        "{plain}"
+    );
     // A later read that succeeds replaces it.
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
