@@ -91,3 +91,48 @@ fn an_unknown_pane_or_size_holds_nothing() {
     drop(source);
     fake.server.join().unwrap();
 }
+
+#[test]
+fn a_refused_hold_leaves_nothing_to_release() {
+    let (source, fake) = fake();
+    source.poll().unwrap();
+    // The fake refuses an attach 13 columns wide.
+    assert!(source.hold(&id("t1"), 13, 30).is_err());
+    let watching = next(&fake);
+    assert_eq!(watching["observe"], true);
+    {
+        let state = lock(&source.state);
+        let mut screen = lock(&state.screens["t1"]);
+        screen.age(Duration::from_secs(600));
+        assert!(screen.expired(), "no hold keeps it");
+    }
+    drop(source);
+    fake.server.join().unwrap();
+}
+
+#[test]
+fn a_driver_that_takes_the_size_back_is_followed() {
+    let (source, fake) = fake();
+    source.poll().unwrap();
+    let hold = source.hold(&id("t1"), 46, 30).unwrap();
+    let screen = lock(&source.state).screens["t1"].clone();
+    let listed = |cols: u16| {
+        let mut record: Terminal = serde_json::from_value(record("t1")).unwrap();
+        record.cols = cols;
+        record.rows = 30;
+        record
+    };
+    let mut screen = lock(&screen);
+    // A listing from before the hold took is older than the hold.
+    screen.follow_size(&listed(80)).unwrap();
+    assert_eq!(screen.size().cols(), 46);
+    screen.follow_size(&listed(46)).unwrap();
+    assert_eq!(screen.size().cols(), 46);
+    // Listed at the hold, then at another size: the desktop resized it.
+    screen.follow_size(&listed(120)).unwrap();
+    assert_eq!(screen.size().cols(), 120);
+    drop(screen);
+    drop(hold);
+    drop(source);
+    fake.server.join().unwrap();
+}

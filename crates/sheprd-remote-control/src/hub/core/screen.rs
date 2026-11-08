@@ -31,6 +31,13 @@ pub(super) struct Screen {
     /// core sizes a terminal to its latest driver and back to the one
     /// before when that one leaves, so the latest hold wins.
     holds: Vec<(u64, Size)>,
+    /// Whether the core listed the terminal at the latest hold's size
+    /// since it was set. After that, a listing at another size is a
+    /// driver that took the terminal back, which the emulator follows.
+    hold_listed: bool,
+    /// Lines pushed into history since the screen opened: where a scrolled
+    /// view's lines went as output arrived.
+    lines: u64,
     lost: bool,
     sync_since: Option<Instant>,
     touched: Instant,
@@ -57,6 +64,8 @@ impl Screen {
             driving: false,
             emulator: Emulator::new(size, HISTORY as usize),
             holds: Vec::new(),
+            hold_listed: false,
+            lines: 0,
             lost: false,
             sync_since: None,
             touched: Instant::now(),
@@ -72,7 +81,7 @@ impl Screen {
         let mut wait = PAINT;
         while !self.lost && started.elapsed() < PAINT {
             let chunk = self.attachment.read(wait)?;
-            self.emulator.feed(&chunk.bytes);
+            self.feed(&chunk.bytes);
             if chunk.end.is_some() {
                 self.lost = true;
             }
@@ -114,8 +123,7 @@ impl Screen {
         self.touched = Instant::now();
         // What the attach it replaces sent belongs before the new paint.
         self.drain()?;
-        self.holds.retain(|(id, _)| *id != hold);
-        self.holds.push((hold, size));
+        // Recorded only once it took: nothing could release a failed one.
         if self.driving {
             self.attachment.resize(size.cols(), size.rows())?;
         } else {
@@ -127,6 +135,9 @@ impl Screen {
             })?;
             self.driving = true;
         }
+        self.holds.retain(|(id, _)| *id != hold);
+        self.holds.push((hold, size));
+        self.hold_listed = false;
         self.emulator.resize(size);
         Ok(())
     }
@@ -141,6 +152,7 @@ impl Screen {
             return Ok(());
         }
         if let Some((_, size)) = self.holds.last().copied() {
+            self.hold_listed = false;
             self.attachment.resize(size.cols(), size.rows())?;
             self.emulator.resize(size);
             return Ok(());
@@ -181,12 +193,24 @@ impl Screen {
         self.touched -= by;
     }
 
-    /// Sizes the emulator as the core last listed the terminal. While held,
-    /// the hold's size is newer than any listing.
+    #[cfg(all(test, unix))]
+    pub(super) fn size(&self) -> Size {
+        self.emulator.size()
+    }
+
+    /// Sizes the emulator as the core last listed the terminal. A hold's
+    /// size is newer than listings until one shows it; a listing at another
+    /// size after that is a driver that took the terminal back, as the
+    /// desktop does when its pane resizes, and the phone follows it rather
+    /// than fight over the size.
     pub(super) fn follow_size(&mut self, terminal: &Terminal) -> Result<()> {
+        let listed = Size::new(terminal.cols, terminal.rows).map_err(|_| Error::Response)?;
         let size = match self.holds.last() {
-            Some((_, size)) => *size,
-            None => Size::new(terminal.cols, terminal.rows).map_err(|_| Error::Response)?,
+            Some((_, held)) if !self.hold_listed => {
+                self.hold_listed = listed == *held;
+                *held
+            }
+            _ => listed,
         };
         if size != self.emulator.size() {
             self.emulator.resize(size);
@@ -198,7 +222,7 @@ impl Screen {
         self.touched = Instant::now();
         self.drain()?;
         match method {
-            ApiMethod::PaneRead => Ok(read(&mut self.emulator, params)),
+            ApiMethod::PaneRead => Ok(read(&mut self.emulator, params, self.lines)),
             ApiMethod::PaneSendText => {
                 let text = params["text"].as_str().ok_or(Error::Response)?;
                 self.drive(core)?;
@@ -225,6 +249,10 @@ impl Screen {
         Ok(())
     }
 
+    fn feed(&mut self, bytes: &[u8]) {
+        self.lines += feed(&mut self.emulator, bytes);
+    }
+
     fn drain(&mut self) -> Result<()> {
         if self.lost {
             return Err(super::Error::Disconnected.into());
@@ -233,7 +261,7 @@ impl Screen {
         let mut bytes = 0;
         loop {
             let chunk = self.attachment.read(Duration::ZERO)?;
-            self.emulator.feed(&chunk.bytes);
+            self.feed(&chunk.bytes);
             bytes += chunk.bytes.len();
             if matches!(chunk.end, Some(End::Lost | End::Closed(_))) {
                 self.lost = true;
@@ -256,24 +284,58 @@ impl Screen {
     }
 }
 
+/// Feeds `bytes`, and counts the lines they pushed into history. Scrolled
+/// up one line, the emulator keeps showing the same line as output pushes
+/// lines into history, so its offset moves by exactly that many; a burst
+/// past the whole history counts one short of it, which still takes any
+/// scrolled view to the top. The emulator is left live.
+pub(super) fn feed(emulator: &mut Emulator, bytes: &[u8]) -> u64 {
+    let before = emulator.scroll_metrics().history;
+    if before == 0 {
+        emulator.feed(bytes);
+        return emulator.scroll_metrics().history as u64;
+    }
+    emulator.scroll(Scroll::Bottom);
+    emulator.scroll(Scroll::Lines(1));
+    emulator.feed(bytes);
+    let pushed = emulator.scroll_metrics().offset.saturating_sub(1);
+    emulator.scroll(Scroll::Bottom);
+    pushed as u64
+}
+
 /// The screen, scrolled up `scroll` lines into history, or with
 /// `source: recent` the last `lines` of history above it. `history` says
-/// how far a view can scroll.
-pub(super) fn read(emulator: &mut Emulator, params: &Value) -> Value {
+/// how far a view can scroll. A view that read at `since` (the `lines`
+/// pushed into history then, as each read answers) stays on the lines it
+/// showed: its `scroll` grows by the lines pushed since, and the answer's
+/// `scroll` is where it is now.
+pub(super) fn read(emulator: &mut Emulator, params: &Value, lines: u64) -> Value {
     let cols = emulator.size().cols();
     let history = emulator.scroll_metrics().history;
-    let lines = |key: &str| {
+    let count = |key: &str| {
         params[key]
             .as_u64()
             .map_or(0, |lines| usize::try_from(lines).unwrap_or(usize::MAX))
-            .min(history)
     };
-    let cells = if params["source"] == "recent" {
-        recent(emulator, lines("lines"))
-    } else {
-        scrolled(emulator, lines("scroll"))
-    };
-    json!({"read": {"text": ansi(&cells, cols), "history": history}})
+    if params["source"] == "recent" {
+        let cells = recent(emulator, count("lines").min(history));
+        return json!({"read": {"text": ansi(&cells, cols), "history": history}});
+    }
+    let mut up = count("scroll");
+    if up > 0
+        && let Some(since) = params["since"].as_u64()
+    {
+        let pushed = usize::try_from(lines.saturating_sub(since)).unwrap_or(usize::MAX);
+        up = up.saturating_add(pushed);
+    }
+    let up = up.min(history);
+    let cells = scrolled(emulator, up);
+    json!({"read": {
+        "text": ansi(&cells, cols),
+        "history": history,
+        "lines": lines,
+        "scroll": up,
+    }})
 }
 
 /// The viewport `up` lines into history; the emulator is left live.

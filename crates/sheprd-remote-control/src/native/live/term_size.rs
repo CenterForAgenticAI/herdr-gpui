@@ -17,6 +17,9 @@ pub(super) struct Sizing {
     held: Option<Held>,
     /// History lines above the screen at the last read of a Herdr 2 pane.
     history: usize,
+    /// Lines the pane had pushed into history at that read, which keeps a
+    /// scrolled view on the same lines as output arrives.
+    lines: Option<u64>,
     size: Option<TermSize>,
     /// Lines a Herdr 2 view is scrolled up into its history.
     up: usize,
@@ -64,10 +67,16 @@ impl Sizing {
     /// The screen as this view shows it: a Herdr 2 pane scrolled where the
     /// view scrolled it.
     pub(super) async fn read(&mut self, state: &Shared, pane: &str) -> Result<String, ApiError> {
-        let (text, history) = read_scrolled(state, pane, self.up).await?;
-        self.history = history;
-        self.up = self.up.min(history);
-        Ok(text)
+        let read = read_scrolled(state, pane, self.up, self.lines).await?;
+        self.history = read.history;
+        self.lines = read.lines;
+        self.up = read.up;
+        Ok(read.text)
+    }
+
+    /// Back to the live screen, as when this phone types.
+    pub(super) fn live(&mut self) {
+        self.up = 0;
     }
 
     /// Scrolls the view `lines`, up toward its history when positive.

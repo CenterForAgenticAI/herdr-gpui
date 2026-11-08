@@ -29,30 +29,82 @@ fn plain(read: &Value) -> Vec<String> {
 #[test]
 fn recent_history_reads_back_oldest_first_down_to_the_screen() {
     let mut emulator = numbered(10);
-    let read = screen::read(&mut emulator, &json!({"source": "recent", "lines": 1000}));
+    let read = screen::read(
+        &mut emulator,
+        &json!({"source": "recent", "lines": 1000}),
+        0,
+    );
     assert_eq!(read["read"]["history"], 7);
     let expected = (1..=10).map(|line| line.to_string()).collect::<Vec<_>>();
     assert_eq!(plain(&read), expected);
-    let read = screen::read(&mut emulator, &json!({"source": "recent", "lines": 4}));
+    let read = screen::read(&mut emulator, &json!({"source": "recent", "lines": 4}), 0);
     assert_eq!(plain(&read), ["4", "5", "6", "7", "8", "9", "10"]);
 }
 
 #[test]
 fn a_scrolled_read_shows_history_and_leaves_the_screen_live() {
     let mut emulator = numbered(10);
-    let read = screen::read(&mut emulator, &json!({"scroll": 2}));
+    let read = screen::read(&mut emulator, &json!({"scroll": 2}), 0);
     assert_eq!(plain(&read), ["6", "7", "8"]);
     // Past the top shows the top.
-    let read = screen::read(&mut emulator, &json!({"scroll": 500}));
+    let read = screen::read(&mut emulator, &json!({"scroll": 500}), 0);
     assert_eq!(plain(&read), ["1", "2", "3"]);
-    let read = screen::read(&mut emulator, &json!({}));
+    let read = screen::read(&mut emulator, &json!({}), 0);
     assert_eq!(plain(&read), ["8", "9", "10"]);
 }
 
 #[test]
 fn a_screen_without_history_reads_only_itself() {
     let mut emulator = numbered(2);
-    let read = screen::read(&mut emulator, &json!({"source": "recent", "lines": 1000}));
+    let read = screen::read(
+        &mut emulator,
+        &json!({"source": "recent", "lines": 1000}),
+        0,
+    );
     assert_eq!(read["read"]["history"], 0);
     assert_eq!(plain(&read), ["1", "2", ""]);
+}
+
+#[test]
+fn feeding_counts_the_lines_pushed_into_history() {
+    let mut emulator = Emulator::new(Size::new(10, 3).unwrap(), 5);
+    // Into an empty history, then into one that has lines.
+    assert_eq!(screen::feed(&mut emulator, b"1\r\n2\r\n3\r\n4"), 1);
+    assert_eq!(screen::feed(&mut emulator, b"\r\n5\r\n6"), 2);
+    // A full history still counts what passes through it.
+    assert_eq!(screen::feed(&mut emulator, b"\r\n7\r\n8"), 2);
+    assert_eq!(emulator.scroll_metrics().history, 5);
+    assert_eq!(screen::feed(&mut emulator, b"\r\n9\r\n10"), 2);
+    // A burst past the whole history counts one short of it, which still
+    // takes any scrolled view to the top.
+    assert_eq!(
+        screen::feed(&mut emulator, b"\r\na\r\nb\r\nc\r\nd\r\ne\r\nf"),
+        4
+    );
+    assert_eq!(emulator.scroll_metrics().offset, 0, "left live");
+    assert_eq!(screen::feed(&mut emulator, b"x"), 0);
+}
+
+#[test]
+fn a_scrolled_view_stays_on_its_lines_as_output_arrives() {
+    let mut emulator = numbered(10);
+    let read = screen::read(&mut emulator, &json!({"scroll": 2, "since": 0}), 0);
+    assert_eq!(plain(&read), ["6", "7", "8"]);
+    let since = read["read"]["lines"].as_u64().unwrap();
+    let pushed = screen::feed(&mut emulator, b"\r\n11\r\n12");
+    assert_eq!(pushed, 2);
+    let read = screen::read(
+        &mut emulator,
+        &json!({"scroll": 2, "since": since}),
+        since + pushed,
+    );
+    assert_eq!(plain(&read), ["6", "7", "8"]);
+    assert_eq!(read["read"]["scroll"], 4);
+    // A view at the live screen follows it.
+    let read = screen::read(
+        &mut emulator,
+        &json!({"scroll": 0, "since": since}),
+        since + pushed,
+    );
+    assert_eq!(plain(&read), ["10", "11", "12"]);
 }

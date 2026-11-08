@@ -71,28 +71,51 @@ fn known(layout: &Layout, pane: &str) -> Result<(), ApiError> {
 
 /// The pane's visible screen, as text with SGR colors.
 pub(crate) async fn read_screen(state: &Shared, pane: &str) -> Result<String, ApiError> {
-    Ok(read_scrolled(state, pane, 0).await?.0)
+    Ok(read_scrolled(state, pane, 0, None).await?.text)
 }
 
-/// The pane's screen `up` lines into its history, and how many history
-/// lines there are to scroll. Only a Herdr 2 pane scrolls its reads and
-/// counts its history; Herdr 1's attach scrolls the terminal itself.
+/// A Herdr 2 screen as one view scrolled it.
+#[derive(Debug, Default)]
+pub(crate) struct Scrolled {
+    pub(crate) text: String,
+    /// History lines above the screen.
+    pub(crate) history: usize,
+    /// Lines the view is scrolled up now, after output moved its lines.
+    pub(crate) up: usize,
+    /// Lines pushed into history so far, for the view's next read.
+    pub(crate) lines: Option<u64>,
+}
+
+/// The pane's screen `up` lines into its history, for a view that last
+/// read at `since` lines pushed: only a Herdr 2 pane scrolls its reads
+/// and counts its history; Herdr 1's attach scrolls the terminal itself.
 pub(crate) async fn read_scrolled(
     state: &Shared,
     pane: &str,
     up: usize,
-) -> Result<(String, usize), ApiError> {
+    since: Option<u64>,
+) -> Result<Scrolled, ApiError> {
     let mut params = json!({"pane_id": pane, "source": "visible", "format": "ansi"});
     if up > 0 {
         params["scroll"] = json!(up);
+        if let Some(since) = since {
+            params["since"] = json!(since);
+        }
     }
     let read = state.hub.call(ApiMethod::PaneRead, params).await?;
-    let text = read["read"]["text"].as_str().unwrap_or_default().to_owned();
-    let history = read["read"]["history"]
-        .as_u64()
-        .and_then(|lines| usize::try_from(lines).ok())
-        .unwrap_or(0);
-    Ok((text, history))
+    let read = &read["read"];
+    let count = |key: &str| {
+        read[key]
+            .as_u64()
+            .and_then(|lines| usize::try_from(lines).ok())
+            .unwrap_or(0)
+    };
+    Ok(Scrolled {
+        text: read["text"].as_str().unwrap_or_default().to_owned(),
+        history: count("history"),
+        up: count("scroll"),
+        lines: read["lines"].as_u64(),
+    })
 }
 
 pub(super) async fn fragment(
@@ -151,7 +174,7 @@ pub(super) struct Keys {
 
 pub(super) async fn keys(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     Path(pane): Path<String>,
     Json(request): Json<Keys>,
 ) -> Result<Json<Value>, ApiError> {
@@ -169,7 +192,7 @@ pub(super) async fn keys(
             json!({"pane_id": pane, "keys": request.keys}),
         )
         .await?;
-    state.typed.typed(&pane);
+    state.typed.typed_by(&pane, &device.0);
     Ok(Json(json!({})))
 }
 
@@ -182,7 +205,7 @@ pub(super) struct Paste {
 /// program asked for one.
 pub(super) async fn paste(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     Path(pane): Path<String>,
     Json(request): Json<Paste>,
 ) -> Result<Json<Value>, ApiError> {
@@ -197,7 +220,7 @@ pub(super) async fn paste(
             json!({"pane_id": pane, "text": request.text}),
         )
         .await?;
-    state.typed.typed(&pane);
+    state.typed.typed_by(&pane, &device.0);
     Ok(Json(json!({})))
 }
 
@@ -208,7 +231,7 @@ pub(super) async fn paste(
 /// it.
 pub(super) async fn upload(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     Path(pane): Path<String>,
     bytes: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
@@ -233,7 +256,7 @@ pub(super) async fn upload(
             json!({"pane_id": pane, "text": text}),
         )
         .await?;
-    state.typed.typed(&pane);
+    state.typed.typed_by(&pane, &device.0);
     Ok(Json(json!({})))
 }
 

@@ -231,10 +231,13 @@ mod socket {
                     }
                     method => panic!("unexpected method {method}"),
                 };
-                let response = if request["params"]["cwd"]
+                // A cwd ending in `/refused`, or an attach 13 columns wide,
+                // is refused.
+                let refused = request["params"]["cwd"]
                     .as_str()
                     .is_some_and(|cwd| cwd.ends_with("/refused"))
-                {
+                    || request["params"]["cols"] == 13;
+                let response = if refused {
                     json!({"jsonrpc": "2.0", "id": request["id"],
                         "error": {"code": -32000, "message": "refused"}})
                 } else {
@@ -253,7 +256,7 @@ mod socket {
                         .write_all(&encode(channel, Kind::Data, line.as_bytes()).unwrap())
                         .unwrap();
                 }
-                if request["method"] == "terminal.attach" {
+                if request["method"] == "terminal.attach" && !refused {
                     socket
                         .write_all(
                             &encode(
