@@ -17,6 +17,7 @@ mod fallback;
 mod hub;
 mod infos;
 pub(crate) mod menu;
+pub(crate) mod moves;
 mod screen;
 mod selection;
 mod sidebar;

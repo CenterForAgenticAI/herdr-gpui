@@ -4,6 +4,7 @@ mod commands;
 mod focus;
 mod keys;
 mod menus;
+mod moves;
 mod pane_keys;
 mod paste;
 mod restore;

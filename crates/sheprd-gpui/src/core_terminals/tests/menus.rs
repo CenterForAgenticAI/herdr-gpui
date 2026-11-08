@@ -38,6 +38,7 @@ fn a_pane_menu_offers_what_its_pane_can_do(cx: &mut TestAppContext) {
             Action::SplitRight,
             Action::SplitDown,
             Action::Zoom,
+            Action::MoveTo,
             Action::Mirror,
             Action::Close,
         ]
