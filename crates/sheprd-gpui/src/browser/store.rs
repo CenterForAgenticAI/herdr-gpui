@@ -331,6 +331,11 @@ impl Store {
             .filter(move |tab| &tab.scope == scope && tab.workspace_id == workspace_id)
     }
 
+    /// Every tab of one host, in the order they were opened.
+    pub(crate) fn in_scope<'a>(&'a self, scope: &'a Scope) -> impl Iterator<Item = &'a Tab> + 'a {
+        self.tabs.iter().filter(move |tab| &tab.scope == scope)
+    }
+
     /// The workspace's VS Code tab, if it has one.
     pub(crate) fn code_tab(&self, scope: &Scope, workspace_id: &str) -> Option<&Tab> {
         self.editor_tab(scope, workspace_id, Editor::VsCode)

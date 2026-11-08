@@ -22,6 +22,17 @@ pub(crate) enum Fallback {
     Shown(Entity<CoreTerminalView>),
 }
 
+impl super::CoreTerminals {
+    /// The address of the shell shown in place of Herdr 1, such as `t3`,
+    /// once herdr-core has listed it.
+    pub(super) fn fallback_terminal(&self) -> Option<&TerminalId> {
+        matches!(self.fallback, Fallback::Shown(_))
+            .then(|| self.infos.named(SHELL))
+            .flatten()
+            .map(|info| &info.id)
+    }
+}
+
 impl SheprdWindow {
     /// Runs every tick: while Herdr 1 is missing, connects and shows the
     /// shell; once Herdr 1 answers again, gives the window back to it.

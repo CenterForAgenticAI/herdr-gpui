@@ -153,6 +153,12 @@ fn core_process_info(
     endpoint: &sheprd_core_client::Endpoint,
     terminal: &str,
 ) -> Result<crate::teleport::ProcessInfo> {
+    // A terminal on another machine this core added (`box/t7`) reports
+    // process IDs of that machine; sampled here they would name unrelated
+    // local processes.
+    if terminal.contains('/') {
+        return Err(Error::RemoteTerminal.into());
+    }
     let core = sheprd_core_client::Core::connect(endpoint).map_err(Error::Core)?;
     let list = core.list(false).map_err(Error::Core)?;
     let record = list

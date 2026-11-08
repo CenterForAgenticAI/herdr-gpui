@@ -9,8 +9,9 @@ use std::path::PathBuf;
 
 impl CoreTerminals {
     /// The folder a workspace's herdr-core tabs started in, as Herdr names
-    /// a workspace's by its first tab's first pane: the first pane of the
-    /// oldest tab that drives its terminals.
+    /// a workspace's by its first tab's first pane: where the first pane of
+    /// the oldest tab that drives its terminals was first seen, so moving
+    /// around in that pane does not move the workspace.
     pub(crate) fn launch_root(&self, scope: &Scope, workspace: &str) -> Option<PathBuf> {
         let (_, tab) = self
             .tabs
@@ -23,7 +24,18 @@ impl CoreTerminals {
                     .is_some_and(|(known, id)| known == scope && id == workspace)
             })
             .min_by_key(|(id, _)| **id)?;
-        self.infos.get(tab.panes.first())?.cwd.clone()
+        tab.root.clone()
+    }
+}
+
+impl super::TabPanes {
+    /// Keeps the first folder herdr-core reports for the tab's first pane.
+    pub(super) fn keep_root(&mut self, infos: &super::infos::Infos) {
+        if self.root.is_none() {
+            self.root = infos
+                .get(self.panes.first())
+                .and_then(|info| info.cwd.clone());
+        }
     }
 }
 
@@ -33,11 +45,19 @@ impl CoreTerminals {
         self.tabs.get(&tab)?.workspace.as_ref()
     }
 
-    /// Each known tab's terminals and the workspace the tab is in, by
-    /// address, for what names a terminal but not its workspace.
+    /// Each terminal of this computer's core the window shows and the
+    /// workspace it is in, by address, for what names a terminal but not
+    /// its workspace: the terminals of its tabs, and the shell shown in
+    /// place of Herdr 1, in the workspace that stands in for Herdr's. A
+    /// saved host's terminals run elsewhere, and their addresses mean
+    /// nothing here.
     pub(crate) fn terminal_workspaces(&self) -> Vec<(String, String)> {
+        let fallback = self
+            .fallback_terminal()
+            .map(|terminal| (terminal.as_str().to_owned(), super::WORKSPACE.to_owned()));
         self.tabs
             .values()
+            .filter(|shown| shown.host == super::Host::Local)
             .filter_map(|shown| Some((shown, &shown.workspace.as_ref()?.1)))
             .flat_map(|(shown, workspace)| {
                 shown
@@ -46,6 +66,7 @@ impl CoreTerminals {
                     .into_iter()
                     .map(move |terminal| (terminal.as_str().to_owned(), workspace.clone()))
             })
+            .chain(fallback)
             .collect()
     }
 }
@@ -55,9 +76,9 @@ impl SheprdWindow {
     /// active group shows, else Herdr's focused pane, where its program is
     /// rather than where its shell started.
     pub(crate) fn focused_folder(&self, cx: &App) -> Option<String> {
-        if let Some((_, terminal)) = self.shown_core_pane(cx) {
+        if let Some((tab, terminal)) = self.shown_core_pane(cx) {
             return self
-                .core_folder(&terminal)
+                .core_folder(tab, &terminal)
                 .and_then(|folder| folder.into_os_string().into_string().ok());
         }
         let snapshot = self.live.snapshot.as_deref()?;
@@ -70,8 +91,8 @@ impl SheprdWindow {
     /// last tick, once Git named its branch. `None` when no herdr-core tab
     /// is shown, or its pane is in no checkout or on a detached head.
     pub(crate) fn core_git_input(&self) -> Option<crate::pull_request::Input> {
-        let (_, terminal) = self.core_terminals.shown.as_ref()?;
-        let folder = self.core_folder(terminal)?;
+        let (tab, terminal) = self.core_terminals.shown.as_ref()?;
+        let folder = self.core_folder(*tab, terminal)?;
         let branch = self.core_terminals.checkout.branch(&folder)?.to_owned();
         let checkout = folder.into_os_string().into_string().ok()?;
         Some(crate::pull_request::Input {

@@ -30,6 +30,13 @@ impl Infos {
         self.known.get(id)
     }
 
+    /// The terminal herdr-core knows by `name`.
+    pub(super) fn named(&self, name: &str) -> Option<&TerminalInfo> {
+        self.known
+            .values()
+            .find(|info| info.name.as_deref() == Some(name))
+    }
+
     /// Records a terminal just started, until the next list replaces it,
     /// and hands it back.
     pub(super) fn insert(&mut self, info: TerminalInfo) -> TerminalInfo {

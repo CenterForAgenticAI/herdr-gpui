@@ -14,6 +14,8 @@ pub enum Error {
     NoRoot,
     #[error("Could not ask Herdr which process the pane runs.")]
     Query(#[source] sheprd_client::Error),
+    #[error("This terminal runs on another machine, whose processes this computer cannot list.")]
+    RemoteTerminal,
     #[error("The pane's process has exited.")]
     RootExited,
     #[error("The process list stopped updating. Reopen it to try again.")]

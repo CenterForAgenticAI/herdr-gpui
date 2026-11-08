@@ -39,6 +39,23 @@ impl ListeningPorts {
         changed
     }
 
+    /// The workspace whose herdr-core terminal started the listening
+    /// process `pid` on this computer, as the latest scan found it.
+    pub(super) fn core_workspace_of(&self, pid: u32) -> Option<&str> {
+        let owner = self
+            .monitors
+            .get(&Host::Local)?
+            .reading
+            .scan
+            .terminal_pids
+            .get(&pid)?;
+        let places = &self.core.places;
+        let at = places
+            .binary_search_by(|(terminal, _)| terminal.as_str().cmp(&owner.terminal))
+            .ok()?;
+        Some(places[at].1.as_str())
+    }
+
     /// The ports the herdr-core terminals of `workspace` listen on, lowest
     /// first, and where they open; None while they listen on none.
     pub fn core_ports(&self, workspace: &str) -> Option<Listed<'_>> {

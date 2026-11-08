@@ -97,9 +97,9 @@ impl SheprdWindow {
             // The last pane closes as its tab does: the window's own close.
             Command::ClosePane if shown.panes.count() > 1 => {
                 // A mirror's pane stops watching; the terminal runs on.
-                let mirror = shown.observe;
+                let (mirror, host) = (shown.observe, shown.host.clone());
                 if self.remove_core_pane(tab, &terminal, window, cx) && !mirror {
-                    self.end_core_terminal(terminal);
+                    self.end_core_terminal(&host, terminal);
                 }
             }
             _ => return false,

@@ -61,18 +61,11 @@ impl SheprdWindow {
     }
 
     /// The ports `workspace` of endpoint `index` listens on: its Herdr
-    /// panes', else, on this computer, its herdr-core terminals'. A
-    /// herdr-core tab in a Herdr workspace names the workspace itself; a
-    /// terminal started outside the app is placed by its tab.
+    /// panes', else, on this computer, its herdr-core terminals'.
     pub(crate) fn listed_ports(&self, index: usize, workspace: &str) -> Option<super::Listed<'_>> {
         let target = &self.endpoints.get(index)?.connection.target;
-        let herdr = super::Daemon::of(target)
-            .and_then(|daemon| self.listening_ports.get(&daemon, workspace));
-        herdr.or_else(|| {
-            (!target.is_remote())
-                .then(|| self.listening_ports.core_ports(workspace))
-                .flatten()
-        })
+        let daemon = super::Daemon::of(target)?;
+        self.listening_ports.get(&daemon, workspace)
     }
 
     /// The workspace a window with no Herdr state shows, when it is one of

@@ -76,8 +76,15 @@ impl SheprdWindow {
             self.show_flash(Flash::warning(fl!("review-too-many-tabs")), cx);
             return;
         };
+        // Read before the review replaces the pane in the active group.
+        let core = self.shown_core_pane(cx);
         self.dismiss_menu(window, cx);
         self.ensure_review(id, agent, cx);
+        if let Some(review) = self.reviews.get_mut(&id)
+            && core.is_some()
+        {
+            review.core = core;
+        }
         self.load_review(id, cx);
         self.show_browser_tab(id, window, cx);
         if let Some(review) = self.reviews.get(&id) {
@@ -265,6 +272,7 @@ impl SheprdWindow {
             base_menu: None,
             split_ratio: rows::EVEN_SPLIT,
             agent,
+            core: None,
             origin: crate::agent_notes::Origin::of(self),
             state: State::Loading,
             starts: vec![0],
