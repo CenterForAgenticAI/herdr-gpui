@@ -1,7 +1,9 @@
-//! Claude Code's sub-agents and background shells: which call started each,
+//! Claude Code's sub-agents, background shells, and monitors: which call
+//! started each,
 //! the task id Claude Code names it by afterwards, and how it ended.
 //!
-//! A call to `Agent` (formerly `Task`) starts a sub-agent; a `Bash` call with
+//! A call to `Monitor` starts a monitor, which ends like a shell does. A call
+//! to `Agent` (formerly `Task`) starts a sub-agent; a `Bash` call with
 //! `run_in_background`, or one Claude Code moved to the background, starts a
 //! shell. Either ends with its result when it ran in the foreground, or
 //! later with a task notification (a `task_notification` system message or
@@ -55,6 +57,7 @@ impl Background {
             "Bash" if input.get("run_in_background").and_then(Value::as_bool) == Some(true) => {
                 Some(ActivityKind::Shell)
             }
+            "Monitor" => Some(ActivityKind::Monitor),
             _ => None,
         };
         if matches!(
@@ -70,9 +73,12 @@ impl Background {
         let activity = kind
             .filter(|kind| self.track(call, *kind))
             .map(|kind| Report {
-                label: field("command")
-                    .filter(|_| kind == ActivityKind::Shell)
-                    .map(str::to_owned),
+                label: match kind {
+                    ActivityKind::Shell => field("command"),
+                    ActivityKind::Monitor => field("description").or_else(|| field("command")),
+                    _ => None,
+                }
+                .map(str::to_owned),
                 ..Report::new(kind, ActivityState::Running)
             });
         Tag {
@@ -120,12 +126,21 @@ impl Background {
                         return (None, None);
                     }
                     self.detach(call, task);
-                    return (
-                        (!known).then(|| Report::new(ActivityKind::Shell, ActivityState::Running)),
-                        None,
-                    );
+                    return (Some(Report::stoppable(ActivityKind::Shell)), None);
                 }
                 (self.finish(call, failed), None)
+            }
+            "Monitor" if self.running.contains_key(call) => {
+                let task = field("taskId")
+                    .map(str::to_owned)
+                    .or_else(|| id_after(&text, "Monitor started (task "));
+                match task.filter(|_| !failed) {
+                    Some(task) => {
+                        self.detach(call, task);
+                        (Some(Report::stoppable(ActivityKind::Monitor)), None)
+                    }
+                    None => (self.finish(call, failed), None),
+                }
             }
             "Agent" | "Task" if self.running.contains_key(call) => {
                 let launched = structured.is_some_and(|result| {
@@ -138,7 +153,7 @@ impl Background {
                 match agent.filter(|_| launched && !failed) {
                     Some(agent) => {
                         self.detach(call, agent);
-                        (None, None)
+                        (Some(Report::stoppable(ActivityKind::Subagent)), None)
                     }
                     None => (self.finish(call, failed), None),
                 }
@@ -148,11 +163,20 @@ impl Background {
     }
 
     /// Claude Code says a task started; the call it names is now known by
-    /// its task id too.
-    pub(crate) fn task_started(&mut self, task: &str, call: Option<&str>) {
-        if let Some(call) = call.filter(|call| self.running.contains_key(*call)) {
-            self.detach(call, task.to_owned());
-        }
+    /// its task id too, which is what stopping it takes.
+    pub(crate) fn task_started(&mut self, task: &str, call: Option<&str>) -> Option<Elsewhere> {
+        let call = call?;
+        let kind = self.running.get(call)?.kind;
+        self.detach(call, task.to_owned());
+        Some((call.to_owned(), Report::stoppable(kind)))
+    }
+
+    /// The task id Claude Code knows the running call `call` by.
+    pub(crate) fn task_of(&self, call: &str) -> Option<&str> {
+        self.tasks
+            .iter()
+            .find(|(_, known)| known.as_str() == call)
+            .map(|(task, _)| task.as_str())
     }
 
     /// A task notification: the task `task`, or the call `call`, ended with

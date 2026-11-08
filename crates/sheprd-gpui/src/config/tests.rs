@@ -46,6 +46,7 @@ mod notification_settings;
 mod omarchy_theme;
 mod preferences;
 mod px0;
+mod quiet_hours;
 mod remote;
 mod repository_icons;
 mod sidebar_scope;

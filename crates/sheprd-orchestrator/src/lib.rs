@@ -46,7 +46,7 @@ pub use review::{CheckState, PrStatus, Review};
 #[cfg(any(test, feature = "test-support"))]
 pub use service::SourceStatus;
 pub use service::{
-    Notice, RemoteRequest, RemoteScope, Request, Service, Snapshot, SyncState, Timing,
+    Notice, RemoteRequest, RemoteScope, Request, Service, Snapshot, Stores, SyncState, Timing,
 };
 pub use store::{Access, SCHEMA_VERSION, Store};
 

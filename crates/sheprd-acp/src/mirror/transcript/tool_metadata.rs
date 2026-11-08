@@ -12,6 +12,8 @@ use crate::harness::out;
 
 /// The longest path listed as a location: a cut one would name another file.
 const MAX_PATH: usize = 4096;
+/// The longest session or cell id a title repeats.
+const MAX_HANDLE: usize = 128;
 
 /// A logged call's kind, title, and the files it names.
 pub(super) struct Described {
@@ -20,8 +22,25 @@ pub(super) struct Described {
     pub(super) title: String,
 }
 
+/// A tool's name without the namespace Codex logs it under.
+pub(super) fn short(name: &str) -> &str {
+    name.strip_prefix("functions.")
+        .or_else(|| name.strip_prefix("collaboration."))
+        .unwrap_or(name)
+}
+
+/// What a log gave as an id, when it can be matched exactly later.
+pub(super) fn identifier(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    if let Some(id) = value.as_u64() {
+        return Some(id.to_string());
+    }
+    let id = value.as_str()?;
+    (!id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)).then(|| id.to_owned())
+}
+
 /// Codex logs its arguments encoded as a string.
-fn arguments(input: &Value) -> Cow<'_, Value> {
+pub(super) fn arguments(input: &Value) -> Cow<'_, Value> {
     input
         .as_str()
         .filter(|raw| raw.len() <= TEXT)
@@ -38,16 +57,36 @@ pub(super) fn describe(name: &str, input: &Value) -> Described {
             .filter(|value| !value.trim().is_empty())
     };
     let path = field(&["file_path", "notebook_path", "path"]);
+    let target = field(&["target"]);
     let titled = |verb: &str, subject: Option<&str>| subject.map(|text| format!("{verb} {text}"));
-    let short = name
-        .strip_prefix("functions.")
-        .or_else(|| name.strip_prefix("collaboration."))
-        .unwrap_or(name);
-    let (kind, title) = match short {
+    let (kind, title) = match short(name) {
         "Bash" | "exec_command" | "shell" | "shell_command" => (
             ToolKind::Execute,
             field(&["cmd", "command"]).map(out::command_title),
         ),
+        // A script's source is opaque: nothing it mentions is known to run.
+        "exec" => (ToolKind::Execute, Some("Tool script".to_owned())),
+        "write_stdin" => {
+            // Enter alone is input, so this must not trim as `field` does.
+            let typed = input
+                .get("chars")
+                .and_then(Value::as_str)
+                .is_some_and(|chars| !chars.is_empty());
+            let action = if typed { "Send input to" } else { "Poll" };
+            (
+                ToolKind::Execute,
+                identifier(input.get("session_id"))
+                    .map(|id| format!("{action} command session {id}")),
+            )
+        }
+        "wait" => {
+            let stop = input.get("terminate").and_then(Value::as_bool) == Some(true);
+            let action = if stop { "Stop" } else { "Wait for" };
+            (
+                ToolKind::Execute,
+                identifier(input.get("cell_id")).map(|id| format!("{action} script cell {id}")),
+            )
+        }
         "Read" | "read_file" | "view_image" => (ToolKind::Read, titled("Read", path)),
         "Write" | "write_file" => (ToolKind::Edit, titled("Write", path)),
         "Edit" | "MultiEdit" | "NotebookEdit" => (ToolKind::Edit, titled("Edit", path)),
@@ -63,6 +102,17 @@ pub(super) fn describe(name: &str, input: &Value) -> Described {
             ToolKind::Subagent,
             field(&["description", "task_name"]).map(str::to_owned),
         ),
+        "send_message" => (ToolKind::Think, Some(aimed("Message agent", target))),
+        "followup_task" => (ToolKind::Think, Some(aimed("Continue agent", target))),
+        "interrupt_agent" => (ToolKind::Think, Some(aimed("Interrupt agent", target))),
+        "wait_agent" => (ToolKind::Think, Some("Wait for an agent update".to_owned())),
+        "list_agents" => (ToolKind::Think, Some("List agents".to_owned())),
+        "TaskOutput" => (ToolKind::Think, Some("Read task output".to_owned())),
+        "TaskStop" => (ToolKind::Think, Some("Stop task".to_owned())),
+        "TodoWrite" | "update_plan" => (ToolKind::Think, Some("Update plan".to_owned())),
+        "create_goal" => (ToolKind::Think, Some("Set goal".to_owned())),
+        "update_goal" => (ToolKind::Think, Some("Update goal".to_owned())),
+        "get_goal" => (ToolKind::Think, Some("Read goal".to_owned())),
         _ => return unknown(name),
     };
     Described {
@@ -74,6 +124,22 @@ pub(super) fn describe(name: &str, input: &Value) -> Described {
             .collect(),
         title: one_line(title.as_deref().unwrap_or(name)),
     }
+}
+
+/// An action on another agent, which logs may leave unnamed.
+fn aimed(action: &str, target: Option<&str>) -> String {
+    target.map_or_else(|| action.to_owned(), |target| format!("{action}: {target}"))
+}
+
+/// A session or cell id, logged as a number or a short string.
+fn identifier(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    if let Some(id) = value.as_u64() {
+        return Some(id.to_string());
+    }
+    let id = value.as_str()?;
+    (!id.is_empty() && id.len() <= MAX_HANDLE && !id.chars().any(char::is_control))
+        .then(|| id.to_owned())
 }
 
 fn unknown(name: &str) -> Described {

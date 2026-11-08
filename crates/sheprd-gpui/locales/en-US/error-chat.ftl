@@ -86,6 +86,7 @@ error-chat-rejection-prompt-too-long = the prompt is longer than the program acc
 error-chat-rejection-not-ready = the agent cannot take prompts
 error-chat-rejection-not-working = no turn is running
 error-chat-rejection-unknown-permission = that permission request was already answered
+error-chat-rejection-unknown-activity = that work has already ended or cannot be stopped
 error-chat-rejection-unknown-option = that is not one of the request's options
 error-chat-rejection-unknown-mode = the agent has no such mode
 error-chat-rejection-unknown-setting = the agent has no such setting, or it does not take that value

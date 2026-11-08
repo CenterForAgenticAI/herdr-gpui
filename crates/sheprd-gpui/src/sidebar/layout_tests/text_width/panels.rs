@@ -115,7 +115,8 @@ pub(super) fn check_github_panel(view: &Entity<SheprdWindow>, cx: &mut gpui::Vis
                     );
                     assert!(view.read(cx).menu.github.copied());
                 });
-                cx.simulate_keystrokes("tab enter");
+                // Past the GitLab and Azure DevOps tabs to Copy.
+                cx.simulate_keystrokes("tab tab tab enter");
                 cx.update(|_, cx| assert!(view.read(cx).menu.github.copied()));
                 cx.simulate_keystrokes("cmd-c");
                 let open = cx.debug_bounds("github-open").unwrap();

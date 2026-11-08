@@ -249,7 +249,10 @@ fn incomplete_malformed_and_unanchored_patches_remain_original_text() {
 fn files(patch: &str) -> Vec<(String, usize, usize)> {
     patch_changes(patch)
         .into_iter()
-        .map(|change| (change.path, change.added, change.removed))
+        .map(|change| {
+            let lines = change.lines.unwrap();
+            (change.path, lines.added, lines.removed)
+        })
         .collect()
 }
 

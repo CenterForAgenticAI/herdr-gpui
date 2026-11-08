@@ -13,6 +13,7 @@ enum Route: Codable, Hashable {
     case chat(PaneKey, title: String)
     case term(PaneKey, title: String)
     case workspace(WorkspaceKey)
+    case changes(WorkspaceKey)
 
     /// Whether this shows the terminal of `pane`, under whatever title.
     func showsTerminal(_ pane: PaneKey) -> Bool {

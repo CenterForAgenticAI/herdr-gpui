@@ -7,7 +7,9 @@ use crate::harness::tests::{file_name, file_uri};
 
 mod background;
 mod names;
+mod progress;
 mod settings;
+mod stopping;
 mod tasks;
 mod turns;
 

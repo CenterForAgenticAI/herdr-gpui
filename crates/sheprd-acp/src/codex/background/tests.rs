@@ -25,6 +25,37 @@ fn followed_sub_agents_and_commands_are_bounded() {
 }
 
 #[test]
+fn a_sub_agent_can_be_stopped_once_its_turn_is_known_until_it_ends() {
+    let mut background = Background::default();
+    background.started(&json!({"type": "collabAgentToolCall", "id": "s", "tool": "spawnAgent"}));
+    background.completed(
+        &json!({"type": "collabAgentToolCall", "id": "s", "tool": "spawnAgent",
+        "receiverThreadIds": ["child"]}),
+    );
+    assert_eq!(background.child_of("s"), None, "no turn to interrupt yet");
+
+    let (call, report) = background.child_turn("child", "turn-1").unwrap();
+    assert_eq!(call, "s");
+    assert!(report.stoppable);
+    assert_eq!(background.child_of("s"), Some(("child", "turn-1")));
+    assert!(
+        background.child_turn("child", "turn-1").is_none(),
+        "said once"
+    );
+
+    background.child_turn_completed("child", Some("interrupted"));
+    assert_eq!(background.child_of("s"), None);
+    assert!(background.child_turn("child", "turn-2").is_none());
+}
+
+#[test]
+fn a_thread_that_is_no_sub_agent_cannot_be_stopped() {
+    let mut background = Background::default();
+    assert!(background.child_turn("stranger", "turn-1").is_none());
+    assert!(background.turns.is_empty());
+}
+
+#[test]
 fn only_a_spawn_starts_a_sub_agent_and_running_states_end_nothing() {
     let mut background = Background::default();
     let wait =
