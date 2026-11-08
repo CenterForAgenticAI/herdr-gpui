@@ -8,6 +8,7 @@ mod poller;
 mod projection;
 mod screen;
 mod spaces;
+mod wake;
 pub(super) mod worktree;
 
 use super::Error as HubError;

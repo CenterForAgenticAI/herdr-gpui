@@ -126,6 +126,7 @@ mod socket {
     mod recovery;
     mod screens;
     mod spaces;
+    mod wake;
 
     struct Fake {
         _dir: tempfile::TempDir,

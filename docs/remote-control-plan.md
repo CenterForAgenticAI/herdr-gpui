@@ -68,7 +68,8 @@ direction.
 - It keeps running when Sheprd quits, so the phone works and push keeps
   flowing. Pairing needs Sheprd, because only its dialog approves devices.
 - Without a running Herdr daemon it serves the app shell with a "Herdr is not
-  running" state; it never starts or installs a daemon.
+  running" state; it never installs a daemon, and starts only an installed
+  herdr-core, for a phone's new work, on a machine without Herdr 1.
 
 ## TLS without DNS
 
