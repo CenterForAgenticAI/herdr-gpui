@@ -327,8 +327,8 @@ impl Emulator {
 /// Marks the cursor's cell with a placement and, unless the command kept
 /// it, moves the cursor as Ghostty does: down to the image's last row,
 /// scrolling as a line feed would, and to the column after it. The rows
-/// below the cursor are walked and the rest scrolled in one step, so a tall
-/// image costs no more than a short one.
+/// below the cursor are walked and the rest scrolled a screen at a time, so
+/// a tall image costs a few steps rather than one per row.
 fn place(term: &mut Term<Listener>, processor: &mut Processor<SyncPending>, placed: Placed) {
     let point = term.grid().cursor.point;
     for c in placed.marker {
@@ -348,9 +348,13 @@ fn place(term: &mut Term<Listener>, processor: &mut Processor<SyncPending>, plac
         processor.advance(term, format!("\x1b[{down}B").as_bytes());
     }
     let moved = term.grid().cursor.point.line.0 - point.line.0;
-    let scroll = rows.saturating_sub(u32::try_from(moved).unwrap_or(0));
-    if scroll > 0 {
-        processor.advance(term, format!("\x1b[{scroll}S").as_bytes());
+    // A scroll moves at most a screen at once, so the rest goes a screen
+    // at a time: a few steps even for the tallest image.
+    let mut scroll = rows.saturating_sub(u32::try_from(moved).unwrap_or(0));
+    while scroll > 0 {
+        let step = scroll.min(screen.max(1));
+        processor.advance(term, format!("\x1b[{step}S").as_bytes());
+        scroll -= step;
     }
     let column = u64::try_from(point.column.0)
         .unwrap_or(u64::MAX)

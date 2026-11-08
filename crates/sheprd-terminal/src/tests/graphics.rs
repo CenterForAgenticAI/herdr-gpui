@@ -253,3 +253,15 @@ fn a_tall_image_shows_its_bottom_after_its_top_scrolls_far_up() {
     };
     assert_eq!((placement.y, placement.rows), (0, 40));
 }
+
+#[test]
+fn a_tall_image_scrolls_its_whole_height_past_a_short_screen() {
+    let mut emulator = Emulator::new(size(10, 40), 1_000);
+    emulator.feed(&command("a=T,f=100,c=1,r=300", &png(2, 300)));
+    // Down 39 rows and 260 scrolled: the top 260 rows are above the screen.
+    assert_eq!(emulator.scroll_metrics().history, 260);
+    let [placement] = &placements(&mut emulator)[..] else {
+        panic!("one placement")
+    };
+    assert_eq!((placement.y, placement.rows), (0, 40));
+}
