@@ -128,7 +128,13 @@ impl SheprdWindow {
             .unwrap_or_default();
         let polled = views
             .iter()
-            .map(|((tab, _), view)| (view.clone(), in_sight.contains(tab)));
+            .map(|((tab, _), view)| {
+                let host = in_sight
+                    .contains(tab)
+                    .then(|| self.core_terminals.host_of(*tab));
+                (view.clone(), host)
+            })
+            .collect::<Vec<_>>();
         self.poll_core_views(polled, window, cx);
         let mut ended = Vec::new();
         for ((tab, terminal), view) in views {

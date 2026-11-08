@@ -118,3 +118,12 @@ fn a_mirror_neither_rings_nor_copies(cx: &mut gpui::TestAppContext) {
     let (first, second) = effects_of_a_view(cx, true);
     assert_eq!((first, second), (Effects::default(), Effects::default()));
 }
+
+#[test]
+fn a_cores_bells_follow_the_mute_of_the_device_it_runs_on() {
+    use crate::{browser::Scope, core_terminals::Host};
+    assert_eq!(Host::Local.endpoint(), crate::endpoint::LOCAL);
+    // A saved host's scope is its endpoint ID, which its mute names.
+    let host = Host::of(&Scope::endpoint("ssh:box"));
+    assert_eq!(host.endpoint(), "ssh:box");
+}

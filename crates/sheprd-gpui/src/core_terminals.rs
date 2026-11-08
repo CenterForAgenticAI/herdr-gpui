@@ -363,7 +363,8 @@ impl SheprdWindow {
         self.poll_core_fallback(cx);
         self.refresh_core_looks(cx);
         self.poll_core_views(
-            self.core_fallback_view().map(|view| (view, true)),
+            self.core_fallback_view()
+                .map(|view| (view, Some(Host::Local))),
             window,
             cx,
         );

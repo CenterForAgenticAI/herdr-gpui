@@ -2,11 +2,11 @@
 //! ring and text to put on the clipboard (OSC 52). Herdr 1 forwards these
 //! from its daemon; herdr-core streams raw output, so the app's emulator
 //! finds them. Both go through the same paths as Herdr 1's: `[bell]`, its
-//! burst limit, quiet hours and this computer's mute, and the clipboard
-//! toast. A mirror only watches, so what
+//! burst limit, quiet hours and the mute of the device the core runs on, and
+//! the clipboard toast. A mirror only watches, so what
 //! it sees is left to the tab that drives the terminal.
 
-use super::CoreTerminalView;
+use super::{CoreTerminalView, Host};
 use crate::SheprdWindow;
 use gpui::{Context, Entity, Window};
 
@@ -30,13 +30,15 @@ impl Effects {
 }
 
 impl SheprdWindow {
-    /// Takes new screens from `views` and what they ask of the window. A
-    /// view whose tab is in another workspace than the one shown keeps its
-    /// screen current but rings nothing, as its tab is out of sight; its
-    /// clipboard writes still land, as Herdr's do from any pane.
+    /// Takes new screens from `views` and what they ask of the window, each
+    /// with the host whose core runs it while its tab is in sight. A view
+    /// whose tab is in another workspace than the one shown keeps its screen
+    /// current but rings nothing, nor does one whose host is muted as a
+    /// device, as a Herdr daemon's bells are held back; clipboard writes
+    /// still land, as Herdr's do from any pane.
     pub(super) fn poll_core_views(
         &mut self,
-        views: impl IntoIterator<Item = (Entity<CoreTerminalView>, bool)>,
+        views: impl IntoIterator<Item = (Entity<CoreTerminalView>, Option<Host>)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -46,7 +48,11 @@ impl SheprdWindow {
                 view.poll(cx);
                 view.take_effects()
             });
-            if !shown {
+            let muted = |host: &Host| {
+                crate::notification_mutes::Mutes::any(cx)
+                    .is_some_and(|mutes| mutes.host(host.endpoint()))
+            };
+            if shown.as_ref().is_none_or(muted) {
                 taken.bells = 0;
             }
             effects.merge(taken);
@@ -61,11 +67,7 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // herdr-core runs on this computer, so muting it as a device holds
-        // its bells back, as it does a Herdr daemon's.
-        let muted = crate::notification_mutes::Mutes::any(cx)
-            .is_some_and(|mutes| mutes.host(crate::endpoint::LOCAL));
-        if effects.bells > 0 && !muted && !self.config.notifications.quiet() {
+        if effects.bells > 0 && !self.config.notifications.quiet() {
             self.bell
                 .queue(u16::try_from(effects.bells).unwrap_or(u16::MAX));
             self.ring_bell(window);

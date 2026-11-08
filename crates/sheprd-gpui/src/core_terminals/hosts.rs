@@ -27,6 +27,14 @@ pub(crate) enum Host {
 }
 
 impl Host {
+    /// The device the core runs on, as notification mutes name it.
+    pub(crate) fn endpoint(&self) -> &str {
+        match self {
+            Self::Local => crate::endpoint::LOCAL,
+            Self::Remote(scope) => scope.as_str(),
+        }
+    }
+
     /// The core a workspace in `scope` starts its terminals in.
     pub(crate) fn of(scope: &Scope) -> Self {
         if scope.is_local() {
