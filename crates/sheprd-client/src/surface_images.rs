@@ -118,9 +118,10 @@ fn referenced(scene: &SurfaceGraphicsScene) -> HashSet<SurfaceGraphicsAssetKey> 
         .collect()
 }
 
-/// The worker's image bytes for one connection.
+/// The worker's image bytes for one connection, or for one herdr-core
+/// terminal, whose emulator sends its scenes the same way.
 #[derive(Default)]
-pub(crate) struct ImageStore {
+pub struct ImageStore {
     images: HashMap<SurfaceGraphicsAssetKey, SurfaceImage>,
     bytes: usize,
     /// Keys the newest received surface references.
@@ -134,7 +135,12 @@ impl ImageStore {
     /// Moves a received surface's asset bytes into the store, leaving the
     /// surface with metadata only. Returns whether the published set changed.
     pub(crate) fn receive(&mut self, surface: &mut PaneSurfaceFrame) -> bool {
-        let scene = &mut surface.graphics;
+        self.receive_scene(&mut surface.graphics)
+    }
+
+    /// Moves a scene's asset bytes into the store, leaving it with
+    /// metadata only. Returns whether the published set changed.
+    pub fn receive_scene(&mut self, scene: &mut SurfaceGraphicsScene) -> bool {
         if scene.placements.len() > MAX_PLACEMENTS {
             tracing::debug!(
                 category = "surface_images",
@@ -169,12 +175,12 @@ impl ImageStore {
 
     /// Records that the newest received surface was emitted. Returns whether
     /// the published set changed.
-    pub(crate) fn show(&mut self) -> bool {
+    pub fn show(&mut self) -> bool {
         self.shown.clone_from(&self.latest);
         self.prune()
     }
 
-    pub(crate) fn published(&self) -> Arc<SurfaceImages> {
+    pub fn published(&self) -> Arc<SurfaceImages> {
         Arc::new(SurfaceImages {
             images: self.images.clone(),
         })

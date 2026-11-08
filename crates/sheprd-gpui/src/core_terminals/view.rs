@@ -16,7 +16,7 @@ use crate::{
     config::{OptionAsAlt, Padding},
     i18n::fl,
     terminal::{HeldKeys, key_input, viewport},
-    terminal_painter::{Ground, TerminalPainter},
+    terminal_painter::{Ground, ImageTarget, PlacedImages, TerminalPainter},
 };
 use gpui::{prelude::*, *};
 use sheprd_backend::{ClientPaneInputEvent, FrameData, Size, TerminalId};
@@ -75,6 +75,8 @@ pub(crate) struct CoreTerminalView {
     /// from, so a veiled pane copies a frame once rather than every paint.
     sleeping: Option<(Arc<FrameData>, Arc<FrameData>)>,
     screen: Screen,
+    /// The cell size in whole pixels the terminal was last told.
+    sent_cell: Option<(u16, u16)>,
     sent_focus: Option<bool>,
     sent_size: Option<Size>,
     /// Wheel motion short of a whole row, kept for the next event.
@@ -106,6 +108,7 @@ impl CoreTerminalView {
             selection: None,
             sleeping: None,
             screen: Screen::default(),
+            sent_cell: None,
             sent_focus: None,
             sent_size: None,
             wheel_rest: 0.,
@@ -193,6 +196,13 @@ impl CoreTerminalView {
             self.look.cell_width,
             self.look.cell_height,
         );
+        // Clamped first, so the casts cannot truncate.
+        let whole = |side: f32| side.round().clamp(1., f32::from(u16::MAX)) as u16;
+        let cell = (whole(self.look.cell_width), whole(self.look.cell_height));
+        if self.sent_cell != Some(cell) {
+            self.sent_cell = Some(cell);
+            self.link.send(Command::CellPixels(cell.0, cell.1));
+        }
         let Ok(size) = Size::new(fits.cols, fits.rows) else {
             return;
         };
@@ -305,6 +315,8 @@ impl Render for CoreTerminalView {
         let painter = self.painter.clone();
         let look = self.look.clone();
         let frame = self.frame_to_paint();
+        let graphics = self.screen.graphics.clone();
+        let images = self.screen.images.0.clone();
         let highlights = self.highlights();
         let pane = self.pane;
         let background = self.look.background;
@@ -339,7 +351,11 @@ impl Render for CoreTerminalView {
                                 &highlights,
                                 &[],
                                 None,
-                                None,
+                                (!graphics.is_empty()).then_some(PlacedImages {
+                                    placements: &graphics,
+                                    images: &images,
+                                    target: ImageTarget::Main,
+                                }),
                                 window,
                                 cx,
                             );

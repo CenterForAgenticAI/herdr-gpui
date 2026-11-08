@@ -5,17 +5,19 @@
 use crate::{
     MAX_SCROLLBACK_CELLS, MAX_SCROLLBACK_LINES, Size, cells,
     damage::{Damage, Tracker},
+    graphics::{Found, Graphics, Placed},
     listener::Listener,
     modes::Modes,
-    scan::Scanner,
+    scan::{Run, Scanner},
 };
 use alacritty_terminal::{
     Term,
     grid::{self, Dimensions},
+    index::{Column, Line},
     term::{Config, Osc52, TermMode},
     vte::ansi::{CursorShape, CursorStyle, Processor, Timeout},
 };
-use sheprd_protocol::{ClientPaneInputEvent, FrameData};
+use sheprd_protocol::{ClientPaneInputEvent, FrameData, SurfaceGraphicsScene};
 use std::{fmt, time::Duration};
 
 /// Something the program did that is not on screen. Taking events coalesces
@@ -101,6 +103,7 @@ impl Dimensions for Dims {
 pub struct Emulator {
     bells: u32,
     damage: Tracker,
+    graphics: Graphics,
     listener: Listener,
     processor: Processor<SyncPending>,
     scanner: Scanner,
@@ -130,6 +133,7 @@ impl Emulator {
         Self {
             bells: 0,
             damage: Tracker::default(),
+            graphics: Graphics::default(),
             listener,
             processor: Processor::new(),
             scanner: Scanner::default(),
@@ -148,12 +152,25 @@ impl Emulator {
             return;
         }
         let Self {
+            graphics,
             processor,
             scanner,
             term,
             ..
         } = self;
-        scanner.feed(bytes, |run| processor.advance(term, run));
+        scanner.feed(bytes, |run| match run {
+            Run::Bytes(bytes) => processor.advance(term, bytes),
+            Run::Graphics(command) => {
+                // An image goes where the cursor is after what came before
+                // it, so output a synchronized update holds lands first.
+                if processor.sync_timeout().pending_timeout() {
+                    processor.stop_sync(term);
+                }
+                if let Some(placed) = graphics.command(command) {
+                    place(term, processor, placed);
+                }
+            }
+        });
         self.damage.fed = true;
         self.drain_events();
     }
@@ -230,6 +247,61 @@ impl Emulator {
         }
     }
 
+    /// An emulator for a viewer that never shows images: placements keep
+    /// moving the cursor as the program expects, and no pixels are kept.
+    pub fn without_images(mut self) -> Self {
+        self.graphics.drop_pixels();
+        self
+    }
+
+    /// The cell size in pixels programs are told, which sizes an image
+    /// placed without a size in cells.
+    pub fn set_cell_pixels(&mut self, width: u32, height: u32) {
+        self.graphics.set_cell(width, height);
+    }
+
+    /// The images on screen, when they changed since the last take: kitty
+    /// graphics placements as Herdr's graphics scene, with the bytes of each
+    /// image the last scene did not show.
+    pub fn take_graphics(&mut self) -> Option<SurfaceGraphicsScene> {
+        if !self.graphics.active() {
+            return None;
+        }
+        let found = self.markers();
+        self.graphics.scene(&found)
+    }
+
+    /// The placement markers on screen and in the rows above it that a
+    /// placement could still reach down from.
+    fn markers(&self) -> Vec<Found> {
+        let grid = self.term.grid();
+        let offset = i64::try_from(grid.display_offset()).unwrap_or(0);
+        let history = i64::try_from(grid.history_size()).unwrap_or(0);
+        let above = i64::try_from(self.graphics.tallest()).unwrap_or(0);
+        let rows = i64::try_from(grid.screen_lines()).unwrap_or(0);
+        let first = (-above).max(offset - history);
+        let mut found = Vec::new();
+        for row in first..rows {
+            let Ok(line) = i32::try_from(row - offset) else {
+                continue;
+            };
+            let cells = &grid[Line(line)];
+            for column in 0..grid.columns() {
+                let Some(marks) = cells[Column(column)].zerowidth() else {
+                    continue;
+                };
+                for &marker in marks.iter().filter(|c| crate::graphics::is_marker(**c)) {
+                    found.push(Found {
+                        marker,
+                        row,
+                        column: u16::try_from(column).unwrap_or(u16::MAX),
+                    });
+                }
+            }
+        }
+        found
+    }
+
     pub fn take_events(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         if std::mem::take(&mut self.title_changed) {
@@ -250,6 +322,24 @@ impl Emulator {
         }
         self.bells = self.bells.saturating_add(inbox.bells);
     }
+}
+
+/// Marks the cursor's cell with a placement and, unless the command kept
+/// it, moves the cursor as Ghostty does: down to the image's last row,
+/// scrolling as a line feed would, and to the column after it.
+fn place(term: &mut Term<Listener>, processor: &mut Processor<SyncPending>, placed: Placed) {
+    let point = term.grid().cursor.point;
+    term.grid_mut()[point].push_zerowidth(placed.marker);
+    if !placed.moves_cursor {
+        return;
+    }
+    let mut moves = b"\x1bD".repeat(usize::try_from(placed.rows.saturating_sub(1)).unwrap_or(0));
+    let column = u64::try_from(point.column.0)
+        .unwrap_or(u64::MAX)
+        .saturating_add(u64::from(placed.cols))
+        .saturating_add(1);
+    moves.extend_from_slice(format!("\x1b[{column}G").as_bytes());
+    processor.advance(term, &moves);
 }
 
 fn config(size: Size, scrollback_lines: usize) -> Config {

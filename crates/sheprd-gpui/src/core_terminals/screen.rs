@@ -1,7 +1,21 @@
 //! What one attached terminal shows, built from its backend's updates.
 
 use sheprd_backend::{Exit, FrameData, KeyReporting, SurfaceUpdate};
+use sheprd_client::{SurfaceImages, protocol::SurfaceGraphicsPlacement};
 use std::sync::Arc;
+
+/// The pixels of the images a terminal places, shared with the painter and
+/// told apart by identity: the worker publishes a new set when it changes.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Images(pub(crate) Arc<SurfaceImages>);
+
+impl PartialEq for Images {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Images {}
 
 /// The latest screen of one terminal. The worker applies updates to it and
 /// the window takes a copy when it changed; `Arc` keeps that copy cheap and
@@ -13,6 +27,10 @@ pub(crate) struct Screen {
     /// Why the terminal could not be shown, for its tab to say.
     pub(crate) failure: Option<String>,
     pub(crate) frame: Option<Arc<FrameData>>,
+    /// Where the terminal's images sit on its screen (kitty graphics).
+    pub(crate) graphics: Arc<[SurfaceGraphicsPlacement]>,
+    /// The pixels those placements name, kept by the worker.
+    pub(crate) images: Images,
     /// The key events the program asked for beyond typed text.
     pub(crate) keys: KeyReporting,
     /// Whether the program reads the mouse, so presses go to it.
@@ -26,6 +44,8 @@ impl Screen {
             SurfaceUpdate::Bell => self.bells = self.bells.saturating_add(1),
             SurfaceUpdate::Ended(exit) => self.ended = Some(exit),
             SurfaceUpdate::Frame(frame) => self.frame = Some(Arc::new(frame)),
+            // The worker has moved the scene's bytes into its image store.
+            SurfaceUpdate::Graphics(scene) => self.graphics = scene.placements.into(),
             SurfaceUpdate::KeyReporting(keys) => self.keys = keys,
             SurfaceUpdate::MouseReporting(reporting) => self.mouse_reporting = reporting,
             SurfaceUpdate::Rows { cursor, rows } => {

@@ -114,6 +114,8 @@ Paste an image into an agent with Cmd-V. Sheprd sends it through Herdr's image b
 
 On Linux, pasting needs `wl-paste` (from `wl-clipboard`) on Wayland or `xclip` on X11.
 
+Programs that show images with the kitty graphics protocol, such as `kitten icat`, show them in Herdr 1 and Herdr 2 panes alike. In a Herdr 2 pane only images sent in the output itself are shown, never a file or shared memory a program names, and an image scrolls and clears with the text around it. A Herdr 2 pane opened after an image was drawn, such as after restarting Sheprd, shows the text but not the image.
+
 ## File drops
 
 Drop files from your file manager onto a pane or popup to paste their paths there, even if another pane is focused. Paths are pasted with shell characters escaped (`/tmp/Shot\ 1.png`), separated by spaces, and Enter is never pressed. Files copied in the file manager and pasted with Cmd-V work the same way. A drop is limited to 256 paths.

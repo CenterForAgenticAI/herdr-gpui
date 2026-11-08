@@ -269,3 +269,70 @@ fn a_real_core_through_the_backend_traits() {
     }
     backend.kill(&info.id).unwrap();
 }
+
+#[test]
+#[ignore = "needs HERDR_CORE_TEST_BINARY"]
+fn an_image_a_program_sends_reaches_the_view() {
+    use sheprd_backend::{
+        Backend, ClientKeyCode, ClientKeyKind, ClientPaneInputEvent, Role, Size, Spawn,
+        SurfaceUpdate, Terminal as _,
+    };
+
+    // A 1x1 PNG.
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    let binary = std::env::var_os("HERDR_CORE_TEST_BINARY").expect("HERDR_CORE_TEST_BINARY");
+    let sandbox = Sandbox::start(binary);
+    let backend = crate::CoreBackend::new(sandbox.connect(), 1000);
+    let info = backend
+        .spawn(&Spawn {
+            argv: vec!["sh".into()],
+            ..Spawn::default()
+        })
+        .unwrap();
+    let mut terminal = backend
+        .attach(&info.id, Size::new(40, 8).unwrap(), Role::Active)
+        .unwrap();
+    terminal.cell_pixels(10, 20).unwrap();
+    let line = format!("printf '\\033_Ga=T,f=100,c=3,r=2;{PNG}\\033\\\\'");
+    terminal
+        .input(&ClientPaneInputEvent::TextCommit(line))
+        .unwrap();
+    terminal
+        .input(&ClientPaneInputEvent::Key {
+            code: ClientKeyCode::Enter,
+            modifiers: 0,
+            kind: ClientKeyKind::Press,
+            repeat_count: 1,
+            shifted_codepoint: None,
+            generated_text: None,
+            tracks_release: false,
+            physical_key_id: None,
+            windows_record: None,
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let scene = loop {
+        assert!(Instant::now() < deadline, "no image arrived");
+        let scene = terminal
+            .next(Duration::from_millis(100))
+            .unwrap()
+            .into_iter()
+            .find_map(|update| match update {
+                SurfaceUpdate::Graphics(scene) => Some(scene),
+                _ => None,
+            });
+        if let Some(scene) = scene {
+            break scene;
+        }
+    };
+    let [placement] = &scene.placements[..] else {
+        panic!("{scene:?}")
+    };
+    assert_eq!((placement.cols, placement.rows), (3, 2));
+    assert_eq!(
+        (placement.asset.image_width, placement.asset.image_height),
+        (1, 1)
+    );
+    assert_eq!(scene.assets.len(), 1);
+    backend.kill(&info.id).unwrap();
+}

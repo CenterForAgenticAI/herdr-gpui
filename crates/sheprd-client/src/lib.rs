@@ -102,8 +102,8 @@ pub use ssh::{
     set_unverified_hosts, trust_host_key,
 };
 pub use surface_images::{
-    MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, MAX_IMAGES, MAX_PLACEMENTS, SurfaceImage, SurfaceImages,
-    valid_asset,
+    ImageStore, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, MAX_IMAGES, MAX_PLACEMENTS, SurfaceImage,
+    SurfaceImages, valid_asset,
 };
 pub use terminal_attach::TerminalAttach;
 pub use transport::Stream;

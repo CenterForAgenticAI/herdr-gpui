@@ -155,6 +155,20 @@ impl sheprd_backend::Terminal for CoreTerminal {
         self.attachment.resize(size.cols(), size.rows())
     }
 
+    /// The emulator sizes images by it; an active view tells the core too,
+    /// which answers the program's questions about it.
+    fn cell_pixels(&mut self, width: u16, height: u16) -> Result<()> {
+        self.emulator
+            .set_cell_pixels(u32::from(width), u32::from(height));
+        if !self.drives() {
+            return Ok(());
+        }
+        self.attachment.facts(&crate::wire::Display {
+            cell: Some([u32::from(width), u32::from(height)]),
+            ..crate::wire::Display::default()
+        })
+    }
+
     /// The core reports focus to programs that asked for it.
     fn focus(&mut self, focused: bool) -> Result<()> {
         if !self.drives() {
@@ -207,6 +221,10 @@ impl sheprd_backend::Terminal for CoreTerminal {
             Damage::Full(frame) => updates.push(SurfaceUpdate::Frame(frame)),
             damage if damage.is_empty() => {}
             Damage::Rows { rows, cursor } => updates.push(SurfaceUpdate::Rows { cursor, rows }),
+        }
+        // After the cells, so the images land on the screen they belong to.
+        if let Some(scene) = self.emulator.take_graphics() {
+            updates.push(SurfaceUpdate::Graphics(scene));
         }
         match chunk.end {
             Some(End::Closed(closed)) => {

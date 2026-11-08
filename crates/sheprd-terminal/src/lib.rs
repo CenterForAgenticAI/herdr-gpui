@@ -5,6 +5,7 @@ mod cells;
 mod damage;
 mod emulator;
 mod error;
+mod graphics;
 pub mod input;
 mod listener;
 mod modes;
@@ -34,6 +35,9 @@ pub const MAX_SCROLLBACK_CELLS: usize = 10_000_000;
 /// The longest OSC string (title, hyperlink) the emulator reads; longer ones
 /// are dropped whole rather than buffered without bound.
 pub const MAX_OSC_BYTES: usize = 8 * 1024;
+/// The longest kitty graphics command the emulator reads, one chunk of an
+/// image or a whole one sent unchunked; longer ones are dropped whole.
+pub const MAX_GRAPHICS_COMMAND_BYTES: usize = 8 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests;
