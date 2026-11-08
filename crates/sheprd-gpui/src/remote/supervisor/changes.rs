@@ -82,14 +82,18 @@ impl Supervisor {
         supervisor.changes.queued.extend(asks);
         Self::start_answers(cx);
         for ask in layout {
-            let answer = change_layout(cx, &ask);
-            Self::send_layout_answer(cx, ask.id, answer);
+            // A split's window answers once its shell is in place.
+            if let Some(answer) = change_layout(cx, &ask) {
+                Self::send_layout_answer(cx, ask.id, answer);
+            }
         }
     }
 
     /// Hands what a window did with a phone's layout change to the daemon.
-    fn send_layout_answer(cx: &mut App, id: AskId, answer: layout::Answer) {
-        let supervisor = cx.global::<Self>();
+    pub(crate) fn send_layout_answer(cx: &mut App, id: AskId, answer: layout::Answer) {
+        let Some(supervisor) = cx.try_global::<Self>() else {
+            return;
+        };
         let Some(address) = supervisor.address.clone() else {
             return;
         };
@@ -137,21 +141,22 @@ impl Supervisor {
     }
 }
 
-/// Makes a phone's change in the window that holds its tab.
-fn change_layout(cx: &mut App, ask: &layout::Ask) -> layout::Answer {
+/// Makes a phone's change in the window that holds its tab; `None` when
+/// that window answers later.
+fn change_layout(cx: &mut App, ask: &layout::Ask) -> Option<layout::Answer> {
     if !ask.valid() {
-        return layout::Answer::Failed(layout::Failure::Refused);
+        return Some(layout::Answer::Failed(layout::Failure::Refused));
     }
     for handle in cx.windows() {
         let Some(window) = handle.downcast::<SheprdWindow>() else {
             continue;
         };
-        let made = window.update(cx, |this, _, cx| this.phone_layout(ask, cx));
+        let made = window.update(cx, |this, window, cx| this.phone_layout(ask, window, cx));
         if let Ok(Some(answer)) = made {
             return answer;
         }
     }
-    layout::Answer::Failed(layout::Failure::Gone)
+    Some(layout::Answer::Failed(layout::Failure::Gone))
 }
 
 /// Works out one answer and hands it to the daemon. Blocking.

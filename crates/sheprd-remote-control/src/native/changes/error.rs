@@ -29,6 +29,7 @@ impl Error {
                 Failure::LogTooLong | Failure::NoBase | Failure::NoLog | Failure::NoRepository,
             ) => StatusCode::CONFLICT,
             Self::Failed(Failure::Unreadable) => StatusCode::BAD_GATEWAY,
+            Self::Layout(layout::Failure::Busy) => StatusCode::TOO_MANY_REQUESTS,
             Self::Layout(layout::Failure::Gone) => StatusCode::NOT_FOUND,
             Self::Layout(layout::Failure::Watching) => StatusCode::CONFLICT,
             Self::Layout(layout::Failure::Refused) => StatusCode::BAD_GATEWAY,

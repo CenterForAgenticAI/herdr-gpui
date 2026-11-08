@@ -125,6 +125,8 @@ pub(crate) struct CoreTerminals {
     infos: infos::Infos,
     /// How the views draw now, to tell when the window's look changed.
     look: Option<Look>,
+    /// A phone's split on its way, answered once it lands or fails.
+    phone_split: Option<phone::Pending>,
     /// A shell starting, and what for.
     starting: Option<(Purpose, Started)>,
     tabs: HashMap<TabId, TabPanes>,
@@ -351,6 +353,7 @@ impl SheprdWindow {
             view.update(cx, |view, cx| view.poll(cx));
         }
         self.poll_core_panes(window, cx);
+        self.answer_phone_split(cx);
         // Split chrome and the sidebar's rows name panes from what herdr-core
         // reports, so it is read while any herdr-core tab is known.
         let listed = !self.core_terminals.tabs.is_empty();

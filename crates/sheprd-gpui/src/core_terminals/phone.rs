@@ -1,18 +1,41 @@
-//! A phone's split or zoom of a Herdr 2 tab. The remote control daemon
-//! cannot change the layout, which this app keeps with the tab, so it asks
-//! (`sheprd_remote_control::control::layout`), and the window holding the
-//! tab makes the change as its own pane commands do.
+//! A phone's split, zoom, or close of a Herdr 2 tab. The remote control
+//! daemon cannot change the layout, which this app keeps with the tab, so
+//! it asks (`sheprd_remote_control::control::layout`), and the window
+//! holding the tab makes the change as its own commands do. A split is
+//! answered once its shell is in the tab, or failed to be.
 
-use super::{CoreTerminals, Purpose, panes::Axis};
-use crate::SheprdWindow;
-use gpui::Context;
+use super::{CoreTerminals, Purpose, TabId, panes::Axis};
+use crate::{SheprdWindow, remote::supervisor::Supervisor};
+use gpui::{App, Context, Window};
 use sheprd_backend::{Spawn, TerminalId};
-use sheprd_remote_control::control::layout::{Answer, Ask, Failure, Op};
+use sheprd_remote_control::control::{
+    changes::AskId,
+    layout::{Answer, Ask, Failure, Op},
+};
+use std::time::{Duration, Instant};
+
+/// How long a phone's split may take before it counts as failed: past the
+/// daemon's own wait, so nothing is held for a phone gone.
+const SPLIT_WAIT: Duration = Duration::from_secs(15);
+
+/// A phone's split on its way.
+#[derive(Debug)]
+pub(super) struct Pending {
+    id: AskId,
+    /// The panes the tab had before, which the split adds to.
+    panes: usize,
+    since: Instant,
+    tab: TabId,
+}
 
 /// What a phone's change comes to in one window.
 pub(super) enum Change {
     /// Made, or refused, already.
     Answered(Answer),
+    /// The tab to close.
+    Close(TabId),
+    /// The tab whose zoom moved to the phone's pane.
+    Zoomed(TabId),
     /// A new shell to start beside the pane.
     Split(Purpose),
 }
@@ -22,6 +45,7 @@ impl CoreTerminals {
     /// does not, so another window may. A zoom is made here.
     pub(super) fn phone_change(&mut self, ask: &Ask) -> Option<Change> {
         let tab = *self.tabs.keys().find(|tab| tab.number() == ask.tab)?;
+        let busy = self.starting.is_some() || self.wanted.is_some() || self.phone_split.is_some();
         let shown = self.tabs.get_mut(&tab)?;
         let Some(terminal) = TerminalId::new(ask.terminal.as_str())
             .ok()
@@ -32,39 +56,102 @@ impl CoreTerminals {
         let axis = match ask.op {
             Op::SplitRight => Axis::Row,
             Op::SplitDown => Axis::Column,
+            Op::Close => return Some(Change::Close(tab)),
             Op::Zoom => {
                 // One pane already fills its tab, as Herdr leaves it.
-                if shown.panes.count() > 1 {
-                    let zoom = (!shown.zoom.is_open()).then_some(terminal);
-                    shown.set_zoom(zoom);
+                if shown.panes.count() < 2 {
+                    return Some(Change::Answered(Answer::Done));
                 }
-                return Some(Change::Answered(Answer::Done));
+                let zoom = (!shown.zoom.is_open()).then(|| terminal.clone());
+                shown.set_zoom(zoom);
+                // The pane zoomed is the one in use, as a zoom here makes it.
+                shown.active = terminal;
+                return Some(Change::Zoomed(tab));
             }
         };
         // A mirror only watches: it never splits.
         if shown.observe {
             return Some(Change::Answered(Answer::Failed(Failure::Watching)));
         }
+        // One start at a time: a second would take the first one's place.
+        if busy {
+            return Some(Change::Answered(Answer::Failed(Failure::Busy)));
+        }
+        self.phone_split = Some(Pending {
+            id: ask.id,
+            panes: shown.panes.count(),
+            since: Instant::now(),
+            tab,
+        });
         Some(Change::Split(Purpose::Split {
             tab,
             at: terminal,
             axis,
         }))
     }
+
+    /// The answer to the phone's split once it is settled: the tab has a
+    /// pane more, or nothing is starting any more, or it took too long.
+    pub(super) fn settled_phone_split(&mut self, now: Instant) -> Option<(AskId, Answer)> {
+        let pending = self.phone_split.as_ref()?;
+        let placed = self
+            .tabs
+            .get(&pending.tab)
+            .is_some_and(|shown| shown.panes.count() > pending.panes);
+        let idle = self.starting.is_none() && self.wanted.is_none();
+        let late = now.saturating_duration_since(pending.since) >= SPLIT_WAIT;
+        if !placed && !idle && !late {
+            return None;
+        }
+        let pending = self.phone_split.take()?;
+        let answer = if placed {
+            Answer::Done
+        } else {
+            Answer::Failed(Failure::Refused)
+        };
+        Some((pending.id, answer))
+    }
 }
 
 impl SheprdWindow {
-    /// Makes `ask` when this window holds its tab; `None` when it does not.
-    pub(crate) fn phone_layout(&mut self, ask: &Ask, cx: &mut Context<Self>) -> Option<Answer> {
-        match self.core_terminals.phone_change(ask)? {
-            Change::Answered(answer) => {
-                cx.notify();
-                Some(answer)
+    /// Makes `ask` when this window holds its tab: `None` when it does not,
+    /// `Some(None)` when its answer comes later, from [`Self::answer_phone_split`].
+    pub(crate) fn phone_layout(
+        &mut self,
+        ask: &Ask,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Option<Answer>> {
+        let answer = match self.core_terminals.phone_change(ask)? {
+            Change::Answered(answer) => Some(answer),
+            Change::Close(tab) => {
+                self.close_browser_tab(tab, window, cx);
+                Some(Answer::Done)
+            }
+            Change::Zoomed(tab) => {
+                // The keyboard stays in the tab it was in, on the pane shown.
+                if self
+                    .core_terminals
+                    .focused_pane(window, cx)
+                    .is_some_and(|(focused, _)| focused == tab)
+                {
+                    self.focus_core_terminal(tab, window, cx);
+                }
+                Some(Answer::Done)
             }
             Change::Split(purpose) => {
                 self.start_core_program(purpose, Spawn::default());
-                Some(Answer::Done)
+                None
             }
+        };
+        cx.notify();
+        Some(answer)
+    }
+
+    /// Tells the daemon how a phone's split went, once it has.
+    pub(super) fn answer_phone_split(&mut self, cx: &mut App) {
+        if let Some((id, answer)) = self.core_terminals.settled_phone_split(Instant::now()) {
+            Supervisor::send_layout_answer(cx, id, answer);
         }
     }
 }

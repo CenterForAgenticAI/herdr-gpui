@@ -86,12 +86,15 @@ terminal's current size. Phone-specific sizing, scrolling, and
 renaming remain Herdr 1 actions. A phone closes a Herdr 2 pane, or a tab with
 every pane in it, chats included, as closing a Herdr 1 tab does.
 
-Sheprd keeps a Herdr 2 tab's layout with the tab, so a phone's split or zoom
-of one of Sheprd's Herdr 2 tabs waits in the daemon with the phones' questions
-about workspaces (`control::layout`), and the window holding the tab makes it
-as its own pane commands do: the new shell takes that window's keyboard, as a
-split there does. With Sheprd closed the phone is told it is not open; a pane
-of the Herdr desktop app's spaces, or one no tab holds, cannot be split.
+Sheprd keeps a Herdr 2 tab's layout with the tab, so a phone's split, zoom, or
+close of one of Sheprd's Herdr 2 tabs waits in the daemon with the phones'
+questions about workspaces (`control::layout`), and the window holding the tab
+makes it as its own commands do. A split is answered once its shell is in the
+tab (it takes that window's keyboard, as a split there does), and refused as
+busy while another terminal is starting; a zoom makes the zoomed pane the one in
+use; a close drops the tab, and the daemon then ends its terminals. With Sheprd
+closed the phone is told it is not open (a close still ends the terminals); a
+pane of the Herdr desktop app's spaces, or one no tab holds, cannot be split.
 The daemon keeps at most 16 shared core attachments and releases each after
 30 seconds without a screen read or input request. When all 16 are held, the
 one idle longest gives way to a new pane if it has been idle for 5 seconds.

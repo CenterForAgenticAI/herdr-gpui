@@ -8,11 +8,12 @@ use crate::{
         phone::Change,
     },
 };
-use sheprd_backend::TerminalId;
+use sheprd_backend::{Spawn, TerminalId};
 use sheprd_remote_control::control::{
     changes::AskId,
     layout::{Answer, Ask, Failure, Op},
 };
+use std::time::Instant;
 
 fn id(name: &str) -> TerminalId {
     TerminalId::new(name).unwrap()
@@ -53,15 +54,88 @@ fn a_split_starts_a_shell_beside_the_phones_pane() {
 }
 
 #[test]
-fn a_zoom_fills_the_tab_and_a_second_shows_the_split() {
+fn a_zoom_fills_the_tab_with_the_phones_pane_and_a_second_shows_the_split() {
     let mut terminals = terminals();
     assert!(matches!(
         terminals.phone_change(&ask(1, "t2", Op::Zoom)),
-        Some(Change::Answered(Answer::Done))
+        Some(Change::Zoomed(tab)) if tab == TabId::test(1)
     ));
-    assert!(terminals.tabs[&TabId::test(1)].zoom.is_open());
+    let shown = &terminals.tabs[&TabId::test(1)];
+    assert!(shown.zoom.is_open());
+    assert_eq!(shown.active, id("t2"), "the pane zoomed is the one in use");
     terminals.phone_change(&ask(1, "t2", Op::Zoom));
     assert!(!terminals.tabs[&TabId::test(1)].zoom.is_open());
+}
+
+#[test]
+fn closing_names_the_tab_to_close() {
+    let mut terminals = terminals();
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t1", Op::Close)),
+        Some(Change::Close(tab)) if tab == TabId::test(1)
+    ));
+}
+
+#[test]
+fn a_split_is_answered_once_its_pane_is_in_the_tab() {
+    let mut terminals = terminals();
+    let now = Instant::now();
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t1", Op::SplitRight)),
+        Some(Change::Split(_))
+    ));
+    // The window starts the shell: until it lands, nothing is answered,
+    // and a second split waits its turn.
+    terminals.wanted = Some((
+        Purpose::Tab {
+            scope: crate::browser::Scope::endpoint("mac"),
+            workspace: "w".into(),
+        },
+        Spawn::default(),
+    ));
+    assert!(terminals.settled_phone_split(now).is_none());
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t1", Op::SplitDown)),
+        Some(Change::Answered(Answer::Failed(Failure::Busy)))
+    ));
+    terminals
+        .tabs
+        .get_mut(&TabId::test(1))
+        .unwrap()
+        .panes
+        .split(&id("t1"), Axis::Row, id("t9"))
+        .unwrap();
+    assert_eq!(
+        terminals.settled_phone_split(now),
+        Some((AskId(1), Answer::Done))
+    );
+    assert!(terminals.settled_phone_split(now).is_none(), "once");
+}
+
+#[test]
+fn a_split_that_never_lands_is_refused() {
+    let mut terminals = terminals();
+    let now = Instant::now();
+    terminals.phone_change(&ask(1, "t1", Op::SplitRight));
+    // Nothing starting and no new pane: the start failed.
+    assert_eq!(
+        terminals.settled_phone_split(now),
+        Some((AskId(1), Answer::Failed(Failure::Refused)))
+    );
+    terminals.phone_change(&ask(1, "t1", Op::SplitRight));
+    terminals.wanted = Some((
+        Purpose::Tab {
+            scope: crate::browser::Scope::endpoint("mac"),
+            workspace: "w".into(),
+        },
+        Spawn::default(),
+    ));
+    assert!(terminals.settled_phone_split(now).is_none());
+    assert_eq!(
+        terminals.settled_phone_split(now + std::time::Duration::from_secs(60)),
+        Some((AskId(1), Answer::Failed(Failure::Refused))),
+        "a start that hangs gives up"
+    );
 }
 
 #[test]

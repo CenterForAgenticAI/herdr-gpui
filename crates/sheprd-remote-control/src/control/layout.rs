@@ -1,5 +1,5 @@
-//! A phone's change to the layout of one of Sheprd's Herdr 2 tabs: a split
-//! or a zoom. herdr-core keeps no layout; Sheprd keeps it in its saved tabs
+//! A phone's change to the layout of one of Sheprd's Herdr 2 tabs: a split,
+//! a zoom, or closing it. herdr-core keeps no layout; Sheprd keeps it in its saved tabs
 //! and changes it as the desktop does, so the phone never writes it and
 //! never fights the desktop over it. The question waits in the daemon with
 //! the phones' questions about workspaces (`control::changes`), and Sheprd
@@ -38,6 +38,9 @@ pub enum Op {
     SplitDown,
     /// The pane fills its tab, or the split shows again.
     Zoom,
+    /// The tab goes. The daemon ends its terminals; Sheprd drops the tab,
+    /// which would otherwise keep its last pane, ended.
+    Close,
 }
 
 /// Sheprd's answer to an [`Ask`].
@@ -52,6 +55,8 @@ pub enum Answer {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case")]
 pub enum Failure {
+    #[error("Sheprd is starting another terminal; try again in a moment")]
+    Busy,
     #[error("no Sheprd window has this tab open")]
     Gone,
     #[error("this tab only watches its terminal; split it where it types")]

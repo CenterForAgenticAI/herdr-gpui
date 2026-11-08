@@ -331,6 +331,17 @@ pub(super) async fn action(
         let location = format!("/term/{}", render::urlencode(&pane));
         return Ok(Json(json!({ "location": location, "pane": pane })));
     }
+    // A Herdr 2 tab Sheprd keeps goes from Sheprd first, or its last pane
+    // would stay there, ended. Without Sheprd its terminals still end.
+    if request.action == Action::CloseTab
+        && let Ok(Some((saved, terminal))) = state.hub.core_saved_pane(&tab, &pane)
+    {
+        let op = crate::control::layout::Op::Close;
+        if let Err(error) = crate::native::changes::change_layout(&state, saved, terminal, op).await
+        {
+            tracing::debug!(%error, "Sheprd did not close a Herdr 2 tab a phone closed");
+        }
+    }
     let core_tab = if request.action == Action::NewTab {
         state.hub.new_core_tab(&workspace).await?
     } else {

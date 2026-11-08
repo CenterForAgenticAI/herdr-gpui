@@ -94,3 +94,19 @@ fn an_older_daemon_sends_no_layout_changes() {
         }
     );
 }
+
+#[tokio::test]
+async fn a_busy_sheprd_asks_the_phone_to_try_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = state_with(dir.path(), Hub::offline(Layout::default()));
+    open(&state);
+    desktop(&state, |_| layout::Answer::Failed(layout::Failure::Busy));
+    let error =
+        crate::native::changes::change_layout(&state, 4, "t1".into(), layout::Op::SplitRight)
+            .await
+            .unwrap_err();
+    assert_eq!(
+        error.into_response().status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
