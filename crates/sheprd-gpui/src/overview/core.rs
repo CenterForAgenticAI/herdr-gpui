@@ -11,7 +11,7 @@ use super::{
 };
 use crate::SheprdWindow;
 use gpui::Context;
-use sheprd_backend::{AgentStatus, TerminalId, TerminalInfo};
+use sheprd_backend::TerminalId;
 use std::time::{Instant, SystemTime};
 
 /// What herdr-core agents are keyed by where a host's endpoint id would be:
@@ -20,19 +20,6 @@ pub(crate) const ENDPOINT: &str = "herdr-core";
 
 /// Untrusted titles are cut here, as a Herdr 1 row's are.
 const TITLE_LIMIT: usize = 200;
-
-/// The agent's name: the one it is identified as, else the one it reports
-/// for itself. A program that reports no status and is no known agent is
-/// not one.
-fn agent_name(info: &TerminalInfo) -> Option<String> {
-    if let Some(kind) = sheprd_core_client::agent_kind(info) {
-        return Some(kind.name().to_owned());
-    }
-    let reported = info.reporter.as_deref()?;
-    let name = crate::notifications::safe_text(reported, 32);
-    let name = name.trim();
-    (!name.is_empty() && info.agent != AgentStatus::Unknown).then(|| name.to_owned())
-}
 
 impl SheprdWindow {
     /// The endpoint and label of this computer, which the core runs on.
@@ -55,7 +42,7 @@ impl SheprdWindow {
         self.core_terminals
             .chat_terminals()
             .filter_map(|info| {
-                let name = agent_name(info)?;
+                let name = sheprd_core_client::agent_name(info)?;
                 let tab = self.core_terminals.tab_of(&info.id)?;
                 let folder = info.cwd.as_deref();
                 let workspace = folder
@@ -123,7 +110,7 @@ impl SheprdWindow {
         self.core_terminals
             .chat_terminals()
             .find(|info| info.id.as_str() == terminal)
-            .filter(|info| agent_name(info).as_deref() == Some(agent))
+            .filter(|info| sheprd_core_client::agent_name(info).as_deref() == Some(agent))
             .map_or(Presence::Gone, |info| Presence::Here(info.agent))
     }
 
@@ -138,7 +125,7 @@ impl SheprdWindow {
             endpoint: ENDPOINT.to_owned(),
             pane: terminal.to_string(),
             boot: String::new(),
-            agent: agent_name(info)?,
+            agent: sheprd_core_client::agent_name(info)?,
         })
     }
 
@@ -177,7 +164,3 @@ impl SheprdWindow {
         .detach();
     }
 }
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests;
