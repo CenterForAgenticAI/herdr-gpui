@@ -203,19 +203,21 @@ fn the_editor_opens_beside_a_running_pane_and_in_a_tab_for_an_ended_one() {
         crate::browser::TabId::test(1),
         sheprd_backend::TerminalId::new("t1").unwrap(),
     );
-    let key = || Some((Scope::endpoint("local"), "w1".to_owned()));
+    let key = |workspace: &str| Some((Scope::endpoint("local"), workspace.to_owned()));
     assert!(matches!(
-        editor_purpose(Some(pane.clone()), false, key()),
+        editor_purpose(Some(pane.clone()), false, key("tab's"), key("current")),
         Some(Purpose::Split { at, .. }) if at == pane.1
     ));
-    // An ended pane would be closed out of a split made beside it.
+    // An ended pane would be closed out of a split made beside it, so its
+    // editor opens in a tab of the pane's workspace, not the one shown now.
     assert!(matches!(
-        editor_purpose(Some(pane.clone()), true, key()),
-        Some(Purpose::Tab { workspace, .. }) if workspace == "w1"
+        editor_purpose(Some(pane.clone()), true, key("tab's"), key("current")),
+        Some(Purpose::Tab { workspace, .. }) if workspace == "tab's"
     ));
+    assert!(editor_purpose(Some(pane), true, None, key("current")).is_none());
+    // The stand-in shell has no tab: its editor opens where the window is.
     assert!(matches!(
-        editor_purpose(None, false, key()),
-        Some(Purpose::Tab { .. })
+        editor_purpose(None, false, None, key("current")),
+        Some(Purpose::Tab { workspace, .. }) if workspace == "current"
     ));
-    assert!(editor_purpose(Some(pane), true, None).is_none());
 }

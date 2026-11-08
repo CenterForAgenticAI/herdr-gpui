@@ -4,7 +4,7 @@
 //! emulator, so they work whatever Herdr 1 is installed or supports.
 
 use super::{CoreTerminalView, Error, Host, Purpose, fallback::Fallback, panes::Axis};
-use crate::{SheprdWindow, controls::Command, i18n::fl, window::Flash};
+use crate::{SheprdWindow, browser::Scope, controls::Command, i18n::fl, window::Flash};
 use gpui::{prelude::*, *};
 use sheprd_backend::{Spawn, TerminalId};
 use std::path::Path;
@@ -93,7 +93,11 @@ impl SheprdWindow {
                 .get(key)
                 .is_some_and(|view| view.read(cx).ended())
         });
-        let Some(purpose) = editor_purpose(pane, ended, self.browser_key()) else {
+        let workspace = pane.as_ref().and_then(|(tab, _)| {
+            let tab = cx.try_global::<crate::browser::Store>()?.get(*tab)?;
+            Some((tab.scope.clone(), tab.workspace_id.clone()))
+        });
+        let Some(purpose) = editor_purpose(pane, ended, workspace, self.browser_key()) else {
             self.show_flash(Flash::warning(fl!("core-terminals-open-workspace")), cx);
             return;
         };
@@ -124,23 +128,30 @@ impl SheprdWindow {
     }
 }
 
-/// Where the editor for a view's history opens: beside `pane`, or in a
-/// new tab of the workspace `key` names. The stand-in shell has no tab to
-/// split, and an `ended` pane would be closed out of a split the editor
-/// made, taking its history with it, so both get a tab of their own.
+/// Where the editor for a view's history opens: beside `pane`, or in a new
+/// tab of the workspace `workspace` holds `pane`'s tab in. The stand-in
+/// shell has no tab to split, and an `ended` pane would be closed out of a
+/// split the editor made, taking its history with it, so both get a tab of
+/// their own: a pane's in its own workspace, wherever the window has moved
+/// since, and the stand-in shell's in the `current` one.
 pub(super) fn editor_purpose(
     pane: Option<Pane>,
     ended: bool,
-    key: Option<(crate::browser::Scope, String)>,
+    workspace: Option<(Scope, String)>,
+    current: Option<(Scope, String)>,
 ) -> Option<Purpose> {
-    match pane.filter(|_| !ended) {
-        Some((tab, at)) => Some(Purpose::Split {
-            tab,
-            at,
-            axis: Axis::Row,
-        }),
-        None => key.map(|(scope, workspace)| Purpose::Tab { scope, workspace }),
-    }
+    let key = match pane {
+        Some((tab, at)) if !ended => {
+            return Some(Purpose::Split {
+                tab,
+                at,
+                axis: Axis::Row,
+            });
+        }
+        Some(_) => workspace,
+        None => current,
+    };
+    key.map(|(scope, workspace)| Purpose::Tab { scope, workspace })
 }
 
 /// Saves `text` to a file only the user can read. The file is removed when
