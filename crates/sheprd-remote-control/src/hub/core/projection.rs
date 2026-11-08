@@ -82,6 +82,22 @@ pub(super) fn project(
     layout
 }
 
+/// Puts the workspaces the app keeps first, in the user's order, ahead of
+/// a document's spaces too; the others keep their order.
+pub(super) fn lead_kept(layout: &mut Layout, saved: Option<&SavedTabs>, scope: Option<&str>) {
+    let kept: Vec<&str> = saved
+        .zip(scope)
+        .into_iter()
+        .flat_map(|(saved, scope)| saved.workspaces(scope))
+        .map(|workspace| workspace.id.as_str())
+        .collect();
+    layout.workspaces.sort_by_key(|workspace| {
+        kept.iter()
+            .position(|id| *id == workspace.id)
+            .unwrap_or(kept.len())
+    });
+}
+
 fn add(layout: &mut Layout, workspace: &str, terminal: Terminal) {
     if let Some(row) = layout.workspaces.iter_mut().find(|row| row.id == workspace) {
         row.terminals.push(terminal);
