@@ -9,8 +9,9 @@
 //! answer keeps running after its phone gives up, so the answers running here
 //! are limited too; questions taken beyond that wait their turn here. Taking
 //! goes on meanwhile, so a split or zoom, which needs no answer worked out,
-//! never waits behind slow workspace answers. The daemon holds at most 16
-//! questions, so no more ever wait here.
+//! does not wait behind slow workspace answers. A phone that gives up frees
+//! its place at the daemon but not here, so taking stops once `QUEUED`
+//! questions wait here.
 
 use super::*;
 use crate::SheprdWindow;
@@ -26,6 +27,9 @@ const RETRY: Duration = Duration::from_secs(5);
 
 /// How many answers are worked out at once.
 pub(super) const RUNNING: usize = 4;
+/// How many taken questions may wait for one of those: the daemon's own
+/// limit, so the work queued here stays bounded however phones come and go.
+pub(super) const QUEUED: usize = 16;
 
 #[derive(Default)]
 pub(crate) struct Changes {
@@ -54,7 +58,8 @@ impl Supervisor {
             .changes
             .retry_at
             .is_some_and(|at| Instant::now() < at);
-        if !phones || waiting || supervisor.changes.polling {
+        let full = supervisor.changes.queued.len() >= QUEUED;
+        if !phones || waiting || full || supervisor.changes.polling {
             return;
         }
         let Some(address) = supervisor.address.clone() else {

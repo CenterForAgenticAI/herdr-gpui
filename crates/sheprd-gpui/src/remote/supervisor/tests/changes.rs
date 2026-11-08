@@ -1,5 +1,5 @@
 use super::*;
-use crate::remote::supervisor::changes::RUNNING;
+use crate::remote::supervisor::changes::{QUEUED, RUNNING};
 use sheprd_remote_control::control::{
     changes::{Answer, Ask, AskId, Failure, Wanted},
     layout,
@@ -207,4 +207,33 @@ fn a_layout_change_no_window_holds_is_answered_as_gone(cx: &mut TestAppContext) 
             (AskId(8), layout::Answer::Failed(layout::Failure::Refused)),
         ]
     );
+}
+
+static FULL_WAITS: AtomicUsize = AtomicUsize::new(0);
+
+fn daemon_counting_waits(_: &Path, request: &Request) -> Result<Response, control::Error> {
+    match request {
+        Request::Status => Ok(Response::Status(status(1))),
+        Request::ChangeAsks => {
+            FULL_WAITS.fetch_add(1, Ordering::SeqCst);
+            Err(control::Error::NoAnswer)
+        }
+        _ => Ok(Response::Done),
+    }
+}
+
+#[gpui::test]
+fn taking_stops_once_the_queue_is_full(cx: &mut TestAppContext) {
+    cx.update(|cx| Supervisor::fixture(cx, on(), daemon_counting_waits));
+    cx.update(Supervisor::tick);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let changes = &mut cx.global_mut::<Supervisor>().changes;
+        changes.running = RUNNING;
+        changes.queued = (0..QUEUED as u64).map(ask).collect();
+    });
+    let waits = FULL_WAITS.load(Ordering::SeqCst);
+    cx.update(Supervisor::poll_changes);
+    cx.run_until_parked();
+    assert_eq!(FULL_WAITS.load(Ordering::SeqCst), waits);
 }
