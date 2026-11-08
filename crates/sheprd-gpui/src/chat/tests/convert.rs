@@ -3,7 +3,7 @@
 use super::start::local_window;
 use crate::{
     SheprdWindow,
-    chat::{ConvertError, convert::Job, existing::Scope},
+    chat::{convert::Job, existing::Scope},
     sidebar::layout_tests::fixture_window,
     window::MockPeer,
 };
@@ -140,7 +140,9 @@ fn a_finished_worker_failure_is_reported_once(cx: &mut gpui::TestAppContext) {
         view.update(cx, |view, cx| {
             local_window(view, &peer, cx);
             let (job, worker, _cancelled) = Job::waiting("w1:p1", scope(view));
-            worker.send(Err(ConvertError::Moved)).unwrap();
+            worker
+                .send(Err(sheprd_client::herdr::convert::Error::Moved.into()))
+                .unwrap();
             view.chats.converting = Some(job);
             view.poll_chat_convert(cx);
             assert!(view.chats.converting.is_none());

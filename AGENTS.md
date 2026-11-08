@@ -26,7 +26,7 @@ Closing or detaching the GUI must leave the daemons and their terminals running.
 | `crates/sheprd-protocol` | Generation-1 wire types, framing, validation, and atomic surface patches |
 | `crates/sheprd-acp` | `sheprd-acp` binary run inside a Herdr pane: the only ACP client of an agent, its in-pane chat view, the attach socket Sheprd connects to, and Herdr status reports |
 | `crates/sheprd-chat-protocol` | Attach wire between `sheprd-acp` and its clients: transcript model, the shared change reducer, framing, and endpoint discovery; no ACP or GPUI types |
-| `crates/sheprd-client` | Discovery, socket worker, session transitions, ordered commands, and client-local activity projection |
+| `crates/sheprd-client` | Discovery, socket worker, session transitions, ordered commands, client-local activity projection, and `herdr`: Herdr's pane and agent views (`AgentKind`, the API snapshot, process info) and the move of a terminal agent into a chat, shared by Teleport, the app, and the remote control daemon |
 | `crates/sheprd-backend` | The `Backend` and `Terminal` traits herdr-core implements and Herdr 1 does not yet: terminals listed, watched, attached, started, and ended, as `sheprd-protocol` cells and semantic input; no GPUI or transport |
 | `crates/sheprd-core-client` | herdr-core (`hc`, Herdr 2): endpoint discovery, the framed JSON-RPC connection worker, credit-flowed terminal and event streams, starting a core, and its `sheprd-backend` implementation; no GPUI |
 | `crates/sheprd-session` | What a session keeps that no terminal backend does (`docs/session-model.md`): the pane tree of a herdr-core tab and the reader of the app's saved tabs, shared by the app and the remote control daemon; no GPUI, runtime, or I/O |

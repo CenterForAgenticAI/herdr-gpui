@@ -39,6 +39,20 @@ pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// The line that runs `words`, the program first, through `sh`, each as its
+/// own single-quoted word, for typing into an interactive shell; `None`
+/// when one holds a quote or a control character.
+pub fn quoted_line(words: &[&str]) -> Option<String> {
+    if words
+        .iter()
+        .any(|word| word.contains('\'') || word.chars().any(char::is_control))
+    {
+        return None;
+    }
+    let quoted: Vec<String> = words.iter().map(|word| format!("'{word}'")).collect();
+    Some(format!(" sh -c 'exec \"$0\" \"$@\"' {}", quoted.join(" ")))
+}
+
 /// Run `script` with `/bin/sh`, streaming `input` to its stdin and its stdout
 /// to `output`. Returns the number of stdout bytes written.
 ///
