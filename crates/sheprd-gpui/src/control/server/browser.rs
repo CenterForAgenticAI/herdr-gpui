@@ -61,11 +61,7 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
         }
     }
     let caller = &request.caller;
-    let target = Target {
-        daemon: caller.daemon_socket.as_deref().map(Path::new),
-        workspace: caller.workspace_id.as_deref(),
-        pane: caller.pane_id.as_deref(),
-    };
+    let target = super::target(caller);
     // First the window connected to the caller's own daemon; then, when the
     // socket paths are spelled differently, any window showing its workspace.
     for strict in [true, false] {
@@ -107,15 +103,16 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
 
 /// Reloads every page the calling pane opened, in every window.
 pub(super) fn reload(caller: &Caller, cx: &mut App) -> Response {
-    let Some(pane) = caller.pane_id.as_deref().filter(|pane| plain(pane, 256)) else {
+    let pane = crate::control::origin(caller.pane_id.as_deref(), caller.terminal_id.as_deref());
+    let Some(pane) = pane.filter(|pane| valid_caller(caller) && plain(pane, 256)) else {
         return Response::error(
             ErrorCode::InvalidRequest,
-            "browser reload runs in the Herdr pane that opened the page",
+            "browser reload runs in the pane that opened the page",
         );
     };
     let tabs: Vec<_> = cx
         .try_global::<crate::browser::Store>()
-        .map(|store| store.opened_by(pane).map(|tab| tab.id).collect())
+        .map(|store| store.opened_by(&pane).map(|tab| tab.id).collect())
         .unwrap_or_default();
     for handle in main_windows(cx) {
         let _ = handle.update(cx, |view, _, _| view.reload_browser_tabs(&tabs));
@@ -136,10 +133,11 @@ fn pastable(text: &str) -> String {
 /// none they are kept for `browser feedback`.
 pub(super) fn notes(request: &NotesRequest, cx: &mut App) -> Response {
     let caller = &request.caller;
-    let Some(pane) = caller.pane_id.as_deref().filter(|_| valid_caller(caller)) else {
+    let pane = crate::control::origin(caller.pane_id.as_deref(), caller.terminal_id.as_deref());
+    let Some(pane) = pane.filter(|_| valid_caller(caller)) else {
         return Response::error(
             ErrorCode::InvalidRequest,
-            "Notes are sent from the Herdr pane of the agent they are for",
+            "Notes are sent from the pane of the agent they are for",
         );
     };
     let Some(daemon) = caller.daemon_socket.as_deref() else {
@@ -150,7 +148,7 @@ pub(super) fn notes(request: &NotesRequest, cx: &mut App) -> Response {
     };
     let recipient = FeedbackKey {
         scope: Scope::local(Path::new(daemon)),
-        pane_id: pane.to_owned(),
+        pane_id: pane.clone().into_owned(),
     };
     let text = pastable(&request.text);
     if text.trim().is_empty() {
@@ -167,7 +165,8 @@ pub(super) fn notes(request: &NotesRequest, cx: &mut App) -> Response {
     let target = Target {
         daemon: caller.daemon_socket.as_deref().map(Path::new),
         workspace: None,
-        pane: Some(pane),
+        pane: Some(&pane),
+        terminal: None,
     };
     for handle in main_windows(cx) {
         let taken = handle.update(cx, |view, _, cx| {

@@ -21,6 +21,13 @@ impl SheprdWindow {
         target: &Target<'_>,
         strict: bool,
     ) -> Option<(usize, String)> {
+        // A herdr-core terminal outside any Herdr workspace is in the
+        // workspace of the tab holding it.
+        if target.workspace.is_none()
+            && let Some(terminal) = target.terminal
+        {
+            return self.core_control_target(terminal);
+        }
         self.endpoints
             .iter()
             .enumerate()
@@ -56,6 +63,19 @@ impl SheprdWindow {
             })
     }
 
+    /// The endpoint and workspace of the tab whose panes hold herdr-core
+    /// `terminal`, among the tabs this window has shown.
+    fn core_control_target(&self, terminal: &str) -> Option<(usize, String)> {
+        let terminal = sheprd_backend::TerminalId::new(terminal).ok()?;
+        let tab = self.core_terminals.tab_of(&terminal)?;
+        let (scope, workspace) = self.core_terminals.tab_workspace(tab)?;
+        let index = self
+            .endpoints
+            .iter()
+            .position(|endpoint| &super::scope(endpoint) == scope)?;
+        Some((index, workspace.to_owned()))
+    }
+
     /// Whether the host this window shows is the daemon at `daemon`, listing
     /// workspaces or not, connected or not. Window-wide commands act on the
     /// shown host, so only that one may stand for the caller's daemon.
@@ -87,10 +107,11 @@ impl SheprdWindow {
         // window does not show yet gets an ordinary tab.
         let besides = placement == Placement::Beside
             && self.browser_key() == Some((scope(&self.endpoints[index]), workspace.clone()));
+        let origin = target.origin();
         let opened = self.open_agent_tab(
             index,
             &workspace,
-            target.pane,
+            origin.as_deref(),
             location,
             focus && !besides,
             window,
@@ -99,7 +120,7 @@ impl SheprdWindow {
         let Some(id) = opened else {
             return Some(Placed::Full);
         };
-        let beside = besides && self.show_beside(id, target.pane, focus, window, cx);
+        let beside = besides && self.show_beside(id, target, focus, window, cx);
         if besides && !beside && focus {
             self.show_agent_tab(index, &workspace, id, window, cx);
         }
@@ -118,8 +139,20 @@ impl SheprdWindow {
     /// terminal no group shows, because the user switched away from it, has
     /// none: a page beside some other terminal would leave the caller hidden
     /// and the keyboard with another agent.
-    fn terminal_group(&self, pane: Option<&str>, cx: &App) -> Option<GroupId> {
-        let Some(pane) = pane else {
+    fn terminal_group(&self, target: &Target<'_>, cx: &App) -> Option<GroupId> {
+        if target.pane.is_none()
+            && let Some(terminal) = target.terminal
+        {
+            // The group showing the herdr-core tab that holds the caller.
+            let terminal = sheprd_backend::TerminalId::new(terminal).ok()?;
+            let tab = self.core_terminals.tab_of(&terminal)?;
+            return self
+                .group_slots()
+                .into_iter()
+                .map(|slot| slot.id)
+                .find(|group| self.group_shown(*group, cx) == Shown::Page(tab));
+        }
+        let Some(pane) = target.pane else {
             return self.primary_group();
         };
         let snapshot = self.live.snapshot.as_ref()?;
@@ -144,12 +177,12 @@ impl SheprdWindow {
     fn show_beside(
         &mut self,
         id: TabId,
-        pane: Option<&str>,
+        target: &Target<'_>,
         focus: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(home) = self.terminal_group(pane, cx) else {
+        let Some(home) = self.terminal_group(target, cx) else {
             return false;
         };
         let in_use = self.active_group();

@@ -1,14 +1,17 @@
 ---
 name: herdr-gpui-browser
-description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it inside Herdr (HERDR_ENV=1) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain, demo, or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills, a system browser, or long text explanations. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, asking the user to approve an automation script you wrote, forwarding, opening, or stopping ports, creating, running commands on, or deleting cloud machines, remote control from a phone, listing or focusing the app's windows and tabs, waiting for a tab to close or the user's notes, Sheprd settings, themes, and fonts, and keeping the machine awake."
+description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills, a system browser, or long explanations. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, asking the user to approve an automation script you wrote, forwarding, opening, or stopping ports, creating, running commands on, or deleting cloud machines, remote control from a phone, listing or focusing its windows and tabs, waiting for a tab to close or the user's notes, Sheprd settings, themes, and fonts, and keeping the machine awake."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
 # Browser tabs in Sheprd
 
-Inside a Herdr pane (`HERDR_ENV=1`), "open a browser tab" means a tab in
-Sheprd, beside the user's terminals: use the commands below, not `open`, a
-system browser, or another tool's browser skill.
+Inside a Herdr pane (`HERDR_ENV=1`) or a Herdr 2 terminal (`HC_TERMINAL_ID`
+is set), "open a browser tab" means a tab in Sheprd, beside the user's
+terminals: use the commands below, not `open`, a system browser, or another
+tool's browser skill. Everything here works the same from either: in a
+Herdr 2 terminal, Sheprd finds your workspace from the tab holding your
+terminal, and pages you open and the user's notes on them belong to it.
 
 Sheprd, the native desktop client for Herdr, can show web pages in
 browser tabs that sit beside the terminal tabs of a workspace. The user can
@@ -58,7 +61,7 @@ sheprd browser open http://localhost:3000
   and the keyboard stays with your pane, so they can keep talking to you
   while the page updates. Later files you open join the same split.
 - A web address opens as a tab in your own workspace (`HERDR_WORKSPACE_ID`,
-  which Herdr sets in every pane) and the window switches to it. The
+  which Herdr sets in every pane, or the workspace of your Herdr 2 tab) and the window switches to it. The
   terminal keeps running underneath; the user returns to it by clicking its
   tab.
 - Add `--tab` to open a file as a tab instead, or `--beside` to put a web
@@ -279,7 +282,9 @@ it in the app.
 Add `--json` to any command for machine-readable output; errors then come
 back as `{"error": {"code", "message"}}`. Exit statuses are the ones in the
 table above. A command acts in the window that shows your workspace; it
-exits 5 rather than act in another session's window.
+exits 5 rather than act in another session's window. In a Herdr 2 terminal
+in no Herdr workspace, `sheprd work` notes, mutes, restores, scripts,
+Teleport, and fan-out exit 8: they keep Herdr's workspace state.
 
 Some commands only open the app's dialog and the user confirms there:
 restoring a checkpoint, teleporting a worktree, fanning out a prompt, running

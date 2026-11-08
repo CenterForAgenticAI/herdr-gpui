@@ -63,6 +63,9 @@ mod middle_click;
 /// Pages a control request opens, only in a workspace the window shows.
 mod requests;
 
+/// Pages a caller in a herdr-core terminal opens, in its tab's workspace.
+mod core_requests;
+
 /// Notes a control request sends, only to a pane the window shows.
 mod requested_notes;
 

@@ -80,7 +80,17 @@ pub(super) fn find<'a>(view: &'a SheprdWindow, caller: &Caller) -> Result<Found<
     let snapshot = live
         .snapshot
         .as_deref()
-        .ok_or_else(|| not_found("The window has no state from that host yet"))?;
+        .ok_or_else(|| match &caller.terminal_id {
+            // A workspace of herdr-core tabs alone has none of Herdr's state that
+            // notes, mutes, scripts, and Teleport keep.
+            Some(terminal) if caller.workspace_id.is_none() => Response::error(
+                ErrorCode::Unsupported,
+                format!(
+                    "herdr-core terminal {terminal} is in no Herdr workspace, which this needs"
+                ),
+            ),
+            _ => not_found("The window has no state from that host yet"),
+        })?;
     let workspace = snapshot
         .workspaces
         .iter()

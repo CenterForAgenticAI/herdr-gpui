@@ -28,6 +28,11 @@ impl CoreTerminals {
 }
 
 impl CoreTerminals {
+    /// The scope and workspace of `tab`, once the window has shown it.
+    pub(crate) fn tab_workspace(&self, tab: crate::browser::TabId) -> Option<&(Scope, String)> {
+        self.tabs.get(&tab)?.workspace.as_ref()
+    }
+
     /// Each known tab's terminals and the workspace the tab is in, by
     /// address, for what names a terminal but not its workspace.
     pub(crate) fn terminal_workspaces(&self) -> Vec<(String, String)> {

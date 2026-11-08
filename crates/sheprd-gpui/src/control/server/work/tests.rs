@@ -15,6 +15,7 @@ fn caller(workspace: Option<&str>) -> Caller {
         // No daemon: one the window does not show would refuse the request.
         daemon_socket: None,
         window: None,
+        terminal_id: None,
     }
 }
 

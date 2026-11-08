@@ -200,6 +200,14 @@ impl CoreTerminals {
         }
     }
 
+    /// Places `tab` in `workspace` of `scope`, as showing the workspace does.
+    #[cfg(test)]
+    pub(crate) fn place_for_test(&mut self, tab: TabId, scope: Scope, workspace: &str) {
+        if let Some(shown) = self.tabs.get_mut(&tab) {
+            shown.workspace = Some((scope, workspace.to_owned()));
+        }
+    }
+
     /// Whether `tab` is a herdr-core tab that drives its terminals, not a
     /// mirror that only watches.
     pub(crate) fn drives(&self, tab: TabId) -> bool {
