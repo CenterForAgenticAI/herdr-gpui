@@ -1,5 +1,6 @@
 mod accessibility;
 mod chats;
+mod close;
 mod commands;
 mod focus;
 mod keys;
