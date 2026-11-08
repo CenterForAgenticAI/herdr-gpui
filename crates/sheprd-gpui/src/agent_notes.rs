@@ -424,7 +424,11 @@ impl SheprdWindow {
         let Some(pane_id) = pane else {
             return self.deliver_notes(None, text, pending, None, cx);
         };
-        if !origin.is_some_and(|origin| origin.current(self)) {
+        // A herdr-core terminal outlives any Herdr session, and a window with
+        // no Herdr has none to compare: its tab holding it is what counts.
+        let core = crate::chat::core_pane::terminal_of(&pane_id)
+            .is_some_and(|terminal| self.core_terminals.tab_of(&terminal).is_some());
+        if !core && !origin.is_some_and(|origin| origin.current(self)) {
             self.show_flash(Flash::warning(fl!("agent-notes-session-not-shown")), cx);
             return Delivered::Copy(typable(&text));
         }

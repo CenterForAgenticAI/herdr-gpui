@@ -32,6 +32,11 @@ pub(crate) fn key(terminal: &TerminalId) -> String {
     format!("core:{terminal}")
 }
 
+/// The herdr-core terminal a [`key`] names, if it is one.
+pub(crate) fn terminal_of(key: &str) -> Option<TerminalId> {
+    TerminalId::new(key.strip_prefix("core:")?).ok()
+}
+
 /// The chats among `terminals`, in their order, one per terminal and at
 /// most [`MAX_CHATS`]. A terminal on another machine this core added
 /// (`box/t7`) runs its program there, out of reach.
