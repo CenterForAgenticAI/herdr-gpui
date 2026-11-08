@@ -26,10 +26,16 @@ impl SheprdWindow {
             // Herdr 1's workspaces, then those the app keeps for Herdr 2.
             let sessions = self.sessions(index);
             let selected = index == self.selected_endpoint;
-            let front = selected
-                .then(|| self.browser_key())
-                .flatten()
-                .map(|(_, workspace)| workspace);
+            // The selected host's front is the window's; another host's is
+            // the workspace its Herdr 1 reports focused.
+            let front = if selected {
+                self.browser_key().map(|(_, workspace)| workspace)
+            } else {
+                sessions
+                    .herdr_1
+                    .as_ref()
+                    .and_then(|session| session.focused.clone())
+            };
             for workspace in sessions.workspaces() {
                 state.workspaces.push(Workspace {
                     id: workspace.id.clone(),
