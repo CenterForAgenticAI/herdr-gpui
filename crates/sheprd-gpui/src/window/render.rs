@@ -741,11 +741,7 @@ impl Render for SheprdWindow {
                 (Shown::Terminal, _)
                     if terminal_slot == Some(slot) && self.core_fallback_view().is_some() =>
                 {
-                    let view = self.core_fallback_view();
-                    if let Some(view) = &view {
-                        self.core_terminals.draw(view);
-                    }
-                    view.map(IntoElement::into_any_element)
+                    self.draw_core_fallback()
                         .unwrap_or_else(|| div().into_any_element())
                 }
                 (Shown::Terminal, _) if terminal_slot == Some(slot) => terminal
