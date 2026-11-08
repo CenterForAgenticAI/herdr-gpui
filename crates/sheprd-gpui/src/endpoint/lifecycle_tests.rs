@@ -20,6 +20,7 @@ mod atomic_projection;
 mod background_commands;
 mod close_pane;
 mod close_sequence;
+mod core_history_hosts;
 mod core_terminal_hosts;
 mod core_terminals_without_herdr_1;
 mod dead_keys;

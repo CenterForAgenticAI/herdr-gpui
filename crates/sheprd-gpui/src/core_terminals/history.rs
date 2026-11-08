@@ -3,7 +3,7 @@
 //! asks its daemon for these; a herdr-core view answers them from its own
 //! emulator, so they work whatever Herdr 1 is installed or supports.
 
-use super::{CoreTerminalView, Error, Purpose, fallback::Fallback, panes::Axis};
+use super::{CoreTerminalView, Error, Host, Purpose, fallback::Fallback, panes::Axis};
 use crate::{SheprdWindow, controls::Command, i18n::fl, window::Flash};
 use gpui::{prelude::*, *};
 use sheprd_backend::{Spawn, TerminalId};
@@ -82,7 +82,12 @@ impl SheprdWindow {
         }
     }
 
-    fn edit_core_history(&mut self, pane: Option<Pane>, text: String, cx: &mut Context<Self>) {
+    pub(crate) fn edit_core_history(
+        &mut self,
+        pane: Option<Pane>,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
         // The stand-in shell has no tab to split: the editor gets its own.
         let purpose = match pane {
             Some((tab, at)) => Purpose::Split {
@@ -98,6 +103,12 @@ impl SheprdWindow {
                 }
             },
         };
+        // The history is saved on this computer, where a remote core's
+        // editor could not open it.
+        if self.purpose_host(&purpose) != Host::Local {
+            self.show_flash(Flash::warning(fl!("core-terminals-edit-remote")), cx);
+            return;
+        }
         let saved = cx.background_spawn(async move { save_history(&text) });
         // A window closed meanwhile drops the file with this task.
         cx.spawn(async move |this, cx| {
