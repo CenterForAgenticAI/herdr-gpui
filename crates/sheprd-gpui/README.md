@@ -980,6 +980,15 @@ colours. Theme ends with the window backdrop and terminal padding. Custom sound
 paths and per-agent sound policies remain shared-file settings. Configuration
 paths are diagnostic facts rather than editable preference values.
 
+Coordinator groups have no switch here yet: `[sidebar] coordinator_suffix`
+turns them on. With it set to `-coord`, a session named `demo-coord` shows the
+coordinator mark in place of its agent's, and the agents header gains a filter
+whose clicks step through each group and back to all groups. A group shows its
+coordinator first, then the sessions named `demo-12`, `demo-13`, and so on, on
+any host, and the agent shortcuts step through those same rows. Groups follow
+names, so a replacement session given the coordinator's name takes the group
+over. `sheprd ui agent-group` lists and picks groups from a script.
+
 These native edits save automatically through the serial background save path,
 preserving unrelated TOML keys/comments and pending theme/layout selections.
 Controls are disabled while a save or reload is in progress. Shared settings
@@ -3081,7 +3090,8 @@ come back after a restart; closing a workspace in Herdr removes its tabs.
   gets WebView2's own confirmation prompt rather than being refused outright.
 - Pages are native web views (WebKit on macOS, WebView2 on Windows). On
   macOS a page lies beneath the window's own drawing. Menus, popovers,
-  dialogs, tooltips, toasts, and the file-transfer card show over it, and
+  dialogs, tooltips, toasts, notice cards, and the file-transfer card show
+  over it, and
   the page stays live around them. The grip between two groups keeps its
   full width over a page. While a menu or dialog is open, a file dropped on
   the window never reaches a page. A file dropped on a toast or the
@@ -3089,9 +3099,11 @@ come back after a restart; closing a workspace in Herdr removes its tabs.
 - On Windows a page is layered above the window, so it steps aside for a
   menu, popover, or status bar tooltip that would fall over it, and for a
   dialog, which dims the whole window. Its place is empty until the menu
-  closes. A page also steps aside while a toast or the file-transfer card
-  falls over it, as when a page or VS Code fills the right-hand group or the
-  whole editor area, so they stay visible and clickable. A page that none of
+  closes. A page also steps aside while a toast, a notice card, or the
+  file-transfer card falls over it, as when a page or VS Code fills the
+  right-hand group or the whole editor area, so they stay visible and
+  clickable. A config warning or announcement card stays until it is
+  dismissed, and the page comes back then. A page that none of
   these reach keeps showing.
 - Linux has no embedded pages yet: browser tab requests open the system
   browser, and local files and annotations are unavailable.
@@ -4480,11 +4492,14 @@ Ctrl+Shift+U is left unbound for
   Cmd-Backspace send Ctrl-A, Ctrl-E, and Ctrl-U by default, so zsh and agent
   prompts jump to the line's ends or delete back to its start as in every
   other Mac terminal, and Option-Left and Option-Right send Esc-b and Esc-f
-  to move by word. On every platform Shift-Enter sends Alt-Enter (Esc CR)
-  by default: Herdr sends a program that never enabled the kitty keyboard
-  protocol or modifyOtherKeys a bare CR for Shift-Enter, which submits the
-  line, while prompt_toolkit apps and zsh read Esc CR as a newline.
-  `"shift-enter" = ""` sends Shift-Enter unchanged again. A value is a key
+  to move by word. On every platform Shift-Enter is sent unchanged, distinct
+  from Alt-Enter, so programs using the kitty keyboard protocol (such as Pi)
+  can bind them separately. For legacy prompts that need Alt-Enter (Esc CR)
+  for a newline, opt in with `"shift-enter" = "alt-enter"`. This applies to
+  every pane: the GUI is not told each pane's keyboard protocol. Without that
+  override, Herdr can encode Shift-Enter as a bare CR for a program that has
+  enabled neither kitty nor modifyOtherKeys. `"shift-enter" = ""` continues
+  to send Shift-Enter unchanged. A value is a key
   a terminal can receive (`ctrl-a`, `home`, `alt-b`, `shift-enter`), or `text:` followed by up to 1024 bytes of
   text, and an empty string removes a default. Text reaches the pane byte for
   byte, so a newline in it is a line feed, not the Enter key. On a layout
