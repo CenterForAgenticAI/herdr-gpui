@@ -113,7 +113,7 @@ fn a_finished_edit_sent_without_its_text_stays_listed(cx: &mut TestAppContext) {
             1,
             ToolKind::Edit,
             ToolStatus::Completed,
-            "/work/data.csv:12",
+            "/work/report:2026",
         ),
         call(2, ToolKind::Edit, ToolStatus::Failed, "/work/failed.csv"),
         call(3, ToolKind::Read, ToolStatus::Completed, "/work/read.csv"),
@@ -122,7 +122,7 @@ fn a_finished_edit_sent_without_its_text_stays_listed(cx: &mut TestAppContext) {
     view.read_with(cx, |view, _| {
         let changed = view.chats.pane("w1:p1").unwrap().prepared.changed();
         assert_eq!(changed.len(), 1);
-        assert_eq!(changed[0].path, "/work/data.csv");
+        assert_eq!(changed[0].path, "/work/report:2026", "a name is never cut");
         assert_eq!(changed[0].lines, None);
     });
 }

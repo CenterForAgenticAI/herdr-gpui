@@ -114,24 +114,14 @@ pub(crate) fn total_lines(diffs: &[DiffSummary]) -> Option<LineChanges> {
 }
 
 /// The files a finished edit changed without saying how, as when its sides
-/// were too large to send: the file still changed.
+/// were too large to send: the file still changed. Locations are listed as
+/// reported: a `:line` an agent added cannot be told from a name ending in
+/// `:digits`, so neither is cut.
 fn unshown_edits(tool: &Tool) -> &[String] {
     if tool.kind == ToolKind::Edit && tool.status == ToolStatus::Completed {
         &tool.locations
     } else {
         &[]
-    }
-}
-
-/// A tool location's path, without the `:line` an agent may add to it.
-fn location_path(location: &str) -> &str {
-    match location.rsplit_once(':') {
-        Some((path, line))
-            if !path.is_empty() && !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit()) =>
-        {
-            path
-        }
-        _ => location,
     }
 }
 
@@ -403,7 +393,7 @@ impl Prepared {
                 _ => &[],
             };
             let unshown = unshown.iter().map(|location| DiffSummary {
-                path: location_path(location).to_owned(),
+                path: location.clone(),
                 lines: None,
             });
             for diff in summary.diffs.iter().cloned().chain(unshown) {
