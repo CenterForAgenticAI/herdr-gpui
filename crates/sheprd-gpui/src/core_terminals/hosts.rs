@@ -43,9 +43,11 @@ pub(super) struct Remote {
     pub(super) infos: Infos,
     /// The saved device the hub dials, to tell when it was edited.
     pub(super) target: ConnectTarget,
-    /// Browser request labels already on the core's terminals when this
-    /// window first listed them, which it never serves; `None` until then.
-    pub(super) old_requests: Option<std::collections::HashSet<String>>,
+    /// Browser request labels, by terminal, this window never serves (again):
+    /// those already there when it first listed the core, those left on a
+    /// terminal it did not show, and those it served and is removing.
+    /// `None` until the first list.
+    pub(super) old_requests: Option<std::collections::HashSet<(TerminalId, String)>>,
 }
 
 impl CoreTerminals {

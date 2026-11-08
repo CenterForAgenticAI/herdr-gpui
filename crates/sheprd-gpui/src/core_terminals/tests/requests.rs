@@ -93,3 +93,53 @@ fn only_requests_after_the_first_list_on_a_shown_terminal_are_served() {
     names.sort_unstable();
     assert_eq!(names, ["herdr-gpui-2-2", "herdr-gpui-2-2_0"]);
 }
+
+const NEW: &[(&str, &str)] = &[
+    ("herdr-gpui-2-2", "open"),
+    ("herdr-gpui-2-2_0", "https://new.example"),
+];
+
+#[test]
+fn a_request_is_served_once_while_its_labels_are_being_removed() {
+    let mut terminals = terminals();
+    terminals.list_for_test(&scope(), vec![labelled("t1", &[])]);
+    assert!(terminals.label_requests().is_empty());
+    terminals.list_for_test(&scope(), vec![labelled("t1", NEW)]);
+    assert_eq!(terminals.label_requests().len(), 1);
+    // The window ticks again before the core lists the labels gone.
+    assert!(terminals.label_requests().is_empty());
+    terminals.list_for_test(&scope(), vec![labelled("t1", NEW)]);
+    assert!(terminals.label_requests().is_empty());
+}
+
+#[test]
+fn a_request_left_on_an_unshown_terminal_is_not_served_once_shown() {
+    let mut terminals = terminals();
+    terminals.list_for_test(&scope(), vec![labelled("t9", &[])]);
+    assert!(terminals.label_requests().is_empty());
+    // An agent in a workspace this window has not opened asks for a page.
+    terminals.list_for_test(&scope(), vec![labelled("t9", NEW)]);
+    assert!(terminals.label_requests().is_empty());
+    // Opening that workspace later shows the terminal.
+    terminals.tabs.insert(
+        TabId::test(9),
+        TabPanes::new(Host::Remote(scope()), Panes::single(id("t9")), false),
+    );
+    assert!(terminals.label_requests().is_empty());
+    // A request made while it is shown is served.
+    let mut labels = NEW.to_vec();
+    labels.extend([
+        ("herdr-gpui-3-3", "open"),
+        ("herdr-gpui-3-3_0", "https://x.example"),
+    ]);
+    terminals.list_for_test(&scope(), vec![labelled("t9", &labels)]);
+    let found = terminals.label_requests();
+    assert_eq!(found.len(), 1);
+    let mut names: Vec<&str> = found[0]
+        .tokens
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, ["herdr-gpui-3-3", "herdr-gpui-3-3_0"]);
+}
