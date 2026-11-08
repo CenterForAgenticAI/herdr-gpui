@@ -12,6 +12,9 @@ use std::sync::{Arc, Weak, atomic::Ordering};
 pub(crate) struct Hold {
     address: String,
     id: u64,
+    /// The screen it is held on. A stream that closes gives the pane a new
+    /// screen, which holds nothing until the phone holds it again.
+    screen: Weak<std::sync::Mutex<super::screen::Screen>>,
     source: Weak<Source>,
 }
 
@@ -26,6 +29,7 @@ impl Source {
         Ok(Hold {
             address: terminal.address,
             id,
+            screen: Arc::downgrade(&screen),
             source: Arc::downgrade(self),
         })
     }
@@ -38,15 +42,22 @@ impl Hold {
         lock(&screen).hold(&core, self.id, size)
     }
 
+    /// Whether the pane's screen is still the one it was held on. Only the
+    /// state lock is taken, never the screen's, which a read may hold.
+    pub(in crate::hub) fn is_held(&self) -> bool {
+        self.screen().is_some()
+    }
+
     /// The screen and its connection, while the hold still has them. A
-    /// screen dropped meanwhile took its driving attach with it.
+    /// screen dropped or replaced meanwhile took its driving attach with it.
     fn screen(&self) -> Option<(Arc<sheprd_core_client::Core>, super::SharedScreen)> {
         let source = self.source.upgrade()?;
         let state = lock(&source.state);
-        Some((
-            state.core.clone()?,
-            state.screens.get(&self.address)?.clone(),
-        ))
+        let screen = state
+            .screens
+            .get(&self.address)
+            .filter(|screen| Weak::ptr_eq(&Arc::downgrade(screen), &self.screen))?;
+        Some((state.core.clone()?, screen.clone()))
     }
 }
 

@@ -22,7 +22,8 @@ impl TermHold {
     /// Whether it still holds the terminal, so a resize can reuse it.
     pub(crate) fn is_attached(&self) -> bool {
         match self {
-            Self::Core(_) => true,
+            // A recovered stream's new screen does not hold it yet.
+            Self::Core(hold) => hold.is_held(),
             Self::Herdr(attach) => attach.is_attached(),
         }
     }

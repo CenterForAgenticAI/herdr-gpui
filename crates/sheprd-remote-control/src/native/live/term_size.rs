@@ -35,7 +35,14 @@ impl Sizing {
         pane: &str,
         wanted: Option<TermSize>,
     ) -> bool {
-        if wanted == self.size {
+        // A hold lost meanwhile, as when a Herdr 2 stream recovers on a new
+        // screen, is made again at the same size.
+        let lost = self
+            .held
+            .as_ref()
+            .and_then(|held| held.attach.as_ref())
+            .is_some_and(|attach| !attach.is_attached());
+        if wanted == self.size && !lost {
             return false;
         }
         self.size = wanted;

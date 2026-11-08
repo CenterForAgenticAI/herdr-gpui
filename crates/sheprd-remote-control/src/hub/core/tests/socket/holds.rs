@@ -136,3 +136,26 @@ fn a_driver_that_takes_the_size_back_is_followed() {
     drop(source);
     fake.server.join().unwrap();
 }
+
+#[test]
+fn a_hold_on_a_screen_that_was_replaced_counts_as_lost_and_lets_the_new_one_be() {
+    let (source, fake) = fake();
+    source.poll().unwrap();
+    let hold = source.hold(&id("t1"), 46, 30).unwrap();
+    next(&fake);
+    next(&fake);
+    assert!(hold.is_held());
+    // A closed stream gives the pane a new screen, which holds nothing: the
+    // phone's view holds it again (`Sizing::apply`).
+    let old = lock(&source.state).screens.remove("t1").unwrap();
+    let (core, terminal) = source.terminal(&id("t1")).unwrap();
+    let replacement = source.screen(&core, &terminal).unwrap();
+    assert_eq!(next(&fake)["observe"], true, "the new screen only watches");
+    assert!(!hold.is_held());
+    // Letting the old hold go must not release the new screen.
+    drop(hold);
+    assert!(fake.attaches.try_recv().is_err(), "nothing re-attached");
+    drop((old, replacement, core));
+    drop(source);
+    fake.server.join().unwrap();
+}
