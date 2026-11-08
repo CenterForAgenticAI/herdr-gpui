@@ -3,6 +3,7 @@
 //! their mappings beside this file.
 
 mod clipboard;
+mod core_bridge;
 mod sessions;
 mod ssh;
 mod terminal_attach;
@@ -65,6 +66,7 @@ impl Localize for Error {
             }
             Self::CommandBoot => fl!("error-client-command-boot"),
             Self::Convert(error) => error.localize(),
+            Self::CoreBridge(error) => error.localize(),
             Self::Disconnected => fl!("error-client-disconnected"),
             Self::EmptySurface => fl!("error-client-empty-surface"),
             Self::EncodedSurfaceBeforeBaseline => {
