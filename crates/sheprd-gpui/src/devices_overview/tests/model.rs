@@ -98,7 +98,10 @@ fn only_a_reachable_device_is_counted() {
     assert_eq!(tally(&endpoint(true), &live), None, "not connected");
     live.status = ConnectionStatus::Connected;
     let counted = tally(&endpoint(true), &live).unwrap();
-    assert_eq!(counted.total(), live.snapshot.as_ref().unwrap().agents.len());
+    assert_eq!(
+        counted.total(),
+        live.snapshot.as_ref().unwrap().agents.len()
+    );
     assert_eq!(tally(&endpoint(false), &live), None, "disabled");
     live.snapshot = None;
     assert_eq!(tally(&endpoint(true), &live), None, "no snapshot yet");
@@ -136,8 +139,17 @@ fn herdr_2_agents_count_on_a_computer_without_herdr_1() {
     };
     let panes = Panes::single(terminal);
     let core = Session::core(
-        [CoreWorkspace { cwd: "", id: "herdr-2", label: "Herdr 2" }],
-        [CoreTab { id: 1, panes: &panes, title: "", workspace_id: "herdr-2" }],
+        [CoreWorkspace {
+            cwd: "",
+            id: "herdr-2",
+            label: "Herdr 2",
+        }],
+        [CoreTab {
+            id: 1,
+            panes: &panes,
+            title: "",
+            workspace_id: "herdr-2",
+        }],
         None,
         |_| Some(&info),
     );
@@ -145,7 +157,10 @@ fn herdr_2_agents_count_on_a_computer_without_herdr_1() {
         core: Some(std::sync::Arc::new(core)),
         herdr_1: None,
     };
-    assert_eq!(online_tally(&endpoint, &live, &sessions).unwrap().blocked, 1);
+    assert_eq!(
+        online_tally(&endpoint, &live, &sessions).unwrap().blocked,
+        1
+    );
     let device = Device::new(0, &endpoint, &live, &sessions);
     assert_eq!(device.link, Link::Online);
     assert_eq!(device.agents[0].workspace, "Herdr 2");
