@@ -416,11 +416,16 @@ CARGO_TARGET_DIR="$cache/target" cargo build --release --locked -p sheprd-remote
 dir="$HOME/.local/share/{PROGRAM}/bin/$version"
 mkdir -p "$dir" "$HOME/.local/bin"
 # The phone's chats run the sheprd-acp beside it; without one they need the
-# user's own, so a failed build of it fails nothing else.
-if CARGO_TARGET_DIR="$cache/target" cargo build --release --locked -p sheprd-acp >&2; then
-  cp "$cache/target/release/sheprd-acp" "$dir/.{CHAT_PROGRAM}.part"
-  chmod 755 "$dir/.{CHAT_PROGRAM}.part"
-  mv -f "$dir/.{CHAT_PROGRAM}.part" "$dir/{CHAT_PROGRAM}"
+# user's own, so a failed build or copy of it fails nothing else. Each job
+# copies through its own file: two pairings may run here at once.
+chat_part="$dir/.{CHAT_PROGRAM}.part.$$"
+if CARGO_TARGET_DIR="$cache/target" cargo build --release --locked -p sheprd-acp >&2 \
+  && cp "$cache/target/release/sheprd-acp" "$chat_part" \
+  && chmod 755 "$chat_part" \
+  && mv -f "$chat_part" "$dir/{CHAT_PROGRAM}"; then
+  :
+else
+  rm -f "$chat_part"
 fi
 cp "$cache/target/release/sheprd-remote-control" "$dir/.{PROGRAM}.part"
 chmod 755 "$dir/.{PROGRAM}.part"
