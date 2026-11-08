@@ -6,6 +6,9 @@
 //! its outcome as a flash, because stopping halfway would strand work.
 
 use super::text;
+use unclaimed::Unclaimed;
+
+mod unclaimed;
 use crate::teleport::{
     error::{Error, Step},
     job::{
@@ -175,18 +178,7 @@ impl Teleport {
         if !finished && !self.retired {
             return Vec::new();
         }
-        std::mem::take(&mut self.closing)
-            .into_iter()
-            .filter(|(tab, moved)| {
-                now(*tab).is_some_and(|panes| {
-                    panes
-                        .terminals()
-                        .into_iter()
-                        .all(|terminal| moved.contains(terminal))
-                })
-            })
-            .map(|(tab, _)| tab)
-            .collect()
+        unclaimed::moved_tabs(std::mem::take(&mut self.closing), now)
     }
 
     #[cfg(test)]
@@ -262,13 +254,16 @@ impl Teleport {
         self.stage = Stage::Reviewing(place);
     }
 
-    fn teleport(&mut self) {
+    /// Starts the move. Should its window close first, `unclaimed` takes
+    /// what the app still has to do once it finishes.
+    fn teleport(&mut self, unclaimed: Unclaimed) {
         let Stage::Ready(candidate, review) = &self.stage else {
             return;
         };
         let (candidate, review) = (candidate.clone(), review.clone());
         let source = self.source.clone();
         let target = candidate.clone();
+        let closing = self.closing.clone();
         self.restart(move |sender, cancelled| {
             let result = job::run(
                 &source,
@@ -279,7 +274,7 @@ impl Teleport {
                 },
                 cancelled,
             );
-            let _ = sender.send(Event::Moved(result));
+            unclaimed::deliver(sender, result, closing, &unclaimed);
         });
         self.stage = Stage::Moving(candidate, None);
     }
@@ -329,6 +324,7 @@ impl Teleport {
 
 impl SheprdWindow {
     pub(crate) fn poll_teleport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.claim_teleports(window, cx);
         if self.teleport_marks.poll() {
             cx.notify();
         }
@@ -407,44 +403,6 @@ impl SheprdWindow {
         self.open_teleported_core_tabs(&outcome, cx);
         self.teleport_follow = Some(Follow::new(outcome.endpoint_id, outcome.workspace_id));
         self.follow_teleport(cx);
-    }
-
-    /// Opens the tabs a move rebuilt in the destination's Herdr 2 in its
-    /// new workspace. Their terminals already run there; the window joins
-    /// them as it shows the workspace.
-    fn open_teleported_core_tabs(&mut self, outcome: &Outcome, cx: &mut Context<Self>) {
-        if outcome.core_tabs.is_empty() {
-            return;
-        }
-        let scope = self
-            .endpoints
-            .iter()
-            .find(|endpoint| endpoint.id == outcome.endpoint_id)
-            .map_or_else(
-                || Scope::endpoint(&outcome.endpoint_id),
-                crate::browser::scope,
-            );
-        // Checked before the move, so only tabs opened meanwhile can leave
-        // one out; the rest still open.
-        let missed = Store::update(cx, |store| {
-            outcome
-                .core_tabs
-                .iter()
-                .filter(|panes| {
-                    let location = Location::CoreTerminal {
-                        panes: (*panes).clone(),
-                        observe: false,
-                    };
-                    store
-                        .open(scope.clone(), &outcome.workspace_id, Some(location), None)
-                        .is_none()
-                })
-                .count()
-        });
-        if missed > 0 {
-            self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
-        }
-        cx.notify();
     }
 
     /// Keep steering to the teleported workspace until it is focused: the
@@ -535,6 +493,7 @@ impl SheprdWindow {
 
     fn submit_teleport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let room = cx.try_global::<Store>().map_or(usize::MAX, Store::room);
+        let unclaimed = cx.default_global::<Unclaimed>().clone();
         let Some(teleport) = &mut self.teleport else {
             return;
         };
@@ -554,7 +513,7 @@ impl SheprdWindow {
                     self.show_flash(Flash::warning(flash), cx);
                     return;
                 }
-                teleport.teleport();
+                teleport.teleport(unclaimed);
             }
             Stage::Failed(_) => {
                 self.teleport = None;
