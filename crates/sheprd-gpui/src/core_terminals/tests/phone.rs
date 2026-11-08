@@ -3,7 +3,7 @@
 use crate::{
     browser::TabId,
     core_terminals::{
-        CoreTerminals, Purpose, TabPanes,
+        CoreTerminals, Host, Purpose, TabPanes,
         panes::{Axis, Panes},
         phone::Change,
     },
@@ -26,10 +26,11 @@ fn terminals() -> CoreTerminals {
     panes.split(&id("t1"), Axis::Row, id("t2")).unwrap();
     terminals
         .tabs
-        .insert(TabId::test(1), TabPanes::new(panes, false));
-    terminals
-        .tabs
-        .insert(TabId::test(2), TabPanes::new(Panes::single(id("t3")), true));
+        .insert(TabId::test(1), TabPanes::new(Host::Local, panes, false));
+    terminals.tabs.insert(
+        TabId::test(2),
+        TabPanes::new(Host::Local, Panes::single(id("t3")), true),
+    );
     terminals
 }
 
@@ -100,6 +101,7 @@ fn a_split_is_answered_once_its_pane_is_in_the_tab() {
             scope: crate::browser::Scope::endpoint("mac"),
             workspace: "w".into(),
         },
+        Host::Local,
         Spawn::default(),
     ));
     assert!(terminals.settled_phone_split(now).is_none());
@@ -137,6 +139,7 @@ fn a_split_that_never_lands_is_refused() {
             scope: crate::browser::Scope::endpoint("mac"),
             workspace: "w".into(),
         },
+        Host::Local,
         Spawn::default(),
     ));
     assert!(terminals.settled_phone_split(now).is_none());
@@ -170,4 +173,15 @@ fn a_tab_closes_even_after_its_panes_ended() {
         terminals.phone_change(&ask(1, "t404", Op::Close)),
         Some(Change::Close(tab, _)) if tab == TabId::test(1)
     ));
+}
+
+#[test]
+fn a_tab_on_another_host_is_not_the_phones() {
+    let mut terminals = terminals();
+    let remote = Host::Remote(crate::browser::Scope::endpoint("box"));
+    terminals.tabs.insert(
+        TabId::test(3),
+        TabPanes::new(remote, Panes::single(id("t1")), false),
+    );
+    assert!(terminals.phone_change(&ask(3, "t1", Op::Close)).is_none());
 }

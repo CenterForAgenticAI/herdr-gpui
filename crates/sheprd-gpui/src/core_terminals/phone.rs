@@ -4,7 +4,7 @@
 //! holding the tab makes the change as its own commands do. A split is
 //! answered once its shell is in the tab, or failed to be.
 
-use super::{CoreTerminals, Purpose, TabId, panes::Axis};
+use super::{CoreTerminals, Host, Purpose, TabId, panes::Axis};
 use crate::{SheprdWindow, remote::supervisor::Supervisor};
 use gpui::{App, Context, Window};
 use sheprd_backend::{Spawn, TerminalId};
@@ -45,7 +45,13 @@ impl CoreTerminals {
     /// What `ask` comes to when this window holds its tab; `None` when it
     /// does not, so another window may. A zoom is made here.
     pub(super) fn phone_change(&mut self, ask: &Ask) -> Option<Change> {
-        let tab = *self.tabs.keys().find(|tab| tab.number() == ask.tab)?;
+        // The phone's daemon reads this computer's core alone: a tab on
+        // another host is never the one it names.
+        let tab = *self
+            .tabs
+            .iter()
+            .find(|(tab, shown)| tab.number() == ask.tab && shown.host == Host::Local)?
+            .0;
         // The tab goes whole: its panes may have left already, their
         // terminals ended first. Any still in it end with it.
         if ask.op == Op::Close {
@@ -137,7 +143,7 @@ impl SheprdWindow {
             Change::Answered(answer) => Some(answer),
             Change::Close(tab, left) => {
                 for terminal in left {
-                    self.end_core_terminal(terminal);
+                    self.end_core_terminal(&Host::Local, terminal);
                 }
                 self.close_browser_tab(tab, window, cx);
                 Some(Answer::Done)
