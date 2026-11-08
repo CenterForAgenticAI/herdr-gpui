@@ -8,12 +8,12 @@ mod poller;
 mod projection;
 mod screen;
 mod spaces;
-pub(super) mod worktree;
 
 use super::Error as HubError;
 use super::{ApiMethod, Layout};
 pub use error::Error;
 use serde_json::Value;
+pub(super) use sheprd_client::herdr::worktree;
 use sheprd_core_client::{Core, Subscription, event::Notice, wire::Terminal};
 use std::{
     collections::HashMap,

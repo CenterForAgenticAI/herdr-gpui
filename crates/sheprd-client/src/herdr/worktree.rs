@@ -1,19 +1,20 @@
-//! Worktrees for new work on a core. The core keeps no workspaces or
-//! worktrees, so the daemon makes the checkout itself where Herdr would,
-//! and the chat simply starts in it.
+//! Worktrees for work on a core. herdr-core keeps no workspaces or
+//! worktrees, so whoever starts work there makes the checkout itself, in the
+//! folder Herdr 1 would have used, and starts its terminal in it: the phone
+//! daemon, automations, and dispatch.
 
 mod error;
 
 pub use error::Error;
 
-use sheprd_client::{local_path::home_dir, new_command};
+use crate::{local_path::home_dir, new_command};
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     process::Stdio,
 };
 
-/// The most of Git's complaint that is kept for the phone and the log.
+/// The most of Git's complaint that is kept for messages and logs.
 const MAX_COMPLAINT_CHARS: usize = 300;
 /// The folder under home that Herdr's default keeps checkouts in.
 const ROOT: &str = ".herdr/worktrees";
@@ -21,13 +22,13 @@ const ROOT: &str = ".herdr/worktrees";
 const FALLBACK_SLUG: &str = "worktree";
 
 /// Where new checkouts go, when this user has a home.
-pub(in crate::hub) fn root() -> Option<PathBuf> {
+pub fn root() -> Option<PathBuf> {
     home_dir().map(|home| home.join(ROOT))
 }
 
-/// Adds a new `branch` from what `repository` has checked out, under
-/// `root`, and answers the checkout's folder.
-pub(in crate::hub) fn add(repository: &Path, branch: &str, root: &Path) -> Result<PathBuf, Error> {
+/// Adds a new `branch` from `base` (a commit, branch, or `HEAD`) of
+/// `repository`, under `root`, and answers the checkout's folder.
+pub fn add(repository: &Path, branch: &str, base: &str, root: &Path) -> Result<PathBuf, Error> {
     let common = git(
         repository,
         [
@@ -46,20 +47,18 @@ pub(in crate::hub) fn add(repository: &Path, branch: &str, root: &Path) -> Resul
             OsStr::new("-b"),
             OsStr::new(branch),
             checkout.as_os_str(),
-            OsStr::new("HEAD"),
+            // A base that looks like an option is a ref, never a flag.
+            OsStr::new("--end-of-options"),
+            OsStr::new(base),
         ],
     )?;
     Ok(checkout)
 }
 
-/// Undoes [`add`] for a checkout no chat started in, so asking again finds
+/// Undoes [`add`] for a checkout nothing started in, so asking again finds
 /// the branch free. Only for what `add` just made: the checkout and branch
 /// are removed whatever they hold.
-pub(in crate::hub) fn remove(
-    repository: &Path,
-    checkout: &Path,
-    branch: &str,
-) -> Result<(), Error> {
+pub fn remove(repository: &Path, checkout: &Path, branch: &str) -> Result<(), Error> {
     git(
         repository,
         [
@@ -119,4 +118,4 @@ fn git<'a>(repository: &Path, args: impl IntoIterator<Item = &'a OsStr>) -> Resu
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-pub(in crate::hub) mod tests;
+mod tests;

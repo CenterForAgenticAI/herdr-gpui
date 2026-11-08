@@ -6,6 +6,7 @@ mod clipboard;
 mod sessions;
 mod ssh;
 mod terminal_attach;
+mod worktree;
 mod wsl;
 
 /// A missing home or config root, in the root error's words.
@@ -195,6 +196,7 @@ impl Localize for Error {
                 code = code.as_str(),
                 message = message.as_str()
             ),
+            Self::Worktree(error) => error.localize(),
             Self::Wsl(error) => error.localize(),
             // keep-sorted end
         }

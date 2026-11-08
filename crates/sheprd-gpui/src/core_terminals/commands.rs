@@ -135,4 +135,50 @@ impl SheprdWindow {
         self.sync_core_views(cx);
         self.show_browser_tab(id, window, cx);
     }
+
+    /// Shows `terminal`, which something outside the window started, such
+    /// as an automation's agent: the tab of the focused workspace that
+    /// drives it, else a new one. A terminal another workspace's tab drives
+    /// opens watch-only here, so two tabs never type into it.
+    pub(crate) fn open_core_terminal(
+        &mut self,
+        terminal: TerminalId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((scope, workspace)) = self.browser_key() else {
+            self.show_flash(Flash::warning(fl!("core-terminals-open-workspace")), cx);
+            return;
+        };
+        let driving = cx.try_global::<Store>().map(|store| {
+            store
+                .tabs()
+                .filter(|tab| tab.scope == scope)
+                .filter_map(|tab| match &tab.location {
+                    Some(Location::CoreTerminal {
+                        panes,
+                        observe: false,
+                    }) if panes.contains(&terminal) => Some((tab.id, tab.workspace_id.clone())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let driving = driving.unwrap_or_default();
+        if let Some((tab, _)) = driving.iter().find(|(_, held)| *held == workspace) {
+            self.show_browser_tab(*tab, window, cx);
+            return;
+        }
+        let location = Location::CoreTerminal {
+            panes: Panes::single(terminal),
+            observe: !driving.is_empty(),
+        };
+        let Some(id) = Store::update(cx, |store| {
+            store.open(scope, &workspace, Some(location), None)
+        }) else {
+            self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
+            return;
+        };
+        self.sync_core_views(cx);
+        self.show_browser_tab(id, window, cx);
+    }
 }

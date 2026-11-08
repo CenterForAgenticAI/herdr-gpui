@@ -151,6 +151,8 @@ pub enum Error {
     #[error(transparent)]
     TerminalAttach(#[from] crate::terminal_attach::Error),
     #[error(transparent)]
+    Worktree(#[from] crate::herdr::worktree::Error),
+    #[error(transparent)]
     Wsl(#[from] crate::wsl::Error),
     /// Every Herdr installed on the SSH host or WSL distribution was skipped
     /// as unable to serve this client. Fields describe the first one;

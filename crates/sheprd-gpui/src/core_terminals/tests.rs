@@ -2,6 +2,7 @@ mod accessibility;
 mod chats;
 mod focus;
 mod keys;
+mod open_terminal;
 mod paste;
 mod saved_tabs;
 mod screen;
