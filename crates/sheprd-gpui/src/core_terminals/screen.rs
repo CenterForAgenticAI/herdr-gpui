@@ -25,6 +25,11 @@ pub(crate) struct Screen {
 }
 
 impl Screen {
+    /// The frame's columns and rows, once one is shown.
+    pub(crate) fn grid(&self) -> Option<(u16, u16)> {
+        self.frame.as_ref().map(|frame| (frame.width, frame.height))
+    }
+
     pub(crate) fn apply(&mut self, update: SurfaceUpdate) {
         match update {
             SurfaceUpdate::Bell => self.bells = self.bells.saturating_add(1),

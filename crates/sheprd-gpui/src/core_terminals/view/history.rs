@@ -23,6 +23,9 @@ pub(super) struct Reading {
     /// The text must be that of `revision`, as a search match's is: output
     /// may have rewritten it in place, even with no row moved.
     exact: bool,
+    /// The screen's columns and rows when asked; a resize since rewrapped
+    /// the rows the read named.
+    grid: Option<(u16, u16)>,
 }
 
 impl CoreTerminalView {
@@ -42,17 +45,19 @@ impl CoreTerminalView {
             }),
             revision,
             exact,
+            grid: self.screen.grid(),
         }
     }
 
     /// Whether the rows `reading` named may now hold other text: any output
-    /// since an exact read's revision, or output into a full history, which
-    /// dropped its oldest lines, since it was asked. The worker shows each
-    /// output's screen before it answers anything after it, and the screen
-    /// is taken before the answers, so the revision here is never older
-    /// than the one the read saw.
+    /// since an exact read's revision, or, since it was asked, output into
+    /// a full history, which dropped its oldest lines, or a resize, which
+    /// rewrapped them. The worker shows each output's and resize's screen
+    /// before it answers anything after it, and the screen is taken before
+    /// the answers, so the screen here is never older than the read saw.
     fn moved(&self, reading: Reading) -> bool {
-        (reading.exact || self.screen.history.full) && self.screen.revision != reading.revision
+        self.screen.revision != reading.revision
+            && (reading.exact || self.screen.history.full || self.screen.grid() != reading.grid)
     }
 
     /// Whether a copy waits on its text.

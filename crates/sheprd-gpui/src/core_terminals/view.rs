@@ -225,9 +225,12 @@ impl CoreTerminalView {
         if let Some(screen) = screen {
             let before = std::mem::replace(&mut self.screen, screen);
             self.slide_from(&before);
-            // Output into a full history drops its oldest lines, so the
-            // rows a selection holds now hold other text.
-            if self.screen.history.full && self.screen.revision != before.revision {
+            // Output into a full history drops its oldest lines, and a
+            // resize rewraps them, so the rows a selection holds now hold
+            // other text.
+            if self.screen.revision != before.revision
+                && (self.screen.history.full || self.screen.grid() != before.grid())
+            {
                 self.selection = None;
             }
             cx.notify();

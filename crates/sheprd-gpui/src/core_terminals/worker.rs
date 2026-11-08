@@ -148,7 +148,12 @@ fn run<B: Backend>(
         Err(error) => return fail(&error),
     };
     while !mailbox.stop.load(Ordering::Acquire) {
+        let mut wait = POLL;
         for command in queue.try_iter() {
+            // A resize rewraps the text: its screen is shown before any
+            // later request is answered, as an output's is, so an answer
+            // never names rows of a text the view has not seen.
+            let resized = matches!(command, Command::Resize(_));
             let applied = match command {
                 Command::Focus(focused) => terminal.focus(focused),
                 Command::History { id, request } => {
@@ -161,8 +166,12 @@ fn run<B: Backend>(
             if let Err(error) = applied {
                 return fail(&error);
             }
+            if resized {
+                wait = Duration::ZERO;
+                break;
+            }
         }
-        match terminal.next(POLL) {
+        match terminal.next(wait) {
             Ok(updates) if updates.is_empty() => {}
             Ok(updates) => {
                 let ended = updates
