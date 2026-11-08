@@ -107,6 +107,19 @@ class WebsiteTests(unittest.TestCase):
         self.assertIn('id="stars-n"', nav)
         self.assertIn("stargazers_count", (WEBSITE / "assets/site.js").read_text())
 
+    def test_masthead_links_to_discord_with_its_icon(self):
+        for page in ("index.html", "testflight/index.html"):
+            with self.subTest(page=page):
+                html = (WEBSITE / page).read_text()
+                nav = re.search(r"<nav .*?</nav>", html, re.S).group(0)
+                link = re.search(
+                    r'<a class="repo" href="https://discord\.gg/GE4JRp8kaX" aria-label="Discord">.*?</a>',
+                    nav,
+                    re.S,
+                )
+                self.assertIsNotNone(link)
+                self.assertIn('<svg class="mark"', link.group(0))
+
     def test_ios_app_links_to_the_public_testflight(self):
         html = (WEBSITE / "index.html").read_text()
         self.assertGreaterEqual(html.count('href="/testflight/"'), 3)
