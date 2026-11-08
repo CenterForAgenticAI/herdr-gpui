@@ -29,6 +29,10 @@ pub struct Activity {
     pub started_ms: u64,
     #[serde(default)]
     pub state: ActivityState,
+    /// The agent can end it on request, through `Command::StopActivity`.
+    /// Older programs and agents that cannot never set it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stoppable: bool,
 }
 
 impl Activity {
@@ -52,6 +56,9 @@ pub enum ActivityKind {
     Subagent,
     /// A command left running in the background.
     Shell,
+    /// Something watched in the background, whose events reach the agent as
+    /// they happen, such as Claude Code's `Monitor`.
+    Monitor,
     /// A kind from a newer program.
     #[default]
     #[serde(other)]
@@ -75,6 +82,7 @@ pub enum ActivityState {
 /// How many activities of each kind still run.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Running {
+    pub monitors: usize,
     pub other: usize,
     pub shells: usize,
     pub subagents: usize,
@@ -82,6 +90,6 @@ pub struct Running {
 
 impl Running {
     pub fn total(self) -> usize {
-        self.other + self.shells + self.subagents
+        self.monitors + self.other + self.shells + self.subagents
     }
 }

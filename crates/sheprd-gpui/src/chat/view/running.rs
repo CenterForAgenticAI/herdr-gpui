@@ -44,6 +44,7 @@ impl Running {
             (running.subagents > 0)
                 .then(|| fl!("chat-running-subagents", count = running.subagents)),
             (running.shells > 0).then(|| fl!("chat-running-shells", count = running.shells)),
+            (running.monitors > 0).then(|| fl!("chat-running-monitors", count = running.monitors)),
             (running.other > 0).then(|| fl!("chat-running-tasks", count = running.other)),
         ]
         .into_iter()
@@ -95,6 +96,7 @@ fn icon(kind: ActivityKind) -> &'static str {
     match kind {
         ActivityKind::Subagent => "icons/fan-out.svg",
         ActivityKind::Shell => "icons/terminal.svg",
+        ActivityKind::Monitor => "icons/search.svg",
         ActivityKind::Other => "icons/pulse.svg",
     }
 }
@@ -116,6 +118,7 @@ impl SheprdWindow {
         chat: &ChatPane,
         working: Option<Div>,
         idle: bool,
+        rail_shows: bool,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let look = self.chat_look();
@@ -139,16 +142,19 @@ impl SheprdWindow {
             .min_w_0()
             .h(px(row_height(&look)))
             .text_size(px(small(&look)))
-            .cursor_pointer()
             .text_color(rgb(theme.subtext()))
-            .hover(|words| words.text_color(rgb(theme.foreground)))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                if let Some(chat) = this.chats.pane_mut(&pane) {
-                    let open = !chat.running.is_open();
-                    chat.running.set(open, motion::now(), false);
-                }
-                cx.notify();
-            }))
+            .when(!rail_shows, |words| {
+                words
+                    .cursor_pointer()
+                    .hover(|words| words.text_color(rgb(theme.foreground)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        if let Some(chat) = this.chats.pane_mut(&pane) {
+                            let open = !chat.running.is_open();
+                            chat.running.set(open, motion::now(), false);
+                        }
+                        cx.notify();
+                    }))
+            })
             .when(idle, |words| {
                 words.child(super::working::pulse(theme.primary(), &look))
             })
@@ -156,17 +162,19 @@ impl SheprdWindow {
                 words.child(div().text_color(rgb(theme.muted)).child("\u{b7}"))
             })
             .child(div().min_w_0().truncate().child(text))
-            .child(
-                svg()
-                    .flex_none()
-                    .size(px(10.))
-                    .path(if open {
-                        "icons/chevron-down.svg"
-                    } else {
-                        "icons/chevron-right.svg"
-                    })
-                    .text_color(rgb(theme.muted)),
-            );
+            .when(!rail_shows, |words| {
+                words.child(
+                    svg()
+                        .flex_none()
+                        .size(px(10.))
+                        .path(if open {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        })
+                        .text_color(rgb(theme.muted)),
+                )
+            });
         Some(match working.filter(|_| !idle) {
             Some(working) => div()
                 .flex()
@@ -180,8 +188,16 @@ impl SheprdWindow {
     }
 
     /// The table of what runs and what ended, opened from the row; it grows
-    /// in and shrinks out, from where it is when turned around.
-    pub(super) fn render_chat_running_table(&self, chat: &ChatPane) -> Option<AnyElement> {
+    /// in and shrinks out, from where it is when turned around. The rail
+    /// lists the same work, so the table only stands in for it.
+    pub(super) fn render_chat_running_table(
+        &self,
+        chat: &ChatPane,
+        rail_shows: bool,
+    ) -> Option<AnyElement> {
+        if rail_shows {
+            return None;
+        }
         let look = self.chat_look();
         let now = motion::now();
         let running = Running::of(chat.session.transcript(), crate::chat::now_ms());

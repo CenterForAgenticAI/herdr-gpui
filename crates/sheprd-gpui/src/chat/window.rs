@@ -193,13 +193,13 @@ impl SheprdWindow {
                 );
             });
         }
-        // A running turn's timer moves once a second.
+        // A running turn's timer moves once a second, and so does the time
+        // of a shell that outlives its turn.
         let second = super::now_ms() / 1000;
-        if self
-            .chats
-            .panes()
-            .any(|pane| pane.session.transcript().turn.is_some())
-            && self.chats.ticked != second
+        if self.chats.panes().any(|pane| {
+            let transcript = pane.session.transcript();
+            transcript.turn.is_some() || transcript.running().total() > 0
+        }) && self.chats.ticked != second
         {
             self.chats.ticked = second;
             changed = true;

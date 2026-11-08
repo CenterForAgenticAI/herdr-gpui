@@ -46,6 +46,7 @@ pub(super) fn title(name: &str, input: &Value) -> String {
     let field = |key: &str| input.get(key).and_then(Value::as_str);
     let titled = match name {
         "Bash" => field("command").map(out::command_title),
+        "Monitor" => field("description").map(str::to_owned),
         "Read" => field("file_path").map(|path| format!("Read {path}")),
         "Write" => field("file_path").map(|path| format!("Write {path}")),
         "Edit" | "MultiEdit" => field("file_path").map(|path| format!("Edit {path}")),
