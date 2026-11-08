@@ -9,6 +9,7 @@ mod background;
 mod names;
 mod progress;
 mod settings;
+mod stopping;
 mod tasks;
 mod turns;
 

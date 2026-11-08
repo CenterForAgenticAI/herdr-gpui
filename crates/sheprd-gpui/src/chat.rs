@@ -29,6 +29,7 @@ pub(crate) mod pasted;
 mod prepared;
 #[cfg(feature = "integration-test")]
 pub(crate) mod preview;
+mod rail_folds;
 mod reader;
 mod restore;
 mod rich;

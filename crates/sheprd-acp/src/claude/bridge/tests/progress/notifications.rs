@@ -101,7 +101,15 @@ fn a_task_that_cannot_show_progress_still_reports_its_activity() {
     start(&mut bridge, "tool-1", "Agent");
     let mut nested = task("task_started", "task-1");
     nested["spawn_depth"] = json!(2);
-    assert!(bridge.on_harness(&nested).is_empty());
+    // No progress row for a nested task; only the call it belongs to learns
+    // it can be stopped.
+    let nested_out = bridge.on_harness(&nested);
+    assert_eq!(nested_out.len(), 1);
+    assert_eq!(update(&nested_out[0])["toolCallId"], "tool-1");
+    assert_eq!(
+        update(&nested_out[0])["_meta"]["herdr"]["activity"]["stoppable"],
+        true
+    );
     let mut launched = tool_result("tool-1", "Async agent launched");
     launched["tool_use_result"] = json!({"isAsync": true, "agentId": "task-1"});
     bridge.on_harness(&launched);

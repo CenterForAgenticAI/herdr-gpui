@@ -148,8 +148,10 @@ pub(crate) struct ChatPane {
     pub(crate) prepared: Prepared,
     #[cfg(feature = "integration-test")]
     preview: bool,
-    /// Whether the plan and changed files show beside the entries.
+    /// Whether the rail shows beside the entries.
     pub(crate) rail: bool,
+    /// Which of the rail's sections show.
+    pub(crate) rail_folds: super::rail_folds::RailFolds,
     /// A read-only overlay owns the keyboard without installing an input handler.
     pub(crate) read_only_focus: Option<FocusHandle>,
     retry_at: Option<Instant>,
@@ -260,6 +262,7 @@ impl ChatPane {
             #[cfg(feature = "integration-test")]
             preview: false,
             rail: true,
+            rail_folds: Default::default(),
             read_only_focus: None,
             retry_at: None,
             running: Default::default(),
@@ -381,6 +384,8 @@ impl ChatPane {
         }
         if changed {
             self.sync_view();
+            let busy = self.session.transcript().running().total() > 0;
+            self.rail_folds.follow(busy, crate::motion::now());
         }
         changed
     }

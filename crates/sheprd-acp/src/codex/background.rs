@@ -34,6 +34,8 @@ pub(super) struct Background {
     commands: HashMap<String, String>,
     /// Commands that outlived their turn.
     shells: HashSet<String>,
+    /// The turn each sub-agent thread runs now, which stopping it takes.
+    turns: HashMap<String, String>,
 }
 
 impl Background {
@@ -149,6 +151,27 @@ impl Background {
         self.children.get(thread).map(String::as_str)
     }
 
+    /// An event of the sub-agent thread `thread` named its turn. The first
+    /// such event is when the sub-agent can be stopped. Codex offers no
+    /// request that stops a command inside a thread, so shells cannot be.
+    pub(super) fn child_turn(&mut self, thread: &str, turn: &str) -> Option<Elsewhere> {
+        let call = self.children.get(thread)?.clone();
+        let known = self.turns.insert(thread.to_owned(), turn.to_owned());
+        known
+            .is_none()
+            .then(|| (call, Report::stoppable(ActivityKind::Subagent)))
+    }
+
+    /// The thread and turn of the running sub-agent started by `call`.
+    pub(super) fn child_of(&self, call: &str) -> Option<(&str, &str)> {
+        let thread = self
+            .children
+            .iter()
+            .find(|(_, known)| known.as_str() == call)
+            .map(|(thread, _)| thread.as_str())?;
+        Some((thread, self.turns.get(thread)?))
+    }
+
     /// The sub-agent thread `thread` finished its turn.
     pub(super) fn child_turn_completed(
         &mut self,
@@ -188,6 +211,7 @@ impl Background {
     }
 
     fn end_child(&mut self, thread: &str, state: ActivityState) -> Option<Elsewhere> {
+        self.turns.remove(thread);
         let call = self.children.remove(thread)?;
         if !self.agents.remove(&call) {
             return None;

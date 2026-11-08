@@ -18,7 +18,7 @@ use crate::{
         Out, Translator, out,
         out::{failure, reply, to_value},
     },
-    project::Tag,
+    project::{STOP_METHOD, Tag},
     rpc::Inbound,
 };
 
@@ -32,6 +32,7 @@ enum Control {
     Interrupt,
     Mode { acp: wire::RequestId, mode: String },
     Model { acp: wire::RequestId, value: String },
+    StopTask,
 }
 
 /// A tool call of the running turn.
@@ -124,6 +125,9 @@ impl Translator for Bridge {
         match inbound {
             Inbound::Request { id, method, params } => self.request(id, &method, params),
             Inbound::Notification { method, .. } if method == "session/cancel" => self.cancel(),
+            Inbound::Notification { method, params } if method == STOP_METHOD => {
+                self.stop_activity(&params)
+            }
             Inbound::Response { id, result } => {
                 let wire::RequestId::Number(id) = id else {
                     return Vec::new();
@@ -234,6 +238,23 @@ impl Bridge {
         vec![self.control(json!({"subtype": "interrupt"}), Control::Interrupt)]
     }
 
+    /// Asks Claude Code to end a task; its notification says how it ended.
+    fn stop_activity(&mut self, params: &Value) -> Vec<Out> {
+        let task = params
+            .get("callId")
+            .and_then(Value::as_str)
+            .and_then(|call| self.background.task_of(call))
+            .map(str::to_owned);
+        task.map(|task| {
+            self.control(
+                json!({"subtype": "stop_task", "task_id": task}),
+                Control::StopTask,
+            )
+        })
+        .into_iter()
+        .collect()
+    }
+
     fn set_option(&mut self, id: wire::RequestId, params: Value) -> Vec<Out> {
         let request = serde_json::from_value::<wire::SetSessionConfigOptionRequest>(params);
         let (Ok(request), Handshake::Ready(settings)) = (request, &self.handshake) else {
@@ -306,6 +327,16 @@ impl Bridge {
                 outs
             }
             Control::Interrupt => Vec::new(),
+            Control::StopTask => result
+                .err()
+                .map(|message| {
+                    self.update(wire::SessionUpdate::Notice(wire::Notice::new(
+                        wire::NoticeSeverity::Warning,
+                        format!("Claude could not stop that task: {message}"),
+                    )))
+                })
+                .into_iter()
+                .collect(),
             Control::Mode { acp, mode } => {
                 if result.is_ok()
                     && let Handshake::Ready(settings) = &mut self.handshake
@@ -402,12 +433,11 @@ impl Bridge {
             }
             Some("status") => self.mode_seen(field("permissionMode")),
             Some("commands_changed") => self.commands(message.get("commands")),
-            Some("task_started") => {
-                if let Some(task) = field("task_id") {
-                    self.background.task_started(task, field("tool_use_id"));
-                }
-                Vec::new()
-            }
+            Some("task_started") => field("task_id")
+                .and_then(|task| self.background.task_started(task, field("tool_use_id")))
+                .map(|elsewhere| self.reported(elsewhere))
+                .into_iter()
+                .collect(),
             Some("task_notification") => field("task_id")
                 .zip(field("status"))
                 .and_then(|(task, status)| {

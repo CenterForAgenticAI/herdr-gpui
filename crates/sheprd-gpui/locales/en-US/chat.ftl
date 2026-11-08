@@ -191,8 +191,14 @@ chat-summary-show = Show
 chat-summary-hide = Hide
 
 # The side rail: the agent's plan and the files it changed.
-chat-rail-plan = PLAN
-chat-rail-changed = CHANGED
+chat-rail-plan = Plan
+chat-rail-changed = Changed
+chat-rail-subagents = Sub-agents
+chat-rail-shells = Shells
+chat-rail-monitors = Monitors
+chat-rail-running = { $count } running
+chat-rail-ended = { $count } ended
+chat-rail-stop = Stop { $what }
 chat-rail-files = { $count ->
     [one] { $count } file
    *[other] { $count } files
@@ -208,6 +214,10 @@ chat-running-subagents = { $count ->
 chat-running-shells = { $count ->
     [one] { $count } background shell
    *[other] { $count } background shells
+}
+chat-running-monitors = { $count ->
+    [one] { $count } monitor
+   *[other] { $count } monitors
 }
 chat-running-tasks = { $count ->
     [one] { $count } task

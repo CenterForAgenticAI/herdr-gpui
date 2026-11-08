@@ -40,7 +40,10 @@ sub-agent's description or the shell's command), when it started and ended,
 an optional detail such as a sub-agent's latest step, and its state
 (`running`, `finished`, `failed`, `killed`). They outlive turns, since a
 background shell keeps running after the turn that started it ends.
-`Change::Activity` adds one or replaces the one with the same call id; the
+An activity the agent can end says `stoppable`, and `Command::StopActivity`
+asks for that; the end arrives as any other change. An older program answers
+that command with a rejection. `Change::Activity` adds one or replaces the one
+with the same call id; the
 reducer refuses text over `MAX_ACTIVITY_TEXT` and keeps at most
 `MAX_ACTIVITIES`, dropping the oldest that has ended, and refusing a new one
 when all of them still run. A tool call a sub-agent made names that
