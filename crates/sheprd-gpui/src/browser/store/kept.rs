@@ -34,12 +34,14 @@ impl Store {
     }
 
     /// Keeps a new workspace at the end of `scope`'s, and answers its ID, or
-    /// `None` when the app already keeps the most it does.
+    /// `None` when the app already keeps the most it does. `custom` when the
+    /// user gave its name, rather than the app taking its folder's.
     pub(crate) fn keep_workspace(
         &mut self,
         scope: &Scope,
         label: &str,
         cwd: &str,
+        custom: bool,
     ) -> Option<String> {
         // Past every ID kept or handed out before, so a closed workspace's
         // ID is never given to another while a late answer may still name it.
@@ -52,7 +54,7 @@ impl Store {
             .unwrap_or(0)
             + 1;
         let id = format!("{PREFIX}{next}");
-        let kept = self.keep_as(scope, &id, label, cwd);
+        let kept = self.keep_as(scope, &id, label, cwd, custom);
         if kept {
             self.last_kept = next;
         }
@@ -62,13 +64,13 @@ impl Store {
     /// Keeps `id`, unless it is kept already, as the workspace a window with
     /// no Herdr 1 installed gathers its tabs in.
     pub(crate) fn keep_default(&mut self, scope: &Scope, id: &str, label: &str) -> bool {
-        self.kept_workspace(scope, id).is_none() && self.keep_as(scope, id, label, "")
+        self.kept_workspace(scope, id).is_none() && self.keep_as(scope, id, label, "", false)
     }
 
-    fn keep_as(&mut self, scope: &Scope, id: &str, label: &str, cwd: &str) -> bool {
+    fn keep_as(&mut self, scope: &Scope, id: &str, label: &str, cwd: &str, custom: bool) -> bool {
         let workspace = SavedWorkspace {
             cwd: cwd.to_owned(),
-            custom: false,
+            custom,
             id: id.to_owned(),
             label: clean_label(label),
             scope: scope.as_str().to_owned(),

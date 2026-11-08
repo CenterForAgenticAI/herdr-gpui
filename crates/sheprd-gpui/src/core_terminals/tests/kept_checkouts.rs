@@ -89,3 +89,52 @@ fn pull_requests_of_kept_checkouts_are_read_without_herdr_1(cx: &mut TestAppCont
         assert_eq!(view.pr_boot().as_deref(), Some(""), "no daemon to answer");
     });
 }
+
+#[gpui::test]
+fn a_name_given_at_creation_is_kept_as_chosen(cx: &mut TestAppContext) {
+    let (view, cx, _) = window(cx);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.new_kept_workspace(Some("tools"), Some("/src/app-tools".into()), cx);
+            view.new_kept_workspace(Some("app-web"), Some("/src/app-web".into()), cx);
+        })
+    });
+    view.read_with(cx, |view, _| {
+        let sessions = view.sessions(0);
+        let custom = |folder: &str| {
+            let id = view.kept_workspace_at(Path::new(folder)).unwrap();
+            sessions.workspace(&id).unwrap().custom_label
+        };
+        assert!(custom("/src/app-tools"), "the user's own name");
+        assert!(!custom("/src/app-web"), "only its folder's name");
+    });
+}
+
+#[gpui::test]
+fn mods_follow_the_tab_shown_in_a_kept_workspace(cx: &mut TestAppContext) {
+    let (view, cx, id) = window(cx);
+    // As each window tick does once the tab is open.
+    cx.update(|_, cx| view.update(cx, |view, cx| view.refresh_core_session(cx)));
+    view.read_with(cx, |view, cx| {
+        let scope = crate::browser::scope(&view.endpoints[0]);
+        let tab = cx
+            .global::<crate::browser::Store>()
+            .in_workspace(&scope, &id)
+            .next()
+            .unwrap()
+            .id
+            .number()
+            .to_string();
+        let state = view.mods_state();
+        assert_eq!(state.focus.unwrap().tab.as_deref(), Some(tab.as_str()));
+        let workspace = state.workspaces.iter().find(|w| w.id == id).unwrap();
+        assert!(workspace.focused);
+        let focused: Vec<_> = workspace
+            .tabs
+            .iter()
+            .filter(|t| t.focused)
+            .map(|t| t.id.as_str())
+            .collect();
+        assert_eq!(focused, [tab.as_str()]);
+    });
+}

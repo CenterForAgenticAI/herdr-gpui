@@ -9,6 +9,15 @@ use sheprd_mods::{Agent, AgentStatus, Focus, Host, State, Tab, Workspace};
 impl SheprdWindow {
     pub(crate) fn mods_state(&self) -> State {
         let mut state = State::default();
+        // A kept workspace's tabs are the app's: the one shown is the
+        // active group's.
+        let kept_tab = self
+            .kept_in_front()
+            .and_then(|_| self.group_pick(self.active_group()?))
+            .and_then(|pick| match pick {
+                crate::browser::Pick::Page(tab) => Some(tab.number().to_string()),
+                _ => None,
+            });
         for (index, endpoint) in self.endpoints.iter().enumerate() {
             if !endpoint.enabled {
                 continue;
@@ -37,18 +46,20 @@ impl SheprdWindow {
                     .and_then(|session| session.focused.clone())
             };
             for workspace in sessions.workspaces() {
+                let in_front = front.as_deref() == Some(workspace.id.as_str());
+                let shown = in_front.then_some(kept_tab.as_deref()).flatten();
                 state.workspaces.push(Workspace {
                     id: workspace.id.clone(),
                     host: endpoint.id.clone(),
                     name: workspace.label.clone(),
-                    focused: front.as_deref() == Some(workspace.id.as_str()),
+                    focused: in_front,
                     tabs: workspace
                         .tabs
                         .iter()
                         .map(|tab| Tab {
                             id: tab.id.clone(),
                             name: tab.label.clone(),
-                            focused: tab.focused,
+                            focused: tab.focused || shown == Some(tab.id.as_str()),
                         })
                         .collect(),
                 });
@@ -63,11 +74,13 @@ impl SheprdWindow {
             if selected {
                 let workspace = front.as_deref().and_then(|id| sessions.workspace(id));
                 // A kept workspace's tabs are the app's; Herdr 1 names its own.
-                let tab = live
-                    .snapshot
-                    .as_ref()
-                    .filter(|_| self.kept_in_front().is_none())
-                    .and_then(|snapshot| snapshot.focused_tab_id.clone());
+                let tab = match self.kept_in_front() {
+                    Some(_) => kept_tab.clone(),
+                    None => live
+                        .snapshot
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.focused_tab_id.clone()),
+                };
                 state.focus = Some(Focus {
                     host: endpoint.id.clone(),
                     workspace: front.clone(),
