@@ -176,7 +176,8 @@ app, once the repository's `testflight` environment holds these secrets:
 
 - **How it signs:** Xcode signs automatically with that key and makes the
   profiles it needs. The archive signs with the stored development
-  certificate, imported into a keychain of its own: a runner starts with
+  certificate, imported into a keychain of its own (`ios/tools/signing.sh`,
+  which puts the keychain search list back afterwards): a runner starts with
   none, and Xcode would otherwise create a certificate on every upload until
   the team hits Apple's limit ("Your account has reached the maximum number
   of certificates"). The upload refuses to run in CI without it. The export

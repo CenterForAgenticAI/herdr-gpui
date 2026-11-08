@@ -57,6 +57,7 @@ jobs:
           xcodegen -q
           python3 tools/test_branding.py
           python3 tools/test_testflight_notes.py
+          python3 tools/test_signing.py
           xcodebuild -project SheprdRemote.xcodeproj -scheme SheprdRemote \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO -quiet build
