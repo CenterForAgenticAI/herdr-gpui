@@ -254,26 +254,71 @@ impl Node {
         }
     }
 
-    /// Gives every pane along each split an equal part; true when a share
-    /// changed.
+    /// Gives every pane along each split an equal part; true when anything
+    /// changed. A run of splits along one axis is rebuilt as a balanced
+    /// tree, keeping its panes in order, so that each split's share stays
+    /// within the bounds even with every pane in one row.
     fn equalize(&mut self) -> bool {
-        let Self::Split {
-            axis,
-            share,
-            first,
-            second,
-        } = self
-        else {
+        let Self::Split { axis, .. } = *self else {
             return false;
         };
-        let (a, b) = (first.span(*axis), second.span(*axis));
-        let total = u32::from(a) + u32::from(b);
-        let even = Share::from(u16::try_from(u32::from(a) * 1000 / total.max(1)).unwrap_or(HALF));
-        let changed = *share != even;
-        *share = even;
-        let first = first.equalize();
-        let second = second.equalize();
-        changed || first || second
+        let mut run = Vec::new();
+        self.run(axis, &mut run);
+        let Some(balanced) = Self::balanced(axis, run) else {
+            return false;
+        };
+        let changed = *self != balanced;
+        *self = balanced;
+        changed
+    }
+
+    /// The parts side by side along `axis`, in order: splits along it are
+    /// opened up, anything else is one part.
+    fn run(&self, axis: Axis, out: &mut Vec<Self>) {
+        match self {
+            Self::Split {
+                axis: own,
+                first,
+                second,
+                ..
+            } if *own == axis => {
+                first.run(axis, out);
+                second.run(axis, out);
+            }
+            _ => out.push(self.clone()),
+        }
+    }
+
+    /// `parts` side by side along `axis`, each as wide as the panes across
+    /// it, cut where the two halves come closest to even.
+    fn balanced(axis: Axis, mut parts: Vec<Self>) -> Option<Self> {
+        if parts.len() < 2 {
+            let mut part = parts.pop()?;
+            part.equalize();
+            return Some(part);
+        }
+        let spans: Vec<u32> = parts
+            .iter()
+            .map(|part| u32::from(part.span(axis)))
+            .collect();
+        let total: u32 = spans.iter().sum();
+        let (mut cut, mut before, mut best) = (1, 0, u32::MAX);
+        let mut prefix = 0;
+        for (index, span) in spans.iter().enumerate().take(spans.len() - 1) {
+            prefix += span;
+            let gap = (2 * prefix).abs_diff(total);
+            if gap < best {
+                (cut, before, best) = (index + 1, prefix, gap);
+            }
+        }
+        let second = parts.split_off(cut);
+        let share = u16::try_from(before * 1000 / total.max(1)).unwrap_or(HALF);
+        Some(Self::Split {
+            axis,
+            share: Share::from(share),
+            first: Box::new(Self::balanced(axis, parts)?),
+            second: Box::new(Self::balanced(axis, second)?),
+        })
     }
 
     fn rects(&self, rect: Rect, out: &mut Vec<(TerminalId, Rect)>) {

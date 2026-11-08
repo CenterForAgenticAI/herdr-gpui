@@ -166,6 +166,34 @@ fn equalize_gives_panes_side_by_side_equal_parts() {
 }
 
 #[test]
+fn equalize_evens_out_a_full_row() {
+    // Sixteen panes in one row, each split off the last: a chain whose
+    // outer shares would fall below the smallest a split may take.
+    let mut panes = Panes::single(id("p0"));
+    for index in 1..16 {
+        let at = id(&format!("p{}", index - 1));
+        panes
+            .split(&at, Axis::Row, id(&format!("p{index}")))
+            .unwrap();
+    }
+    let order = panes.terminals().into_iter().cloned().collect::<Vec<_>>();
+    assert!(panes.equalize());
+    let rects = panes.rects();
+    for (pane, rect) in &rects {
+        assert!(
+            (rect.width - 1. / 16.).abs() < 0.01,
+            "{pane}: {}",
+            rect.width
+        );
+    }
+    assert_eq!(
+        panes.terminals().into_iter().cloned().collect::<Vec<_>>(),
+        order
+    );
+    assert!(!panes.equalize(), "already equal");
+}
+
+#[test]
 fn cycle_steps_through_panes_in_layout_order_and_wraps() {
     let panes = three();
     assert_eq!(panes.cycle(&id("t1"), true), Some(id("t2")));
