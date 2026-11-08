@@ -44,3 +44,16 @@ fn a_core_source_is_named_by_its_terminal() {
     };
     assert_eq!(source.name(), "t7");
 }
+
+#[test]
+fn a_terminal_on_another_machine_is_refused_before_asking_the_core() {
+    let endpoint = sheprd_core_client::Endpoint {
+        // Nothing answers here: the refusal must come first.
+        socket: "/nonexistent/hc.sock".into(),
+        session: "default".into(),
+    };
+    assert!(matches!(
+        core_process_info(&endpoint, "box/t7"),
+        Err(crate::Error::Processes(Error::RemoteTerminal))
+    ));
+}

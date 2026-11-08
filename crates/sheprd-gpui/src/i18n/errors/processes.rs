@@ -12,6 +12,7 @@ impl Localize for Error {
             Self::Executable => fl!("error-processes-executable"),
             Self::NoRoot => fl!("error-processes-no-root"),
             Self::Query(_) => fl!("error-processes-query"),
+            Self::RemoteTerminal => fl!("error-processes-remote-terminal"),
             Self::RootExited => fl!("error-processes-root-exited"),
             Self::Stopped => fl!("error-processes-stopped"),
             Self::TerminalGone => fl!("error-processes-terminal-gone"),
