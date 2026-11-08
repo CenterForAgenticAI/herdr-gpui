@@ -114,14 +114,16 @@ impl CoreTerminals {
     }
 
     /// `host`'s hub, which a test drives directly.
-    #[cfg(test)]
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
     pub(crate) fn hub_of_mut_for_test(&mut self, host: &Host) -> Option<&mut Hub> {
         self.hub_of_mut(host)
     }
 
     /// Records `info` as what `host`'s core reports, as a finished list
     /// would.
-    #[cfg(test)]
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
     pub(crate) fn record_for_test(&mut self, host: &Host, info: TerminalInfo) {
         if let Some(infos) = self.infos_of_mut(host) {
             infos.insert(info);
