@@ -64,6 +64,7 @@ impl Localize for Error {
                 )
             }
             Self::CommandBoot => fl!("error-client-command-boot"),
+            Self::Convert(error) => error.localize(),
             Self::Disconnected => fl!("error-client-disconnected"),
             Self::EmptySurface => fl!("error-client-empty-surface"),
             Self::EncodedSurfaceBeforeBaseline => {

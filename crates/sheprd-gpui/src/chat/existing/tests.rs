@@ -141,27 +141,6 @@ fn settled_answers_back_off_and_reported_activity_probes_again() {
     assert_eq!((state.due, state.interval), (None, REFRESH));
 }
 
-#[test]
-fn detects_actual_agent_programs_not_arguments_to_other_programs() {
-    let args = |values: &[&str]| {
-        values
-            .iter()
-            .map(|value| (*value).into())
-            .collect::<Vec<_>>()
-    };
-    assert!(is_agent(
-        Agent::Codex,
-        &args(&["/usr/local/bin/codex", "resume"])
-    ));
-    assert!(is_agent(
-        Agent::Claude,
-        &args(&["node", "/opt/node_modules/@anthropic-ai/claude-code/cli.js"])
-    ));
-    assert!(!is_agent(Agent::Codex, &args(&["echo", "codex"])));
-    assert!(!is_agent(Agent::Codex, &args(&["bash", "-c", "codex"])));
-    assert!(!is_agent(Agent::Codex, &args(&["claude"])));
-}
-
 fn process_info(rows: &[(u32, &[&str])]) -> teleport::ProcessInfo {
     serde_json::from_value(serde_json::json!({
         "shell_pid":1,"foreground_process_group_id":10,

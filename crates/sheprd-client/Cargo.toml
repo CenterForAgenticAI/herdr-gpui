@@ -30,6 +30,8 @@ test-support = []
 base64.workspace            = true
 crossbeam-channel.workspace = true
 sheprd-protocol.workspace    = true
+# The agents a chat runs, for moving a terminal agent into one.
+sheprd-chat-protocol.workspace = true
 serde.workspace             = true
 serde_json.workspace        = true
 tempfile.workspace          = true

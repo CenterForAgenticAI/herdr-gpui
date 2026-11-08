@@ -18,6 +18,7 @@ mod event;
 mod forward;
 mod frame;
 mod handle;
+pub mod herdr;
 mod host_theme;
 mod limits;
 mod local_network;
@@ -82,7 +83,9 @@ pub use options::ConnectOptions;
 pub use process::CREATE_NO_WINDOW;
 pub use process::new_command;
 pub use remote_host::RemoteHost;
-pub use script::{ScriptHost, ScriptLimits, run_script, run_script_command, shell_quote};
+pub use script::{
+    ScriptHost, ScriptLimits, quoted_line, run_script, run_script_command, shell_quote,
+};
 pub use sessions::{
     LocalSession, RemoteSession, SessionState, delete_local_session, delete_remote_session,
     list_local_sessions, list_remote_sessions, list_running_sessions_in,

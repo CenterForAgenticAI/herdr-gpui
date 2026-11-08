@@ -5,6 +5,7 @@ use crate::teleport::{self, Envelope, Host, ProcessInfoResult, SessionKind, Snap
 use sheprd_chat_protocol::Agent;
 use sheprd_client::{
     ConnectTarget, ScriptLimits,
+    herdr::processes::{agent_args, agent_processes, program},
     protocol::{ClientShellAgent, ClientShellSnapshot},
     shell_quote,
 };
@@ -31,7 +32,6 @@ mod codex;
 mod error;
 pub(crate) use error::Error;
 
-const MAX_MATCHING_PROCESSES: usize = 16;
 const LIMITS: ScriptLimits = ScriptLimits {
     output: 1024 * 1024,
     idle: Duration::from_secs(10),
@@ -516,52 +516,6 @@ struct Selected<'a> {
     pane: &'a teleport::snapshot::Pane,
     agent: Agent,
     session: &'a teleport::snapshot::AgentSession,
-}
-
-/// The foreground processes running `agent`, unless there are more than
-/// [`MAX_MATCHING_PROCESSES`] to verify.
-pub(super) fn agent_processes(
-    agent: Agent,
-    info: &teleport::ProcessInfo,
-) -> Option<Vec<&teleport::snapshot::Process>> {
-    let matching: Vec<_> = info
-        .foreground_processes
-        .iter()
-        .filter(|process| is_agent(agent, &process.argv))
-        .take(MAX_MATCHING_PROCESSES + 1)
-        .collect();
-    (matching.len() <= MAX_MATCHING_PROCESSES).then_some(matching)
-}
-
-/// The program an argument vector runs, without its directory.
-fn program(argv: &[String]) -> Option<&str> {
-    argv.first()?.rsplit('/').next()
-}
-
-fn is_agent(agent: Agent, argv: &[String]) -> bool {
-    agent_args(agent, argv).is_some()
-}
-
-/// Arguments of a native CLI or one of the launchers process selection knows.
-fn agent_args(agent: Agent, argv: &[String]) -> Option<&[String]> {
-    let program = program(argv)?;
-    if program == agent.name() {
-        return Some(&argv[1..]);
-    }
-    if !matches!(program, "node" | "nodejs" | "bun") {
-        return None;
-    }
-    let script = argv.get(1)?;
-    let matches = match agent {
-        Agent::Claude => {
-            script.ends_with("/@anthropic-ai/claude-code/cli.js") || script.ends_with("/claude")
-        }
-        Agent::Codex => {
-            script.ends_with("/@openai/codex/bin/codex.js") || script.ends_with("/codex")
-        }
-        _ => false,
-    };
-    matches.then_some(&argv[2..])
 }
 
 #[cfg(test)]

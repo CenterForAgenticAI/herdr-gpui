@@ -56,7 +56,7 @@ fn the_local_line_runs_this_apps_program_through_sh() {
     let resume = resumed(&["claude"], Some("/my work"), Agent::Claude);
     assert_eq!(
         resume
-            .line(Some(Path::new("/Applications/Herdr.app/sheprd-acp")))
+            .local_line(Path::new("/Applications/Herdr.app/sheprd-acp"))
             .unwrap(),
         format!(
             " sh -c 'exec \"$0\" \"$@\"' '/Applications/Herdr.app/sheprd-acp' \
@@ -66,27 +66,12 @@ fn the_local_line_runs_this_apps_program_through_sh() {
 }
 
 #[test]
-fn the_remote_line_finds_the_hosts_program() {
-    let line = resumed(&["claude"], Some("/my work"), Agent::Claude)
-        .line(None)
-        .unwrap();
-    assert!(line.starts_with(" sh -c 'for p in "));
-    assert!(line.contains(&format!(
-        "exec \"$p\" \"--resume\" \"{SESSION}\" \"--cwd\" \"/my work\" \"claude\""
-    )));
-}
-
-#[test]
 fn a_folder_no_line_can_carry_is_refused_before_anything_stops() {
     for cwd in ["/it's", "/line\nbreak"] {
         let resume = resumed(&["claude"], Some(cwd), Agent::Claude);
         assert!(matches!(
-            resume.line(Some(Path::new("/app/sheprd-acp"))),
+            resume.local_line(Path::new("/app/sheprd-acp")),
             Err(Error::Line)
         ));
-    }
-    for cwd in ["/$HOME", "/`id`", "/a\"b", "/a\\b", "/it's"] {
-        let resume = resumed(&["claude"], Some(cwd), Agent::Claude);
-        assert!(matches!(resume.line(None), Err(Error::Line)));
     }
 }

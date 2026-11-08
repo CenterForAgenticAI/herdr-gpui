@@ -49,6 +49,8 @@ pub enum Error {
     Disconnected,
     #[error(transparent)]
     Clipboard(#[from] crate::clipboard::Error),
+    #[error(transparent)]
+    Convert(#[from] crate::herdr::convert::Error),
     #[error("terminal input write timed out; reconnect required")]
     InputWriteTimeout,
     #[error("invalid client command: snapshot boot ID required")]
