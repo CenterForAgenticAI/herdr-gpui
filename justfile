@@ -107,6 +107,13 @@ test-perf budget="30":
     cargo build --locked --release -p sheprd-gpui --features integration-test
     HERDR_PERF_P95_MS="{{budget}}" target/release/sheprd --performance-test
 
+# Frame times and CPU of `sheprd` and `sheprd-moonframe` on one workload, each
+# on a private daemon started from `herdr`, as the median of `rounds`; opens
+# windows, so it needs a desktop. `scripts/bench_frames.py --help` for more.
+bench-moonframe herdr rounds="3":
+    cargo build --locked --release -p sheprd-gpui -p sheprd-moonframe
+    scripts/bench_frames.py --herdr "{{herdr}}" --rounds "{{rounds}}" main=target/release/sheprd moonframe=target/release/sheprd-moonframe
+
 # Compare UI variants written as GPUI code in `file` (the built-in demo when
 # empty) in a native window. "Send to agent" types the notes into the calling
 # Herdr pane through the running Sheprd, else writes `feedback`; `capture` gets

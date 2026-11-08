@@ -83,3 +83,9 @@ ZED_MEASUREMENTS=1 target/release/sheprd
 `frame duration` is one frame's draw and present. `moonframe::perf` adds what
 each publish and message ran. Machine load moves these a lot, so alternate the
 two apps and compare medians.
+
+`just bench-moonframe /path/to/herdr` does that for you: it builds both apps,
+runs each in turn on a private daemon with 14 linked worktrees, through idle,
+terminal output, agents changing state, and focusing each workspace, and
+prints the medians of three rounds. It opens windows, so it needs a desktop.
+`scripts/bench_frames.py` takes other binaries, round counts, and `--json`.
