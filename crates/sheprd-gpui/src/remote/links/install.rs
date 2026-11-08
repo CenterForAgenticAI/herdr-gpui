@@ -18,7 +18,9 @@
 //! snapshot was built there before.
 //!
 //! So the phone's chats work there, `sheprd-acp` goes beside it when this
-//! app's own build fits the host, and a source build builds it too. It is
+//! app's own build is what the host gets (a Mac from a Mac release, or a
+//! host like this computer from a development build), and a source build
+//! builds it too. It is
 //! never linked into `~/.local/bin`, where it would replace one the user
 //! installed; the daemon starts the one beside it first. A release has no
 //! static `sheprd-acp` for Linux yet, so a Linux host from a release keeps

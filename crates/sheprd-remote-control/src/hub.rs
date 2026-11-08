@@ -96,6 +96,10 @@ pub(crate) struct Hub {
     /// The primary session's own layout, to tell whether it answers.
     primary: watch::Receiver<Arc<Layout>>,
     program: Option<PathBuf>,
+    /// Whether a missing program is looked for again as a chat starts: one
+    /// installed after the daemon started (pairing again copies one) works
+    /// without restarting it. Tests leave it off.
+    search_program: bool,
     sessions: Arc<sessions::Sessions>,
     /// Where new checkouts go for work on a core.
     worktrees: Option<PathBuf>,
@@ -151,6 +155,7 @@ impl Hub {
             moving: convert::Moving::default(),
             primary: daemon_layout,
             program: locate_program(),
+            search_program: true,
             sessions,
             worktrees: core::worktree::root(),
         });
@@ -165,9 +170,11 @@ impl Hub {
         Ok(hub)
     }
 
-    /// The `sheprd-acp` chats start with, when one was found.
-    pub(crate) fn program(&self) -> Option<&Path> {
-        self.program.as_deref()
+    /// The `sheprd-acp` chats start with, when one is found.
+    pub(crate) fn program(&self) -> Option<PathBuf> {
+        self.program
+            .clone()
+            .or_else(|| self.search_program.then(locate_program).flatten())
     }
 
     /// A hub showing `layout` that never connects to a daemon or a chat,
@@ -235,6 +242,7 @@ impl Hub {
             primary: receiver.clone(),
             layout: receiver,
             program: None,
+            search_program: false,
             sessions: sessions::Sessions::offline(),
             worktrees: None,
         }
@@ -280,7 +288,8 @@ impl Hub {
         if sessions::in_wsl(workspace) {
             return Err(Error::WslChat);
         }
-        let program = self.program.as_deref().ok_or(Error::ProgramMissing)?;
+        let program = self.program().ok_or(Error::ProgramMissing)?;
+        let program = program.as_path();
         let layout = self.layout();
         let folder = layout
             .workspace(workspace)
@@ -331,7 +340,8 @@ impl Hub {
         if session.is_some_and(sessions::is_wsl) {
             return Err(Error::WslChat);
         }
-        let program = self.program.as_deref().ok_or(Error::ProgramMissing)?;
+        let program = self.program().ok_or(Error::ProgramMissing)?;
+        let program = program.as_path();
         if let Some(core) = self.active_core() {
             let (cwd, program) = (cwd.to_owned(), program.to_owned());
             let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
@@ -586,8 +596,25 @@ fn locate_program() -> Option<PathBuf> {
     [renamed.as_str(), PROGRAM].into_iter().find_map(|program| {
         dirs.iter()
             .map(|dir| dir.join(program))
-            .find(|candidate| candidate.is_file())
+            .find(|candidate| runnable(candidate))
     })
+}
+
+/// Whether `path` is a file this user may run: one left without the
+/// execute bit must not hide a working copy further on.
+fn runnable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
 }
 
 /// Where a chat program is looked for, in order. Only absolute folders: a
