@@ -11,6 +11,7 @@ mod compat;
 mod connect;
 #[cfg(unix)]
 mod control_dir;
+pub mod core_bridge;
 mod discovery;
 mod environment;
 mod error;

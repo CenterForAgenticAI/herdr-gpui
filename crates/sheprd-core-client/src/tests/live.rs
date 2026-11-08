@@ -13,15 +13,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Sandbox {
+pub(super) struct Sandbox {
     _dir: tempfile::TempDir,
-    binary: OsString,
+    pub(super) binary: OsString,
     child: Child,
-    vars: Vec<(&'static str, OsString)>,
+    pub(super) vars: Vec<(&'static str, OsString)>,
 }
 
 impl Sandbox {
-    fn start(binary: OsString) -> Self {
+    /// The private folder holding the core's home and socket.
+    #[cfg(unix)]
+    pub(super) fn dir(&self) -> &Path {
+        self._dir.path()
+    }
+
+    pub(super) fn start(binary: OsString) -> Self {
         let parent = std::env::var_os("HERDR_TEST_TMPDIR").unwrap_or_else(|| "/tmp".into());
         let dir = tempfile::Builder::new()
             .prefix("hc")
