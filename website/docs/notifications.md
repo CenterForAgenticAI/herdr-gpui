@@ -119,6 +119,8 @@ sound = false     # play the system alert sound
 
 A burst rings at most once per 500 ms. **QA > Ring Bell in 3 Seconds** previews both, giving you time to switch to another app.
 
+Herdr 2 terminals ring the same way while their tab is in the workspace shown. A mirror tab never rings: the tab driving the terminal does.
+
 ## Dock and taskbar badges
 
 On **macOS**, the Dock icon shows how many agents are done or blocked, across all connected hosts and windows, and clears at zero. It follows the daemon's status like the sidebar, so bringing the app forward does not clear it; blocked agents stay counted until their status changes. Muted sounds, dismissed toasts, and the delivery setting do not affect it.

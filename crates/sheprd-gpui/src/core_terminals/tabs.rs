@@ -114,9 +114,9 @@ impl SheprdWindow {
             .iter()
             .map(|(key, view)| (key.clone(), view.clone()))
             .collect();
+        self.poll_core_views(views.iter().map(|(_, view)| view.clone()), window, cx);
         let mut ended = Vec::new();
         for ((tab, terminal), view) in views {
-            view.update(cx, |view, cx| view.poll(cx));
             let split = self
                 .core_terminals
                 .tabs

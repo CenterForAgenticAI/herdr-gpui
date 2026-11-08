@@ -60,7 +60,7 @@ Drag across the terminal to select. Releasing the button copies the selection an
 
 Programs that read the mouse, such as many agent TUIs, receive your clicks and drags. **Hold Shift** to select text there instead. The first time such a program takes a drag, Sheprd shows a short reminder.
 
-Programs that copy with OSC 52 put their text on your clipboard too, with the same flash. Only bounded UTF-8 text is accepted.
+Programs that copy with OSC 52 put their text on your clipboard too, with the same flash, in Herdr 1 and Herdr 2 panes. Only bounded UTF-8 text (up to 2 MiB) is accepted, and programs can never read the clipboard this way.
 
 **Paste** is Cmd-V on macOS, Ctrl-Shift-V on Linux, and Ctrl-V (while the clipboard holds text) or Ctrl-Shift-V on Windows.
 

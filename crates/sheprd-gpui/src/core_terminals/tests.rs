@@ -1,5 +1,6 @@
 mod accessibility;
 mod chats;
+mod effects;
 mod focus;
 mod keys;
 mod paste;

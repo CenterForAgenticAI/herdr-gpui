@@ -12,6 +12,7 @@
 //! screens.
 
 mod commands;
+mod effects;
 mod error;
 mod fallback;
 mod hub;
@@ -346,9 +347,7 @@ impl SheprdWindow {
         }
         self.poll_core_fallback(cx);
         self.refresh_core_looks(cx);
-        if let Some(view) = self.core_fallback_view() {
-            view.update(cx, |view, cx| view.poll(cx));
-        }
+        self.poll_core_views(self.core_fallback_view(), window, cx);
         self.poll_core_panes(window, cx);
         // Split chrome and the sidebar's rows name panes from what herdr-core
         // reports, so it is read while any herdr-core tab is known.
