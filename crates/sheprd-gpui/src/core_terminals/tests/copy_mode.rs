@@ -201,3 +201,67 @@ fn a_copy_whose_rows_moved_while_it_was_read_copies_nothing(cx: &mut gpui::TestA
     });
     cx.update(|_, cx| assert!(cx.read_from_clipboard().is_none()));
 }
+
+#[gpui::test]
+fn a_match_rewritten_while_it_was_read_copies_nothing(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    let found = sheprd_backend::TextRange {
+        start: point(8, 1),
+        end: point(8, 2),
+    };
+    backend.answers.lock().unwrap().extend([
+        HistoryAnswer::Matches(sheprd_backend::Matches {
+            matches: vec![found],
+            total: 1,
+            current: Some(0),
+            current_global: Some(0),
+            revision: 4,
+        }),
+        HistoryAnswer::Text("new".into()),
+    ]);
+    cx.update(|window, cx| view.update(cx, |view, cx| view.enter_copy_mode(window, cx)));
+    cx.simulate_keystrokes("/");
+    cx.simulate_input("ab");
+    cx.simulate_keystrokes("enter");
+    let History::Search(search) = requests(&backend, 1)[0].clone() else {
+        panic!("copy mode searches first");
+    };
+    assert_eq!(search.query, "ab");
+    until(|| {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.poll(window, cx);
+                view.copy_mode_settled().then_some(())
+            })
+        })
+    });
+    // Output rewrites the match's row in place, with no row moved, and
+    // reaches the worker, but not yet the view, before the copy.
+    backend.push(vec![SurfaceUpdate::Scroll {
+        metrics: ScrollMetrics {
+            offset: 0,
+            history: 7,
+            rows: 3,
+            full: false,
+        },
+        revision: 5,
+    }]);
+    until(|| cx.update(|_, cx| view.read(cx).changed().then_some(())));
+    cx.simulate_keystrokes("y");
+    assert_eq!(
+        requests(&backend, 2)[1],
+        History::Read {
+            anchor: found.start,
+            cursor: found.end,
+        }
+    );
+    until(|| {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.poll(window, cx);
+                (!view.copy_pending()).then_some(())
+            })
+        })
+    });
+    cx.update(|_, cx| assert!(cx.read_from_clipboard().is_none()));
+}

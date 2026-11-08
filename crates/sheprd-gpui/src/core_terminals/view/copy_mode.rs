@@ -67,6 +67,15 @@ impl CoreTerminalView {
         self.copy_mode.is_some()
     }
 
+    /// Whether copy mode is on with no motion or search waiting on its
+    /// answer.
+    #[cfg(test)]
+    pub(crate) fn copy_mode_settled(&self) -> bool {
+        self.copy_mode
+            .as_ref()
+            .is_some_and(|state| state.mode.in_flight().is_none())
+    }
+
     /// A key while copy mode is on: a copy-mode key runs and every other is
     /// swallowed rather than typed. Keys with Command are the window's.
     pub(super) fn copy_mode_key(
@@ -139,8 +148,16 @@ impl CoreTerminalView {
                 self.open_copy_search(direction, query.unwrap_or_default(), window, cx);
             }
             Outcome::Send(request) => self.send_copy_request(&request),
-            Outcome::Copy { range, .. } => {
-                self.copy_range(range);
+            Outcome::Copy {
+                range,
+                content_revision,
+            } => {
+                match content_revision {
+                    // A match is copied only as it was found: its text
+                    // revision was doubled for copy mode.
+                    Some(found) => self.copying = Some(self.read_at(range, found / 2, true)),
+                    None => self.copy_range(range),
+                }
                 self.leave_copy_mode(window, cx);
             }
             Outcome::Exit => self.leave_copy_mode(window, cx),
