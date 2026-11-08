@@ -71,3 +71,5 @@ fn the_api_socket_is_the_client_socket_without_its_suffix() {
     assert_eq!(api_socket(Path::new("/tmp/custom.sock")), None);
     assert_eq!(api_socket(Path::new("/tmp/-client.sock")), None);
 }
+
+mod window;
