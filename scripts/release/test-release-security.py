@@ -47,7 +47,7 @@ class ReleaseTargets(unittest.TestCase):
             self.assertIn("github.repository == 'sheprd-labs/sheprd'", job)
         # Keeps every main cache inside the repository's 10 GB cache budget.
         self.assertIn("\nenv:\n  CARGO_PROFILE_DEV_DEBUG: '0'\n\njobs:\n", workflow)
-        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, commits]\n",
+        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, commits, website]\n",
                       jobs["checks-passed"])
         self.assertIn('test "$COMMITS" = success || exit 1', jobs["checks-passed"])
         self.assertIn('test "$RESULT" = success && test "$WINDOWS" = success', jobs["checks-passed"])
