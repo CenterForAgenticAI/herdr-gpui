@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use super::*;
 
 mod activities;
+mod direct_subagents;
 mod images;
 mod todos;
 mod tool_start;

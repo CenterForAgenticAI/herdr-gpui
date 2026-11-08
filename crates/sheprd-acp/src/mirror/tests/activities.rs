@@ -11,6 +11,7 @@ fn activity(call: &str, state: ActivityState) -> Activity {
         label: "npm run dev".into(),
         started_ms: 1,
         state,
+        stoppable: false,
     }
 }
 

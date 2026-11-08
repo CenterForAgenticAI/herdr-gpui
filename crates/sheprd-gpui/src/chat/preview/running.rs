@@ -84,6 +84,7 @@ pub(super) fn activities(now_ms: u64) -> Vec<Activity> {
             label: label.into(),
             started_ms: now_ms.saturating_sub(started),
             state,
+            stoppable: state == ActivityState::Running,
         };
     vec![
         activity(
@@ -110,6 +111,14 @@ pub(super) fn activities(now_ms: u64) -> Vec<Activity> {
             ActivityKind::Shell,
             "npm run dev -- --port 5173", // i18n: data
             252_000,
+            None,
+            ActivityState::Running,
+        ),
+        activity(
+            "monitor-deploy",
+            ActivityKind::Monitor,
+            "Errors in the deploy log", // i18n: data
+            96_000,
             None,
             ActivityState::Running,
         ),

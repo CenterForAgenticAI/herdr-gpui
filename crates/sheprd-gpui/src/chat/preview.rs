@@ -127,6 +127,7 @@ impl Options {
                 | "turns"
                 | "running"
                 | "running-open"
+                | "running-rail"
                 | "steps"
                 | "steps-open"
                 | "state-completed"
@@ -136,7 +137,7 @@ impl Options {
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, loading, input-resize, tools, turns, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, loading, input-resize, tools, turns, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -542,6 +543,12 @@ fn install(
     {
         pane.expanded.insert(EntryId(3));
         pane.running.set(true, crate::motion::now(), true);
+    }
+    // The rail, which a fixture leaves off, listing what runs.
+    if options.case == "running-rail"
+        && let Some(pane) = view.chats.pane_mut(PANE)
+    {
+        pane.rail = true;
     }
     // Every running step in full, from the working row.
     if options.case == "steps-open"
