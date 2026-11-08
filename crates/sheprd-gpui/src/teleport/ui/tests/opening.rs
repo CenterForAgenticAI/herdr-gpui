@@ -23,7 +23,10 @@ fn a_moves_herdr_2_tabs_open_in_the_destination_workspace(cx: &mut TestAppContex
         warnings: Vec::new(),
         core_tabs: tabs.clone(),
     };
-    view.update(cx, |view, cx| view.open_teleported_core_tabs(&outcome, cx));
+    let scope = Scope::endpoint("buildbox");
+    view.update(cx, |view, cx| {
+        view.open_teleported_core_tabs(&outcome, &scope, cx)
+    });
     cx.update(|_, cx| {
         let opened: Vec<Panes> = cx
             .global::<Store>()
@@ -64,23 +67,29 @@ fn another_window_finishes_a_move_whose_window_closed(cx: &mut TestAppContext) {
         core_tabs: vec![Panes::single(id("t5"))],
     };
     let unclaimed = Unclaimed::default();
-    let closing = vec![(source_tab, moved)];
+    // The destination as the starting window named it, which the claiming
+    // window, with its own `buildbox`, must not rename.
+    let destination = Scope::local(std::path::Path::new("/run/default.sock"));
+    let leftover = || (destination.clone(), vec![(source_tab, moved.clone())]);
 
     let (sender, receiver) = mpsc::channel();
-    unclaimed::deliver(&sender, Ok(outcome()), closing.clone(), &unclaimed);
+    unclaimed::deliver(&sender, Ok(outcome()), leftover(), &unclaimed);
     assert!(matches!(receiver.try_recv(), Ok(Event::Moved(Ok(_)))));
 
     drop(receiver);
-    unclaimed::deliver(&sender, Ok(outcome()), closing, &unclaimed);
+    unclaimed::deliver(&sender, Ok(outcome()), leftover(), &unclaimed);
     cx.update(|window, cx| {
         cx.set_global(unclaimed);
         view.update(cx, |view, cx| view.poll_teleport(window, cx));
         let store = cx.global::<Store>();
         assert!(store.get(source_tab).is_none());
-        let opened = store
-            .in_workspace(&Scope::endpoint("buildbox"), "w9")
-            .count();
-        assert_eq!(opened, 1);
+        assert_eq!(store.in_workspace(&destination, "w9").count(), 1);
+        assert_eq!(
+            store
+                .in_workspace(&Scope::endpoint("buildbox"), "w9")
+                .count(),
+            0
+        );
         // Taken once.
         assert!(cx.global::<Unclaimed>().clone().is_empty());
     });

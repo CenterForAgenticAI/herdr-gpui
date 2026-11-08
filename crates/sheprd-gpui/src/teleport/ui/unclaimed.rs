@@ -18,6 +18,9 @@ use std::sync::{Arc, Mutex, PoisonError, mpsc};
 /// A move that finished after its window closed.
 pub(super) struct Leftover {
     pub(super) outcome: Outcome,
+    /// Where the destination's tabs belong, read by the window that started
+    /// the move: another window may name a different session `local`.
+    pub(super) scope: Scope,
     /// The source's Herdr 2 tabs and the panes that moved from each.
     pub(super) closing: Vec<(TabId, Panes)>,
 }
@@ -55,11 +58,15 @@ impl Unclaimed {
 pub(super) fn deliver(
     sender: &mpsc::Sender<Event>,
     result: Result<Outcome, Error>,
-    closing: Vec<(TabId, Panes)>,
+    (scope, closing): (Scope, Vec<(TabId, Panes)>),
     unclaimed: &Unclaimed,
 ) {
     if let Err(mpsc::SendError(Event::Moved(Ok(outcome)))) = sender.send(Event::Moved(result)) {
-        unclaimed.push(Leftover { outcome, closing });
+        unclaimed.push(Leftover {
+            outcome,
+            scope,
+            closing,
+        });
     }
 }
 
@@ -100,25 +107,31 @@ impl SheprdWindow {
             for tab in moved_tabs(leftover.closing, panes) {
                 self.close_browser_tab(tab, window, cx);
             }
-            self.open_teleported_core_tabs(&leftover.outcome, cx);
+            self.open_teleported_core_tabs(&leftover.outcome, &leftover.scope, cx);
         }
+    }
+
+    /// The scope of this window's endpoint `endpoint_id`, where its
+    /// workspaces' tabs belong.
+    pub(super) fn endpoint_scope(&self, endpoint_id: &str) -> Scope {
+        self.endpoints
+            .iter()
+            .find(|endpoint| endpoint.id == endpoint_id)
+            .map_or_else(|| Scope::endpoint(endpoint_id), crate::browser::scope)
     }
 
     /// Opens the tabs a move rebuilt in the destination's Herdr 2 in its
     /// new workspace. Their terminals already run there; the window joins
     /// them as it shows the workspace.
-    pub(super) fn open_teleported_core_tabs(&mut self, outcome: &Outcome, cx: &mut Context<Self>) {
+    pub(super) fn open_teleported_core_tabs(
+        &mut self,
+        outcome: &Outcome,
+        scope: &Scope,
+        cx: &mut Context<Self>,
+    ) {
         if outcome.core_tabs.is_empty() {
             return;
         }
-        let scope = self
-            .endpoints
-            .iter()
-            .find(|endpoint| endpoint.id == outcome.endpoint_id)
-            .map_or_else(
-                || Scope::endpoint(&outcome.endpoint_id),
-                crate::browser::scope,
-            );
         // Checked before the move, so only tabs opened meanwhile can leave
         // one out; the rest still open.
         let missed = Store::update(cx, |store| {

@@ -255,15 +255,16 @@ impl Teleport {
     }
 
     /// Starts the move. Should its window close first, `unclaimed` takes
-    /// what the app still has to do once it finishes.
-    fn teleport(&mut self, unclaimed: Unclaimed) {
+    /// what the app still has to do once it finishes, with the `scope` the
+    /// destination's tabs belong in.
+    fn teleport(&mut self, unclaimed: Unclaimed, scope: Scope) {
         let Stage::Ready(candidate, review) = &self.stage else {
             return;
         };
         let (candidate, review) = (candidate.clone(), review.clone());
         let source = self.source.clone();
         let target = candidate.clone();
-        let closing = self.closing.clone();
+        let leftover = (scope, self.closing.clone());
         self.restart(move |sender, cancelled| {
             let result = job::run(
                 &source,
@@ -274,7 +275,7 @@ impl Teleport {
                 },
                 cancelled,
             );
-            unclaimed::deliver(sender, result, closing, &unclaimed);
+            unclaimed::deliver(sender, result, leftover, &unclaimed);
         });
         self.stage = Stage::Moving(candidate, None);
     }
@@ -400,7 +401,8 @@ impl SheprdWindow {
             )),
         };
         self.show_flash(flash, cx);
-        self.open_teleported_core_tabs(&outcome, cx);
+        let scope = self.endpoint_scope(&outcome.endpoint_id);
+        self.open_teleported_core_tabs(&outcome, &scope, cx);
         self.teleport_follow = Some(Follow::new(outcome.endpoint_id, outcome.workspace_id));
         self.follow_teleport(cx);
     }
@@ -494,12 +496,21 @@ impl SheprdWindow {
     fn submit_teleport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let room = cx.try_global::<Store>().map_or(usize::MAX, Store::room);
         let unclaimed = cx.default_global::<Unclaimed>().clone();
+        let destination = match self.teleport.as_ref().map(|teleport| &teleport.stage) {
+            Some(Stage::Ready(candidate, _)) => {
+                Some(self.endpoint_scope(&candidate.place.endpoint_id))
+            }
+            _ => None,
+        };
         let Some(teleport) = &mut self.teleport else {
             return;
         };
         match &teleport.stage {
             Stage::Choosing => teleport.review(),
             Stage::Ready(_, review) => {
+                let Some(destination) = destination else {
+                    return;
+                };
                 // The tabs rebuilt in Herdr 2 must all open once the move
                 // ends, when the source's own Herdr 2 tabs have closed: a
                 // program without a tab would run unseen.
@@ -513,7 +524,7 @@ impl SheprdWindow {
                     self.show_flash(Flash::warning(flash), cx);
                     return;
                 }
-                teleport.teleport(unclaimed);
+                teleport.teleport(unclaimed, destination);
             }
             Stage::Failed(_) => {
                 self.teleport = None;
