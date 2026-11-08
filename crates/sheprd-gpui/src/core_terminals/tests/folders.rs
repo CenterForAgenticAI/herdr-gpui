@@ -1,6 +1,6 @@
 use crate::{
     browser::{Scope, TabId},
-    core_terminals::{CoreTerminals, TabPanes, panes::Panes},
+    core_terminals::{CoreTerminals, Host, TabPanes, panes::Panes},
 };
 use sheprd_backend::{RunState, TerminalId, TerminalInfo};
 use sheprd_client::protocol::AgentStatus;
@@ -23,7 +23,7 @@ fn info(name: &str, cwd: &str) -> TerminalInfo {
 }
 
 fn tab(terminals: &mut CoreTerminals, number: u64, terminal: &str, workspace: &str, observe: bool) {
-    let mut shown = TabPanes::new(Panes::single(id(terminal)), observe);
+    let mut shown = TabPanes::new(Host::Local, Panes::single(id(terminal)), observe);
     shown.workspace = Some((Scope::endpoint("local"), workspace.to_owned()));
     terminals.tabs.insert(TabId::test(number), shown);
 }

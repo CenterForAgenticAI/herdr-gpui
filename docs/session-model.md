@@ -14,11 +14,24 @@ on Herdr 1's snapshot and a new backend costs an adapter rather than a rewrite.
 | Workspaces | The daemon's snapshot | One per window (`core_terminals::WORKSPACE`), only with no Herdr 1 installed |
 | Agents | The daemon's snapshot | `TerminalInfo::agent`, per terminal |
 | Commands | 43 `sheprd_client::Method` variants | Handled per feature in `core_terminals` |
+| `Session` | `session_model::of_snapshot`, cached per snapshot in `LiveState::session` | `Session::core`, rebuilt on the window tick from the app's tabs and the core's terminals |
 
-`sheprd-session` holds what is already shared: the pane tree and the reader of
-the app's saved tabs, which the remote control daemon used to parse as untyped
-JSON. A test in the app reads what the app saves through that reader, so the two
-cannot drift apart.
+`sheprd-session` holds what is already shared: the pane tree, the reader of the
+app's saved tabs, which the remote control daemon used to parse as untyped JSON,
+and `Session`: workspaces, their tabs, and agents, each workspace marked with the
+`Keeper` that carries out what is asked of it. A test in the app reads what the
+app saves through the saved tabs reader, so the two cannot drift apart.
+
+`SheprdWindow::sessions` gives a host's sessions together: Herdr 1's, and on
+this computer the one over herdr-core. Readers walk both, so a reader moved onto
+it lists Herdr 2 work beside Herdr 1's.
+
+| Reader | On `Session` |
+| --- | --- |
+| Devices overview: counts, agent lines, search | Yes |
+| Sidebar workspace rows, previous and next workspace | Not yet |
+| Tab strip | Not yet |
+| Palette and jump list | Not yet |
 
 The app still reads `ClientShell*` types directly in about 67 files. That is the
 work left.
@@ -29,8 +42,9 @@ Move one reader at a time, in separate pull requests, so parallel work conflicts
 as little as possible:
 
 1. Add `Session` to `sheprd-session`: workspaces, tabs, and agents as domain
-   types, with `From<&ClientShellSnapshot>` in the app rather than a new
-   dependency here. It is a model, not a mirror of the wire types: only what
+   types, built from a `ClientShellSnapshot` in the app (`session_model`)
+   rather than through a new dependency here; a `From` impl would need one,
+   as both types are foreign to the app. It is a model, not a mirror of the wire types: only what
    features read, and nothing the daemon's protocol alone needs.
 2. Keep it next to `LiveState::snapshot`, built once when a snapshot lands, so
    render paths stay thin and revision fencing stays where it is.
@@ -44,8 +58,9 @@ as little as possible:
 
 ## Decisions
 
-- Layout stays in the app's saved tabs rather than a core document. The app's
-  core connection is local and the remote control daemon reads the same file,
+- Layout stays in the app's saved tabs rather than a core document. The app
+  saves the tabs of every core it reaches, on this computer or over SSH, and
+  the remote control daemon reads the same file,
   so a document would have no reader the file does not already serve. Revisit
   when a second client on another machine needs a core's layout.
 - Sheprd's saved tabs win on the phone. A `herdr-app` document lists what they

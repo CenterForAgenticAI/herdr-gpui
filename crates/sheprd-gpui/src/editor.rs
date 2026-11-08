@@ -500,7 +500,7 @@ impl SheprdWindow {
         }
         let argv = argv(target, self.config.editor_command.as_ref())?;
         let cwd = self
-            .core_folder(&at)
+            .core_folder(tab, &at)
             .or_else(|| target.path.parent().map(Path::to_path_buf));
         let spawn = sheprd_backend::Spawn {
             argv,

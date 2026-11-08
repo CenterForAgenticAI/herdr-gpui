@@ -4,7 +4,7 @@
 use crate::{
     browser::{Location, Store, TabId},
     core_terminals::{
-        WORKSPACE,
+        Host, WORKSPACE,
         panes::{Axis, Panes},
     },
     sidebar::layout_tests::{fixture_window, full_draw},
@@ -53,7 +53,14 @@ fn a_split_in_a_hidden_tab_shows_that_tab(cx: &mut TestAppContext) {
     assert_eq!(shown(cx), Some(tabs[0]));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            view.place_split(tabs[1], &id("t2"), Axis::Row, id("t3"), window, cx)
+            view.place_split(
+                tabs[1],
+                &id("t2"),
+                Axis::Row,
+                (Host::Local, id("t3")),
+                window,
+                cx,
+            )
         });
         full_draw(window, cx).clear(cx);
     });

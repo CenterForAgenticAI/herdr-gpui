@@ -44,9 +44,9 @@ impl SheprdWindow {
     /// active group shows, else Herdr's focused pane, where its program is
     /// rather than where its shell started.
     pub(crate) fn focused_folder(&self, cx: &App) -> Option<String> {
-        if let Some((_, terminal)) = self.shown_core_pane(cx) {
+        if let Some((tab, terminal)) = self.shown_core_pane(cx) {
             return self
-                .core_folder(&terminal)
+                .core_folder(tab, &terminal)
                 .and_then(|folder| folder.into_os_string().into_string().ok());
         }
         let snapshot = self.live.snapshot.as_deref()?;
@@ -59,8 +59,8 @@ impl SheprdWindow {
     /// last tick, once Git named its branch. `None` when no herdr-core tab
     /// is shown, or its pane is in no checkout or on a detached head.
     pub(crate) fn core_git_input(&self) -> Option<crate::pull_request::Input> {
-        let (_, terminal) = self.core_terminals.shown.as_ref()?;
-        let folder = self.core_folder(terminal)?;
+        let (tab, terminal) = self.core_terminals.shown.as_ref()?;
+        let folder = self.core_folder(*tab, terminal)?;
         let branch = self.core_terminals.checkout.branch(&folder)?.to_owned();
         let checkout = folder.into_os_string().into_string().ok()?;
         Some(crate::pull_request::Input {
