@@ -290,7 +290,7 @@ impl Emulator {
                 let Some(marks) = cells[Column(column)].zerowidth() else {
                     continue;
                 };
-                for &marker in marks.iter().filter(|c| crate::graphics::is_marker(**c)) {
+                for marker in crate::graphics::markers_in(marks) {
                     found.push(Found {
                         marker,
                         row,
@@ -331,7 +331,9 @@ impl Emulator {
 /// image costs no more than a short one.
 fn place(term: &mut Term<Listener>, processor: &mut Processor<SyncPending>, placed: Placed) {
     let point = term.grid().cursor.point;
-    term.grid_mut()[point].push_zerowidth(placed.marker);
+    for c in placed.marker {
+        term.grid_mut()[point].push_zerowidth(c);
+    }
     if !placed.moves_cursor {
         return;
     }

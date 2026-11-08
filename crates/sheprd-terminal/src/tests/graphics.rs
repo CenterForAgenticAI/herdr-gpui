@@ -219,3 +219,37 @@ fn a_source_outside_the_image_is_refused_and_one_past_its_edge_is_held() {
     };
     assert_eq!((placement.source_y, placement.source_height), (2, 2));
 }
+
+#[test]
+fn an_unfinished_command_lets_the_next_sequence_and_text_through() {
+    let mut emulator = fed(10, 2, b"xx");
+    emulator.feed(b"\x1b_Ga=T,f=100;AAAA\x1b[2J\x1b[Hok");
+    assert!(emulator.take_graphics().is_none());
+    assert_eq!(line(&emulator.frame(), 0), "ok");
+}
+
+#[test]
+fn a_cropped_source_sizes_from_what_it_shows() {
+    let mut emulator = emulator(20, 8);
+    emulator.set_cell_pixels(10, 10);
+    // The right half of a 40 by 20 image is 20 by 20: four columns are
+    // four rows.
+    emulator.feed(&command("a=T,f=100,x=20,c=4", &png(40, 20)));
+    let [placement] = &placements(&mut emulator)[..] else {
+        panic!("one placement")
+    };
+    assert_eq!((placement.cols, placement.rows), (4, 4));
+    assert_eq!((placement.source_x, placement.source_width), (20, 20));
+    assert_eq!(emulator.frame().cursor.map(|cursor| cursor.y), Some(3));
+}
+
+#[test]
+fn a_tall_image_shows_its_bottom_after_its_top_scrolls_far_up() {
+    let mut emulator = Emulator::new(size(10, 40), 1_000);
+    emulator.feed(&command("a=T,f=100,c=1,r=300,C=1", &png(2, 300)));
+    emulator.feed(&b"\r\n".repeat(299));
+    let [placement] = &placements(&mut emulator)[..] else {
+        panic!("one placement")
+    };
+    assert_eq!((placement.y, placement.rows), (0, 40));
+}

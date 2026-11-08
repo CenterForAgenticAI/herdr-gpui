@@ -4,8 +4,10 @@
 //! as Herdr's graphics scene for the app's image painter. herdr-core answers
 //! the program's queries itself, so nothing here ever replies.
 //!
-//! Each placement leaves a marker in the cell at its top-left corner, a
-//! zero-width private-use character the frame never shows. The marker moves
+//! Each placement leaves a marker in the cell at its top-left corner, two
+//! zero-width private-use characters the frame never shows, which together
+//! name it among billions, so a mark left behind by a deleted placement
+//! never stands for a later one. The marker moves
 //! with its row as the screen scrolls, reflows, or switches screens, and goes
 //! when the program clears or overwrites that cell, so placements follow
 //! the text they sit in without a separate scroll ledger.
@@ -37,13 +39,16 @@ pub(crate) const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const MAX_PLACEMENTS: usize = 1024;
 /// Kitty and Ghostty refuse images wider or taller than this.
 pub(crate) const MAX_SIDE: u32 = 10_000;
-/// The first marker character: Supplementary Private Use Area-B, which no
-/// program prints by accident.
-const MARKER_BASE: u32 = 0x10_0000;
-/// Markers available before their numbers wrap.
-const MARKERS: u32 = 0xFFFD;
-/// The most rows above the screen scanned for an image reaching into it.
-const MAX_ROWS_ABOVE: usize = 200;
+/// A marker's two characters: its high part in Supplementary Private Use
+/// Area-A, its low part in Area-B, which no program prints by accident.
+const MARKER_HIGH: u32 = 0xF_0000;
+const MARKER_LOW: u32 = 0x10_0000;
+/// Values each character holds.
+const MARKER_SPAN: u32 = 0xFFFD;
+/// The most rows above the screen scanned for an image reaching into it:
+/// an image taller than this stops showing once its top row scrolls this
+/// far up. Scanning is per update, so it stays well short of `MAX_SIDE`.
+const MAX_ROWS_ABOVE: usize = 1_000;
 
 /// Lenient about padding, as kitty is.
 const BASE64: GeneralPurpose = GeneralPurpose::new(
@@ -51,17 +56,32 @@ const BASE64: GeneralPurpose = GeneralPurpose::new(
     GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
 );
 
-/// Whether `c` is a placement marker, which no frame shows.
+/// Whether `c` is part of a placement marker, which no frame shows.
 pub(crate) fn is_marker(c: char) -> bool {
-    (MARKER_BASE..MARKER_BASE + MARKERS).contains(&u32::from(c))
+    let c = u32::from(c);
+    (MARKER_HIGH..MARKER_HIGH + MARKER_SPAN).contains(&c)
+        || (MARKER_LOW..MARKER_LOW + MARKER_SPAN).contains(&c)
 }
 
-fn marker_char(marker: u32) -> Option<char> {
-    char::from_u32(MARKER_BASE + marker % MARKERS)
+fn marker_chars(marker: u32) -> Option<[char; 2]> {
+    Some([
+        char::from_u32(MARKER_HIGH + marker / MARKER_SPAN)?,
+        char::from_u32(MARKER_LOW + marker % MARKER_SPAN)?,
+    ])
 }
 
-fn marker_of(c: char) -> Option<u32> {
-    is_marker(c).then(|| u32::from(c) - MARKER_BASE)
+/// The markers among a cell's zero-width characters.
+pub(crate) fn markers_in(chars: &[char]) -> impl Iterator<Item = u32> + '_ {
+    chars.windows(2).filter_map(|pair| {
+        let (high, low) = (u32::from(pair[0]), u32::from(pair[1]));
+        let high = high
+            .checked_sub(MARKER_HIGH)
+            .filter(|high| *high < MARKER_SPAN)?;
+        let low = low
+            .checked_sub(MARKER_LOW)
+            .filter(|low| *low < MARKER_SPAN)?;
+        Some(high * MARKER_SPAN + low)
+    })
 }
 
 /// A command's control data: `key=value` pairs, the keys this module reads.
@@ -164,7 +184,7 @@ struct Placement {
 /// move the cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Placed {
-    pub(crate) marker: char,
+    pub(crate) marker: [char; 2],
     pub(crate) cols: u32,
     pub(crate) rows: u32,
     pub(crate) moves_cursor: bool,
@@ -179,7 +199,7 @@ struct Loading {
 /// The cell a marker was found in, as rows from the top of the screen
 /// (negative above it) and a column.
 pub(crate) struct Found {
-    pub(crate) marker: char,
+    pub(crate) marker: u32,
     pub(crate) row: i64,
     pub(crate) column: u16,
 }
@@ -451,7 +471,7 @@ impl Graphics {
             };
             self.placements.remove(&oldest);
         }
-        let marker = self.next_marker % MARKERS;
+        let marker = self.next_marker % (MARKER_SPAN * MARKER_SPAN);
         self.next_marker = self.next_marker.wrapping_add(1);
         self.placements.insert(
             marker,
@@ -466,7 +486,7 @@ impl Graphics {
             },
         );
         Some(Placed {
-            marker: marker_char(marker)?,
+            marker: marker_chars(marker)?,
             cols,
             rows,
             moves_cursor: !control.cursor_stays,
@@ -511,7 +531,7 @@ impl Graphics {
         let placements: Vec<SurfaceGraphicsPlacement> = found
             .iter()
             .filter_map(|found| {
-                let marker = marker_of(found.marker)?;
+                let marker = found.marker;
                 let placement = self.placements.get(&marker)?;
                 let image = self.images.get(&placement.image)?;
                 visible(marker, placement, &image.key, found.row, found.column)

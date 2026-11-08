@@ -180,8 +180,9 @@ impl Scanner {
                         self.end_osc(&mut run, index + 1);
                     } else {
                         // ESC ends the command unfinished, and begins
-                        // another sequence with this byte.
-                        forward(Run::Bytes(b"_"));
+                        // another sequence with this byte: vte reads it as
+                        // an APC string the ESC ends, then that sequence.
+                        forward(Run::Bytes(b"_\x1b"));
                         self.end_osc(&mut run, index);
                         self.state = State::Escape;
                         continue;
