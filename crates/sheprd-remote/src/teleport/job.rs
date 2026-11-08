@@ -57,6 +57,9 @@ pub struct Source {
     /// terminals run in the source host's herdr-core, and each moves as one
     /// more tab after the Herdr 1 ones.
     pub core_tabs: Vec<Panes>,
+    /// Herdr 2 was chosen for new tabs: on a destination with a herdr-core,
+    /// Herdr 1 tabs move into it too.
+    pub core_preferred: bool,
 }
 
 /// A repository open on some host, found through one of its workspaces.
@@ -121,6 +124,9 @@ pub struct Outcome {
     pub branch: String,
     /// Things that did not carry over, for the user to see.
     pub warnings: Vec<Warning>,
+    /// The tabs rebuilt in the destination's herdr-core, for the app to open
+    /// in the workspace, in order.
+    pub core_tabs: Vec<Panes>,
 }
 
 /// The repositories open in `snapshot`, one per Git common directory, each
@@ -241,6 +247,9 @@ pub fn run(
     let _ = git::discard_upload(to, &uploaded, cancelled);
     fetched?;
 
+    // Herdr 2 terminals started from here on end again unless the move
+    // finishes, since only its outcome gives them tabs.
+    let mut spawned = core::Spawned::new(to);
     let placed = (|| {
         let landing = land(
             source,
@@ -251,10 +260,10 @@ pub fn run(
             &mut report,
             cancelled,
         )?;
-        let panes = rebuild_tabs(to, &landing, review, &mut report, cancelled)?;
-        Ok((landing, panes))
+        let rebuilt = rebuild_tabs(to, &landing, review, &mut spawned, &mut report, cancelled)?;
+        Ok((landing, rebuilt))
     })();
-    let (landing, panes) = match placed {
+    let (landing, (panes, core_tabs)) = match placed {
         Ok(placed) => placed,
         Err(error) => {
             git::drop_reference(to, key, &reference, &AtomicBool::new(false));
@@ -336,19 +345,24 @@ pub fn run(
         if target.cwd != target.created_in {
             line = format!("cd -- {} && {line}", shell_quote(&target.cwd));
         }
-        to.herdr_ok(
-            Step::Launch,
-            &["pane", "run", &target.pane_id, &line],
-            cancelled,
-        )?;
+        match target.generation {
+            Generation::Herdr1 => to.herdr_ok(
+                Step::Launch,
+                &["pane", "run", &target.pane_id, &line],
+                cancelled,
+            )?,
+            Generation::Herdr2 => core::type_line(to, &target.pane_id, &line, cancelled)?,
+        }
     }
 
+    spawned.keep();
     Ok(Outcome {
         endpoint_id: destination.place.endpoint_id.clone(),
         workspace_id: landing.workspace_id,
         repo_key: repository.key.clone(),
         branch: review.branch.clone(),
         warnings,
+        core_tabs,
     })
 }
 
@@ -429,9 +443,11 @@ pub(super) fn open_workspace(
     Ok(opened.workspace.workspace_id)
 }
 
-/// A destination pane standing in for a source pane.
+/// A destination pane standing in for a source pane: a Herdr 1 pane, or a
+/// Herdr 2 terminal.
 #[derive(Debug, Clone)]
 struct Target {
+    generation: Generation,
     pane_id: String,
     /// Where its program should run, and where its shell started.
     cwd: String,
@@ -554,14 +570,16 @@ fn retire(host: &Host, workspace_id: &str, checkout: &str, cancelled: &AtomicBoo
 }
 
 /// Rebuild the source tabs in `landing`, then close the tabs it replaces.
-/// Returns one target per pane in `review.panes()` order.
+/// Returns one target per pane in `review.panes()` order, and the pane trees
+/// of the tabs rebuilt in Herdr 2, whose terminals are also in `spawned`.
 fn rebuild_tabs(
     to: &Host,
     landing: &Landing,
     review: &Review,
+    spawned: &mut core::Spawned<'_>,
     report: &mut impl FnMut(Step),
     cancelled: &AtomicBool,
-) -> Result<Vec<Target>> {
+) -> Result<(Vec<Target>, Vec<Panes>)> {
     report(Step::Tabs);
     let checkout = &landing.checkout;
     let cwd_of = |plan: Option<&PanePlan>| {
@@ -570,30 +588,53 @@ fn rebuild_tabs(
             .unwrap_or_else(|| checkout.clone())
     };
     let mut targets: HashMap<String, Target> = HashMap::new();
-    for (index, tab) in review.tabs.iter().enumerate() {
+    let mut core_tabs = Vec::new();
+    // The first tab rebuilt in Herdr 1 takes the landing's empty tab.
+    let mut first = Some((landing.first_tab.clone(), landing.first_pane.clone()));
+    for tab in &review.tabs {
         let build = tab.tree.plan();
+        if tab.into == Generation::Herdr2 {
+            let mut terminals = HashMap::new();
+            for source_pane in &build.slots {
+                let cwd = cwd_of(tab.pane(source_pane));
+                let terminal = core::start_shell(to, &cwd, cancelled)?;
+                spawned.push(terminal.clone());
+                terminals.insert(source_pane.clone(), terminal.clone());
+                let target = Target {
+                    generation: Generation::Herdr2,
+                    pane_id: terminal,
+                    cwd: cwd.clone(),
+                    created_in: cwd,
+                };
+                targets.insert(source_pane.clone(), target);
+            }
+            core_tabs.push(
+                core::panes(&tab.tree, &terminals).ok_or_else(|| Error::Decode {
+                    step: Step::Tabs,
+                    source: serde::de::Error::custom("a Herdr 2 tab could not be laid out"),
+                })?,
+            );
+            continue;
+        }
         let first_cwd = cwd_of(build.slots.first().and_then(|id| tab.pane(id)));
-        let (tab_id, root, root_cwd) = if index == 0 {
-            (
-                landing.first_tab.clone(),
-                landing.first_pane.clone(),
-                checkout.clone(),
-            )
-        } else {
-            let made: TabCreated = to.herdr(
-                Step::Tabs,
-                &[
-                    "tab",
-                    "create",
-                    "--workspace",
-                    &landing.workspace_id,
-                    "--cwd",
-                    &first_cwd,
-                    "--no-focus",
-                ],
-                cancelled,
-            )?;
-            (made.tab.tab_id, made.root_pane.pane_id, first_cwd.clone())
+        let (tab_id, root, root_cwd) = match first.take() {
+            Some((tab_id, root)) => (tab_id, root, checkout.clone()),
+            None => {
+                let made: TabCreated = to.herdr(
+                    Step::Tabs,
+                    &[
+                        "tab",
+                        "create",
+                        "--workspace",
+                        &landing.workspace_id,
+                        "--cwd",
+                        &first_cwd,
+                        "--no-focus",
+                    ],
+                    cancelled,
+                )?;
+                (made.tab.tab_id, made.root_pane.pane_id, first_cwd.clone())
+            }
         };
         if let Some(label) = &tab.label {
             to.herdr_ok(Step::Tabs, &["tab", "rename", &tab_id, label], cancelled)?;
@@ -625,6 +666,7 @@ fn rebuild_tabs(
             targets.insert(
                 source_pane.clone(),
                 Target {
+                    generation: Generation::Herdr1,
                     pane_id,
                     cwd: cwd_of(tab.pane(source_pane)),
                     created_in,
@@ -635,7 +677,7 @@ fn rebuild_tabs(
     for tab in &landing.stale_tabs {
         to.herdr_ok(Step::Tabs, &["tab", "close", tab], cancelled)?;
     }
-    review
+    let targets = review
         .panes()
         .map(|plan| {
             targets
@@ -646,5 +688,6 @@ fn rebuild_tabs(
                     source: serde::de::Error::custom("a pane was not recreated"),
                 })
         })
-        .collect()
+        .collect::<Result<_>>()?;
+    Ok((targets, core_tabs))
 }

@@ -16,12 +16,14 @@ use crate::teleport::{
 };
 use crate::{
     NavigationTarget, SheprdWindow,
+    browser::{Location, Scope, Store},
     i18n::{errors::Localize, fl},
     menu::Page,
     progress::{self, Progress},
     window::Flash,
 };
 use gpui::{prelude::*, *};
+use sheprd_backend::Generation;
 use std::{
     sync::{
         Arc,
@@ -349,9 +351,9 @@ impl SheprdWindow {
         };
         let destination = teleport.destination_label().unwrap_or_default().to_owned();
         let source = teleport.source.clone();
-        let store = cx.try_global::<crate::browser::Store>();
+        let store = cx.try_global::<Store>();
         let panes = |tab| match store?.get(tab)?.location.as_ref()? {
-            crate::browser::Location::CoreTerminal { panes, .. } => Some(panes.clone()),
+            Location::CoreTerminal { panes, .. } => Some(panes.clone()),
             _ => None,
         };
         let closed = teleport.closed_tabs(result.is_ok(), panes);
@@ -402,8 +404,41 @@ impl SheprdWindow {
             )),
         };
         self.show_flash(flash, cx);
+        self.open_teleported_core_tabs(&outcome, cx);
         self.teleport_follow = Some(Follow::new(outcome.endpoint_id, outcome.workspace_id));
         self.follow_teleport(cx);
+    }
+
+    /// Opens the tabs a move rebuilt in the destination's Herdr 2 in its
+    /// new workspace. Their terminals already run there; the window joins
+    /// them as it shows the workspace.
+    fn open_teleported_core_tabs(&mut self, outcome: &Outcome, cx: &mut Context<Self>) {
+        if outcome.core_tabs.is_empty() {
+            return;
+        }
+        let scope = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.id == outcome.endpoint_id)
+            .map_or_else(
+                || Scope::endpoint(&outcome.endpoint_id),
+                crate::browser::scope,
+            );
+        let opened = Store::update(cx, |store| {
+            outcome.core_tabs.iter().all(|panes| {
+                let location = Location::CoreTerminal {
+                    panes: panes.clone(),
+                    observe: false,
+                };
+                store
+                    .open(scope.clone(), &outcome.workspace_id, Some(location), None)
+                    .is_some()
+            })
+        });
+        if !opened {
+            self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
+        }
+        cx.notify();
     }
 
     /// Keep steering to the teleported workspace until it is focused: the
@@ -633,7 +668,7 @@ impl SheprdWindow {
                 }
                 for (index, tab) in review.tabs.iter().enumerate() {
                     let number = index + 1;
-                    let title = match &tab.label {
+                    let mut title = match &tab.label {
                         None => fl!("teleport-tab", number = number),
                         Some(label) => {
                             fl!(
@@ -643,6 +678,9 @@ impl SheprdWindow {
                             )
                         }
                     };
+                    if tab.into == Generation::Herdr2 {
+                        title = fl!("teleport-tab-herdr-2", tab = title);
+                    }
                     body = body.child(
                         div()
                             .pt(px(4.))

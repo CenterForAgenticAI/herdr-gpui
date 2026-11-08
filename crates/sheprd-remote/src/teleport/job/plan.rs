@@ -14,6 +14,7 @@ use crate::teleport::{
 };
 use sheprd_backend::Generation;
 use sheprd_client::shell_quote;
+use sheprd_session::panes::MAX_PANES;
 use std::{collections::HashMap, sync::atomic::AtomicBool};
 
 /// What the destination pane will do.
@@ -47,6 +48,8 @@ pub struct TabPlan {
     /// Which Herdr runs the source tab's terminals, and so how its agents
     /// are asked for notes and its programs stopped.
     pub generation: Generation,
+    /// Which Herdr runs it on the destination; see `destination_generation`.
+    pub into: Generation,
     pub label: Option<String>,
     pub tree: Node,
     pub panes: Vec<PanePlan>,
@@ -229,14 +232,23 @@ pub fn review(source: &Source, destination: &Candidate, cancelled: &AtomicBool) 
         _ => GitHubAccess::Direct,
     };
 
+    let wants_core = source.core_preferred || !source.core_tabs.is_empty();
+    let core_there = wants_core && core::available(&destination.place.host, cancelled)?;
+    let into = |generation| destination_generation(generation, core_there, source.core_preferred);
     let mut notes = 0;
     let mut planned: Vec<TabPlan> = tabs
         .iter()
-        .map(|tab| plan_tab(&snapshot, tab, source, &works, &installed, &mut notes))
+        .map(|tab| {
+            let node = tab_tree(&snapshot, tab);
+            let label = source.tab_labels.get(&tab.tab_id).cloned();
+            let moves = (Generation::Herdr1, into(Generation::Herdr1));
+            plan_tree(moves, label, node, &works, &installed, &mut notes)
+        })
         .collect();
     planned.extend(source.core_tabs.iter().map(|panes| {
+        let moves = (Generation::Herdr2, into(Generation::Herdr2));
         plan_tree(
-            Generation::Herdr2,
+            moves,
             None,
             core::tree(panes),
             &works,
@@ -257,47 +269,52 @@ pub fn review(source: &Source, destination: &Candidate, cancelled: &AtomicBool) 
     })
 }
 
-fn plan_tab(
-    snapshot: &HostSnapshot,
-    tab: &crate::teleport::snapshot::Tab,
-    source: &Source,
-    works: &[(String, Work, Option<String>)],
-    installed: &[String],
-    notes: &mut usize,
-) -> TabPlan {
+/// Which Herdr a tab run by `generation` here runs in on the destination.
+/// A Herdr 2 tab stays in Herdr 2, and with Herdr 2 `preferred` for new
+/// tabs every tab moves into it, wherever the destination runs a core;
+/// without one, every tab goes to its Herdr 1.
+fn destination_generation(generation: Generation, core_there: bool, preferred: bool) -> Generation {
+    if core_there && (preferred || generation == Generation::Herdr2) {
+        Generation::Herdr2
+    } else {
+        Generation::Herdr1
+    }
+}
+
+/// A Herdr 1 tab's split tree, or its panes in a row when its layout
+/// cannot be read.
+fn tab_tree(snapshot: &HostSnapshot, tab: &crate::teleport::snapshot::Tab) -> Node {
     let members: Vec<String> = snapshot
         .panes
         .iter()
         .filter(|pane| pane.tab_id == tab.tab_id)
         .map(|pane| pane.pane_id.clone())
         .collect();
-    let node = snapshot
+    snapshot
         .layout(&tab.tab_id)
         .and_then(tree)
         .or_else(|| Node::row(&members))
-        .unwrap_or_else(|| Node::Pane(String::new()));
-    plan_tree(
-        Generation::Herdr1,
-        source.tab_labels.get(&tab.tab_id).cloned(),
-        node,
-        works,
-        installed,
-        notes,
-    )
+        .unwrap_or_else(|| Node::Pane(String::new()))
 }
 
-/// What each pane of one source tab, laid out as `node`, becomes.
+/// What each pane of one source tab, laid out as `node`, becomes, as it
+/// moves `from` one Herdr `into` one on the destination. A tab with more
+/// panes than a Herdr 2 tab holds stays in Herdr 1.
 fn plan_tree(
-    generation: Generation,
+    (generation, into): (Generation, Generation),
     label: Option<String>,
     node: Node,
     works: &[(String, Work, Option<String>)],
     installed: &[String],
     notes: &mut usize,
 ) -> TabPlan {
-    let panes = node
-        .plan()
-        .slots
+    let slots = node.plan().slots;
+    let into = if slots.len() > MAX_PANES {
+        Generation::Herdr1
+    } else {
+        into
+    };
+    let panes = slots
         .into_iter()
         .filter_map(|id| {
             let (_, work, cwd) = works.iter().find(|(pane, ..)| *pane == id)?;
@@ -316,6 +333,7 @@ fn plan_tree(
         .collect();
     TabPlan {
         generation,
+        into,
         label,
         tree: node,
         panes,

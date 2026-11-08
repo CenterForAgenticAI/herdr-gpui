@@ -148,6 +148,7 @@ impl SheprdWindow {
             branch: target.branch.clone(),
             tab_labels,
             core_tabs: moving.iter().map(|(_, panes)| panes.clone()).collect(),
+            core_preferred: self.config.herdr_2_terminals,
         };
         // Every enabled host, connected or not: Teleport reaches each over its
         // own SSH. A connected host's snapshot saves a round trip; the others

@@ -1,7 +1,8 @@
 //! Herdr 2 (herdr-core) terminals in a teleported workspace. herdr-core keeps
 //! no tabs, the app does, so the app hands over each tab's pane tree; what
 //! runs in each terminal is read through the host's `herdr-core` CLI, as the
-//! `herdr` CLI reads a Herdr 1 pane.
+//! `herdr` CLI reads a Herdr 1 pane. On the destination, the same CLI starts
+//! a shell per pane, and the app opens the tabs it returns.
 
 use super::{
     error::{Result, Step, decode},
@@ -11,9 +12,10 @@ use super::{
     snapshot::SplitDirection,
 };
 use serde::Deserialize;
+use sheprd_backend::TerminalId;
 use sheprd_client::ScriptLimits;
 use sheprd_client::shell_quote;
-use sheprd_session::panes::{Axis, Node as PaneNode, Panes};
+use sheprd_session::panes::{Axis, Node as PaneNode, Panes, Share};
 use std::{collections::HashMap, sync::atomic::AtomicBool, time::Duration};
 
 /// How long past a handoff's own timeout its script may stay quiet.
@@ -195,6 +197,117 @@ pub(super) fn stop(host: &Host, terminals: &[String], cancelled: &AtomicBool) ->
         })
         .collect::<String>();
     host.query(Step::Retire, &body, &[], cancelled).map(drop)
+}
+
+/// Whether `host` has a herdr-core to run tabs in.
+pub(super) fn available(host: &Host, cancelled: &AtomicBool) -> Result<bool> {
+    let output = host.query(
+        Step::Review,
+        "if core_cli --version >/dev/null 2>&1; then echo yes; fi\n",
+        &[],
+        cancelled,
+    )?;
+    Ok(output.trim_ascii() == b"yes")
+}
+
+/// What `herdr-core run --json` answers.
+#[derive(Deserialize)]
+struct Started {
+    address: String,
+}
+
+/// Starts an idle shell in `host`'s core, in `cwd`, as the app's own new
+/// tab does, and returns its terminal ID. A program is typed into it later
+/// with [`type_line`], so its shell stays when it ends.
+pub(super) fn start_shell(host: &Host, cwd: &str, cancelled: &AtomicBool) -> Result<String> {
+    let line = format!(
+        "core_cli run --bg --json --no-parent --cwd {}\n",
+        shell_quote(cwd)
+    );
+    let output = host.query(Step::Tabs, &line, &[], cancelled)?;
+    let started: Started =
+        serde_json::from_slice(output.trim_ascii()).map_err(decode(Step::Tabs))?;
+    Ok(started.address)
+}
+
+/// Types `line` into `terminal` and presses Enter, as `herdr pane run` does
+/// for a Herdr 1 pane.
+pub(super) fn type_line(
+    host: &Host,
+    terminal: &str,
+    line: &str,
+    cancelled: &AtomicBool,
+) -> Result<()> {
+    let body = format!(
+        "core_cli send --json {} {} >/dev/null\n",
+        shell_quote(terminal),
+        shell_quote(line)
+    );
+    host.query(Step::Launch, &body, &[], cancelled).map(drop)
+}
+
+/// Terminals started on a destination for a move that has not finished:
+/// dropped before [`Spawned::keep`], it ends them, since no tab would ever
+/// show them.
+pub(super) struct Spawned<'a> {
+    host: &'a Host,
+    ids: Vec<String>,
+}
+
+impl<'a> Spawned<'a> {
+    pub(super) fn new(host: &'a Host) -> Self {
+        Self {
+            host,
+            ids: Vec::new(),
+        }
+    }
+
+    pub(super) fn push(&mut self, id: String) {
+        self.ids.push(id);
+    }
+
+    /// The move finished: the app opens their tabs.
+    pub(super) fn keep(mut self) {
+        self.ids.clear();
+    }
+}
+
+impl Drop for Spawned<'_> {
+    fn drop(&mut self) {
+        if self.ids.is_empty() {
+            return;
+        }
+        // Even a cancelled move ends what it started.
+        if let Err(error) = stop(self.host, &self.ids, &AtomicBool::new(false)) {
+            tracing::warn!(%error, "Could not end the Herdr 2 terminals of a failed teleport");
+        }
+    }
+}
+
+/// `node`, a source tab's split tree, as the app's panes of the terminals
+/// that stand in for its panes on the destination.
+pub(super) fn panes(node: &Node, terminals: &HashMap<String, String>) -> Option<Panes> {
+    Panes::try_from(pane_node(node, terminals)?).ok()
+}
+
+fn pane_node(node: &Node, terminals: &HashMap<String, String>) -> Option<PaneNode> {
+    Some(match node {
+        Node::Pane(id) => PaneNode::Leaf(TerminalId::new(terminals.get(id)?.as_str()).ok()?),
+        Node::Split {
+            direction,
+            ratio,
+            first,
+            second,
+        } => PaneNode::Split {
+            axis: match direction {
+                SplitDirection::Right => Axis::Row,
+                SplitDirection::Down => Axis::Column,
+            },
+            share: Share::at(*ratio),
+            first: Box::new(pane_node(first, terminals)?),
+            second: Box::new(pane_node(second, terminals)?),
+        },
+    })
 }
 
 /// A tab's panes as the split tree Teleport rebuilds, keyed by terminal ID.

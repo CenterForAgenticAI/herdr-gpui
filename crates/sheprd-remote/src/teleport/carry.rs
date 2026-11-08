@@ -165,6 +165,7 @@ fn review_repository(
         branch: None,
         tab_labels: HashMap::new(),
         core_tabs: Vec::new(),
+        core_preferred: false,
     };
     let candidate = job::resolve(&source, hosts, cancelled)?;
     // Only a repository sharing a remote is the same project; a name alone

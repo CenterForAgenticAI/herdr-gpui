@@ -2,6 +2,9 @@ use super::*;
 use sheprd_backend::TerminalId;
 use sheprd_session::panes::Share;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod destination;
+
 fn terminal(json: &str) -> Terminal {
     serde_json::from_str(json).unwrap()
 }
@@ -98,7 +101,8 @@ fn pane_trees_become_split_trees() {
 }
 
 /// A host whose `herdr-core` is a script logging its arguments: `get`
-/// answers for `t1` only, and `kill` does not know `t9`.
+/// answers for `t1` only, `kill` does not know `t9`, `run` starts `t5`, and
+/// `--version` fails once `$HOME/broken` exists.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn fake_core() -> (tempfile::TempDir, Host) {
     use std::os::unix::fs::PermissionsExt;
@@ -118,6 +122,8 @@ get) case "$3" in
     esac ;;
 kill) [ "$3" = t9 ] && exit 3; [ "$3" = t8 ] && exit 1; printf '{}\n' ;;
 send) printf '{}\n' ;;
+run) printf '{"address":"t5","agent":"zsh","state":"live"}\n' ;;
+--version) [ -e "$HOME/broken" ] && exit 1; printf 'hc 0.1.13\n' ;;
 esac
 "#,
     )

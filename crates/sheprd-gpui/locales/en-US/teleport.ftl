@@ -32,6 +32,8 @@ teleport-name-only = Matched by name only: this repository's remotes differ ther
 # A tab of the move, numbered from 1, with the label the user gave it.
 teleport-tab = Tab { $number }
 teleport-tab-labeled = Tab { $number }: { $label }
+# A tab that runs in the destination's Herdr 2; $tab is its title above.
+teleport-tab-herdr-2 = { $tab } · Herdr 2
 # What a pane runs on the destination. $program is a program's name,
 # $agent the agent that continues, $command the command line.
 teleport-pane-shell = Shell
