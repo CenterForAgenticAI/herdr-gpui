@@ -7,6 +7,35 @@ use super::AgentKind;
 
 /// Runtimes that run an agent's script rather than being one.
 const RUNTIMES: &[&str] = &["bun", "deno", "node"];
+/// Runtime options whose value is the next argument, not the script.
+const VALUED: &[&str] = &[
+    "-r",
+    "--require",
+    "--import",
+    "--loader",
+    "--experimental-loader",
+    "--env-file",
+    "--title",
+    "--inspect-port",
+    "--conditions",
+    "-C",
+    "--preload",
+    "--config",
+];
+/// Options after which the runtime runs code from the command line, so no
+/// script follows.
+const INLINE: &[&str] = &["-e", "--eval", "-p", "--print"];
+/// Packages whose entry point is not named after the agent, such as
+/// Claude Code's `cli.js`, found by their folder.
+const PACKAGES: &[(&str, AgentKind)] = &[
+    ("@anthropic-ai/claude-code", AgentKind::Claude),
+    ("@github/copilot", AgentKind::Copilot),
+    ("@letta-ai/letta-code", AgentKind::Letta),
+    ("@openai/codex", AgentKind::Codex),
+    ("@qwen-code/qwen-code", AgentKind::Qwen),
+    ("mastracode", AgentKind::Mastracode),
+    ("opencode-ai", AgentKind::Opencode),
+];
 
 impl AgentKind {
     /// The agent behind `name`: a reported app such as `claude-code`, or a
@@ -49,10 +78,36 @@ impl AgentKind {
         if !RUNTIMES.contains(&base(program).to_ascii_lowercase().as_str()) {
             return None;
         }
-        // The first argument that is not a flag is the script.
-        let script = argv.iter().skip(1).find(|arg| !arg.starts_with('-'))?;
-        Self::lookup(script)
+        let script = script(argv)?;
+        package(script).or_else(|| Self::lookup(script))
     }
+}
+
+/// The script a runtime's command line runs: the first argument that is
+/// neither an option nor an option's value.
+fn script(argv: &[String]) -> Option<&str> {
+    let mut args = argv.iter().skip(1);
+    while let Some(arg) = args.next() {
+        if !arg.starts_with('-') {
+            return Some(arg);
+        }
+        if INLINE.contains(&arg.as_str()) {
+            return None;
+        }
+        if VALUED.contains(&arg.as_str()) {
+            args.next();
+        }
+    }
+    None
+}
+
+/// The agent whose package folder holds `script`.
+fn package(script: &str) -> Option<AgentKind> {
+    let script = script.replace('\\', "/");
+    PACKAGES
+        .iter()
+        .find(|(folder, _)| script.contains(&format!("/node_modules/{folder}/")))
+        .map(|(_, kind)| *kind)
 }
 
 /// A program's name without its folder, a login shell's leading dash, or a

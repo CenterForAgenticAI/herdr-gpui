@@ -81,6 +81,47 @@ fn a_runtime_is_looked_past_to_its_script() {
 }
 
 #[test]
+fn a_package_names_an_entry_point_that_does_not() {
+    for (script, kind) in [
+        (
+            "/opt/node_modules/@anthropic-ai/claude-code/cli.js",
+            AgentKind::Claude,
+        ),
+        (
+            r"C:\npm\node_modules\@qwen-code\qwen-code\dist\index.js",
+            AgentKind::Qwen,
+        ),
+        (
+            "/g/lib/node_modules/@openai/codex/bin/codex.js",
+            AgentKind::Codex,
+        ),
+    ] {
+        assert_eq!(
+            AgentKind::identify(None, "node", &argv(&["node", script])),
+            Some(kind),
+            "{script}"
+        );
+    }
+}
+
+#[test]
+fn runtime_options_and_their_values_are_not_the_script() {
+    assert_eq!(
+        AgentKind::identify(
+            None,
+            "node",
+            &argv(&["node", "--require", "/work/setup.js", "/a/bin/codex"])
+        ),
+        Some(AgentKind::Codex)
+    );
+    assert_eq!(
+        AgentKind::identify(None, "node", &argv(&["node", "-e", "codex"])),
+        None,
+        "inline code runs no script"
+    );
+}
+
+#[test]
 fn shells_and_other_programs_are_not_agents() {
     for program in ["zsh", "-bash", "vim", "python3", "cargo", "node"] {
         assert_eq!(
