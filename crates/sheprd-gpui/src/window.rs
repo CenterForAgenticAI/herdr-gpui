@@ -42,6 +42,7 @@ pub(crate) mod prefix;
 mod reconnecting;
 mod regions;
 mod render;
+pub(crate) use render::NoticeCard;
 mod report_issue;
 mod select_hint;
 mod selection;
@@ -118,6 +119,9 @@ pub(crate) struct SheprdWindow {
     pub(crate) active: bool,
     /// The activity bar's panel and filter.
     pub(crate) activity: sidebar::Activity,
+    /// The coordinator group the agents panel is narrowed to, by name: a
+    /// group outlives its coordinator's pane. None lists every group.
+    pub(crate) agent_group: Option<String>,
     pub(crate) agent_sort: preferences::AgentSort,
     /// Whether the user chose the sort with the panel toggle, now or in a
     /// stored session. Until then the daemon's `ui.agent_panel_sort` decides,
@@ -255,6 +259,8 @@ pub(crate) struct SheprdWindow {
     pub(crate) listening_ports: crate::listening_ports::ListeningPorts,
     pub(crate) live: LiveState,
     pub(crate) local_error: Option<String>,
+    /// Every port this computer's user listens on, for the Ports section.
+    pub(crate) local_ports: crate::local_ports::LocalPorts,
     /// Draws the moving status marks the sidebar and the tab strip reserve
     /// room for; see `mark_layer`.
     pub(crate) mark_layer: Entity<crate::mark_layer::MarkLayer>,
@@ -734,6 +740,9 @@ impl SheprdWindow {
         self.update_checkpoints(cx);
         self.update_port_forwards(cx);
         if self.update_listening_ports() {
+            cx.notify();
+        }
+        if self.update_local_ports() {
             cx.notify();
         }
         #[cfg(feature = "azure")]

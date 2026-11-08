@@ -459,7 +459,7 @@ pub(crate) fn run() -> std::process::ExitCode {
     };
     // Whether the launcher is installed is read once here, never while a window opens.
     let taskbar = crate::taskbar::Taskbar::load();
-    gpui_platform::application()
+    crate::composition::application(appearance.dark.config.backdrop.translucent())
         .with_assets(icons::Icons)
         .run(move |cx| {
             let window_count = window_state.as_ref().map_or(1, |state| state.count());
@@ -509,6 +509,8 @@ pub(crate) fn run() -> std::process::ExitCode {
             let language = cx.global::<InitialAppearance>().config.language.clone();
             crate::i18n::install(&language, cx);
             app_icon::install();
+            #[cfg(target_os = "macos")]
+            crate::accessibility::window_focus::install();
             crate::caffeine::install(cx);
             crate::endpoint::watch_network();
             #[cfg(any(target_os = "macos", windows))]

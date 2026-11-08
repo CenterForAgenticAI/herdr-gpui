@@ -43,6 +43,7 @@ mod observer_program;
 mod opencode;
 mod overlay;
 mod pasted;
+mod phases;
 mod pinned;
 mod prepared;
 mod questions;

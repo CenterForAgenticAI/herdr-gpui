@@ -275,6 +275,10 @@ pub(crate) fn load(
         let mut args = vec![
             "-c",
             "core.quotePath=false",
+            // Its line ending warnings would land in the listing, which
+            // shares a stream with Git's errors.
+            "-c",
+            "core.safecrlf=false",
             "diff",
             format,
             "-z",
@@ -507,6 +511,8 @@ fn diff_text(source: &Source, files: &[&Request], limit: usize) -> crate::Result
     let mut args: Vec<String> = [
         "-c",
         "core.quotePath=false",
+        "-c",
+        "core.safecrlf=false",
         "diff",
         "--no-color",
         "--no-ext-diff",
