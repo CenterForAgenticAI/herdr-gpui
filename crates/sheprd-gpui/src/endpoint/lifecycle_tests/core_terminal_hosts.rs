@@ -83,8 +83,11 @@ fn the_herdr_2_command_on_an_ssh_host_dials_that_hosts_core(cx: &mut gpui::TestA
             view.endpoints.push(endpoint);
             view.selected_endpoint = 1;
             view.reset_selected(cx);
-            view.core_terminals
-                .set_remote_hub_for_test(scope(), Hub::with_join(unreachable));
+            view.core_terminals.set_remote_hub_for_test(
+                scope(),
+                ssh(),
+                Hub::with_join(unreachable),
+            );
             view.command(Command::NewCoreTerminal, window, cx);
             // This computer's core is never asked for the host's terminal.
             assert!(matches!(view.core_terminals.hub.state(), State::Idle));
@@ -123,7 +126,7 @@ fn a_new_tab_on_a_host_without_herdr_core_is_created_by_its_herdr(cx: &mut gpui:
             view.settings.shared =
                 Some(crate::herdr_settings::Settings::parse_text(NO_TAB_PROMPT).unwrap());
             view.core_terminals
-                .set_remote_hub_for_test(scope(), Hub::with_join(missing));
+                .set_remote_hub_for_test(scope(), ssh(), Hub::with_join(missing));
             view.command(Command::Tab, window, cx);
             let host = Host::Remote(scope());
             settle(view, &host, window, cx);
@@ -177,6 +180,79 @@ fn with_herdr_2_off_a_new_tab_on_an_ssh_host_is_created_by_its_herdr(
     };
     let request: serde_json::Value = serde_json::from_str(&request).unwrap();
     assert_eq!(request["method"], Method::TabCreate.as_str());
+}
+
+#[gpui::test]
+fn an_edited_or_removed_device_drops_its_core_hub(cx: &mut gpui::TestAppContext) {
+    let (fixture, cx) = cx.add_window_view(|window, cx| {
+        Fixture(cx.new(|cx| crate::sidebar::layout_tests::fixture_window(window, cx)))
+    });
+    let view = fixture.update(cx, |fixture, _| fixture.0.clone());
+    let (mut endpoint, _server) = connected_endpoint("ssh:fixture");
+    endpoint.connection.target = ssh();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.endpoints.push(endpoint);
+            let host = Host::Remote(scope());
+            view.core_terminals.set_remote_hub_for_test(
+                scope(),
+                ssh(),
+                Hub::with_join(unreachable),
+            );
+            view.poll_core_terminals(window, cx);
+            assert!(view.core_terminals.hub_of(&host).is_some());
+            // The device now reaches another machine: the hub that dials
+            // the old one goes, and the next ask makes one for the new one.
+            view.endpoints[1].connection.target = ConnectTarget::Ssh {
+                target: "elsewhere".into(),
+                session: "default".into(),
+            };
+            view.poll_core_terminals(window, cx);
+            assert!(view.core_terminals.hub_of(&host).is_none());
+            view.core_terminals.set_remote_hub_for_test(
+                scope(),
+                ssh(),
+                Hub::with_join(unreachable),
+            );
+            view.endpoints.truncate(1);
+            view.poll_core_terminals(window, cx);
+            assert!(view.core_terminals.hub_of(&host).is_none());
+        })
+    });
+}
+
+#[gpui::test]
+fn a_missing_core_never_opens_a_herdr_tab_in_another_workspace(cx: &mut gpui::TestAppContext) {
+    let (fixture, cx) = cx.add_window_view(|window, cx| {
+        Fixture(cx.new(|cx| crate::sidebar::layout_tests::fixture_window(window, cx)))
+    });
+    let view = fixture.update(cx, |fixture, _| fixture.0.clone());
+    let (mut endpoint, _server) = connected_endpoint("ssh:fixture");
+    endpoint.connection.target = ssh();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.endpoints.push(endpoint);
+            view.selected_endpoint = 1;
+            view.reset_selected(cx);
+            view.core_terminals
+                .set_remote_hub_for_test(scope(), ssh(), Hub::with_join(missing));
+            // Asked for in a workspace the user has since left.
+            view.start_core_program(
+                crate::core_terminals::Purpose::Tab {
+                    scope: scope(),
+                    workspace: "w-left".into(),
+                },
+                sheprd_backend::Spawn::default(),
+            );
+            settle(view, &Host::Remote(scope()), window, cx);
+            let (flash, _) = view.flash.as_ref().unwrap();
+            let reason = missing(Start::Join).err().unwrap().to_string();
+            assert_eq!(
+                flash.text,
+                crate::i18n::fl!("core-terminals-unavailable", reason = reason)
+            );
+        })
+    });
 }
 
 /// Creating at once, rather than asking for the tab's name first.

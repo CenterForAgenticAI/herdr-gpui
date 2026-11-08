@@ -154,28 +154,30 @@ impl SheprdWindow {
         }
     }
 
-    /// Puts a started terminal beside `at` in `tab`, and gives it the
-    /// keyboard. One that cannot be placed is ended rather than left behind.
+    /// Puts a started terminal of `host`'s core beside `at` in `tab`, and
+    /// gives it the keyboard. One that cannot be placed is ended in the core
+    /// it started in rather than left behind.
     pub(super) fn place_split(
         &mut self,
         tab: TabId,
         at: &TerminalId,
         axis: Axis,
-        new: TerminalId,
+        (host, new): (Host, TerminalId),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let placed = match self.core_terminals.tabs.get_mut(&tab) {
-            Some(shown) => shown.panes.split(at, axis, new.clone()).map(|()| {
-                shown.active = new.clone();
-                shown.set_zoom(None);
-                shown.unsaved = true;
-            }),
-            None => Err(super::panes::Error::Missing(at.clone())),
+            Some(shown) if shown.host == host => {
+                shown.panes.split(at, axis, new.clone()).map(|()| {
+                    shown.active = new.clone();
+                    shown.set_zoom(None);
+                    shown.unsaved = true;
+                })
+            }
+            _ => Err(super::panes::Error::Missing(at.clone())),
         };
         if let Err(error) = placed {
             self.show_flash(Flash::warning(error.to_string()), cx);
-            let host = self.core_terminals.host_of(tab);
             self.end_core_terminal(&host, new);
             return;
         }

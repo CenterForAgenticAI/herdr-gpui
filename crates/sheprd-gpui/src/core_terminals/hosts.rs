@@ -13,6 +13,7 @@ use crate::{
 };
 use gpui::{Context, Window};
 use sheprd_backend::{TerminalId, TerminalInfo};
+use sheprd_client::ConnectTarget;
 use sheprd_core_client::CoreBackend;
 use std::time::Instant;
 
@@ -40,6 +41,8 @@ impl Host {
 pub(super) struct Remote {
     pub(super) hub: Hub,
     pub(super) infos: Infos,
+    /// The saved device the hub dials, to tell when it was edited.
+    pub(super) target: ConnectTarget,
 }
 
 impl CoreTerminals {
@@ -99,9 +102,14 @@ impl CoreTerminals {
     /// Uses `hub` for the core of the host `scope` names, as the first ask
     /// for it would, so a test never dials a real host.
     #[cfg(test)]
-    pub(crate) fn set_remote_hub_for_test(&mut self, scope: Scope, hub: Hub) {
+    pub(crate) fn set_remote_hub_for_test(
+        &mut self,
+        scope: Scope,
+        target: ConnectTarget,
+        hub: Hub,
+    ) {
         let infos = Infos::default();
-        self.remote.insert(scope, Remote { hub, infos });
+        self.remote.insert(scope, Remote { hub, infos, target });
     }
 
     /// Reads what each core reports while any of its tabs is known, for
@@ -135,7 +143,7 @@ impl SheprdWindow {
     /// pane that held the keyboard has its tab take it back once the new
     /// view is there.
     pub(super) fn poll_core_hubs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut changed = false;
+        let mut changed = self.forget_stale_core_hosts();
         for host in self.core_terminals.hosts() {
             let Some(hub) = self.core_terminals.hub_of_mut(&host) else {
                 continue;
@@ -165,10 +173,10 @@ impl SheprdWindow {
                 .core_terminals
                 .wanted
                 .as_ref()
-                .is_some_and(|(purpose, _)| self.purpose_host(purpose) == host);
+                .is_some_and(|(_, wanted, _)| *wanted == host);
             if let Some(error) = failed
                 && wanted_here
-                && let Some((purpose, _)) = self.core_terminals.wanted.take()
+                && let Some((purpose, _, _)) = self.core_terminals.wanted.take()
             {
                 self.core_unavailable(purpose, &error, window, cx);
             }
@@ -189,13 +197,13 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let still_there = |view: &Self, scope: &Scope| {
-            view.browser_key()
-                .is_some_and(|(focused, _)| focused == *scope)
-        };
+        // Only while the workspace the tab was asked for is still the one
+        // shown, since the Herdr tab opens in the focused workspace.
         if error.core_missing()
-            && let Purpose::Tab { scope, .. } = &purpose
-            && still_there(self, scope)
+            && let Purpose::Tab { scope, workspace } = &purpose
+            && self
+                .browser_key()
+                .is_some_and(|(focused, shown)| focused == *scope && shown == *workspace)
         {
             self.command(Command::Tab, window, cx);
             self.show_flash(Flash::hint(fl!("core-terminals-host-without-core")), cx);
@@ -214,21 +222,55 @@ impl SheprdWindow {
         if let Host::Remote(scope) = host
             && !self.core_terminals.remote.contains_key(scope)
         {
-            let target = self
-                .endpoints
-                .iter()
-                .find(|endpoint| crate::browser::scope(endpoint) == *scope)?
-                .connection
-                .target
-                .clone();
+            let target = self.saved_target(scope)?.clone();
             self.core_terminals.remote.insert(
                 scope.clone(),
                 Remote {
-                    hub: Hub::remote(target),
+                    hub: Hub::remote(target.clone()),
                     infos: Infos::default(),
+                    target,
                 },
             );
         }
         self.core_terminals.hub_of_mut(host)
+    }
+
+    /// Where the saved device `scope` names connects now.
+    fn saved_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
+        self.endpoints
+            .iter()
+            .find(|endpoint| crate::browser::scope(endpoint) == *scope)
+            .map(|endpoint| &endpoint.connection.target)
+    }
+
+    /// Drops the hub of every host whose device was removed or now connects
+    /// somewhere else, with its views and a terminal wanted there, so no new
+    /// terminal starts on a machine the device no longer names. A host still
+    /// saved gets a new hub the next time its tabs ask. True when any went.
+    fn forget_stale_core_hosts(&mut self) -> bool {
+        let stale: Vec<Scope> = self
+            .core_terminals
+            .remote
+            .iter()
+            .filter(|(scope, remote)| self.saved_target(scope) != Some(&remote.target))
+            .map(|(scope, _)| scope.clone())
+            .collect();
+        for scope in &stale {
+            let terminals = &mut self.core_terminals;
+            terminals.remote.remove(scope);
+            let host = Host::Remote(scope.clone());
+            let tabs = &terminals.tabs;
+            terminals
+                .views
+                .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != host));
+            if terminals
+                .wanted
+                .as_ref()
+                .is_some_and(|(_, wanted, _)| *wanted == host)
+            {
+                terminals.wanted = None;
+            }
+        }
+        !stale.is_empty()
     }
 }
