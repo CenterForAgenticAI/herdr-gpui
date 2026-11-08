@@ -326,20 +326,35 @@ impl Emulator {
 
 /// Marks the cursor's cell with a placement and, unless the command kept
 /// it, moves the cursor as Ghostty does: down to the image's last row,
-/// scrolling as a line feed would, and to the column after it.
+/// scrolling as a line feed would, and to the column after it. The rows
+/// below the cursor are walked and the rest scrolled in one step, so a tall
+/// image costs no more than a short one.
 fn place(term: &mut Term<Listener>, processor: &mut Processor<SyncPending>, placed: Placed) {
     let point = term.grid().cursor.point;
     term.grid_mut()[point].push_zerowidth(placed.marker);
     if !placed.moves_cursor {
         return;
     }
-    let mut moves = b"\x1bD".repeat(usize::try_from(placed.rows.saturating_sub(1)).unwrap_or(0));
+    // Rows and columns are at most `graphics::MAX_SIDE`, within a CSI
+    // parameter.
+    let rows = placed.rows.saturating_sub(1);
+    let screen = u32::try_from(term.screen_lines()).unwrap_or(u32::MAX);
+    let down = rows.min(screen);
+    if down > 0 {
+        // Cursor down stops at the bottom margin, as an index would before
+        // it scrolls.
+        processor.advance(term, format!("\x1b[{down}B").as_bytes());
+    }
+    let moved = term.grid().cursor.point.line.0 - point.line.0;
+    let scroll = rows.saturating_sub(u32::try_from(moved).unwrap_or(0));
+    if scroll > 0 {
+        processor.advance(term, format!("\x1b[{scroll}S").as_bytes());
+    }
     let column = u64::try_from(point.column.0)
         .unwrap_or(u64::MAX)
         .saturating_add(u64::from(placed.cols))
         .saturating_add(1);
-    moves.extend_from_slice(format!("\x1b[{column}G").as_bytes());
-    processor.advance(term, &moves);
+    processor.advance(term, format!("\x1b[{column}G").as_bytes());
 }
 
 fn config(size: Size, scrollback_lines: usize) -> Config {

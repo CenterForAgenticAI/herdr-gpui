@@ -402,17 +402,16 @@ impl Graphics {
         self.clock += 1;
         image.used = self.clock;
         let (width, height) = (image.key.image_width, image.key.image_height);
-        let [_, _, source_width, source_height] = control.source;
-        let shown_width = if source_width == 0 {
-            width
-        } else {
-            source_width
-        };
-        let shown_height = if source_height == 0 {
-            height
-        } else {
-            source_height
-        };
+        // The source rectangle is held inside the image; one starting
+        // outside it shows nothing.
+        let [source_x, source_y, source_width, source_height] = control.source;
+        if source_x >= width || source_y >= height {
+            return None;
+        }
+        let side = |wanted: u32, room: u32| if wanted == 0 { room } else { wanted.min(room) };
+        let shown_width = side(source_width, width - source_x);
+        let shown_height = side(source_height, height - source_y);
+        let source = [source_x, source_y, shown_width, shown_height];
         let (cell_width, cell_height) = self.cell;
         let pixels_wide = shown_width.saturating_add(control.offset[0]);
         let pixels_high = shown_height.saturating_add(control.offset[1]);
@@ -461,7 +460,7 @@ impl Graphics {
                 named,
                 cols,
                 rows,
-                source: control.source,
+                source,
                 offset: control.offset,
                 z: control.z,
             },
@@ -564,18 +563,14 @@ fn visible(
     if hidden >= placement.rows {
         return None;
     }
+    // `place` held the source rectangle inside the image.
     let [source_x, mut source_y, source_width, mut source_height] = placement.source;
     let mut y_offset = placement.offset[1];
     if hidden > 0 {
-        let full = if source_height == 0 {
-            key.image_height.saturating_sub(source_y)
-        } else {
-            source_height
-        };
-        let cut = u64::from(full) * u64::from(hidden) / u64::from(placement.rows);
-        let cut = u32::try_from(cut).ok()?;
-        source_y += cut;
-        source_height = full - cut;
+        let cut = u64::from(source_height) * u64::from(hidden) / u64::from(placement.rows);
+        let cut = u32::try_from(cut).ok()?.min(source_height);
+        source_y = source_y.saturating_add(cut);
+        source_height -= cut;
         y_offset = 0;
     }
     Some(SurfaceGraphicsPlacement {

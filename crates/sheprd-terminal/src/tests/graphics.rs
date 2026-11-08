@@ -187,3 +187,35 @@ fn without_images_the_cursor_still_moves_past_them() {
     let cursor = emulator.frame().cursor.unwrap();
     assert_eq!((cursor.x, cursor.y), (3, 2));
 }
+
+#[test]
+fn a_tall_image_scrolls_like_its_rows_of_line_feeds() {
+    let mut emulator = fed(10, 4, b"one\r\ntwo\r\n");
+    // The cursor is on row 2 of 4: an image five rows tall walks one row
+    // down and scrolls three, as five line feeds would less one.
+    emulator.feed(&command("a=T,f=100,c=1,r=5", &png(2, 2)));
+    let frame = emulator.frame();
+    assert_eq!(
+        frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
+        Some((1, 3))
+    );
+    assert_eq!(line(&frame, 0), "");
+    assert_eq!(emulator.scroll_metrics().history, 3);
+    // As tall as the image may be, the move is bounded.
+    let mut tall = super::emulator(10, 4);
+    tall.feed(&command("a=T,f=100,c=1,r=10000", &png(2, 2)));
+    assert_eq!(tall.frame().cursor.map(|cursor| cursor.y), Some(3));
+}
+
+#[test]
+fn a_source_outside_the_image_is_refused_and_one_past_its_edge_is_held() {
+    let mut emulator = emulator(10, 4);
+    emulator.feed(&command("a=t,f=100,i=2", &png(4, 4)));
+    emulator.feed(b"\x1b_Ga=p,i=2,y=9,c=1,r=1,C=1\x1b\\");
+    assert!(emulator.take_graphics().is_none());
+    emulator.feed(b"\x1b_Ga=p,i=2,y=2,h=4294967295,c=1,r=2,C=1\x1b\\");
+    let [placement] = &placements(&mut emulator)[..] else {
+        panic!("one placement")
+    };
+    assert_eq!((placement.source_y, placement.source_height), (2, 2));
+}
