@@ -183,7 +183,18 @@ export PATH
     /// from the desktop never reaches another session's core.
     fn core_cli(&self) -> String {
         if !self.is_local() {
-            return r#"core_cli() { herdr-core "$@"; }"#.to_owned();
+            // Found where the app's own bridge finds it, so a core that
+            // opens Herdr 2 tabs there also takes the moved ones. `$USER`
+            // may be unset in a non-interactive shell.
+            let locate = sheprd_client::core_bridge::locate_script();
+            return format!(
+                r#"core_cli() (
+set +u
+{locate}
+[ -n "$herdr_core" ] || {{ echo "herdr-core: not installed" >&2; exit 127; }}
+exec "$herdr_core" "$@"
+)"#
+            );
         }
         let bundled = std::env::current_exe()
             .ok()
