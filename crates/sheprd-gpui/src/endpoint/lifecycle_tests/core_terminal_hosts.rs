@@ -211,9 +211,11 @@ fn an_edited_or_removed_device_drops_its_core_hub(cx: &mut gpui::TestAppContext)
                 Ok(sheprd_backend::TerminalInfo {
                     agent: AgentStatus::Unknown,
                     cwd: None,
+                    foreground: None,
                     id: sheprd_backend::TerminalId::new("t1").unwrap(),
                     labels: Default::default(),
                     name: None,
+                    reporter: None,
                     state: sheprd_backend::RunState::Running,
                     title: None,
                 }),
