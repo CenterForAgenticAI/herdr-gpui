@@ -88,20 +88,15 @@ impl SheprdWindow {
         text: String,
         cx: &mut Context<Self>,
     ) {
-        // The stand-in shell has no tab to split: the editor gets its own.
-        let purpose = match pane {
-            Some((tab, at)) => Purpose::Split {
-                tab,
-                at,
-                axis: Axis::Row,
-            },
-            None => match self.browser_key() {
-                Some((scope, workspace)) => Purpose::Tab { scope, workspace },
-                None => {
-                    self.show_flash(Flash::warning(fl!("core-terminals-open-workspace")), cx);
-                    return;
-                }
-            },
+        let ended = pane.as_ref().is_some_and(|key| {
+            self.core_terminals
+                .views
+                .get(key)
+                .is_some_and(|view| view.read(cx).ended())
+        });
+        let Some(purpose) = editor_purpose(pane, ended, self.browser_key()) else {
+            self.show_flash(Flash::warning(fl!("core-terminals-open-workspace")), cx);
+            return;
         };
         // The history is saved on this computer, where a remote core's
         // editor could not open it.
@@ -127,6 +122,25 @@ impl SheprdWindow {
     fn core_edit_failed(&mut self, error: &Error, cx: &mut Context<Self>) {
         tracing::warn!(%error, "Could not edit a herdr-core terminal's history");
         self.show_flash(Flash::warning(fl!("core-terminals-edit-failed")), cx);
+    }
+}
+
+/// Where the editor for a view's history opens: beside `pane`, or in a
+/// new tab of the workspace `key` names. The stand-in shell has no tab to
+/// split, and an `ended` pane would be closed out of a split the editor
+/// made, taking its history with it, so both get a tab of their own.
+pub(super) fn editor_purpose(
+    pane: Option<Pane>,
+    ended: bool,
+    key: Option<(crate::browser::Scope, String)>,
+) -> Option<Purpose> {
+    match pane.filter(|_| !ended) {
+        Some((tab, at)) => Some(Purpose::Split {
+            tab,
+            at,
+            axis: Axis::Row,
+        }),
+        None => key.map(|(scope, workspace)| Purpose::Tab { scope, workspace }),
     }
 }
 
