@@ -38,12 +38,10 @@ local function button(id: string, icon: string, label: string?, count: any, sele
 			style = { background = if selected and theme.accent then `{theme.accent}30` else nil, radius = 8, margin = { left = 2 } },
 			ui.icon { icon, class = "activity-icon", style = { color = if selected then theme.foreground else theme.muted } },
 			if count
-				then ui.text {
-					`{count}`,
+				then ui.row {
 					class = "activity-count",
-					size = "small",
-					float = { at = "top-right", inset = 0 },
-					style = { color = theme.accent },
+					float = { top = 0, right = 0 },
+					ui.text { `{count}`, size = "small", style = { color = theme.accent } },
 				}
 				else false,
 		},
