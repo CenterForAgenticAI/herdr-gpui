@@ -138,7 +138,7 @@ impl SheprdWindow {
     pub(crate) fn poll_devices_overview(&mut self, cx: &mut Context<Self>) {
         let now = std::time::Instant::now();
         let wall = std::time::SystemTime::now();
-        // Counted straight from each snapshot: this runs every tick, open
+        // Counted straight from each host's sessions: this runs every tick, open
         // overview or not, and needs none of a row's display data.
         let selected = self.selected_endpoint;
         let counts = self
@@ -151,9 +151,14 @@ impl SheprdWindow {
                 } else {
                     &endpoint.live
                 };
-                let tally = online_tally(endpoint, live)?;
-                Some((endpoint.id.as_str(), tally.counts()))
-            });
+                let tally = online_tally(endpoint, live, &self.sessions(index))?;
+                Some((index, tally.counts()))
+            })
+            .collect::<Vec<_>>();
+        let endpoints = &self.endpoints;
+        let counts = counts
+            .into_iter()
+            .map(|(index, counts)| (endpoints[index].id.as_str(), counts));
         self.devices_overview.history.observe(now, wall, counts);
         self.sync_tree_search(cx);
         let Some(store) = cx.try_global::<Store>() else {
@@ -232,7 +237,7 @@ impl SheprdWindow {
                 } else {
                     &endpoint.live
                 };
-                Device::new(index, endpoint, live)
+                Device::new(index, endpoint, live, &self.sessions(index))
             })
             .collect()
     }
