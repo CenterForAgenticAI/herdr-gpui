@@ -160,15 +160,27 @@ impl Screen {
         if !self.driving {
             return Ok(());
         }
-        self.drain()?;
         let size = self.emulator.size();
-        self.attachment = core.attach(&Attach {
-            cols: size.cols(),
-            observe: true,
-            rows: size.rows(),
-            terminal: &self.address,
-            ..Attach::default()
-        })?;
+        let observing = self.drain().and_then(|()| {
+            Ok(core.attach(&Attach {
+                cols: size.cols(),
+                observe: true,
+                rows: size.rows(),
+                terminal: &self.address,
+                ..Attach::default()
+            })?)
+        });
+        let observing = match observing {
+            Ok(observing) => observing,
+            Err(error) => {
+                // The driving attach must not outlive the last hold: the
+                // screen goes, taking it along, and the next read opens a
+                // watching one.
+                self.lost = true;
+                return Err(error);
+            }
+        };
+        self.attachment = observing;
         self.driving = false;
         let attached = self.attachment.terminal.clone();
         self.follow_size(&attached)

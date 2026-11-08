@@ -159,3 +159,23 @@ fn a_hold_on_a_screen_that_was_replaced_counts_as_lost_and_lets_the_new_one_be()
     drop(source);
     fake.server.join().unwrap();
 }
+
+#[test]
+fn a_last_hold_that_cannot_go_back_to_watching_takes_its_screen_along() {
+    let (source, fake) = fake();
+    source.poll().unwrap();
+    let hold = source.hold(&id("t1"), 46, 30).unwrap();
+    next(&fake);
+    next(&fake);
+    // The fake core refuses any attach 13 columns wide, so watching again
+    // at the phone's last size fails.
+    hold.resize(13, 30).unwrap();
+    fake.resizes.recv_timeout(Duration::from_secs(2)).unwrap();
+    drop(hold);
+    assert!(
+        !lock(&source.state).screens.contains_key("t1"),
+        "the driving attach went with its screen"
+    );
+    drop(source);
+    fake.server.join().unwrap();
+}

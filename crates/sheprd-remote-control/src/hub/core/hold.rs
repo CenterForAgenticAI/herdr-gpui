@@ -66,8 +66,21 @@ impl Drop for Hold {
         let Some((core, screen)) = self.screen() else {
             return;
         };
-        if let Err(error) = lock(&screen).release(&core, self.id) {
-            tracing::debug!(%error, "a phone's size was not released");
+        let released = lock(&screen).release(&core, self.id);
+        if let Err(error) = released {
+            tracing::debug!(%error, "a phone's size was not released; its screen goes");
+            // Dropping the screen ends the driving attach, so the core sizes
+            // the terminal back to the driver before.
+            if let Some(source) = self.source.upgrade() {
+                let mut state = lock(&source.state);
+                if state
+                    .screens
+                    .get(&self.address)
+                    .is_some_and(|current| Arc::ptr_eq(current, &screen))
+                {
+                    state.screens.remove(&self.address);
+                }
+            }
         }
     }
 }
