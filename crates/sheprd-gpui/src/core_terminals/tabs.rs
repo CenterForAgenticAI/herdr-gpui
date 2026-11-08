@@ -26,12 +26,27 @@ impl SheprdWindow {
             return;
         };
         let terminals = &mut self.core_terminals;
-        terminals.tabs.retain(|id, _| store.get(*id).is_some());
+        // A tab closed before its layout was saved holds panes its saved
+        // layout does not list yet: they end with it too.
+        let mut closed = Vec::new();
+        terminals.tabs.retain(|id, shown| {
+            let open = store.get(*id).is_some();
+            if !open && !shown.observe {
+                closed.extend(shown.panes.terminals().into_iter().cloned());
+            }
+            open
+        });
         let tabs = &terminals.tabs;
         terminals.views.retain(|(tab, terminal), _| {
             tabs.get(tab)
                 .is_some_and(|shown| shown.panes.contains(terminal))
         });
+        if !closed.is_empty() {
+            Store::update(cx, |store| store.end_terminals(closed));
+        }
+        let Some(store) = cx.try_global::<Store>() else {
+            return;
+        };
         let Some((scope, workspace)) = self.browser_key() else {
             return;
         };

@@ -509,6 +509,8 @@ impl Store {
     /// still types into, as one a pane moved to.
     pub(crate) fn take_ending(&mut self) -> Vec<sheprd_backend::TerminalId> {
         let mut ending = std::mem::take(&mut self.ending);
+        ending.sort();
+        ending.dedup();
         ending.retain(|terminal| {
             !self.tabs.iter().any(|tab| {
                 matches!(
@@ -519,6 +521,15 @@ impl Store {
             })
         });
         ending
+    }
+
+    /// Queues `terminals` of a tab already closed to end, as a layout split
+    /// after its last save still holds.
+    pub(crate) fn end_terminals(
+        &mut self,
+        terminals: impl IntoIterator<Item = sheprd_backend::TerminalId>,
+    ) {
+        self.ending.extend(terminals);
     }
 
     /// Whether closed tabs left terminals to end.
