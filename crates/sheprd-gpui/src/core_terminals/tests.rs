@@ -7,4 +7,5 @@ mod paste;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod wanted;
 mod worker;
