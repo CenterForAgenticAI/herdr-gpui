@@ -16,11 +16,26 @@ const HERDR: &str = if cfg!(windows) { "herdr.exe" } else { "herdr" };
 /// always tries, and says why it failed.
 const RETRY: Duration = Duration::from_secs(60);
 
+/// What asks for this machine's core to start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wake {
+    /// A phone opening its home view.
+    View,
+    /// A phone's new tab, chat, or workspace.
+    Work,
+}
+
 impl Hub {
     /// The core new work goes to: the one answering, else this machine's,
     /// started now when Herdr 1 neither answers nor is installed here.
     /// `Ok(None)` when the work is Herdr 1's; an error when a start failed.
     pub(super) async fn core_for_work(&self) -> Result<Option<Arc<core::Source>>> {
+        self.start_core(Wake::Work).await
+    }
+
+    /// [`Self::core_for_work`] for `wake`: a view does not start a core again
+    /// within a minute of a failed start; new work always may.
+    async fn start_core(&self, wake: Wake) -> Result<Option<Arc<core::Source>>> {
         if let Some(core) = self.active_core() {
             return Ok(Some(core));
         }
@@ -31,6 +46,11 @@ impl Hub {
         // Another phone's request may have started it meanwhile.
         if core.connected() {
             return Ok(Some(core));
+        }
+        // Checked under the lock, so views queued behind a failed start do
+        // not each try again.
+        if wake == Wake::View && failed.is_some_and(|at| at.elapsed() < RETRY) {
+            return Ok(None);
         }
         tracing::info!(binary = %binary.display(), "Starting herdr-core for a phone");
         let started = core.clone();
@@ -54,16 +74,17 @@ impl Hub {
         if self.layout().connected || self.startable().is_none() {
             return;
         }
-        let recent = self
+        // A start underway, or a recent failure: nothing to queue.
+        let idle = self
             .waking
             .try_lock()
-            .map_or(true, |failed| failed.is_some_and(|at| at.elapsed() < RETRY));
-        if recent {
+            .is_ok_and(|failed| failed.is_none_or(|at| at.elapsed() >= RETRY));
+        if !idle {
             return;
         }
         let hub = self.clone();
         tokio::spawn(async move {
-            let _ = hub.core_for_work().await;
+            let _ = hub.start_core(Wake::View).await;
         });
     }
 
