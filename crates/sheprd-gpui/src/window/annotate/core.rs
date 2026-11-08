@@ -4,23 +4,19 @@
 //! agents do not take notes yet, so a note is copied to the clipboard.
 
 use super::*;
-use crate::core_terminals::Quote;
 
 impl SheprdWindow {
-    /// Opens the note card about `view`'s selection, at once when the
-    /// screen shows it, or once its text is read from the history.
+    /// Opens the note card about `view`'s selection once its text is read
+    /// from the history.
     pub(super) fn annotate_core_selection(
         &mut self,
         view: Entity<CoreTerminalView>,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match view.update(cx, |view, _| view.quote_selection()) {
-            Quote::Nothing => {
-                self.show_flash(Flash::warning(fl!("window-annotate-select")), cx);
-            }
-            Quote::Ready(quote) => self.compose_core_note(view, quote, window, cx),
-            Quote::Reading => self.terminal_notes.core_quote = Some(view),
+        if view.update(cx, |view, _| view.quote_selection()) {
+            self.terminal_notes.core_quote = Some(view);
+        } else {
+            self.show_flash(Flash::warning(fl!("window-annotate-select")), cx);
         }
     }
 

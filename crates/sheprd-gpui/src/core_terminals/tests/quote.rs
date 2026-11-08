@@ -4,7 +4,6 @@ use super::{
     history::{point, requests, shown},
     worker::until,
 };
-use crate::core_terminals::Quote;
 use gpui::{Modifiers, MouseButton, point as at, px};
 use sheprd_backend::{History, HistoryAnswer, ScrollMetrics, SurfaceUpdate};
 
@@ -12,11 +11,7 @@ use sheprd_backend::{History, HistoryAnswer, ScrollMetrics, SurfaceUpdate};
 fn a_selection_off_the_screen_is_quoted_from_the_history(cx: &mut gpui::TestAppContext) {
     let (view, cx, backend) = shown(cx);
     cx.run_until_parked();
-    cx.update(|_, cx| {
-        view.update(cx, |view, _| {
-            assert_eq!(view.quote_selection(), Quote::Nothing)
-        })
-    });
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(!view.quote_selection())));
     let bounds = cx.update(|_, cx| view.read(cx).bounds()).unwrap();
     let cell =
         |column: f32, row: f32| bounds.origin + at(px(8.5 * column + 1.), px(17. * row + 1.));
@@ -26,15 +21,13 @@ fn a_selection_off_the_screen_is_quoted_from_the_history(cx: &mut gpui::TestAppC
     cx.simulate_mouse_up(cell(0., 1.), MouseButton::Left, Modifiers::none());
     cx.update(|_, cx| {
         view.update(cx, |view, _| {
-            // The blank screen shows all of it: quoted at once.
-            assert_eq!(view.quote_selection(), Quote::Ready("\n".into()));
             // The card sits beside the last selected row.
             let anchor = view.selection_anchor().unwrap();
             assert_eq!(anchor.origin, bounds.origin + at(px(0.), px(34.)));
             assert_eq!(anchor.size.width, px(8.5 * 4.));
         })
     });
-    // Scrolled so the selection is off the screen, it is read instead.
+    // Scrolled so the selection is off the screen, it is read the same way.
     backend
         .answers
         .lock()
@@ -45,6 +38,7 @@ fn a_selection_off_the_screen_is_quoted_from_the_history(cx: &mut gpui::TestAppC
             offset: 5,
             history: 7,
             rows: 3,
+            full: false,
         },
         revision: 4,
     }]);
@@ -58,7 +52,7 @@ fn a_selection_off_the_screen_is_quoted_from_the_history(cx: &mut gpui::TestAppC
     });
     cx.update(|_, cx| {
         view.update(cx, |view, _| {
-            assert_eq!(view.quote_selection(), Quote::Reading);
+            assert!(view.quote_selection());
             assert!(view.selection_anchor().is_none());
         })
     });
@@ -78,4 +72,48 @@ fn a_selection_off_the_screen_is_quoted_from_the_history(cx: &mut gpui::TestAppC
         })
     });
     assert_eq!(quote.unwrap(), "quoted");
+}
+
+#[gpui::test]
+fn a_newer_quote_drops_the_answer_to_an_older_one(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    cx.run_until_parked();
+    let bounds = cx.update(|_, cx| view.read(cx).bounds()).unwrap();
+    let cell =
+        |column: f32, row: f32| bounds.origin + at(px(8.5 * column + 1.), px(17. * row + 1.));
+    cx.simulate_mouse_down(cell(3., 2.), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(cell(0., 1.), Some(MouseButton::Left), Modifiers::none());
+    cx.simulate_mouse_up(cell(0., 1.), MouseButton::Left, Modifiers::none());
+    backend.answers.lock().unwrap().extend([
+        HistoryAnswer::Text("older".into()),
+        HistoryAnswer::Text("newer".into()),
+    ]);
+    cx.update(|_, cx| {
+        view.update(cx, |view, _| {
+            assert!(view.quote_selection());
+            assert!(view.quote_selection());
+        })
+    });
+    let quote = until(|| {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.poll(window, cx);
+                view.take_quote()
+            })
+        })
+    });
+    assert_eq!(quote.unwrap(), "newer");
+}
+
+#[gpui::test]
+fn only_a_view_drawn_in_the_last_frame_is_shown(cx: &mut gpui::TestAppContext) {
+    let (view, _, _) = shown(cx);
+    let mut terminals = crate::core_terminals::CoreTerminals::default();
+    // A cached view of a tab no group shows is not on screen.
+    assert!(!terminals.shows(&view));
+    terminals.draw(&view);
+    assert!(terminals.shows(&view));
+    // A frame that does not draw it, as after switching tabs, hides it.
+    terminals.start_frame();
+    assert!(!terminals.shows(&view));
 }

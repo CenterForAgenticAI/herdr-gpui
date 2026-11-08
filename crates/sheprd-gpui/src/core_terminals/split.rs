@@ -46,6 +46,18 @@ impl SheprdWindow {
         tab: &Tab,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let drawn: Vec<_> = self
+            .core_terminals
+            .tabs
+            .get(&tab.id)
+            .into_iter()
+            .flat_map(|shown| shown.panes.terminals())
+            .filter_map(|terminal| self.core_terminals.views.get(&(tab.id, terminal.clone())))
+            .cloned()
+            .collect();
+        for view in &drawn {
+            self.core_terminals.draw(view);
+        }
         let Some(shown) = self.core_terminals.tabs.get(&tab.id) else {
             return self.core_placeholder();
         };

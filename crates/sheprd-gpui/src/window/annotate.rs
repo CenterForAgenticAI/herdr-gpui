@@ -105,8 +105,10 @@ fn destination(snapshot: &ClientShellSnapshot, pane_id: &str) -> (Option<String>
 impl SheprdWindow {
     /// Opens the note field over the pane holding the selection.
     pub(crate) fn annotate_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A newer note replaces one whose quote is still being read.
+        self.terminal_notes.core_quote = None;
         if let Some(view) = self.core_terminals.focused_view(window, cx) {
-            self.annotate_core_selection(view, window, cx);
+            self.annotate_core_selection(view, cx);
             return;
         }
         let Some(selection) = self.selection.clone() else {
@@ -178,6 +180,8 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A quote still being read would replace this note when it arrives.
+        self.terminal_notes.core_quote = None;
         let input = cx.new(SearchInput::new);
         input.update(cx, |input, cx| {
             input.set_placeholder_with(|| fl!("window-annotate-placeholder"), cx);

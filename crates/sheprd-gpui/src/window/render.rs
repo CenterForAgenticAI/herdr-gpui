@@ -114,6 +114,7 @@ impl SheprdWindow {
 
 impl Render for SheprdWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.core_terminals.start_frame();
         self.restore_menu_focus(window, cx);
         self.leave_vanished_region(window, cx);
         self.sync_backdrop(window, cx);
@@ -740,8 +741,11 @@ impl Render for SheprdWindow {
                 (Shown::Terminal, _)
                     if terminal_slot == Some(slot) && self.core_fallback_view().is_some() =>
                 {
-                    self.core_fallback_view()
-                        .map(IntoElement::into_any_element)
+                    let view = self.core_fallback_view();
+                    if let Some(view) = &view {
+                        self.core_terminals.draw(view);
+                    }
+                    view.map(IntoElement::into_any_element)
                         .unwrap_or_else(|| div().into_any_element())
                 }
                 (Shown::Terminal, _) if terminal_slot == Some(slot) => terminal

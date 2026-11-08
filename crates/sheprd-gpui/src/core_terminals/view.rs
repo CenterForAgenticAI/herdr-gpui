@@ -10,7 +10,6 @@ pub(super) mod keys;
 pub(super) mod paste;
 mod pointer;
 mod quote;
-pub(crate) use quote::Quote;
 mod slide;
 
 use super::{

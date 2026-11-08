@@ -32,7 +32,7 @@ mod tests;
 pub(crate) use error::Error;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
-pub(crate) use view::{CoreTerminalView, Look, Quote};
+pub(crate) use view::{CoreTerminalView, Look};
 
 use crate::{
     SheprdWindow,
@@ -120,6 +120,9 @@ impl TabPanes {
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// The views the window drew in its last frame: a cached view of a tab
+    /// no group shows is not among them.
+    drawn: Vec<EntityId>,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view

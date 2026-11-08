@@ -1,45 +1,26 @@
-//! The selected text a note quotes, and where the note sits: a selection
-//! the screen shows is quoted at once, one reaching into the history is
-//! read from it first.
+//! The selected text a note quotes, and where the note sits. The text is
+//! read from the history, shown or not, as a copy reads it.
 
 use super::CoreTerminalView;
 use crate::core_terminals::Error;
 use gpui::{Bounds, Context, Pixels, point, px, size};
 use sheprd_backend::History;
 
-/// What [`CoreTerminalView::quote_selection`] found.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Quote {
-    /// Nothing is selected.
-    Nothing,
-    Ready(String),
-    /// The text is being read from the history; [`CoreTerminalView::take_quote`]
-    /// has it once it arrives.
-    Reading,
-}
-
 impl CoreTerminalView {
-    /// The selected text, for a note about it.
-    pub(crate) fn quote_selection(&mut self) -> Quote {
-        let Some(selection) = self.selection.filter(|selection| !selection.is_empty()) else {
-            return Quote::Nothing;
+    /// Starts reading the selected text, for a note about it; false when
+    /// nothing is selected. [`Self::take_quote`] has it once it arrives; a
+    /// quote asked for earlier is dropped.
+    pub(crate) fn quote_selection(&mut self) -> bool {
+        self.quote_ready = None;
+        let Some(range) = self.selection.and_then(|selection| selection.range()) else {
+            self.quoting = None;
+            return false;
         };
-        let shown = self
-            .screen
-            .frame
-            .as_deref()
-            .and_then(|frame| selection.text(frame, self.top()));
-        match (shown, selection.range()) {
-            (Some(text), _) => Quote::Ready(text),
-            (None, Some(range)) => {
-                self.quoting = Some(self.ask(History::Read {
-                    anchor: range.start,
-                    cursor: range.end,
-                }));
-                Quote::Reading
-            }
-            (None, None) => Quote::Nothing,
-        }
+        self.quoting = Some(self.ask(History::Read {
+            anchor: range.start,
+            cursor: range.end,
+        }));
+        true
     }
 
     /// The text [`Self::quote_selection`] read from the history, once.
