@@ -15,6 +15,7 @@ mod attention;
 mod commands;
 mod error;
 mod fallback;
+mod hosts;
 mod hub;
 mod infos;
 mod screen;
@@ -30,6 +31,7 @@ mod worker;
 mod tests;
 
 pub(crate) use error::Error;
+pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
 pub(crate) use view::{CoreTerminalView, Look};
@@ -70,6 +72,8 @@ pub(crate) enum Purpose {
 struct TabPanes {
     /// The pane keys go to while the tab has focus.
     active: TerminalId,
+    /// The core the tab's terminals run in.
+    host: Host,
     /// A mirror tab only watches: it neither types nor splits.
     observe: bool,
     panes: Panes,
@@ -83,9 +87,18 @@ struct TabPanes {
 }
 
 impl TabPanes {
-    fn new(panes: Panes, observe: bool) -> Self {
+    /// Whether chats are drawn over the tab's panes: it drives its
+    /// terminals, and they run in this computer's core. A chat runs
+    /// `herdr-acp`, whose program and socket are this computer's, so a tab
+    /// on another host shows its terminals only.
+    fn holds_chats(&self) -> bool {
+        !self.observe && self.host == Host::Local
+    }
+
+    fn new(host: Host, panes: Panes, observe: bool) -> Self {
         Self {
             active: panes.first().clone(),
+            host,
             observe,
             panes,
             unsaved: false,
@@ -127,13 +140,15 @@ pub(crate) struct CoreTerminals {
     infos: infos::Infos,
     /// How the views draw now, to tell when the window's look changed.
     look: Option<Look>,
+    /// Other hosts' cores, by the scope of their workspaces.
+    remote: HashMap<Scope, hosts::Remote>,
     /// A shell starting, and what for.
-    starting: Option<(Purpose, Started)>,
+    starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// A terminal to start once the hub connects: a shell, or the program
     /// its spawn names.
-    wanted: Option<(Purpose, Spawn)>,
+    wanted: Option<(Purpose, Host, Spawn)>,
 }
 
 impl CoreTerminals {
@@ -157,22 +172,23 @@ impl CoreTerminals {
             .any(|view| view.read(cx).focus_handle().contains_focused(window, cx))
     }
 
-    /// What herdr-core reports of the terminals in the panes of tabs that
-    /// drive them, which a chat may be drawn over. A mirror only watches.
+    /// What this computer's core reports of the terminals in the panes of
+    /// tabs that hold chats, which a chat may be drawn over. A mirror only
+    /// watches, and a tab on another host runs no chat.
     pub(crate) fn chat_terminals(&self) -> impl Iterator<Item = &TerminalInfo> {
         self.tabs
             .values()
-            .filter(|shown| !shown.observe)
+            .filter(|shown| shown.holds_chats())
             .flat_map(|shown| shown.panes.terminals())
             .filter_map(|terminal| self.infos.get(terminal))
     }
 
     /// The pane a new chat in `tab` opens beside: the one in use, in a tab
-    /// that drives its terminals.
+    /// that holds chats.
     pub(crate) fn chat_split_at(&self, tab: TabId) -> Option<TerminalId> {
         self.tabs
             .get(&tab)
-            .filter(|shown| !shown.observe)
+            .filter(|shown| shown.holds_chats())
             .map(|shown| shown.active.clone())
     }
 
@@ -186,22 +202,23 @@ impl CoreTerminals {
         observe: bool,
         infos: Vec<TerminalInfo>,
     ) {
-        self.tabs.insert(tab, TabPanes::new(panes, observe));
+        self.tabs
+            .insert(tab, TabPanes::new(Host::Local, panes, observe));
         for info in infos {
             self.infos.insert(info);
         }
     }
 
-    /// Whether `tab` is a herdr-core tab that drives its terminals, not a
-    /// mirror that only watches.
+    /// Whether `tab` is a herdr-core tab that holds chats: it drives its
+    /// terminals, rather than a mirror that only watches, on this computer.
     pub(crate) fn drives(&self, tab: TabId) -> bool {
-        self.tabs.get(&tab).is_some_and(|shown| !shown.observe)
+        self.tabs.get(&tab).is_some_and(TabPanes::holds_chats)
     }
 
-    /// The panes a driving tab draws: all of them, or only the zoomed one
-    /// once it covers the split. A mirror draws no chat.
+    /// The panes a tab that holds chats draws: all of them, or only the
+    /// zoomed one once it covers the split. A mirror draws no chat.
     pub(crate) fn visible_chat_panes(&self, tab: TabId) -> Vec<&TerminalId> {
-        let Some(shown) = self.tabs.get(&tab).filter(|shown| !shown.observe) else {
+        let Some(shown) = self.tabs.get(&tab).filter(|shown| shown.holds_chats()) else {
             return Vec::new();
         };
         let zoomed = shown
@@ -228,11 +245,12 @@ impl CoreTerminals {
         true
     }
 
-    /// The tab whose panes hold `terminal`, among tabs that drive them.
+    /// The tab whose panes hold `terminal` of this computer's core, among
+    /// tabs that hold chats. Another host's `t1` is another terminal.
     pub(crate) fn tab_of(&self, terminal: &TerminalId) -> Option<TabId> {
         self.tabs
             .iter()
-            .find(|(_, shown)| !shown.observe && shown.panes.contains(terminal))
+            .find(|(_, shown)| shown.holds_chats() && shown.panes.contains(terminal))
             .map(|(id, _)| *id)
     }
 
@@ -246,22 +264,21 @@ impl CoreTerminals {
 }
 
 impl SheprdWindow {
-    /// Whether a new tab runs in herdr-core. The window's core is on this
-    /// computer, so a tab on another host stays with that host's Herdr, where
-    /// its shell starts on the host and in the workspace's folder.
+    /// Whether a new tab runs in herdr-core: the core of the host the
+    /// focused workspace is on. A host found to have no herdr-core keeps its
+    /// new tabs in its Herdr.
     pub(crate) fn new_tabs_use_core(&self) -> bool {
-        self.config.herdr_2_terminals && !self.selected_is_remote()
+        let host = Host::of(&crate::browser::scope(
+            &self.endpoints[self.selected_endpoint],
+        ));
+        self.config.herdr_2_terminals && !self.core_terminals.lacks_core(&host)
     }
 
     /// The `new_core_terminal` command: starts a shell in herdr-core and
-    /// shows it in a tab of the focused workspace. With no core running, the
-    /// user's own `herdr-core` or the bundled one starts. Refused on another
-    /// host, where the shell would run on this computer instead.
+    /// shows it in a tab of the focused workspace. With no core running on
+    /// this computer, the user's own `herdr-core` or the bundled one starts;
+    /// on another host, its bridge starts the host's own.
     pub(crate) fn new_core_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected_is_remote() {
-            self.show_flash(Flash::warning(fl!("core-terminals-local-only")), cx);
-            return;
-        }
         let Some((scope, workspace)) = self.browser_key() else {
             self.show_flash(Flash::warning(fl!("core-terminals-open-workspace")), cx);
             return;
@@ -270,30 +287,51 @@ impl SheprdWindow {
         self.start_core_program(Purpose::Tab { scope, workspace }, Spawn::default());
     }
 
-    /// Starts `spawn` in herdr-core for `purpose`, once the hub connects.
+    /// Starts `spawn` in herdr-core for `purpose`, once the hub of its
+    /// host's core connects.
     pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn) {
-        self.core_terminals.wanted = Some((purpose, spawn));
-        self.core_terminals.hub.connect(Start::IfMissing);
+        let host = self.purpose_host(&purpose);
+        let Some(hub) = self.core_hub(&host) else {
+            return;
+        };
+        hub.connect(Start::IfMissing);
+        self.core_terminals.wanted = Some((purpose, host, spawn));
         self.start_core_shell();
+    }
+
+    /// The core a terminal started for `purpose` runs in, read once as it is
+    /// asked for: a tab closed while it starts must not send its terminal
+    /// to another core.
+    fn purpose_host(&self, purpose: &Purpose) -> Host {
+        match purpose {
+            Purpose::Tab { scope, .. } => Host::of(scope),
+            Purpose::Split { tab, .. } => self.core_terminals.host_of(*tab),
+        }
     }
 
     /// Starts the wanted shell once the hub is connected, in the folder of
     /// the pane it splits when herdr-core knows it.
     fn start_core_shell(&mut self) {
-        let terminals = &mut self.core_terminals;
-        if terminals.starting.is_some() {
+        if self.core_terminals.starting.is_some() {
             return;
         }
-        let Some(backend) = terminals.hub.backend().cloned() else {
+        let terminals = &mut self.core_terminals;
+        let Some((_, host, _)) = &terminals.wanted else {
             return;
         };
-        let Some((purpose, mut spawn)) = terminals.wanted.take() else {
+        let Some(backend) = terminals.backend_of(host).cloned() else {
+            return;
+        };
+        let Some((purpose, host, mut spawn)) = terminals.wanted.take() else {
             return;
         };
         if spawn.cwd.is_none()
             && let Purpose::Split { at, .. } = &purpose
         {
-            spawn.cwd = terminals.infos.get(at).and_then(|info| info.cwd.clone());
+            spawn.cwd = terminals
+                .infos_of(&host)
+                .and_then(|infos| infos.get(at))
+                .and_then(|info| info.cwd.clone());
         }
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let spawned = std::thread::Builder::new()
@@ -302,7 +340,7 @@ impl SheprdWindow {
                 let _ = send.send(backend.spawn(&spawn));
             });
         match spawned {
-            Ok(_) => terminals.starting = Some((purpose, receive)),
+            Ok(_) => terminals.starting = Some((purpose, host, receive)),
             Err(error) => tracing::warn!(%error, "Could not start a herdr-core spawn worker"),
         }
     }
@@ -310,30 +348,7 @@ impl SheprdWindow {
     /// Runs every window tick: connects for restored tabs, places a started
     /// terminal, gives each shown pane its view, and takes new screens.
     pub(crate) fn poll_core_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let connected = self.core_terminals.hub.backend().is_some();
-        if self.core_terminals.hub.poll() {
-            // A lost connection ended every pane's worker. Their views go, so
-            // the next sync joins the core again and attaches each terminal
-            // anew; nothing is started or replayed. A pane that held the
-            // keyboard has its tab take it back once the new view is there.
-            if connected && self.core_terminals.hub.backend().is_none() {
-                if let Some((tab, _)) = self.core_terminals.focused_pane(window, cx) {
-                    self.core_terminals.focus_wanted = Some(tab);
-                }
-                self.core_terminals.views.clear();
-            }
-            if let State::Unavailable(error) = self.core_terminals.hub.state()
-                && self.core_terminals.wanted.take().is_some()
-            {
-                let reason = error.to_string();
-                self.show_flash(
-                    Flash::warning(fl!("core-terminals-unavailable", reason = reason)),
-                    cx,
-                );
-            }
-            self.start_core_shell();
-            cx.notify();
-        }
+        self.poll_core_hubs(window, cx);
         self.place_started_core_terminal(window, cx);
         self.sync_core_views(cx);
         if let Some(tab) = self.core_terminals.focus_wanted
@@ -353,15 +368,7 @@ impl SheprdWindow {
             view.update(cx, |view, cx| view.poll(cx));
         }
         self.poll_core_panes(window, cx);
-        // Split chrome and the sidebar's rows name panes from what herdr-core
-        // reports, so it is read while any herdr-core tab is known.
-        let listed = !self.core_terminals.tabs.is_empty();
-        let backend = listed.then(|| self.core_terminals.hub.backend()).flatten();
-        if self
-            .core_terminals
-            .infos
-            .poll(backend, std::time::Instant::now())
-        {
+        if self.core_terminals.poll_infos(std::time::Instant::now()) {
             self.hear_core_agents(cx);
             cx.notify();
         }
@@ -382,7 +389,7 @@ impl SheprdWindow {
     }
 
     fn place_started_core_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((_, started)) = &self.core_terminals.starting else {
+        let Some((_, _, started)) = &self.core_terminals.starting else {
             return;
         };
         let outcome = match started.try_recv() {
@@ -393,13 +400,16 @@ impl SheprdWindow {
                 return;
             }
         };
-        let Some((purpose, _)) = self.core_terminals.starting.take() else {
+        let Some((purpose, host, _)) = self.core_terminals.starting.take() else {
             return;
         };
         let info = match outcome {
             // Known at once, so a chat it labels attaches without waiting
             // for the next list.
-            Ok(info) => self.core_terminals.infos.insert(info),
+            Ok(info) => match self.core_terminals.infos_of_mut(&host) {
+                Some(infos) => infos.insert(info),
+                None => info,
+            },
             Err(error) => {
                 let reason = error.to_string();
                 self.show_flash(
@@ -425,7 +435,7 @@ impl SheprdWindow {
                 self.show_browser_tab(id, window, cx);
             }
             Purpose::Split { tab, at, axis } => {
-                self.place_split(tab, &at, axis, info.id, window, cx)
+                self.place_split(tab, &at, axis, (host, info.id), window, cx)
             }
         }
         cx.notify();

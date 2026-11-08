@@ -24,7 +24,7 @@ mod value;
 mod worker;
 
 pub use catalog::{FILE as CATALOG_FILE, SavedDevice, load, remove, rename, save};
-pub use command::with_command;
+pub use command::{connect_core, with_command};
 pub use providers::ProviderError;
 pub use providers::{
     Deletion, Shape, Spec, connect, deletion, icon, image as image_support, name, noun, offer,
