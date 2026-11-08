@@ -101,3 +101,30 @@ fn herdr_2_workspaces_get_their_checkout_but_the_unlisted_group_does_not() {
     checkouts.fill(&mut later, now + Duration::from_secs(10));
     assert_eq!(later.workspaces[0].branch.as_deref(), Some("next"));
 }
+
+#[test]
+fn a_full_cache_keeps_its_fresh_readings() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Instant::now();
+    let mut checkouts = Checkouts::default();
+    let folder = |n: usize| dir.path().join(n.to_string());
+    let workspaces = (0..=crate::hub::core::checkouts::MAX_FOLDERS)
+        .map(|n| workspace(&format!("core:space:{n}"), &folder(n)))
+        .collect();
+    let mut layout = Layout {
+        workspaces,
+        ..Layout::default()
+    };
+    checkouts.fill(&mut layout, now);
+    let cached = &checkouts.cached;
+    assert_eq!(cached.len(), crate::hub::core::checkouts::MAX_FOLDERS);
+    assert!(cached.contains_key(&folder(0).to_string_lossy().into_owned()));
+    // Once stale, room is made again.
+    let later = now + Duration::from_secs(10);
+    let mut one = Layout {
+        workspaces: vec![workspace("core:space:x", &dir.path().join("x"))],
+        ..Layout::default()
+    };
+    checkouts.fill(&mut one, later);
+    assert_eq!(checkouts.cached.len(), 1);
+}

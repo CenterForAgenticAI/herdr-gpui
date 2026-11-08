@@ -18,7 +18,7 @@ use std::{
 /// shows within this.
 const FRESH: Duration = Duration::from_secs(5);
 /// Folders remembered at once.
-const MAX_FOLDERS: usize = 256;
+pub(super) const MAX_FOLDERS: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Checkout {
@@ -28,7 +28,7 @@ pub(super) struct Checkout {
 
 #[derive(Default)]
 pub(super) struct Checkouts {
-    cached: HashMap<String, (Instant, Option<Checkout>)>,
+    pub(super) cached: HashMap<String, (Instant, Option<Checkout>)>,
 }
 
 impl Checkouts {
@@ -58,10 +58,15 @@ impl Checkouts {
         }
         let checkout = read(Path::new(folder));
         if self.cached.len() >= MAX_FOLDERS {
-            self.cached.clear();
+            self.cached
+                .retain(|_, (at, _)| now.saturating_duration_since(*at) < FRESH);
         }
-        self.cached
-            .insert(folder.to_owned(), (now, checkout.clone()));
+        // Past the bound, a folder is read each time rather than pushing
+        // out readings still fresh.
+        if self.cached.len() < MAX_FOLDERS || self.cached.contains_key(folder) {
+            self.cached
+                .insert(folder.to_owned(), (now, checkout.clone()));
+        }
         checkout
     }
 }
