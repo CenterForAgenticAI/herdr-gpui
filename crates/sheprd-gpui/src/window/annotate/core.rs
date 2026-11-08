@@ -25,7 +25,11 @@ impl SheprdWindow {
         let Some(view) = self.terminal_notes.core_quote.clone() else {
             return;
         };
-        if !self.core_terminals.shows(&view) {
+        // The note is the pane's: one that lost the keyboard, to the
+        // palette or anything else, while its quote was read drops it
+        // rather than take the keyboard back.
+        let focused = view.read(cx).focus_handle().contains_focused(window, cx);
+        if !self.core_terminals.shows(&view) || !focused || self.menu.page.is_some() {
             self.terminal_notes.core_quote = None;
             return;
         }
