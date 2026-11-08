@@ -21,6 +21,10 @@ pub const READY_TIMEOUT: Duration = Duration::from_secs(90);
 /// call's own limit and a stop request is seen soon.
 const CHECK_IN: Duration = Duration::from_secs(5);
 
+/// How long to pause before asking again about an agent that is not
+/// working, which the core answers at once.
+const QUIET_PAUSE: Duration = Duration::from_secs(1);
+
 /// When waiting gives up: a stop request, or a deadline.
 #[derive(Clone, Copy)]
 pub struct Until<'a> {
@@ -29,6 +33,21 @@ pub struct Until<'a> {
 }
 
 impl Until<'_> {
+    /// Whether to go on: a stop request is `Error::Stopped`, a passed
+    /// deadline `Error::Expired`. Checked before work that cannot be undone,
+    /// such as starting an agent.
+    pub fn check(&self) -> Result<()> {
+        if self.stop.load(Ordering::Acquire) {
+            return Err(Error::Stopped);
+        }
+        if Instant::now() >= self.deadline {
+            return Err(Error::Expired);
+        }
+        Ok(())
+    }
+
+    /// How long the next wait call may take, or `None` once the deadline
+    /// has passed.
     fn check_in(&self) -> Result<Option<Duration>> {
         if self.stop.load(Ordering::Acquire) {
             return Err(Error::Stopped);
@@ -91,20 +110,31 @@ pub fn ready(core: &Core, terminal: &str, until: Until<'_>) -> Result<()> {
 }
 
 /// Waits until the turn after `turn` ends: the agent took a prompt sent at
-/// `turn` and is done with it. A deadline passing first is
+/// `turn` and is done with it. An agent blocked on a question has not
+/// finished, so the wait goes on for the user to answer it; one that
+/// reports an error has failed. A deadline passing first is
 /// `Error::AgentBusy`.
 pub fn finish(core: &Core, terminal: &str, turn: u64, until: Until<'_>) -> Result<Waited> {
     while let Some(timeout) = until.check_in()? {
         let waited = core.wait(terminal, timeout)?;
-        if waited.ended && (waited.turn > turn || waited.reason != WaitReason::Status) {
-            ended(&waited)?;
-            return Ok(waited);
+        if !waited.ended {
+            continue;
         }
-        if waited.ended {
-            // Not started on the prompt yet: wait a moment rather than ask
-            // again at once, as the core answers a quiet agent straight away.
-            std::thread::sleep(Duration::from_millis(250));
+        ended(&waited)?;
+        let finished = waited.turn > turn || waited.reason != WaitReason::Status;
+        match waited.status.as_deref() {
+            Some("error") if finished => {
+                return Err(Error::AgentFailed {
+                    status: "error".to_owned(),
+                });
+            }
+            Some("blocked") => {}
+            _ if finished => return Ok(waited),
+            _ => {}
         }
+        // Not started on the prompt yet, or waiting on the user: the core
+        // answers such an agent at once, so pause rather than ask again.
+        std::thread::sleep(QUIET_PAUSE);
     }
     Err(Error::AgentBusy)
 }

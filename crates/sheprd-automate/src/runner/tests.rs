@@ -1,4 +1,6 @@
 use super::*;
+
+mod prompt;
 use crate::{
     store::{AgentRow, NewRun},
     testing::{Fixture, git},

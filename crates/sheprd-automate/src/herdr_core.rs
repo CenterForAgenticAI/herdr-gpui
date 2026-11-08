@@ -105,18 +105,32 @@ impl HerdrCore {
     }
 
     /// A new worktree of `repo` on `branch`, from `base` or what it has
-    /// checked out. Answers the checkout.
-    pub fn create_worktree(repo: &Path, branch: &str, base: Option<&str>) -> Result<PathBuf> {
+    /// checked out. Answers the checkout. Git is killed at the step's stop
+    /// or deadline, so a hook that hangs cannot hold a stopped run.
+    pub fn create_worktree(
+        repo: &Path,
+        branch: &str,
+        base: Option<&str>,
+        until: Until<'_>,
+    ) -> Result<PathBuf> {
         let root = worktree::root().ok_or(Error::NoHome)?;
-        Ok(worktree::add(repo, branch, base.unwrap_or("HEAD"), &root)?)
+        let give_up = || until.check().is_err();
+        Ok(worktree::add(
+            repo,
+            branch,
+            base.unwrap_or("HEAD"),
+            &root,
+            give_up,
+        )?)
     }
 
-    /// A new worktree, and `harness` started in it. A worktree whose agent
-    /// did not start stays, as Herdr 1's does: the user can see what
-    /// happened there.
-    pub fn start_agent(&self, start: &AgentStart<'_>) -> Result<Started> {
+    /// A new worktree, and `harness` started in it, unless the step was
+    /// stopped or ran out of time first. A worktree whose agent did not
+    /// start stays, as Herdr 1's does: the user can see what happened there.
+    pub fn start_agent(&self, start: &AgentStart<'_>, until: Until<'_>) -> Result<Started> {
         let core = self.core()?;
-        let checkout = Self::create_worktree(start.repo, start.branch, start.base)?;
+        let checkout = Self::create_worktree(start.repo, start.branch, start.base, until)?;
+        until.check()?;
         let argv = argv(start.harness);
         let cwd = checkout.to_string_lossy();
         let run = Run {

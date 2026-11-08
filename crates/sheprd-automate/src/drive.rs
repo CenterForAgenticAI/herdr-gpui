@@ -38,7 +38,8 @@ impl Drive {
     }
 
     /// This drive for one step: each Herdr 1 call ends when `stop` is set or
-    /// `deadline` passes. herdr-core's waits take theirs per call.
+    /// `deadline` passes. herdr-core's steps take the same limits as an
+    /// `Until` with every call that can wait (see `steps::execute`).
     pub fn bounded(&self, stop: Arc<AtomicBool>, deadline: Instant) -> Self {
         match self {
             Self::Herdr(herdr) => Self::Herdr(herdr.bounded(stop, deadline)),

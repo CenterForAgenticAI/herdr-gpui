@@ -136,3 +136,33 @@ fn an_agent_on_a_dialog_gets_no_prompt() {
         "{error}"
     );
 }
+
+#[test]
+fn a_question_mid_turn_keeps_the_wait_going_and_an_error_fails_it() {
+    let (client, mut core) = connected();
+    let finished = thread::spawn(move || {
+        let stop = AtomicBool::new(false);
+        agent::finish(&client, "t1", 0, until(&stop))
+    });
+    let mut blocked = waited(true, "status", 1);
+    blocked["status"] = json!("blocked");
+    expect(&mut core, "terminal.wait", blocked);
+    let mut failed = waited(true, "status", 1);
+    failed["status"] = json!("error");
+    expect(&mut core, "terminal.wait", failed);
+    let error = finished.join().unwrap().unwrap_err();
+    assert!(matches!(error, Error::AgentFailed { .. }), "{error}");
+}
+
+#[test]
+fn a_stopped_or_late_step_starts_nothing() {
+    let stop = AtomicBool::new(false);
+    let late = Until {
+        deadline: Instant::now(),
+        stop: &stop,
+    };
+    assert!(matches!(late.check(), Err(Error::Expired)));
+    let stopped = AtomicBool::new(true);
+    assert!(matches!(until(&stopped).check(), Err(Error::Stopped)));
+    until(&stop).check().unwrap();
+}

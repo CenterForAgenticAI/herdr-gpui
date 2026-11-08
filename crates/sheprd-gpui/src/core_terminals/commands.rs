@@ -136,41 +136,38 @@ impl SheprdWindow {
         self.show_browser_tab(id, window, cx);
     }
 
-    /// Shows `terminal`, which something outside the window started, such
-    /// as an automation's agent: the tab of the focused workspace that
-    /// drives it, else a new one. A terminal another workspace's tab drives
-    /// opens watch-only here, so two tabs never type into it.
+    /// Shows `terminal`, a terminal of this computer's core that something
+    /// outside the window started, such as an automation's agent: the
+    /// focused workspace's tab holding it, with it as the pane in use, else
+    /// a new tab. A terminal a tab elsewhere drives opens watch-only here,
+    /// so two tabs never type into it. Refused while another host is shown,
+    /// whose workspaces cannot hold this computer's terminals.
     pub(crate) fn open_core_terminal(
         &mut self,
         terminal: TerminalId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.selected_is_remote() {
+            self.show_flash(Flash::warning(fl!("core-terminals-local-only")), cx);
+            return;
+        }
         let Some((scope, workspace)) = self.browser_key() else {
             self.show_flash(Flash::warning(fl!("core-terminals-open-workspace")), cx);
             return;
         };
-        let driving = cx.try_global::<Store>().map(|store| {
-            store
-                .tabs()
-                .filter(|tab| tab.scope == scope)
-                .filter_map(|tab| match &tab.location {
-                    Some(Location::CoreTerminal {
-                        panes,
-                        observe: false,
-                    }) if panes.contains(&terminal) => Some((tab.id, tab.workspace_id.clone())),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let driving = driving.unwrap_or_default();
-        if let Some((tab, _)) = driving.iter().find(|(_, held)| *held == workspace) {
-            self.show_browser_tab(*tab, window, cx);
+        let (shown, driven) = cx
+            .try_global::<Store>()
+            .map(|store| holding(store, &terminal, &scope, &workspace))
+            .unwrap_or_default();
+        if let Some(tab) = shown {
+            self.sync_core_views(cx);
+            self.show_core_pane(tab, &terminal, window, cx);
             return;
         }
         let location = Location::CoreTerminal {
             panes: Panes::single(terminal),
-            observe: !driving.is_empty(),
+            observe: driven,
         };
         let Some(id) = Store::update(cx, |store| {
             store.open(scope, &workspace, Some(location), None)
@@ -181,4 +178,30 @@ impl SheprdWindow {
         self.sync_core_views(cx);
         self.show_browser_tab(id, window, cx);
     }
+}
+
+/// The focused workspace's tab already showing `terminal`, driving or
+/// watching, and whether any tab of this computer drives it. Every local
+/// scope's tabs attach to the same core.
+fn holding(
+    store: &Store,
+    terminal: &TerminalId,
+    scope: &crate::browser::Scope,
+    workspace: &str,
+) -> (Option<TabId>, bool) {
+    let mut shown = None;
+    let mut driven = false;
+    for tab in store.tabs().filter(|tab| tab.scope.is_local()) {
+        let Some(Location::CoreTerminal { panes, observe }) = &tab.location else {
+            continue;
+        };
+        if !panes.contains(terminal) {
+            continue;
+        }
+        driven |= !observe;
+        if shown.is_none() && tab.scope == *scope && tab.workspace_id == workspace {
+            shown = Some(tab.id);
+        }
+    }
+    (shown, driven)
 }

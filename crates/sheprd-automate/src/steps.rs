@@ -110,7 +110,7 @@ pub fn execute(
         Step::Pull { branch } => pull(context, &log, branch, timeout),
         Step::Run { name } => worktree_script(context, &log, name, timeout),
         Step::Sh { command } => shell(context, &log, command, &step.env, timeout),
-        Step::Worktree { name, base } => worktree(context, name, base.as_deref()),
+        Step::Worktree { name, base } => worktree(context, name, base.as_deref(), until),
         Step::Agent {
             harness,
             prompt,
@@ -119,6 +119,7 @@ pub fn execute(
             wait,
         } => agent(
             context,
+            &log,
             &Agent {
                 position,
                 harness,
@@ -129,7 +130,7 @@ pub fn execute(
             },
             until,
         ),
-        Step::Notify { text } => notify(context, text),
+        Step::Notify { text } => notify(context, text, until),
     };
     match result {
         Ok(mut result) => {
@@ -319,7 +320,12 @@ fn shell(
     })
 }
 
-fn worktree(context: &StepContext<'_>, name: &str, base: Option<&str>) -> Outcome {
+fn worktree(
+    context: &StepContext<'_>,
+    name: &str,
+    base: Option<&str>,
+    until: Until<'_>,
+) -> Outcome {
     let repo = repo(context)?;
     let (path, pane) = match context.drive {
         Drive::Herdr(herdr) => {
@@ -330,7 +336,7 @@ fn worktree(context: &StepContext<'_>, name: &str, base: Option<&str>) -> Outcom
         // herdr-core has no workspace to open a shell in; the checkout is
         // what later steps use.
         Drive::HerdrCore(_) => {
-            let checkout = HerdrCore::create_worktree(repo, name, base)?;
+            let checkout = HerdrCore::create_worktree(repo, name, base, until)?;
             (checkout.to_string_lossy().into_owned(), None)
         }
     };
@@ -355,7 +361,7 @@ struct Agent<'a> {
 
 /// Starts the agent in a new worktree, records it so it counts and is
 /// sampled, then sends the prompt.
-fn agent(context: &StepContext<'_>, step: &Agent<'_>, until: Until<'_>) -> Outcome {
+fn agent(context: &StepContext<'_>, log: &Path, step: &Agent<'_>, until: Until<'_>) -> Outcome {
     let repo = repo(context)?;
     let branch = step.worktree.map(str::to_owned).unwrap_or_else(|| {
         format!(
@@ -372,13 +378,16 @@ fn agent(context: &StepContext<'_>, step: &Agent<'_>, until: Until<'_>) -> Outco
             (created.pane, created.path)
         }
         Drive::HerdrCore(core) => {
-            let started = core.start_agent(&AgentStart {
-                repo,
-                branch: &branch,
-                base: step.base,
-                harness: step.harness,
-                label: &label,
-            })?;
+            let started = core.start_agent(
+                &AgentStart {
+                    repo,
+                    branch: &branch,
+                    base: step.base,
+                    harness: step.harness,
+                    label: &label,
+                },
+                until,
+            )?;
             (
                 started.terminal,
                 started.checkout.to_string_lossy().into_owned(),
@@ -398,9 +407,28 @@ fn agent(context: &StepContext<'_>, step: &Agent<'_>, until: Until<'_>) -> Outco
     };
     context.store.add_agent(&row)?;
     drop(context.reserved.take());
-    match context.drive {
-        Drive::Herdr(herdr) => herdr.prompt(&pane, step.prompt, step.wait)?,
-        Drive::HerdrCore(core) => core.prompt(&pane, step.prompt, step.wait.is_some(), until)?,
+    let prompted = match context.drive {
+        Drive::Herdr(herdr) => herdr
+            .prompt(&pane, step.prompt, step.wait)
+            .map_err(Error::from),
+        Drive::HerdrCore(core) => core
+            .prompt(&pane, step.prompt, step.wait.is_some(), until)
+            .map_err(Error::from),
+    };
+    if let Err(error) = prompted {
+        // The agent runs, so its step keeps its pane: the run's page can
+        // still open it, such as to answer the dialog that held the prompt.
+        let reason = error.to_string();
+        note(log, &reason);
+        return Ok(StepResult {
+            log_tail: process::tail(log, process::TAIL_BYTES)
+                .map(|(text, _)| text)
+                .unwrap_or(reason),
+            worktree: Some(cwd),
+            pane: Some(pane.clone()),
+            run_id: Some(pane),
+            ..StepResult::default()
+        });
     }
     let waited = if step.wait.is_some() {
         ", and it finished"
@@ -418,13 +446,15 @@ fn agent(context: &StepContext<'_>, step: &Agent<'_>, until: Until<'_>) -> Outco
     })
 }
 
-fn notify(context: &StepContext<'_>, text: &str) -> Outcome {
+fn notify(context: &StepContext<'_>, text: &str, until: Until<'_>) -> Outcome {
     match context.drive {
         Drive::Herdr(herdr) => {
             herdr.ensure_server()?;
             herdr.notify(context.script_name, text)?;
         }
-        Drive::HerdrCore(_) => crate::notify::show(context.script_name, text)?,
+        Drive::HerdrCore(_) => {
+            crate::notify::show(context.script_name, text, || until.check().is_err())?
+        }
     }
     Ok(StepResult {
         ok: true,

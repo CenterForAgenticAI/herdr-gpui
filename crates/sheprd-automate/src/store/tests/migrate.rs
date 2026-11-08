@@ -57,3 +57,20 @@ fn a_herdr_core_agent_reads_back_as_one() {
         Terminals::HerdrCore
     );
 }
+
+#[test]
+fn a_database_another_process_already_upgraded_is_left_as_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.sqlite");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(SCHEMA_1)
+        .unwrap();
+    // Both read version 1 before either took the lock.
+    let first = Connection::open(&path).unwrap();
+    let second = Connection::open(&path).unwrap();
+    migrate(&first).unwrap();
+    migrate(&second).unwrap();
+    drop((first, second));
+    assert_eq!(Store::open(&path).unwrap().agents(false).unwrap().len(), 1);
+}

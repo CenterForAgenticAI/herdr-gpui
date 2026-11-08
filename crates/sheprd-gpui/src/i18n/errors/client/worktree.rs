@@ -9,6 +9,7 @@ impl Localize for Error {
     fn localize(&self) -> String {
         match self {
             // keep-sorted start
+            Self::GaveUp => fl!("error-client-worktree-gave-up"),
             Self::NoHome => fl!("error-client-worktree-no-home"),
             Self::NoRepositoryName => fl!("error-client-worktree-no-repository-name"),
             Self::Refused(complaint) => fl!(

@@ -33,6 +33,7 @@ case "$*" in
     mkdir -p '{worktree}'
     echo '{"id":"1","result":{"type":"worktree_created","worktree":{"path":"{worktree}","branch":"b"},"root_pane":{"pane_id":"w1p1"}}}' ;;
   *"agent start"*) echo '{"id":"1","result":{"type":"agent_started"}}' ;;
+  *"agent prompt"*"refuse-me"*) echo '{"id":"1","error":{"code":"agent_blocked","message":"the agent is blocked"}}' >&2; exit 1 ;;
   *"agent prompt"*"slow"*"--wait"*) sleep 30; echo '{"id":"1","result":{"type":"agent_prompted"}}' ;;
   *"agent prompt"*) echo '{"id":"1","result":{"type":"agent_prompted"}}' ;;
   *"notification show"*) echo '{"id":"1","result":{"type":"notification_show","shown":true}}' ;;

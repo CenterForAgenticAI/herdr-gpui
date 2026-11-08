@@ -73,22 +73,40 @@ pub struct Store {
 }
 
 /// Brings a database written by an older daemon up to [`SCHEMA_VERSION`],
-/// all in one transaction, so a failure leaves it as it was.
-fn migrate(connection: &Connection, found: i64) -> Result<()> {
-    let mut batch = String::from("BEGIN IMMEDIATE;");
-    for version in found..SCHEMA_VERSION {
-        let (_, step) = MIGRATIONS
-            .iter()
-            .find(|(from, _)| *from == version)
-            .ok_or(crate::Error::Schema { found })?;
-        batch.push_str(step);
-    }
-    batch.push_str(&format!(
-        "UPDATE meta SET value = '{SCHEMA_VERSION}' WHERE key = 'schema'; COMMIT;"
-    ));
-    if let Err(error) = connection.execute_batch(&batch) {
-        let _ = connection.execute_batch("ROLLBACK;");
-        return Err(error.into());
+/// all in one transaction, so a failure leaves it as it was. The version is
+/// read again once the write lock is held: the daemon and a command opening
+/// the same old database together must not both run a step.
+fn migrate(connection: &Connection) -> Result<()> {
+    connection.execute_batch("BEGIN IMMEDIATE;")?;
+    let migrated = (|| -> Result<()> {
+        let found = connection
+            .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |row| {
+                row.get::<_, String>(0)
+            })?
+            .parse::<i64>()
+            .map_err(|_| crate::Error::Schema { found: -1 })?;
+        if found > SCHEMA_VERSION {
+            return Err(crate::Error::Schema { found });
+        }
+        for version in found..SCHEMA_VERSION {
+            let (_, step) = MIGRATIONS
+                .iter()
+                .find(|(from, _)| *from == version)
+                .ok_or(crate::Error::Schema { found })?;
+            connection.execute_batch(step)?;
+        }
+        connection.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema'",
+            params![SCHEMA_VERSION.to_string()],
+        )?;
+        Ok(())
+    })();
+    match migrated {
+        Ok(()) => connection.execute_batch("COMMIT;")?,
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK;");
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -121,7 +139,7 @@ impl Store {
                 )?;
             }
             Some(Ok(SCHEMA_VERSION)) => {}
-            Some(Ok(found)) if found < SCHEMA_VERSION => migrate(&connection, found)?,
+            Some(Ok(found)) if found < SCHEMA_VERSION => migrate(&connection)?,
             Some(Ok(found)) => return Err(crate::Error::Schema { found }),
             Some(Err(_)) => return Err(crate::Error::Schema { found: -1 }),
         }

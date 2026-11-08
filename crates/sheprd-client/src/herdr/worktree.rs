@@ -10,8 +10,11 @@ pub use error::Error;
 use crate::{local_path::home_dir, new_command};
 use std::{
     ffi::OsStr,
+    io::Read,
     path::{Path, PathBuf},
     process::Stdio,
+    thread,
+    time::Duration,
 };
 
 /// The most of Git's complaint that is kept for messages and logs.
@@ -20,6 +23,10 @@ const MAX_COMPLAINT_CHARS: usize = 300;
 const ROOT: &str = ".herdr/worktrees";
 /// The folder of a branch with no ASCII letters or digits.
 const FALLBACK_SLUG: &str = "worktree";
+/// The most of Git's output read; its answers here are a line or two.
+const MAX_OUTPUT: u64 = 64 * 1024;
+/// How often a running Git is asked whether its caller has given up.
+const POLL: Duration = Duration::from_millis(50);
 
 /// Where new checkouts go, when this user has a home.
 pub fn root() -> Option<PathBuf> {
@@ -27,9 +34,18 @@ pub fn root() -> Option<PathBuf> {
 }
 
 /// Adds a new `branch` from `base` (a commit, branch, or `HEAD`) of
-/// `repository`, under `root`, and answers the checkout's folder.
-pub fn add(repository: &Path, branch: &str, base: &str, root: &Path) -> Result<PathBuf, Error> {
+/// `repository`, under `root`, and answers the checkout's folder. Git is
+/// killed, and the add fails with `Error::GaveUp`, once `give_up` says so,
+/// such as for a stopped run or a hook that hangs.
+pub fn add(
+    repository: &Path,
+    branch: &str,
+    base: &str,
+    root: &Path,
+    give_up: impl Fn() -> bool,
+) -> Result<PathBuf, Error> {
     let common = git(
+        &give_up,
         repository,
         [
             OsStr::new("rev-parse"),
@@ -40,6 +56,7 @@ pub fn add(repository: &Path, branch: &str, base: &str, root: &Path) -> Result<P
     let name = repository_name(Path::new(common.trim())).ok_or(Error::NoRepositoryName)?;
     let checkout = root.join(name).join(path_slug(branch));
     git(
+        &give_up,
         repository,
         [
             OsStr::new("worktree"),
@@ -59,7 +76,9 @@ pub fn add(repository: &Path, branch: &str, base: &str, root: &Path) -> Result<P
 /// the branch free. Only for what `add` just made: the checkout and branch
 /// are removed whatever they hold.
 pub fn remove(repository: &Path, checkout: &Path, branch: &str) -> Result<(), Error> {
+    let never = || false;
     git(
+        &never,
         repository,
         [
             OsStr::new("worktree"),
@@ -69,6 +88,7 @@ pub fn remove(repository: &Path, checkout: &Path, branch: &str) -> Result<(), Er
         ],
     )?;
     git(
+        &never,
         repository,
         [OsStr::new("branch"), OsStr::new("-D"), OsStr::new(branch)],
     )?;
@@ -100,20 +120,55 @@ fn path_slug(branch: &str) -> String {
     }
 }
 
-fn git<'a>(repository: &Path, args: impl IntoIterator<Item = &'a OsStr>) -> Result<String, Error> {
-    let output = new_command("git")
+fn git<'a>(
+    give_up: &dyn Fn() -> bool,
+    repository: &Path,
+    args: impl IntoIterator<Item = &'a OsStr>,
+) -> Result<String, Error> {
+    let mut child = new_command("git")
         .current_dir(repository)
         .args(args)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(Error::Start)?;
-    if !output.status.success() {
-        let complaint = String::from_utf8_lossy(&output.stderr);
+    // Read both pipes while Git runs, so a full one never blocks it.
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(Error::Start)? {
+            break status;
+        }
+        if give_up() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Error::GaveUp);
+        }
+        thread::sleep(POLL);
+    };
+    let (stdout, stderr) = (joined(stdout), joined(stderr));
+    if !status.success() {
+        let complaint = String::from_utf8_lossy(&stderr);
         return Err(Error::Refused(
             complaint.trim().chars().take(MAX_COMPLAINT_CHARS).collect(),
         ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(pipe) = pipe {
+            let _ = pipe.take(MAX_OUTPUT).read_to_end(&mut bytes);
+        }
+        bytes
+    })
+}
+
+fn joined(reader: thread::JoinHandle<Vec<u8>>) -> Vec<u8> {
+    reader.join().unwrap_or_default()
 }
 
 #[cfg(test)]

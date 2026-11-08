@@ -10,6 +10,9 @@ pub enum Error {
     AgentBusy,
     #[error("the agent ended{}", .code.map(|code| format!(" with code {code}")).unwrap_or_default())]
     AgentExited { code: Option<i32> },
+    /// `status` is the agent's own word for how its turn ended.
+    #[error("the agent reported {status} while working on its prompt")]
+    AgentFailed { status: String },
     /// `status` is the agent's own word, such as `blocked`, when it gave one.
     #[error("{}", match .status.as_deref() {
         Some(status) => format!("the agent is {status}, not ready for its prompt; answer it in its terminal"),
@@ -28,6 +31,8 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    #[error("the step ran out of time")]
+    Expired,
     #[error(transparent)]
     Frame(#[from] frame::Error),
     #[error("herdr-core sent an invalid {0} answer")]

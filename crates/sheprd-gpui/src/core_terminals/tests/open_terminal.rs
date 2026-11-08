@@ -75,3 +75,41 @@ fn a_terminal_another_workspace_drives_opens_watch_only(cx: &mut gpui::TestAppCo
         });
     });
 }
+
+#[gpui::test]
+fn a_split_tab_holding_the_terminal_shows_it_as_the_pane_in_use(cx: &mut gpui::TestAppContext) {
+    let (host, cx) = cx.add_window_view(|window, cx| {
+        Host(cx.new(|cx| crate::palette::fixture_window(window, cx)))
+    });
+    let view = host.update(cx, |host, _| host.0.clone());
+    let first = TerminalId::new("t1").unwrap();
+    let terminal = TerminalId::new("t7").unwrap();
+    cx.update(|window, cx| {
+        Store::default().install(cx);
+        view.update(cx, |view, cx| {
+            let (scope, workspace) = view.browser_key().unwrap();
+            let mut panes = Panes::single(first.clone());
+            panes
+                .split(
+                    &first,
+                    crate::core_terminals::panes::Axis::Row,
+                    terminal.clone(),
+                )
+                .unwrap();
+            // A watch-only tab counts too: asking again must not add one.
+            let location = Location::CoreTerminal {
+                panes,
+                observe: true,
+            };
+            let tab = Store::update(cx, |store| {
+                store.open(scope, &workspace, Some(location), None)
+            })
+            .unwrap();
+            view.sync_core_views(cx);
+            view.open_core_terminal(terminal.clone(), window, cx);
+            view.open_core_terminal(terminal.clone(), window, cx);
+            assert_eq!(core_tabs(cx, &terminal), [(workspace, true)]);
+            assert_eq!(view.core_terminals.tabs[&tab].active, terminal);
+        });
+    });
+}

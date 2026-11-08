@@ -3,10 +3,20 @@
 //! while Sheprd is closed too. Title and body go as arguments, never as
 //! script text, so neither can run as code.
 
-use std::process::Stdio;
+use std::{
+    io::Read,
+    process::Stdio,
+    thread,
+    time::{Duration, Instant},
+};
 
 /// The most of a failed notifier's complaint kept.
 const MAX_COMPLAINT_CHARS: usize = 300;
+/// The most of its error output read.
+const MAX_COMPLAINT_BYTES: u64 = 4096;
+/// How long a notifier may take; showing one is quick, a hung one is not.
+const TIMEOUT: Duration = Duration::from_secs(10);
+const POLL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -21,22 +31,48 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+    #[error("{program} did not show the notification in time")]
+    TimedOut { program: &'static str },
     #[error("notifications need Herdr 1 on this system")]
     Unsupported,
 }
 
-/// Shows `body` under `title` as a system notification.
-pub fn show(title: &str, body: &str) -> Result<(), Error> {
+/// Shows `body` under `title` as a system notification, giving up (and
+/// ending the notifier) after [`TIMEOUT`] or once `give_up` says so.
+pub fn show(title: &str, body: &str, give_up: impl Fn() -> bool) -> Result<(), Error> {
     let (program, args) = command(title, body).ok_or(Error::Unsupported)?;
-    let output = sheprd_client::new_command(program)
+    let launch = |source| Error::Launch { program, source };
+    let mut child = sheprd_client::new_command(program)
         .args(&args)
         .stdin(Stdio::null())
-        .output()
-        .map_err(|source| Error::Launch { program, source })?;
-    if output.status.success() {
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(launch)?;
+    let stderr = child.stderr.take();
+    let complaint = thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(stderr) = stderr {
+            let _ = stderr.take(MAX_COMPLAINT_BYTES).read_to_string(&mut text);
+        }
+        text
+    });
+    let deadline = Instant::now() + TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(launch)? {
+            break status;
+        }
+        if give_up() || Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Error::TimedOut { program });
+        }
+        thread::sleep(POLL);
+    };
+    if status.success() {
         return Ok(());
     }
-    let complaint = String::from_utf8_lossy(&output.stderr);
+    let complaint = complaint.join().unwrap_or_default();
     Err(Error::Failed {
         program,
         complaint: complaint.trim().chars().take(MAX_COMPLAINT_CHARS).collect(),
