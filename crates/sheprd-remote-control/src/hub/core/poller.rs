@@ -66,6 +66,14 @@ impl Poller {
         projection::project(boot, terminals, saved, scope)
     }
 
+    /// Whether Sheprd keeps workspace `id` for `scope` in its saved tabs.
+    pub(super) fn keeps(&self, scope: &str, id: &str) -> bool {
+        self.saved
+            .as_ref()
+            .and_then(|(_, saved)| saved.as_ref())
+            .is_some_and(|saved| saved.workspaces(scope).any(|workspace| workspace.id == id))
+    }
+
     fn refresh_saved(&mut self, path: &Path) {
         let changed = std::fs::metadata(path).and_then(|file| file.modified());
         match (changed, &self.saved) {

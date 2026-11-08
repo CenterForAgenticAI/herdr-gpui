@@ -408,6 +408,7 @@ mod socket {
 mod state_context;
 
 mod poller;
+mod renames;
 mod saved_beside_spaces;
 
 #[test]

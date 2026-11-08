@@ -450,16 +450,30 @@ pub(super) async fn rename(
     Path(pane): Path<String>,
     Json(request): Json<RenameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let (method, params) = {
+    let (method, params, tab) = {
         let layout = state.hub.layout();
-        let target = if layout.chat(&pane).is_some() {
-            RenameTarget::Chat { pane: &pane }
+        let (target, tab) = if let Some((_, chat)) = layout.chat(&pane) {
+            (RenameTarget::Chat { pane: &pane }, chat.tab.clone())
         } else {
             let (_, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
-            RenameTarget::Tab { tab: &terminal.tab }
+            (
+                RenameTarget::Tab { tab: &terminal.tab },
+                terminal.tab.clone(),
+            )
         };
-        rename_call(target, &request.label)?
+        let (method, params) = rename_call(target, &request.label)?;
+        (method, params, tab)
     };
+    // Sheprd keeps a Herdr 2 tab's names: it renames it.
+    if let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)? {
+        let name = Some(request.label.trim().to_owned()).filter(|name| !name.is_empty());
+        let op = match method {
+            ApiMethod::PaneRename => crate::control::layout::Op::RenamePane(name),
+            _ => crate::control::layout::Op::RenameTab(name),
+        };
+        crate::native::changes::change_layout(&state, saved, terminal, op).await?;
+        return Ok(Json(json!({})));
+    }
     state.hub.call(method, params).await?;
     Ok(Json(json!({})))
 }
@@ -478,6 +492,15 @@ pub(super) async fn rename_workspace(
         workspace: &workspace,
     };
     let (method, params) = rename_call(target, &request.label)?;
+    // A workspace Sheprd keeps for Herdr 2 is Sheprd's to rename.
+    if state.hub.kept_workspace(&workspace) {
+        let op = crate::control::layout::Op::RenameWorkspace {
+            workspace,
+            name: request.label.trim().to_owned(),
+        };
+        crate::native::changes::change_layout(&state, 0, String::new(), op).await?;
+        return Ok(Json(json!({})));
+    }
     state.hub.call(method, params).await?;
     Ok(Json(json!({})))
 }

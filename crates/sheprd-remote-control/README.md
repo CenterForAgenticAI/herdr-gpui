@@ -76,6 +76,10 @@ created by `hc` and the desktop's shell when Herdr 1 is absent. Status comes
 from the core's terminal records. The phone reports **Herdr not running**
 only when neither source answers.
 
+Renaming a Herdr 2 tab, a chat or terminal pane in one, or a workspace
+Sheprd keeps for Herdr 2 goes to Sheprd too, which names it as its own
+menus do; the daemon then shows the names Sheprd saved with the tab.
+
 A phone opens a Herdr 2 pane through the same screen and input endpoints
 as a Herdr 1 pane. The server uses `sheprd-terminal` to emulate raw core
 output and sends complete ANSI screens through the existing stream.
