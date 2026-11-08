@@ -407,6 +407,7 @@ mod socket {
 
 mod state_context;
 
+mod pane_agents;
 mod poller;
 mod saved_beside_spaces;
 
