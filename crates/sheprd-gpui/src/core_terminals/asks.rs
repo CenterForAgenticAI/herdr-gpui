@@ -54,7 +54,11 @@ impl SheprdWindow {
                 at,
                 axis: super::panes::Axis::Row,
             },
-            None if self.core_fallback_terminal(cx).as_ref() == Some(&at) => {
+            // The shell shown in place of Herdr 1, or a terminal only a
+            // mirror shows, which takes no split: a tab of its own.
+            None if self.core_fallback_terminal(cx).as_ref() == Some(&at)
+                || self.core_terminals.mirrors(&at) =>
+            {
                 match self.browser_key() {
                     Some((scope, workspace)) => Purpose::Tab { scope, workspace },
                     // No workspace to hold a tab: the system opens it.

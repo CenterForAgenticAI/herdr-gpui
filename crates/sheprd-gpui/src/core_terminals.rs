@@ -252,6 +252,14 @@ impl CoreTerminals {
             .map(|(id, _)| *id)
     }
 
+    /// Whether a tab on this computer's core shows `terminal`, a mirror
+    /// included, which [`Self::tab_of`] leaves out.
+    pub(crate) fn mirrors(&self, terminal: &TerminalId) -> bool {
+        self.tabs
+            .values()
+            .any(|shown| shown.host == Host::Local && shown.panes.contains(terminal))
+    }
+
     /// The tab and pane whose view holds the keyboard.
     pub(crate) fn focused_pane(&self, window: &Window, cx: &App) -> Option<(TabId, TerminalId)> {
         self.views

@@ -3,8 +3,9 @@
 //! The same keys paste as over a Herdr pane, and the Edit menu's Paste
 //! lands here rather than in the Herdr pane behind this one. Files copied
 //! in a file manager, or dropped on the pane, paste their paths with shell
-//! characters escaped, as over a local Herdr pane; herdr-core runs on this
-//! computer, so the paths name the same files there. Enter is never sent.
+//! characters escaped, as over a local Herdr pane. Only this computer's core
+//! sees the same files: another host's pane refuses them and says so, as
+//! nothing carries them there yet. Enter is never sent.
 
 use super::{CoreTerminalView, ToWindow};
 use gpui::{App, ExternalPaths, Keystroke, Window};
@@ -70,7 +71,12 @@ impl CoreTerminalView {
     /// Pastes `paths` quoted for a shell; a drop the quoting refuses (too
     /// many paths, control characters) is said, never pasted in part.
     fn paste_paths(&self, paths: &[PathBuf], window: &mut Window, cx: &mut App) -> bool {
-        match crate::window::file_drop::quote_paths(paths) {
+        let quoted = if self.remote {
+            Err(crate::window::file_drop::Error::OtherHost.into())
+        } else {
+            crate::window::file_drop::quote_paths(paths)
+        };
+        match quoted {
             Ok(text) => {
                 self.send(ClientPaneInputEvent::Paste(text));
                 true

@@ -219,6 +219,28 @@ fn a_refused_drop_is_said_and_pastes_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn another_hosts_pane_refuses_this_computers_files(cx: &mut TestAppContext) {
+    let (view, cx, backend, asked) = shown(cx, &["$"], false);
+    cx.update(|_, cx| view.update(cx, |view, cx| view.set_remote(true, cx)));
+    let paths = ExternalPaths(vec![PathBuf::from("/tmp/a")].into());
+    cx.update(|window, cx| view.update(cx, |view, cx| view.drop_files(&paths, window, cx)));
+    assert!(matches!(
+        &asked.borrow()[..],
+        [ToWindow::Refused(crate::Error::FileDrop(
+            crate::window::file_drop::Error::OtherHost
+        ))]
+    ));
+    assert!(
+        !backend
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|command| matches!(command, Command::Input(_)))
+    );
+}
+
+#[gpui::test]
 fn a_mirror_takes_no_drop(cx: &mut TestAppContext) {
     let (view, cx, backend, asked) = shown(cx, &["$"], true);
     let paths = ExternalPaths(vec![PathBuf::from("/tmp/a")].into());
@@ -311,4 +333,32 @@ fn a_terminal_found_by_name_has_its_details() {
     shell.name = None;
     infos.insert(shell);
     assert_eq!(infos.named(&by_name), None);
+}
+
+#[test]
+fn a_terminal_only_a_mirror_shows_is_still_this_computers() {
+    use crate::{
+        browser::TabId,
+        core_terminals::{CoreTerminals, Host, TabPanes, panes::Panes},
+    };
+    let id = |name| TerminalId::new(name).unwrap();
+    let mut terminals = CoreTerminals::default();
+    terminals.tabs.insert(
+        TabId::test(1),
+        TabPanes::new(Host::Local, Panes::single(id("t1")), true),
+    );
+    terminals.tabs.insert(
+        TabId::test(2),
+        TabPanes::new(
+            Host::Remote(crate::browser::Scope::endpoint("ssh:box")),
+            Panes::single(id("t2")),
+            false,
+        ),
+    );
+    // No tab driving it takes a split, but the editor still opens on
+    // this computer's core rather than beside a Herdr 1 pane.
+    assert_eq!(terminals.tab_of(&id("t1")), None);
+    assert!(terminals.mirrors(&id("t1")));
+    // Another host's `t2` is no terminal of this computer's.
+    assert!(!terminals.mirrors(&id("t2")));
 }
