@@ -82,6 +82,8 @@ impl SheprdWindow {
                     &home,
                     &flag,
                 )
+                // The label the core now carries leads to the chat.
+                .map(drop)
                 .map_err(from_core);
                 let _ = sender.send(outcome);
             })
