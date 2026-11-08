@@ -7,20 +7,32 @@ use crate::{
     session_model::Sessions,
 };
 use gpui::App;
-use sheprd_session::{CoreTab, CoreWorkspace, Session};
+use sheprd_session::{CoreTab, CoreWorkspace, Session, panes::Panes};
 use std::sync::Arc;
 
 impl SheprdWindow {
-    /// Rebuilds the herdr-core session of the selected host when it is this
-    /// computer, from the store's workspaces and tabs and what the core last
-    /// reported.
+    /// The host whose herdr-core session the window keeps: the selected one
+    /// when it is this computer, else this computer's first, so its Herdr 2
+    /// agents still count while another host is shown.
+    pub(crate) fn core_host(&self) -> Option<usize> {
+        if !self.selected_is_remote() {
+            return Some(self.selected_endpoint);
+        }
+        self.endpoints
+            .iter()
+            .position(|endpoint| !endpoint.connection.target.is_remote())
+    }
+
+    /// Rebuilds the herdr-core session of this computer's host from the
+    /// store's workspaces and tabs, the shell shown in place of Herdr 1, and
+    /// what the core last reported.
     pub(crate) fn refresh_core_session(&mut self, cx: &mut App) {
-        let built = (!self.selected_is_remote()).then(|| {
-            let scope = scope(&self.endpoints[self.selected_endpoint]);
-            self.keep_default_workspace(&scope, cx);
+        let built = self.core_host().map(|index| {
+            let scope = scope(&self.endpoints[index]);
+            self.keep_default_workspace(self.live_at(index).missing_installation, &scope, cx);
             let session = cx
                 .try_global::<Store>()
-                .map(|store| self.core_session_of(store, &scope))
+                .map(|store| self.core_session_of(index, store, &scope, cx))
                 .unwrap_or_default();
             (scope, Arc::new(session))
         });
@@ -34,20 +46,43 @@ impl SheprdWindow {
         }
     }
 
-    fn core_session_of(&self, store: &Store, scope: &Scope) -> Session {
+    fn live_at(&self, index: usize) -> &crate::state::LiveState {
+        if index == self.selected_endpoint {
+            &self.live
+        } else {
+            &self.endpoints[index].live
+        }
+    }
+
+    fn core_session_of(&self, index: usize, store: &Store, scope: &Scope, cx: &App) -> Session {
         let workspaces = store.kept_workspaces(scope).map(CoreWorkspace::from);
-        let tabs = store.in_scope(scope).filter_map(|tab| match &tab.location {
-            Some(Location::CoreTerminal {
+        // The shell shown in place of Herdr 1 is no tab, but runs agents too.
+        let shell = self
+            .live_at(index)
+            .missing_installation
+            .then(|| self.core_fallback_view())
+            .flatten()
+            .map(|view| Panes::single(view.read(cx).terminal().clone()));
+        let tabs = store
+            .in_scope(scope)
+            .filter_map(|tab| match &tab.location {
+                Some(Location::CoreTerminal {
+                    panes,
+                    observe: false,
+                }) => Some(CoreTab {
+                    id: tab.id.number(),
+                    panes,
+                    title: &tab.title,
+                    workspace_id: &tab.workspace_id,
+                }),
+                _ => None,
+            })
+            .chain(shell.as_ref().map(|panes| CoreTab {
+                id: super::SHELL_TAB,
                 panes,
-                observe: false,
-            }) => Some(CoreTab {
-                id: tab.id.number(),
-                panes,
-                title: &tab.title,
-                workspace_id: &tab.workspace_id,
-            }),
-            _ => None,
-        });
+                title: "",
+                workspace_id: super::WORKSPACE,
+            }));
         let focused = self
             .core_terminals
             .in_front

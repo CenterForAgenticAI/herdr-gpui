@@ -255,8 +255,13 @@ impl SheprdWindow {
 
     /// Keeps the workspace a window with no Herdr 1 installed gathers its
     /// tabs in, so it lists, renames, and closes like any other.
-    pub(super) fn keep_default_workspace(&self, scope: &Scope, cx: &mut App) {
-        if !self.live.missing_installation
+    pub(super) fn keep_default_workspace(
+        &self,
+        missing_installation: bool,
+        scope: &Scope,
+        cx: &mut App,
+    ) {
+        if !missing_installation
             || cx
                 .try_global::<Store>()
                 .is_some_and(|store| store.kept_workspaces(scope).next().is_some())

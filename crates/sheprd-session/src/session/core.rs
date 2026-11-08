@@ -28,9 +28,9 @@ impl Session {
     /// its tabs among `tabs`, and an agent for every terminal `info` reports
     /// one in. A tab in a workspace not listed, such as a Herdr 1 workspace
     /// a core tab opened in, adds its agents but no workspace.
-    pub fn core<'a, 'i>(
-        workspaces: impl IntoIterator<Item = CoreWorkspace<'a>>,
-        tabs: impl IntoIterator<Item = CoreTab<'a>>,
+    pub fn core<'w, 't, 'i>(
+        workspaces: impl IntoIterator<Item = CoreWorkspace<'w>>,
+        tabs: impl IntoIterator<Item = CoreTab<'t>>,
         focused: Option<&str>,
         info: impl Fn(&TerminalId) -> Option<&'i TerminalInfo>,
     ) -> Self {
