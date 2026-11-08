@@ -9,6 +9,7 @@ mod animated;
 mod cell;
 mod device_drag;
 mod host_row;
+pub(crate) mod hosted;
 mod hover;
 mod layout;
 mod layouts;

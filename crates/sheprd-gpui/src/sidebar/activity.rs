@@ -45,7 +45,7 @@ const TITLE_END: f32 = 4.;
 /// One breath of a busy icon's pulse.
 const BUSY_PULSE: std::time::Duration = std::time::Duration::from_millis(1600);
 
-fn label(panel: ActivityPanel) -> SharedString {
+pub(super) fn label(panel: ActivityPanel) -> SharedString {
     match panel {
         ActivityPanel::Overview => fl!("sidebar-activity-overview"),
         ActivityPanel::Workspaces => fl!("sidebar-activity-workspaces"),
@@ -214,7 +214,7 @@ impl SheprdWindow {
 
     /// The section the bar marks: the one picked, or Workspaces when that
     /// one is no longer listed.
-    fn activity_panel(&self) -> ActivityPanel {
+    pub(crate) fn activity_panel(&self) -> ActivityPanel {
         Some(self.activity.panel)
             .filter(|panel| self.activity_panel_listed(*panel))
             .unwrap_or_default()

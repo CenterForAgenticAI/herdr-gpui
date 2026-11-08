@@ -6,7 +6,10 @@
 //! by its root view (the control socket, system notifications, opening links)
 //! is left out here, as are the updater and the app menus.
 
-pub use crate::window::host_regions::{Region, Sizes};
+pub use crate::{
+    sidebar::hosted::{Action, HostedState, Palette, Stamp},
+    window::host_regions::{Region, Sizes},
+};
 
 use crate::{
     Hide, HideOthers, Quit, SheprdWindow, ShowAll, ShowLogs,
@@ -21,7 +24,7 @@ use gpui::{
 #[cfg(feature = "integration-test")]
 use gpui::{
     Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput,
-    point, px,
+    ScrollDelta, ScrollEvent, point, px,
 };
 use sheprd_client::ConnectTarget;
 #[cfg(feature = "integration-test")]
@@ -117,6 +120,22 @@ impl Host {
         .into()
     }
 
+    /// The window's state for a layout of mods; see `sidebar::hosted`.
+    pub fn state(&self, cx: &App) -> HostedState {
+        self.window.read(cx).hosted_state(cx)
+    }
+
+    /// Equal stamps say [`Self::state`] has nothing new from the window.
+    pub fn stamp(&self, cx: &App) -> Stamp {
+        self.window.read(cx).hosted_stamp()
+    }
+
+    /// Does what a layout of mods asked.
+    pub fn act(&self, action: Action, window: &mut Window, cx: &mut App) {
+        self.window
+            .update(cx, |view, cx| view.hosted_action(action, window, cx));
+    }
+
     pub fn sizes(&self, window: &Window, cx: &App) -> Sizes {
         self.window.read(cx).region_sizes(window)
     }
@@ -156,6 +175,10 @@ impl Render for RegionView {
 pub enum Drive {
     /// Presses at `from`, drags to `to`, and releases.
     Drag { from: (f32, f32), to: (f32, f32) },
+    /// Moves the pointer to `at`.
+    Hover { at: (f32, f32) },
+    /// Scrolls by `y` pixels at `at`; negative goes down the content.
+    Scroll { at: (f32, f32), y: f32 },
     /// Types each keystroke in turn, a space between them.
     Keys(String),
     /// Types a keystroke such as `cmd-shift-p`.
@@ -222,6 +245,26 @@ pub fn drive(view: AnyView, input: Drive, delay: Duration, window: &Window, cx: 
                             "drive: terminal geometry"
                         );
                     }
+                }
+                Drive::Hover { at } => {
+                    window.dispatch_event(
+                        PlatformInput::MouseMove(MouseMoveEvent {
+                            position: point(px(at.0), px(at.1)),
+                            pressed_button: None,
+                            modifiers: Modifiers::default(),
+                        }),
+                        cx,
+                    );
+                }
+                Drive::Scroll { at, y } => {
+                    window.dispatch_event(
+                        PlatformInput::Scroll(ScrollEvent {
+                            position: point(px(at.0), px(at.1)),
+                            delta: ScrollDelta::Pixels(point(px(0.), px(y))),
+                            ..Default::default()
+                        }),
+                        cx,
+                    );
                 }
                 Drive::Keys(text) => {
                     if let Ok(view) = view.clone().downcast::<SheprdWindow>() {

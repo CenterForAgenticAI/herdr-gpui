@@ -16,7 +16,8 @@ pub enum Region {
     /// and Back and Forward.
     Header,
     /// Menus, toasts and what else draws over the window, in its coordinates,
-    /// so it goes over the whole window. It takes no clicks of its own.
+    /// so the host paints it over the whole window, outside its layout. It takes
+    /// no clicks of its own.
     Overlay,
     Sidebar,
     StatusBar,

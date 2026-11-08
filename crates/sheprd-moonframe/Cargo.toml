@@ -15,9 +15,12 @@ name = "sheprd-moonframe"
 path = "src/main.rs"
 
 [dependencies]
+async-channel.workspace = true
+futures-lite.workspace  = true
 # `acp` runs the agent behind the sparkles (the built-in `feedback` mod).
-moonframe               = { features = ["acp"], workspace = true }
-sheprd-gpui.path        = "../sheprd-gpui"
+moonframe            = { features = ["acp"], workspace = true }
+serde_json.workspace = true
+sheprd-gpui.path     = "../sheprd-gpui"
 
 [features]
 # Writes the app's own rendered frame to `MOONFRAME_CAPTURE`, for checks

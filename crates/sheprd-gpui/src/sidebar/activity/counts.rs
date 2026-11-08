@@ -13,7 +13,7 @@ use gpui::App;
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct Counts {
+pub(in crate::sidebar) struct Counts {
     needs: Count,
     pull_requests: Count,
     issues: Count,
@@ -61,7 +61,7 @@ impl Counts {
     }
 
     /// The bar's count for `panel`, if it shows one.
-    pub(super) fn of(self, panel: ActivityPanel) -> Option<usize> {
+    pub(in crate::sidebar) fn of(self, panel: ActivityPanel) -> Option<usize> {
         self.count(panel).map(|count| count.items)
     }
 
@@ -78,7 +78,7 @@ fn open(item: &Item) -> bool {
 }
 
 impl SheprdWindow {
-    pub(super) fn activity_counts(&self, cx: &App) -> Counts {
+    pub(in crate::sidebar) fn activity_counts(&self, cx: &App) -> Counts {
         let mut counts = Counts {
             needs: Count {
                 items: self.overview_needing(),

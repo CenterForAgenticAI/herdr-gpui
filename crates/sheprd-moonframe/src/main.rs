@@ -2,25 +2,181 @@
 //! layout around it can change without a rebuild.
 
 use {
+    async_channel::{Receiver, Sender, bounded},
+    futures_lite::future::or,
     moonframe::{
-        Data, HostView, Moonframe, ViewInit,
+        Data, Handle, HostView, Moonframe, Native, ViewInit,
         gpui_kit::{prelude::*, *},
     },
-    sheprd_gpui::embed::{Host, Region, Sizes, Startup},
-    std::{cell::RefCell, process::ExitCode, rc::Rc},
+    serde_json::Value,
+    sheprd_gpui::embed::{Action, Host, HostedState, Region, Sizes, Stamp, Startup},
+    std::{
+        cell::RefCell,
+        process::ExitCode,
+        rc::Rc,
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    },
 };
+
+mod theme;
+
+/// How often state is read anyway: the machine's load, the activity counts
+/// and Git's marks change without the window saying so.
+const REFRESH: Duration = Duration::from_secs(2);
+/// Actions waiting for the UI: clicks, so few. More are dropped, not queued.
+const ACTION_QUEUE: usize = 64;
+
+/// One provider's data: `app.<name>`, published as it changes. Each part of
+/// the state has its own, so a change runs only the views that read that part.
+#[derive(Clone, Default)]
+struct Feed {
+    handle: Arc<Mutex<Option<Handle>>>,
+    wake: Option<Sender<()>>,
+}
+
+impl Feed {
+    fn new(wake: Sender<()>) -> Self {
+        Self {
+            handle: Arc::default(),
+            wake: Some(wake),
+        }
+    }
+
+    /// Whether the provider has started and took `state`.
+    fn publish(&self, state: &Value) -> bool {
+        let Ok(handle) = self.handle.lock() else {
+            return false;
+        };
+        let Some(handle) = handle.as_ref() else {
+            return false;
+        };
+        handle.publish_json(state);
+        true
+    }
+
+    /// Publishes `state` unless it is what `last` holds. Whether mods have it:
+    /// a provider not started yet gets it when it does.
+    fn offer(&self, last: &mut Option<Value>, state: Value) -> bool {
+        if last.as_ref() == Some(&state) {
+            return true;
+        }
+        let taken = self.publish(&state);
+        if taken {
+            *last = Some(state);
+        }
+        taken
+    }
+}
+
+impl Native for Feed {
+    fn start(&mut self, host: &Handle) -> Result<(), String> {
+        if let Ok(mut handle) = self.handle.lock() {
+            *handle = Some(host.clone());
+        }
+        // What was read before this provider started never reached it.
+        if let Some(wake) = &self.wake {
+            let _ = wake.try_send(());
+        }
+        Ok(())
+    }
+
+    fn tick(&mut self, _: &Handle) {}
+
+    fn receive(&mut self, _: &Handle, _: &str, _: Data) {}
+}
+
+/// The `sheprd` provider: `app.sheprd`, and what mods send it.
+#[derive(Clone)]
+struct Bridge {
+    actions: Sender<Action>,
+    feed: Feed,
+}
+
+impl Native for Bridge {
+    fn start(&mut self, host: &Handle) -> Result<(), String> {
+        self.feed.start(host)
+    }
+
+    fn tick(&mut self, _: &Handle) {}
+
+    fn receive(&mut self, _: &Handle, _: &str, message: Data) {
+        if let Some(action) = action(&message) {
+            let _ = self.actions.try_send(action);
+        }
+    }
+}
+
+/// The providers state is published through.
+#[derive(Clone)]
+struct Feeds {
+    load: Feed,
+    main: Feed,
+    theme: Feed,
+}
+
+/// What each of [`Feeds`] last took.
+#[derive(Default)]
+struct Published {
+    load: Option<Value>,
+    main: Option<Value>,
+    theme: Option<Value>,
+}
+
+impl Feeds {
+    /// Whether every provider has `state`.
+    fn offer(&self, last: &mut Published, state: HostedState) -> bool {
+        // `palette` is for the toolkit, not mods.
+        let load = self.load.offer(&mut last.load, state.load);
+        let main = self.main.offer(&mut last.main, state.main);
+        let theme = self.theme.offer(&mut last.theme, state.theme);
+        load && main && theme
+    }
+}
+
+/// What a mod's message to `provider:sheprd` asks for, if anything.
+fn action(message: &Data) -> Option<Action> {
+    let text = |key: &str| message.get(key).and_then(Data::as_str).map(str::to_owned);
+    text("command")
+        .map(Action::Command)
+        .or_else(|| text("focus_workspace").map(Action::FocusWorkspace))
+        .or_else(|| text("focus_pane").map(Action::FocusPane))
+        .or_else(|| text("panel").map(Action::Panel))
+}
 
 /// What is read before the event loop, and the host the first region makes.
 struct Shared {
+    actions: Receiver<Action>,
+    feeds: Feeds,
     host: Option<Host>,
     startup: Option<Startup>,
+    /// Told the window changed, or a provider started.
+    wake: Sender<()>,
+    woken: Receiver<()>,
 }
 
 fn main() -> ExitCode {
     // Read before the event loop, as the app's own startup does.
+    let (actions, received) = bounded(ACTION_QUEUE);
+    // One is enough: a wake only says to look.
+    let (wake, woken) = bounded(1);
+    let feeds = Feeds {
+        load: Feed::new(wake.clone()),
+        main: Feed::new(wake.clone()),
+        theme: Feed::new(wake.clone()),
+    };
+    let bridge = Bridge {
+        actions,
+        feed: feeds.main.clone(),
+    };
+    let (load, theme) = (feeds.load.clone(), feeds.theme.clone());
     let shared = Rc::new(RefCell::new(Shared {
+        actions: received,
+        feeds,
         host: None,
         startup: Some(sheprd_gpui::embed::prepare()),
+        wake,
+        woken,
     }));
     Moonframe::new("sheprd-moonframe")
         .title("Sheprd")
@@ -30,6 +186,9 @@ fn main() -> ExitCode {
         .assets(sheprd_gpui::embed::assets())
         // The sparkles: ask an agent to change the layout or add something.
         .keep(["feedback"])
+        .native("sheprd", move || bridge.clone())
+        .native("sheprd_load", move || load.clone())
+        .native("sheprd_theme", move || theme.clone())
         .view("sheprd", move |init: &ViewInit, window, cx| {
             SheprdRegion::new(init, &shared, window, cx)
         })
@@ -38,6 +197,8 @@ fn main() -> ExitCode {
 
 /// One region of the main window, where Luau placed it.
 struct SheprdRegion {
+    /// Over the whole window, for the main region; see `render`.
+    overlay: Option<AnyView>,
     _sizes: Option<Subscription>,
     view: AnyView,
 }
@@ -54,7 +215,6 @@ impl SheprdRegion {
         let region = match name {
             Some("activity") => Some(Region::ActivityBar),
             Some("header") => Some(Region::Header),
-            Some("overlay") => Some(Region::Overlay),
             Some("sidebar") => Some(Region::Sidebar),
             Some("status") => Some(Region::StatusBar),
             _ => None,
@@ -82,13 +242,100 @@ impl SheprdRegion {
                 }
             };
             report(host.sizes(window, cx));
-            host.observe_sizes(window, cx, move |_, sizes, _| report(sizes))
+            let wake = shared.borrow().wake.clone();
+            host.observe_sizes(window, cx, move |_, sizes, _| {
+                let _ = wake.try_send(());
+                report(sizes);
+            })
         });
+        let overlay = region.is_none().then(|| host.region(Region::Overlay, cx));
+        if region.is_none() {
+            let shared = shared.borrow();
+            take_actions(host.clone(), shared.actions.clone(), window, cx);
+            publish_state(
+                host.clone(),
+                shared.feeds.clone(),
+                shared.woken.clone(),
+                window,
+                cx,
+            );
+            let _ = shared.wake.try_send(());
+        }
         Self {
+            overlay,
             _sizes: sizes,
             view,
         }
     }
+}
+
+/// Does what mods ask as it arrives: a click must not wait for a tick.
+fn take_actions(
+    host: Host,
+    actions: Receiver<Action>,
+    window: &mut Window,
+    cx: &mut Context<SheprdRegion>,
+) {
+    cx.spawn_in(window, async move |_, cx| {
+        while let Ok(action) = actions.recv().await {
+            if cx
+                .update(|window, cx| host.act(action, window, cx))
+                .is_err()
+            {
+                break;
+            }
+        }
+    })
+    .detach();
+}
+
+/// Offers mods the window's state as soon as it changes. The window notifies
+/// for every terminal frame, so its [`Stamp`] says first whether anything mods
+/// show changed, and only then is state built. [`REFRESH`] covers the rest,
+/// and keeps its time however busy the window is.
+fn publish_state(
+    host: Host,
+    feeds: Feeds,
+    woken: Receiver<()>,
+    window: &mut Window,
+    cx: &mut Context<SheprdRegion>,
+) {
+    cx.spawn_in(window, async move |_, cx| {
+        let mut follow = theme::Follow::default();
+        let mut last = Published::default();
+        let mut stamp: Option<Stamp> = None;
+        let mut refresh = Instant::now() + REFRESH;
+        loop {
+            let wait = refresh.saturating_duration_since(Instant::now());
+            let timer = cx.background_executor().timer(wait);
+            let woke = or(async { Some(woken.recv().await) }, async {
+                timer.await;
+                None
+            })
+            .await;
+            // The region went: nothing wakes this any more.
+            if matches!(woke, Some(Err(_))) {
+                break;
+            }
+            let due = Instant::now() >= refresh;
+            if due {
+                refresh = Instant::now() + REFRESH;
+            }
+            let alive = cx.update(|_, cx| {
+                let now = host.stamp(cx);
+                if due || stamp.as_ref() != Some(&now) {
+                    let state = host.state(cx);
+                    follow.apply(&state.palette, cx);
+                    let delivered = feeds.offer(&mut last, state);
+                    stamp = delivered.then_some(now);
+                }
+            });
+            if alive.is_err() {
+                break;
+            }
+        }
+    })
+    .detach();
 }
 
 fn host(shared: &RefCell<Shared>, window: &mut Window, cx: &mut App) -> Host {
@@ -103,47 +350,69 @@ fn host(shared: &RefCell<Shared>, window: &mut Window, cx: &mut App) -> Host {
 impl HostView for SheprdRegion {}
 
 impl Render for SheprdRegion {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // Menus and toasts use window coordinates and cover every region. They
+        // are painted here rather than placed by Luau: they are not part of the
+        // layout, and as an element they would cover it for Inspect.
+        let overlay = self.overlay.clone().map(|overlay| {
+            let size = window.viewport_size();
+            deferred(
+                anchored()
+                    .position_mode(AnchoredPositionMode::Window)
+                    .position(point(px(0.), px(0.)))
+                    .child(div().w(size.width).h(size.height).child(overlay)),
+            )
+        });
         // `Terminal` keeps Moonframe's Escape off: it belongs to the terminal.
         div()
             .key_context("Terminal")
             .size_full()
             .child(self.view.clone())
+            .children(overlay)
     }
 }
 
-/// Sends `SPIKE_DRIVE` to the view: `keys:a b enter` or `drag:x1,y1,x2,y2`.
+/// Sends `SPIKE_DRIVE` to the view, steps apart by `;` a second after each
+/// other: `keys:a b enter`, `drag:x1,y1,x2,y2`, `hover:x,y`, or `scroll:x,y,by`.
 #[cfg(feature = "drive")]
 fn drive(view: &AnyView, window: &Window, cx: &mut App) {
     use sheprd_gpui::embed::Drive;
-    let Ok(spec) = std::env::var("SPIKE_DRIVE") else {
+    let Ok(steps) = std::env::var("SPIKE_DRIVE") else {
         return;
     };
-    let input = if let Some(keys) = spec.strip_prefix("keys:") {
-        Drive::Keys(keys.to_owned())
-    } else {
-        let numbers: Vec<f32> = spec
-            .trim_start_matches("drag:")
-            .split(',')
-            .filter_map(|number| number.parse().ok())
-            .collect();
-        let [x1, y1, x2, y2] = numbers[..] else {
-            return;
-        };
-        Drive::Drag {
-            from: (x1, y1),
-            to: (x2, y2),
-        }
-    };
-    let delay = std::env::var("SPIKE_DRIVE_DELAY")
+    let start: u64 = std::env::var("SPIKE_DRIVE_DELAY")
         .ok()
         .and_then(|seconds| seconds.parse().ok())
         .unwrap_or(7);
-    sheprd_gpui::embed::drive(
-        view.clone(),
-        input,
-        std::time::Duration::from_secs(delay),
-        window,
-        cx,
-    );
+    for (index, step) in steps.split(';').enumerate() {
+        let numbers = |spec: &str| -> Vec<f32> {
+            spec.split(',')
+                .filter_map(|number| number.parse().ok())
+                .collect()
+        };
+        let input = if let Some(keys) = step.strip_prefix("keys:") {
+            Drive::Keys(keys.to_owned())
+        } else if let Some(at) = step.strip_prefix("scroll:") {
+            let [x, y, by] = numbers(at)[..] else {
+                continue;
+            };
+            Drive::Scroll { at: (x, y), y: by }
+        } else if let Some(at) = step.strip_prefix("hover:") {
+            let [x, y] = numbers(at)[..] else { continue };
+            Drive::Hover { at: (x, y) }
+        } else {
+            let [x1, y1, x2, y2] = numbers(step.trim_start_matches("drag:"))[..] else {
+                continue;
+            };
+            Drive::Drag {
+                from: (x1, y1),
+                to: (x2, y2),
+            }
+        };
+        let delay = Duration::from_secs(start + index as u64);
+        sheprd_gpui::embed::drive(view.clone(), input, delay, window, cx);
+    }
 }
+
+#[cfg(test)]
+mod tests;
