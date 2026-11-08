@@ -97,9 +97,12 @@ impl SheprdWindow {
                     gitlab_mark(gitlab_color),
                     page == Page::GitLab,
                 )
-                .when(azure_selected(AzureAction::GitLab), |tab| {
-                    tab.bg(rgb(theme.active))
-                })
+                .when(
+                    (page == Page::GitHub
+                        && self.menu.github_selected == Some(crate::menu::github::Action::GitLab))
+                        || azure_selected(AzureAction::GitLab),
+                    |tab| tab.bg(rgb(theme.active)),
+                )
                 .on_click(cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
                     if this.menu.page != Some(Page::GitLab) {
@@ -117,6 +120,14 @@ impl SheprdWindow {
                         theme.muted
                     }),
                     page == Page::AzureDevOps,
+                )
+                .when(
+                    (page == Page::GitHub
+                        && self.menu.github_selected
+                            == Some(crate::menu::github::Action::AzureDevOps))
+                        || (page == Page::GitLab
+                            && self.menu.gitlab.is_selected(&Action::AzureDevOps)),
+                    |tab| tab.bg(rgb(theme.active)),
                 )
                 .on_click(cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();

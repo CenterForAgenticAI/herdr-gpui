@@ -91,7 +91,14 @@ fn the_page_switches_to_an_additional_account_and_back(cx: &mut TestAppContext) 
             // Its own sign-in, a pasted token, or removal; never the local CLI.
             assert_eq!(
                 view.github_actions(),
-                [Action::Start, Action::Token, Action::SignOut, Action::Close]
+                [
+                    Action::GitLab,
+                    Action::AzureDevOps,
+                    Action::Start,
+                    Action::Token,
+                    Action::SignOut,
+                    Action::Close
+                ]
             );
             cx.notify();
         });
