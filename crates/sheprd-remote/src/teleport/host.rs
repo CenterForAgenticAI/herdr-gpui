@@ -149,6 +149,7 @@ impl Host {
         } else {
             format!(r#"herdr_cli() {{ herdr{session} "$@"; }}"#)
         };
+        let core_cli = self.core_cli();
         format!(
             r#"set -eu
 {home}herdr_linuxbrew=
@@ -156,8 +157,28 @@ case "$(uname -s)" in Linux) herdr_linuxbrew=/home/linuxbrew/.linuxbrew/bin:;; e
 PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$HOME/.bun/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$herdr_linuxbrew$HOME/.nix-profile/bin:$PATH"
 export PATH
 {herdr_cli}
+{core_cli}
 "#
         )
+    }
+
+    /// `core_cli`, the host's herdr-core (Herdr 2) CLI: the user's own
+    /// `herdr-core`, else, on this machine, the copy bundled beside the app,
+    /// which is how the app itself starts a core when none runs.
+    fn core_cli(&self) -> String {
+        let bundled = self
+            .is_local()
+            .then(|| std::env::current_exe().ok())
+            .flatten()
+            .and_then(|exe| Some(exe.parent()?.join("herdr-core")))
+            .filter(|path| path.is_file())
+            .map(|path| shell_quote(&path.to_string_lossy()));
+        match bundled {
+            Some(bundled) => format!(
+                r#"core_cli() {{ if command -v herdr-core >/dev/null 2>&1; then herdr-core "$@"; else {bundled} "$@"; fi; }}"#
+            ),
+            None => r#"core_cli() { herdr-core "$@"; }"#.to_owned(),
+        }
     }
 
     /// Run `body` after the prelude, streaming `input` and `output`.

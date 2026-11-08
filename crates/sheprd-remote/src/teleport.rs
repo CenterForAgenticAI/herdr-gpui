@@ -8,6 +8,7 @@
 //! cloud provider's authenticated command).
 
 pub mod carry;
+mod core;
 mod credentials;
 pub mod error;
 mod fresh;

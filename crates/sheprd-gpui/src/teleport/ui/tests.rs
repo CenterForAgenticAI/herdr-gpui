@@ -3,6 +3,7 @@ use super::*;
 use crate::teleport::{Host, Node, Repository, SourceState, TabPlan, launch::Work};
 use sheprd_client::ConnectTarget;
 
+mod closing;
 mod en_xa;
 
 fn place(label: &str) -> Place {
@@ -22,6 +23,7 @@ fn source() -> Source {
         repo_label: "herdr".into(),
         branch: Some("feature".into()),
         tab_labels: Default::default(),
+        core_tabs: Vec::new(),
     }
 }
 
@@ -59,6 +61,7 @@ fn review(github: GitHubAccess) -> Review {
         },
         tabs: vec![
             TabPlan {
+                generation: sheprd_backend::Generation::Herdr1,
                 label: None,
                 tree: Node::Pane("p1".into()),
                 panes: vec![
@@ -67,6 +70,7 @@ fn review(github: GitHubAccess) -> Review {
                 ],
             },
             TabPlan {
+                generation: sheprd_backend::Generation::Herdr1,
                 label: Some("agents".into()),
                 tree: Node::Pane("p3".into()),
                 panes: vec![pane("p3", Action::Missing("aider".into()))],

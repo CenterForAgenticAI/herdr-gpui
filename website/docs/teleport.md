@@ -38,6 +38,8 @@ Right-click a linked worktree and choose **Teleport...** to move it to another c
 - the programs running in them, started again with their arguments,
 - agent sessions, resumed with their full history.
 
+Herdr 2 tabs in the worktree's workspace move too, after its Herdr tabs and with their splits. Herdr 2 reports no agent session, so an agent there writes a handoff note and starts again with it on the destination, rather than resuming.
+
 Ignored files such as `.env` and build output stay behind, and so do submodule contents, environment variables, shell history, background jobs, and unsaved editor buffers.
 
 Teleport works on the local session, saved SSH hosts, and Coder, Daytona, and Railway cloud devices, in either direction. It does not create a cloud machine or install Herdr.
@@ -69,7 +71,7 @@ When `origin` is on GitHub and the destination cannot reach it by itself, the re
 
 ### After the move, and back
 
-Once the destination is ready, the source workspace's programs stop: its tabs are replaced by one idle `teleported` shell tab, and the checkout stays. The row gets a teleport icon, and its menu offers **Go to teleported copy** and **Clear teleported mark**. The copy on the destination offers **Teleport back**. Before work returns, the original checkout's current state is saved to `refs/herdr-teleport/backup/...`.
+Once the destination is ready, the source workspace's programs stop: its tabs are replaced by one idle `teleported` shell tab, its Herdr 2 terminals end and their tabs close, and the checkout stays. The row gets a teleport icon, and its menu offers **Go to teleported copy** and **Clear teleported mark**. The copy on the destination offers **Teleport back**. Before work returns, the original checkout's current state is saved to `refs/herdr-teleport/backup/...`.
 
 ## Smart Dispatch
 

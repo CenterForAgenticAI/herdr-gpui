@@ -90,6 +90,11 @@ pub(crate) struct Teleport {
     selected: Option<usize>,
     cancelled: Arc<AtomicBool>,
     events: mpsc::Receiver<Event>,
+    /// The app's Herdr 2 tabs moving with the workspace, closed here once
+    /// the move has stopped their terminals.
+    closing: Vec<crate::browser::TabId>,
+    /// The move got past stopping the source's programs.
+    retired: bool,
 }
 
 impl Drop for Teleport {
@@ -141,6 +146,24 @@ impl Teleport {
             selected: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             events,
+            closing: Vec::new(),
+            retired: false,
+        }
+    }
+
+    /// Closes `tabs` once a move has stopped their terminals.
+    pub(crate) fn closing(mut self, tabs: Vec<crate::browser::TabId>) -> Self {
+        self.closing = tabs;
+        self
+    }
+
+    /// The Herdr 2 tabs to close now that the move is over: all of them
+    /// when it stopped their terminals, else none.
+    fn closed_tabs(&mut self, finished: bool) -> Vec<crate::browser::TabId> {
+        if finished || self.retired {
+            std::mem::take(&mut self.closing)
+        } else {
+            Vec::new()
         }
     }
 
@@ -252,6 +275,9 @@ impl Teleport {
                     }
                 }
                 Event::Step(step) => {
+                    // Steps after `Retire` start once the source's programs
+                    // stopped.
+                    self.retired |= step.progress() > Step::Retire.progress();
                     if let Stage::Moving(_, current) = &mut self.stage {
                         *current = Some(step);
                     }
@@ -303,6 +329,9 @@ impl SheprdWindow {
         };
         let destination = teleport.destination_label().unwrap_or_default().to_owned();
         let source = teleport.source.clone();
+        for tab in teleport.closed_tabs(result.is_ok()) {
+            self.close_browser_tab(tab, window, cx);
+        }
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) if !open => {
