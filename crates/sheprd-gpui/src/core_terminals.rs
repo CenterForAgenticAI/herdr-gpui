@@ -15,6 +15,7 @@ mod commands;
 mod context;
 mod error;
 mod fallback;
+mod folders;
 mod hub;
 mod infos;
 mod screen;
@@ -74,6 +75,8 @@ struct TabPanes {
     observe: bool,
     panes: Panes,
     unsaved: bool,
+    /// The workspace whose tab this is, known once the window has shown it.
+    workspace: Option<(Scope, String)>,
     /// How far the zoomed pane has grown over the tab; it shrinks back to
     /// its place when unzoomed.
     zoom: crate::motion::Toggle,
@@ -89,6 +92,7 @@ impl TabPanes {
             observe,
             panes,
             unsaved: false,
+            workspace: None,
             zoom: crate::motion::Toggle::default(),
             zoomed: None,
         }

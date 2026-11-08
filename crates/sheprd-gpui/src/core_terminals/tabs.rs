@@ -44,6 +44,9 @@ impl SheprdWindow {
                 .tabs
                 .entry(tab.id)
                 .or_insert_with(|| TabPanes::new(panes.clone(), *observe));
+            if shown.workspace.is_none() {
+                shown.workspace = Some((scope.clone(), workspace.clone()));
+            }
             missing.extend(
                 shown
                     .panes
