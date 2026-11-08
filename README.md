@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/sheprd-labs/sheprd/actions/workflows/ci.yml"><img src="https://github.com/sheprd-labs/sheprd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://discord.gg/GE4JRp8kaX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Join the Sheprd Discord"></a>
 </p>
 
 <p align="center">
