@@ -1,4 +1,5 @@
 mod accessibility;
+mod adopt;
 mod chats;
 mod focus;
 mod kept_workspaces;

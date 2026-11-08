@@ -100,6 +100,8 @@ async fn a_chat_starts_on_the_core_with_its_endpoint_labelled() {
     assert_eq!(params["cwd"], "/code/one");
     assert_eq!(params["env"][ENDPOINT_ENV], params["labels"][TOKEN]);
     assert_eq!(params["env"]["HERDR_PANE_ID"], "");
+    // Sheprd puts it in a tab of the workspace it was asked for.
+    assert_eq!(params["labels"][sheprd_session::WORKSPACE_LABEL], "w1");
     drop((hub, source));
     fake.server.join().unwrap();
 }
@@ -242,6 +244,10 @@ async fn a_new_tab_opens_a_shell_in_the_workspace_folder_and_answers_its_pane() 
     assert_eq!(run["params"]["cwd"], "/code/one");
     assert_eq!(run["params"]["keep"], true);
     assert!(run["params"].get("argv").is_none());
+    assert_eq!(
+        run["params"]["labels"][sheprd_session::WORKSPACE_LABEL],
+        "w1"
+    );
     drop((hub, source));
     fake.server.join().unwrap();
 }

@@ -30,6 +30,11 @@ impl Infos {
         self.known.get(id)
     }
 
+    /// Every terminal the last list named.
+    pub(super) fn all(&self) -> impl Iterator<Item = &TerminalInfo> {
+        self.known.values()
+    }
+
     /// Records a terminal just started, until the next list replaces it,
     /// and hands it back.
     pub(super) fn insert(&mut self, info: TerminalInfo) -> TerminalInfo {

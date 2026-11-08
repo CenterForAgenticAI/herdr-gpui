@@ -46,7 +46,7 @@ impl SheprdWindow {
         }
     }
 
-    fn live_at(&self, index: usize) -> &crate::state::LiveState {
+    pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {
         if index == self.selected_endpoint {
             &self.live
         } else {

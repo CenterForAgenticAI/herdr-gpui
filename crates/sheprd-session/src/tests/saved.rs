@@ -84,3 +84,16 @@ fn a_file_from_before_kept_workspaces_has_none() {
     let saved = parse(json!([]));
     assert_eq!(saved.workspaces("s").count(), 0);
 }
+
+#[test]
+fn a_terminal_labelled_for_a_workspace_names_one_a_tab_can_be_in() {
+    use crate::{WORKSPACE_LABEL, labelled_workspace};
+    use std::collections::BTreeMap;
+    let labels = |id: &str| BTreeMap::from([(WORKSPACE_LABEL.to_owned(), id.to_owned())]);
+    assert_eq!(labelled_workspace(&labels("space-3")), Some("space-3"));
+    assert_eq!(labelled_workspace(&labels("w1")), Some("w1"));
+    assert_eq!(labelled_workspace(&labels("")), None);
+    assert_eq!(labelled_workspace(&labels("core:terminals")), None);
+    assert_eq!(labelled_workspace(&labels(&"x".repeat(257))), None);
+    assert_eq!(labelled_workspace(&BTreeMap::new()), None);
+}

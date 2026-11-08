@@ -289,7 +289,9 @@ impl Hub {
             .clone();
         if let Some(core) = self.active_core() {
             let (cwd, program) = (cwd.unwrap_or(&folder).to_owned(), program.to_owned());
-            return on_core(move || core.open_chat(agent, &program, &cwd)).await;
+            // Labelled for its workspace, so Sheprd puts it in a tab there.
+            let workspace = workspace.to_owned();
+            return on_core(move || core.open_chat(agent, &program, &cwd, Some(&workspace))).await;
         }
         let response = self
             .call(
@@ -339,7 +341,7 @@ impl Hub {
                 Some(branch) => {
                     core.open_worktree_chat(agent, &program, &cwd, &branch, root.as_deref())
                 }
-                None => core.open_chat(agent, &program, &cwd),
+                None => core.open_chat(agent, &program, &cwd, None),
             })
             .await?;
             return Ok(CreatedWorkspace {
@@ -424,7 +426,8 @@ impl Hub {
             .layout()
             .workspace(workspace)
             .map_or_else(String::new, |workspace| workspace.cwd.clone());
-        let pane = on_core(move || core.open_shell(&cwd)).await?;
+        let workspace = workspace.to_owned();
+        let pane = on_core(move || core.open_shell(&cwd, Some(&workspace))).await?;
         let mut layout = self.layout.clone();
         let listed = layout.wait_for(|layout| layout.terminal(&pane).is_some());
         // An unlisted tab is still made: the phone reloads and finds it.

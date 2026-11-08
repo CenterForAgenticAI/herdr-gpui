@@ -11,6 +11,7 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod adopt;
 mod commands;
 mod error;
 mod fallback;
@@ -137,6 +138,9 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// Terminals labelled for a workspace that were put in a tab, so each
+    /// is put in one only once.
+    adopted: std::collections::HashSet<TerminalId>,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view
@@ -416,6 +420,7 @@ impl SheprdWindow {
         }
         self.poll_core_panes(window, cx);
         if self.core_terminals.poll_infos(std::time::Instant::now()) {
+            self.adopt_labelled_terminals(cx);
             cx.notify();
         }
         if !cx.has_active_drag() {

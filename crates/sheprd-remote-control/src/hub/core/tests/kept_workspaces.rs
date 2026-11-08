@@ -73,3 +73,32 @@ fn kept_workspaces_lead_the_desktop_documents_spaces_too() {
         .collect();
     assert_eq!(labels, ["api", "desk"]);
 }
+
+#[test]
+fn a_terminal_started_for_a_workspace_is_listed_there_before_it_has_a_tab() {
+    let saved = serde_json::from_value(json!({
+        "workspaces": [
+            {"id": "space-2", "scope": "local:/test.sock", "label": "api", "cwd": "/code/api"}
+        ],
+        "tabs": []
+    }))
+    .unwrap();
+    let mut phone = record("t1");
+    phone["labels"] = json!({sheprd_session::WORKSPACE_LABEL: "space-2"});
+    let mut made_up = record("t2");
+    made_up["labels"] = json!({sheprd_session::WORKSPACE_LABEL: "core:space:x"});
+    let records = [phone, made_up].map(|record| serde_json::from_value(record).unwrap());
+    let layout = projection::project(
+        "fake-core",
+        &records,
+        Some(&saved),
+        Some("local:/test.sock"),
+    );
+    let rows: Vec<(&str, usize)> = layout
+        .workspaces
+        .iter()
+        .map(|row| (row.id.as_str(), row.terminals.len()))
+        .collect();
+    // A label naming the daemon's own groups is not one a tab can be in.
+    assert_eq!(rows, vec![("space-2", 1), (UNLISTED, 1)]);
+}

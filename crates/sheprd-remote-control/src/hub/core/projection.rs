@@ -75,8 +75,12 @@ pub(super) fn project(
         .filter(|record| !assigned.contains(record.address.as_str()))
     {
         let tab = pane_id(boot, &record.address);
+        // Started for a workspace, as by a phone: listed there before Sheprd
+        // puts it in a tab of its own.
+        let workspace =
+            sheprd_session::labelled_workspace(&record.labels).unwrap_or(super::UNLISTED);
         if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
-            add(&mut layout, super::UNLISTED, terminal);
+            add(&mut layout, workspace, terminal);
         }
     }
     layout

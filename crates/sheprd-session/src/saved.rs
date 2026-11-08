@@ -63,6 +63,25 @@ pub fn readable_workspaces<'de, D: Deserializer<'de>>(
 
 /// The longest workspace ID kept, as for a tab's workspace.
 pub const MAX_ID_BYTES: usize = 256;
+/// The herdr-core label naming the workspace a terminal was started for
+/// outside the app, as by a phone: the app puts such a terminal in a tab
+/// of that workspace, and the remote control daemon lists it there.
+pub const WORKSPACE_LABEL: &str = "sheprd.workspace";
+
+/// The workspace a terminal's `labels` name, when it is one the app could
+/// keep a tab in: a Herdr 1 workspace or one the app keeps.
+pub fn labelled_workspace(labels: &std::collections::BTreeMap<String, String>) -> Option<&str> {
+    labels
+        .get(WORKSPACE_LABEL)
+        .map(String::as_str)
+        .filter(|id| tab_workspace(id))
+}
+
+/// Whether `id` names a workspace the app could keep a tab in, rather than
+/// a group the remote control daemon makes up (`core:…`).
+pub fn tab_workspace(id: &str) -> bool {
+    !id.is_empty() && id.len() <= MAX_ID_BYTES && !id.starts_with("core:")
+}
 /// The longest workspace name kept.
 pub const MAX_LABEL_CHARS: usize = 200;
 /// The longest folder kept for a workspace.
