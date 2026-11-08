@@ -11,6 +11,7 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod attention;
 mod commands;
 mod error;
 mod fallback;
@@ -115,6 +116,8 @@ impl TabPanes {
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// Agents' news waiting out the sound delay.
+    attention: attention::Attention,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view
@@ -359,8 +362,10 @@ impl SheprdWindow {
             .infos
             .poll(backend, std::time::Instant::now())
         {
+            self.hear_core_agents(cx);
             cx.notify();
         }
+        self.tell_core_agents(window, cx);
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
