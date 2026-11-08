@@ -17,7 +17,13 @@ use sheprd_backend::{
 /// Where a press is going: to the program, or into a selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Press {
-    Reported(ClientMouseButton),
+    /// A press the program reads; `bare` when it was a passthrough
+    /// right-click, whose whole gesture reaches the program without the
+    /// modifier, as Herdr strips it.
+    Reported {
+        button: ClientMouseButton,
+        bare: bool,
+    },
     Selecting,
 }
 
@@ -28,6 +34,14 @@ fn button(button: MouseButton) -> Option<ClientMouseButton> {
         MouseButton::Middle => Some(ClientMouseButton::Middle),
         _ => None,
     }
+}
+
+/// The modifiers a gesture reports: none for a passthrough right-click,
+/// which reaches the program without Herdr's
+/// `right_click_passthrough_modifier`. A herdr-core pane has no pane menu
+/// yet, so its other right-clicks reach the program as they are.
+fn reported(held: Modifiers, bare: bool) -> Modifiers {
+    if bare { Modifiers::default() } else { held }
 }
 
 fn modifier_bits(modifiers: Modifiers) -> u8 {
@@ -81,8 +95,13 @@ impl CoreTerminalView {
         };
         if self.screen.mouse_reporting && !event.modifiers.shift {
             if let Some(pressed) = button(event.button) {
-                self.press = Some(Press::Reported(pressed));
-                let modifiers = self.reported_modifiers(event.button, event.modifiers);
+                let bare = event.button == MouseButton::Right
+                    && self.look.right_click_passthrough.matches(event.modifiers);
+                self.press = Some(Press::Reported {
+                    button: pressed,
+                    bare,
+                });
+                let modifiers = reported(event.modifiers, bare);
                 self.report(ClientMouseKind::Down(pressed), cell, modifiers, 1);
             }
             return;
@@ -113,8 +132,9 @@ impl CoreTerminalView {
             return;
         };
         match self.press {
-            Some(Press::Reported(pressed)) if event.pressed_button.is_some() => {
-                self.report(ClientMouseKind::Drag(pressed), cell, event.modifiers, 1);
+            Some(Press::Reported { button, bare }) if event.pressed_button.is_some() => {
+                let modifiers = reported(event.modifiers, bare);
+                self.report(ClientMouseKind::Drag(button), cell, modifiers, 1);
             }
             Some(Press::Selecting) if event.pressed_button == Some(MouseButton::Left) => {
                 if let Some(selection) = &mut self.selection {
@@ -146,10 +166,10 @@ impl CoreTerminalView {
             return;
         }
         match self.press.take() {
-            Some(Press::Reported(pressed)) => {
+            Some(Press::Reported { button, bare }) => {
                 if let Some(cell) = self.cell_at(event.position) {
-                    let modifiers = self.reported_modifiers(event.button, event.modifiers);
-                    self.report(ClientMouseKind::Up(pressed), cell, modifiers, 1);
+                    let modifiers = reported(event.modifiers, bare);
+                    self.report(ClientMouseKind::Up(button), cell, modifiers, 1);
                 }
             }
             // Releasing a selection copies it while `copy_on_select` is on;
@@ -191,18 +211,6 @@ impl CoreTerminalView {
         // Clamped to a u16 first, so the cast cannot truncate.
         let lines = steps.abs().min(f32::from(u16::MAX)) as u16;
         self.report(kind, cell, event.modifiers, lines);
-    }
-
-    /// The modifiers a press reports. A right-click held with exactly
-    /// Herdr's `right_click_passthrough_modifier` reaches the program
-    /// without it, as Herdr strips it. A herdr-core pane has no pane menu
-    /// yet, so its other right-clicks reach the program as they are.
-    fn reported_modifiers(&self, button: MouseButton, held: Modifiers) -> Modifiers {
-        if button == MouseButton::Right && self.look.right_click_passthrough.matches(held) {
-            Modifiers::default()
-        } else {
-            held
-        }
     }
 
     /// Ends a copy: the copied flash, and the highlight dropped unless

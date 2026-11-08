@@ -160,13 +160,16 @@ fn the_passthrough_modifier_reaches_the_program_without_it(cx: &mut TestAppConte
         },
     );
     let position = at(&view, cx, 0, 0);
+    let next = at(&view, cx, 2, 0);
+    // The whole gesture, drag included, goes without the modifier.
     cx.simulate_mouse_down(position, MouseButton::Right, Modifiers::alt());
-    cx.simulate_mouse_up(position, MouseButton::Right, Modifiers::alt());
+    cx.simulate_mouse_move(next, Some(MouseButton::Right), Modifiers::alt());
+    cx.simulate_mouse_up(next, MouseButton::Right, Modifiers::alt());
     // Another modifier is reported as held.
     cx.simulate_mouse_down(position, MouseButton::Right, Modifiers::control());
     let modifiers: Vec<(ClientMouseKind, u8)> = until(|| {
         let reports = reports(&backend);
-        (reports.len() >= 3).then_some(reports)
+        (reports.len() >= 4).then_some(reports)
     })
     .into_iter()
     .filter_map(|input| match input {
@@ -180,6 +183,7 @@ fn the_passthrough_modifier_reaches_the_program_without_it(cx: &mut TestAppConte
         modifiers,
         [
             (ClientMouseKind::Down(ClientMouseButton::Right), 0),
+            (ClientMouseKind::Drag(ClientMouseButton::Right), 0),
             (ClientMouseKind::Up(ClientMouseButton::Right), 0),
             (ClientMouseKind::Down(ClientMouseButton::Right), 0b10),
         ]
