@@ -25,9 +25,11 @@ impl SheprdWindow {
         }
     }
 
-    /// Opens `target` in the terminal editor in a herdr-core split beside
-    /// `pane`, when `pane` is a herdr-core pane in a tab; false otherwise,
-    /// for the caller to open it as it would for a Herdr pane.
+    /// Opens `target` in the terminal editor beside `pane` when `pane` is a
+    /// herdr-core terminal: in a herdr-core split of its tab, or, for the
+    /// shell shown in place of Herdr 1, in a new herdr-core tab. False when
+    /// `pane` is no herdr-core terminal, for the caller to open it as it
+    /// would for a Herdr pane.
     pub(crate) fn open_in_core_editor(
         &mut self,
         target: &EditorTarget,
@@ -37,8 +39,23 @@ impl SheprdWindow {
         let Ok(at) = TerminalId::new(pane) else {
             return false;
         };
-        let Some(tab) = self.core_terminals.tab_of(&at) else {
-            return false;
+        let purpose = match self.core_terminals.tab_of(&at) {
+            Some(tab) => Purpose::Split {
+                tab,
+                at,
+                axis: super::panes::Axis::Row,
+            },
+            None if self.core_fallback_terminal(cx).as_ref() == Some(&at) => {
+                match self.browser_key() {
+                    Some((scope, workspace)) => Purpose::Tab { scope, workspace },
+                    // No workspace to hold a tab: the system opens it.
+                    None => {
+                        self.open_in_system_app(target.path.clone(), cx);
+                        return true;
+                    }
+                }
+            }
+            None => return false,
         };
         let argv = match crate::editor::argv(target, self.config.editor_command.as_ref()) {
             Ok(argv) => argv,
@@ -52,8 +69,7 @@ impl SheprdWindow {
             cwd: target.path.parent().map(std::path::Path::to_owned),
             ..Spawn::default()
         };
-        let axis = super::panes::Axis::Row;
-        self.start_core_program(Purpose::Split { tab, at, axis }, spawn);
+        self.start_core_program(purpose, spawn);
         true
     }
 }

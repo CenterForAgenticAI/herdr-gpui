@@ -187,8 +187,14 @@ impl CoreTerminalView {
         let Some(pressed) = self.links.pressed.take() else {
             return false;
         };
-        let released = self
-            .cell_at(event.position)
+        // `cell_at` holds a point outside the cells on their edge, which a
+        // release off the pane must not count as one on a link there.
+        let inside = self
+            .bounds
+            .is_some_and(|bounds| bounds.contains(&event.position));
+        let released = inside
+            .then(|| self.cell_at(event.position))
+            .flatten()
             .and_then(|cell| self.link_at(cell));
         if released.as_ref() != Some(&pressed) || !crate::keymap::secondary(&event.modifiers) {
             return true;

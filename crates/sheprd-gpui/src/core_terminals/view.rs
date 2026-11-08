@@ -142,12 +142,18 @@ impl CoreTerminalView {
         self
     }
 
-    /// Keeps the working directory a printed relative path is read against.
-    pub(crate) fn set_cwd(&mut self, cwd: Option<&std::path::Path>) {
+    /// Keeps the working directory a printed relative path is read
+    /// against, and reads the link under the pointer again when it moved.
+    pub(crate) fn set_cwd(&mut self, cwd: Option<&std::path::Path>, cx: &mut Context<Self>) {
         let cwd = cwd.and_then(std::path::Path::to_str);
         if self.cwd.as_deref() != cwd {
             self.cwd = cwd.map(str::to_owned);
+            self.rehover_link(cx);
         }
+    }
+
+    pub(crate) fn terminal(&self) -> &TerminalId {
+        &self.id
     }
 
     pub(crate) fn title(&self) -> Option<&str> {

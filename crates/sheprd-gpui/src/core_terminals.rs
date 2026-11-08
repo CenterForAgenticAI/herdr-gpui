@@ -352,8 +352,10 @@ impl SheprdWindow {
         }
         self.poll_core_panes(window, cx);
         // Split chrome and the sidebar's rows name panes from what herdr-core
-        // reports, so it is read while any herdr-core tab is known.
-        let listed = !self.core_terminals.tabs.is_empty();
+        // reports, so it is read while any herdr-core tab is known, and the
+        // shell shown in place of Herdr 1 reads its links against its folder.
+        let fallback = self.core_fallback_view();
+        let listed = !self.core_terminals.tabs.is_empty() || fallback.is_some();
         let backend = listed.then(|| self.core_terminals.hub.backend()).flatten();
         if self
             .core_terminals
@@ -361,6 +363,14 @@ impl SheprdWindow {
             .poll(backend, std::time::Instant::now())
         {
             cx.notify();
+        }
+        if let Some(view) = fallback {
+            let cwd = self
+                .core_terminals
+                .infos
+                .named(view.read(cx).terminal())
+                .and_then(|info| info.cwd.clone());
+            view.update(cx, |view, cx| view.set_cwd(cwd.as_deref(), cx));
         }
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
