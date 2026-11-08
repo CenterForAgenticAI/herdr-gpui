@@ -17,7 +17,12 @@ impl SheprdWindow {
     pub(crate) fn checkpoint_checkout(&self) -> Option<Checkout> {
         let target = self.menu.target.as_ref()?;
         let endpoint = self.endpoints.get(self.selected_endpoint)?;
-        let host = host_for(&endpoint.connection.target, self.live.local_daemon_peer)?;
+        // A workspace the app keeps is in a folder on this computer.
+        let host = if target.keeper == sheprd_session::Keeper::App {
+            host_for(&sheprd_client::ConnectTarget::Local, true)?
+        } else {
+            host_for(&endpoint.connection.target, self.live.local_daemon_peer)?
+        };
         Checkout::new(
             host,
             &target.worktree.as_ref()?.key,

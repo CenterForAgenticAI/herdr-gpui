@@ -134,14 +134,15 @@ impl SheprdWindow {
                 .observe(&endpoint.id, &host, boot, &session);
             watched.push(endpoint.id.clone());
         }
-        // Herdr 2's agents on this computer, watched as an endpoint of their
-        // own so a turn is told apart from Herdr 1's.
-        if let (true, Some(host), Some(session)) = (
+        // Herdr 2's agents on this computer, whichever host is shown, watched
+        // as an endpoint of their own so a turn is told apart from Herdr 1's.
+        if let (true, Some(host), Some(index)) = (
             enabled,
             checkpoint::host_for(&sheprd_client::ConnectTarget::Local, true),
-            self.sessions(self.selected_endpoint).core,
-        ) {
-            let watch = format!("{}/herdr-2", self.endpoints[self.selected_endpoint].id);
+            self.core_host(),
+        ) && let Some(session) = crate::session_model::core_with_checkouts(&self.sessions(index))
+        {
+            let watch = format!("{}/herdr-2", self.endpoints[index].id);
             self.checkpoints.observe(&watch, &host, "herdr-2", &session);
             watched.push(watch);
         }

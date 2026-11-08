@@ -84,3 +84,22 @@ fn a_file_from_before_kept_workspaces_has_none() {
     let saved = parse(json!([]));
     assert_eq!(saved.workspaces("s").count(), 0);
 }
+
+#[test]
+fn a_workspace_saved_before_names_were_marked_keeps_its_name() {
+    let saved = SavedTabs::parse(
+        &serde_json::to_vec(&json!({
+            "tabs": [],
+            "workspaces": [
+                {"id": "space-1", "scope": "s", "label": "mine", "cwd": "/a"},
+                {"id": "space-2", "scope": "s", "label": "b", "cwd": "/b", "custom": false},
+            ],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let custom: Vec<_> = saved.workspaces("s").map(|w| w.custom).collect();
+    assert_eq!(custom, [true, false]);
+    let written = serde_json::to_value(saved.workspaces("s").nth(1).unwrap()).unwrap();
+    assert_eq!(written["custom"], false, "always written");
+}

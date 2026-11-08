@@ -8,9 +8,9 @@ use gpui::{prelude::*, *};
 use sheprd_client::protocol::ClientShellWorktree;
 use sheprd_session::Keeper;
 
-/// The rows a kept workspace's menu shows: a note too once Git says which
-/// checkout and branch its folder is.
-pub(super) fn items(checkout: bool) -> Vec<(WorkspaceMenuAction, Label)> {
+/// The rows a kept workspace's menu shows: a note and its checkpoints too
+/// once Git says which checkout and branch its folder is.
+pub(super) fn items(checkout: bool, checkpoints: bool) -> Vec<(WorkspaceMenuAction, Label)> {
     let mut items = vec![
         (
             WorkspaceMenuAction::Dialog(WorkspaceAction::Rename),
@@ -21,6 +21,9 @@ pub(super) fn items(checkout: bool) -> Vec<(WorkspaceMenuAction, Label)> {
             Label::CLOSE,
         ),
     ];
+    if checkpoints {
+        items.push((WorkspaceMenuAction::Checkpoints, Label::CHECKPOINTS));
+    }
     if checkout {
         items.push((
             WorkspaceMenuAction::Dialog(WorkspaceAction::Note),
