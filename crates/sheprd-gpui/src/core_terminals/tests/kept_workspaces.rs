@@ -131,6 +131,11 @@ fn with_herdr_1_kept_workspaces_list_after_its_own(cx: &mut TestAppContext) {
     assert_eq!(front(&view, cx), id);
     view.read_with(cx, |view, _| {
         assert_eq!(view.herdr_workspace_in_front(), None);
+        assert_eq!(
+            view.herdr_tabs_in_front().count(),
+            0,
+            "the strip shows none of Herdr 1's tabs"
+        );
         assert!(
             view.new_tabs_use_core(),
             "a tab in a kept workspace is Herdr 2's"
@@ -141,6 +146,11 @@ fn with_herdr_1_kept_workspaces_list_after_its_own(cx: &mut TestAppContext) {
     view.read_with(cx, |view, _| {
         assert_eq!(view.browser_key().unwrap().1, "w0");
         assert_eq!(view.herdr_workspace_in_front(), Some("w0"));
+        assert!(
+            view.herdr_tabs_in_front()
+                .all(|tab| tab.workspace_id == "w0")
+        );
+        assert!(view.herdr_tabs_in_front().next().is_some());
     });
 }
 

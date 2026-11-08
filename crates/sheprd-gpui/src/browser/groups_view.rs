@@ -327,18 +327,8 @@ impl SheprdWindow {
 
     /// Every tab of the focused workspace, hidden ones included.
     pub(crate) fn open_workspace_tabs(&self, cx: &App) -> Vec<Pick> {
-        let workspace = self.herdr_workspace_in_front();
-        let herdr = self.live.snapshot.as_ref().map(|snapshot| {
-            snapshot
-                .tabs
-                .iter()
-                .filter(|tab| Some(tab.workspace_id.as_str()) == workspace)
-                .map(|tab| Pick::Herdr(tab.tab_id.clone()))
-                .collect::<Vec<_>>()
-        });
-        herdr
-            .unwrap_or_default()
-            .into_iter()
+        self.herdr_tabs_in_front()
+            .map(|tab| Pick::Herdr(tab.tab_id.clone()))
             .chain(self.browser_tab_ids(cx).into_iter().map(Pick::Page))
             .collect()
     }

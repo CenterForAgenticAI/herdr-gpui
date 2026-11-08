@@ -213,6 +213,19 @@ impl SheprdWindow {
         self.live.snapshot.as_ref()?.focused_workspace_id.as_deref()
     }
 
+    /// Herdr 1's tabs of the workspace in front, in its order: none while a
+    /// workspace the app keeps is in front.
+    pub(crate) fn herdr_tabs_in_front(
+        &self,
+    ) -> impl Iterator<Item = &sheprd_client::protocol::ClientShellTab> {
+        let workspace = self.herdr_workspace_in_front();
+        self.live
+            .snapshot
+            .iter()
+            .flat_map(|snapshot| &snapshot.tabs)
+            .filter(move |tab| Some(tab.workspace_id.as_str()) == workspace)
+    }
+
     /// The focused workspace's browser tabs, in the order they opened.
     pub(crate) fn browser_tab_ids(&self, cx: &App) -> Vec<TabId> {
         let (Some((scope, workspace)), Some(store)) = (self.browser_key(), store(cx)) else {
