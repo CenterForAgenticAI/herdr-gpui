@@ -29,14 +29,16 @@ pub(super) fn short(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-/// What a log gave as an id, when it can be matched exactly later.
+/// A session or cell id a log gave as a number or a short string, when it
+/// can be matched exactly later.
 pub(super) fn identifier(value: Option<&Value>) -> Option<String> {
     let value = value?;
     if let Some(id) = value.as_u64() {
         return Some(id.to_string());
     }
     let id = value.as_str()?;
-    (!id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)).then(|| id.to_owned())
+    (!id.is_empty() && id.len() <= MAX_HANDLE && !id.chars().any(char::is_control))
+        .then(|| id.to_owned())
 }
 
 /// Codex logs its arguments encoded as a string.
@@ -129,17 +131,6 @@ pub(super) fn describe(name: &str, input: &Value) -> Described {
 /// An action on another agent, which logs may leave unnamed.
 fn aimed(action: &str, target: Option<&str>) -> String {
     target.map_or_else(|| action.to_owned(), |target| format!("{action}: {target}"))
-}
-
-/// A session or cell id, logged as a number or a short string.
-fn identifier(value: Option<&Value>) -> Option<String> {
-    let value = value?;
-    if let Some(id) = value.as_u64() {
-        return Some(id.to_string());
-    }
-    let id = value.as_str()?;
-    (!id.is_empty() && id.len() <= MAX_HANDLE && !id.chars().any(char::is_control))
-        .then(|| id.to_owned())
 }
 
 fn unknown(name: &str) -> Described {
