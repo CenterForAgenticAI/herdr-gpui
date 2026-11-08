@@ -337,8 +337,13 @@ impl Graphics {
             100 => (SurfaceGraphicsFormat::Png, None),
             _ => return None,
         };
-        let expected =
-            bytes_per_pixel.map(|bpp| u64::from(control.width) * u64::from(control.height) * bpp);
+        // Sides are checked below, after a PNG's are read; until then they
+        // are any `u32`, which saturating keeps from overflowing.
+        let expected = bytes_per_pixel.map(|bpp| {
+            u64::from(control.width)
+                .saturating_mul(u64::from(control.height))
+                .saturating_mul(bpp)
+        });
         let limit = expected.map_or(MAX_IMAGE_BYTES as u64, |expected| {
             expected.min(MAX_IMAGE_BYTES as u64)
         });
@@ -442,7 +447,9 @@ impl Graphics {
                 pixels_high.div_ceil(cell_height),
             ),
             (cols, 0) => {
-                let high = u64::from(cols) * u64::from(cell_width) * u64::from(shown_height)
+                let high = u64::from(cols)
+                    .saturating_mul(u64::from(cell_width))
+                    .saturating_mul(u64::from(shown_height))
                     / u64::from(shown_width.max(1));
                 (
                     cols,
@@ -450,7 +457,9 @@ impl Graphics {
                 )
             }
             (0, rows) => {
-                let wide = u64::from(rows) * u64::from(cell_height) * u64::from(shown_width)
+                let wide = u64::from(rows)
+                    .saturating_mul(u64::from(cell_height))
+                    .saturating_mul(u64::from(shown_width))
                     / u64::from(shown_height.max(1));
                 (
                     u32::try_from(wide.div_ceil(u64::from(cell_width))).ok()?,

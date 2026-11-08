@@ -89,6 +89,9 @@ fn files_and_wrong_sizes_are_refused() {
     emulator.feed(&command("a=T,f=24,s=2,v=2", &[0; 5]));
     // Sides past the limit.
     emulator.feed(&command("a=T,f=100", &png(20_000, 1)));
+    // Raw sides whose byte count overflows: refused, never a panic.
+    emulator.feed(&command("a=T,f=32,s=4294967295,v=4294967295", &[0; 4]));
+    emulator.feed(&command("a=T,f=32,o=z,s=4294967295,v=4294967295", &[0; 4]));
     assert!(emulator.take_graphics().is_none());
     assert_eq!(emulator.frame().cursor.map(|c| (c.x, c.y)), Some((0, 0)));
 }
