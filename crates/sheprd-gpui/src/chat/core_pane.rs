@@ -141,6 +141,40 @@ impl SheprdWindow {
     /// `terminal`'s pane in `tab`: its view, with its chat drawn over it when
     /// one is attached, or the button that brings the chat back over a pane
     /// turned to its terminal. A mirror only watches, so it keeps the view.
+    /// `view`, opening its pane's menu on a right-click the program does not
+    /// take, as a Herdr pane does.
+    fn core_pane_menu_area(
+        &self,
+        tab: TabId,
+        terminal: &TerminalId,
+        view: gpui::Entity<CoreTerminalView>,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::AnyElement {
+        use gpui::{InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _};
+        let terminal = terminal.clone();
+        gpui::div()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .size_full()
+            .child(view)
+            .on_mouse_down(
+                gpui::MouseButton::Right,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    let target = crate::core_terminals::menu::Target::Pane {
+                        tab,
+                        terminal: terminal.clone(),
+                    };
+                    this.open_core_menu(target, event.position, window, cx);
+                    this.menu.opening_right_click =
+                        this.menu.page == Some(crate::menu::Page::CoreMenu);
+                }),
+            )
+            .into_any_element()
+    }
+
     pub(crate) fn core_pane_body(
         &self,
         tab: TabId,
@@ -157,7 +191,7 @@ impl SheprdWindow {
             .flatten()
             .filter(|chat| chat.available());
         let Some(chat) = chat else {
-            return view.clone().into_any_element();
+            return self.core_pane_menu_area(tab, terminal, view.clone(), cx);
         };
         // The cells' last size shapes the chat's rail; it covers the pane.
         let size = view

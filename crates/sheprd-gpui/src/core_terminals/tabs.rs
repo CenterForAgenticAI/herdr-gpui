@@ -37,18 +37,18 @@ impl SheprdWindow {
         };
         let mut missing: Vec<(TabId, TerminalId, Role)> = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
-            let Some(Location::CoreTerminal {
-                panes,
-                observe,
-                active,
-                zoomed,
-            }) = &tab.location
-            else {
+            let Some(location) = &tab.location else {
                 continue;
             };
-            let shown = self.core_terminals.tabs.entry(tab.id).or_insert_with(|| {
-                TabPanes::restore(panes.clone(), *observe, active.as_ref(), zoomed.as_ref())
-            });
+            let shown = match self.core_terminals.tabs.entry(tab.id) {
+                std::collections::hash_map::Entry::Occupied(shown) => shown.into_mut(),
+                std::collections::hash_map::Entry::Vacant(place) => {
+                    let Some(restored) = TabPanes::restore(location) else {
+                        continue;
+                    };
+                    place.insert(restored)
+                }
+            };
             missing.extend(
                 shown
                     .panes
@@ -189,6 +189,10 @@ impl SheprdWindow {
             .tabs
             .iter()
             .filter_map(|(tab, shown)| {
+                // A name the user gave stands over the program's title.
+                if let Some(name) = &shown.name {
+                    return Some((*tab, name.clone()));
+                }
                 let view = self
                     .core_terminals
                     .views

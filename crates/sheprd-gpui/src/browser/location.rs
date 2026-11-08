@@ -90,6 +90,12 @@ pub(crate) enum Location {
         /// The pane filling the tab, restored zoomed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         zoomed: Option<sheprd_backend::TerminalId>,
+        /// The name the user gave the tab, shown over its program's title.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Names the user gave panes, shown over their programs' titles.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        names: std::collections::BTreeMap<sheprd_backend::TerminalId, String>,
     },
 }
 
@@ -224,6 +230,8 @@ impl Location {
             observe,
             active: None,
             zoomed: None,
+            name: None,
+            names: Default::default(),
         }
     }
 

@@ -1,0 +1,412 @@
+//! The right-click menus of herdr-core (Herdr 2) tabs and panes. Herdr's
+//! own menus act through its daemon; these act on the tab's panes as the
+//! window keeps them, in the same rows and order where the action exists:
+//! a new tab, renaming, splitting, zooming, mirroring, and closing.
+
+use super::{Purpose, panes::Axis};
+use crate::{
+    SheprdWindow,
+    browser::{Store, TabId},
+    i18n::fl,
+    menu::Page,
+    notifications::safe_text,
+    search_input::SearchInput,
+};
+use gpui::{prelude::*, *};
+use sheprd_backend::TerminalId;
+
+/// The most characters a name the user gives keeps.
+const MAX_NAME_CHARS: usize = 128;
+
+/// What the menu acts on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Target {
+    Tab(TabId),
+    Pane { tab: TabId, terminal: TerminalId },
+}
+
+impl Target {
+    fn tab(&self) -> TabId {
+        match self {
+            Self::Tab(tab) | Self::Pane { tab, .. } => *tab,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Action {
+    NewTab,
+    Rename,
+    SplitRight,
+    SplitDown,
+    Zoom,
+    Unzoom,
+    Mirror,
+    Close,
+}
+
+impl Action {
+    fn label(self, target: &Target) -> String {
+        match (self, target) {
+            (Self::NewTab, _) => fl!("tab-menu-new-tab"),
+            (Self::Rename, Target::Tab(_)) => fl!("tab-menu-rename"),
+            (Self::Rename, Target::Pane { .. }) => fl!("pane-menu-rename"),
+            (Self::SplitRight, _) => fl!("pane-menu-split-right"),
+            (Self::SplitDown, _) => fl!("pane-menu-split-down"),
+            (Self::Zoom, _) => fl!("pane-menu-zoom"),
+            (Self::Unzoom, _) => fl!("pane-menu-unzoom"),
+            (Self::Mirror, _) => fl!("core-terminals-menu-mirror"),
+            (Self::Close, Target::Tab(_)) => fl!("tab-menu-close"),
+            (Self::Close, Target::Pane { .. }) => fl!("pane-menu-close"),
+        }
+    }
+}
+
+pub(crate) struct CoreMenu {
+    target: Target,
+    selected: Option<usize>,
+    /// The name being typed on the rename page.
+    input: Option<Entity<SearchInput>>,
+}
+
+impl CoreMenu {
+    #[cfg(test)]
+    pub(crate) fn target(&self) -> &Target {
+        &self.target
+    }
+}
+
+/// `name` as a tab or pane keeps it: one safe, bounded line, or none when
+/// blank, which gives the program's title back.
+pub(crate) fn clean_name(name: &str) -> Option<String> {
+    let name: String = safe_text(name, MAX_NAME_CHARS * 4)
+        .chars()
+        .take(MAX_NAME_CHARS)
+        .collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+impl SheprdWindow {
+    /// The rows the menu offers, in Herdr's order. A mirror only watches,
+    /// so it neither splits nor mirrors again.
+    pub(crate) fn core_menu_actions(&self, target: &Target) -> Vec<Action> {
+        let Some(shown) = self.core_terminals.tabs.get(&target.tab()) else {
+            return Vec::new();
+        };
+        match target {
+            Target::Tab(_) => vec![Action::NewTab, Action::Rename, Action::Close],
+            Target::Pane { terminal, .. } => {
+                let mut actions = Vec::new();
+                if !shown.observe {
+                    actions.extend([Action::Rename, Action::SplitRight, Action::SplitDown]);
+                }
+                if shown.panes.count() > 1 {
+                    let zoomed = shown.zoom.is_open() && shown.zoomed.as_ref() == Some(terminal);
+                    actions.push(if zoomed { Action::Unzoom } else { Action::Zoom });
+                }
+                if !shown.observe {
+                    actions.push(Action::Mirror);
+                }
+                actions.push(Action::Close);
+                actions
+            }
+        }
+    }
+
+    /// Opens the menu of `target` at `anchor`, as a right-click on a
+    /// herdr-core tab or pane does.
+    pub(crate) fn open_core_menu(
+        &mut self,
+        target: Target,
+        anchor: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.core_terminals.tabs.contains_key(&target.tab()) || !self.open_menu(window, cx) {
+            return;
+        }
+        self.menu.anchor = anchor;
+        self.menu.page = Some(Page::CoreMenu);
+        self.menu.core = Some(CoreMenu {
+            target,
+            selected: None,
+            input: None,
+        });
+    }
+
+    /// Opens the rename dialog of the focused herdr-core tab or pane, as its
+    /// menu's Rename row would, just below the tab strip.
+    pub(super) fn rename_core(
+        &mut self,
+        target: Target,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_core_menu(target, self.bounds.origin, window, cx);
+        if self.menu.page == Some(Page::CoreMenu) {
+            self.activate_core_menu(Action::Rename, window, cx);
+        }
+    }
+
+    fn activate_core_menu(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(target) = self.menu.core.as_ref().map(|menu| menu.target.clone()) else {
+            return;
+        };
+        let tab = target.tab();
+        if action == Action::Rename {
+            let current = self.core_name(&target).unwrap_or_default();
+            let input = cx.new(SearchInput::new);
+            input.update(cx, |input, cx| {
+                input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);
+                input.set_placeholder_with(|| fl!("pane-menu-rename-placeholder"), cx);
+                input.set_text_selected(&current, cx);
+                window.focus(&input.focus, cx);
+            });
+            if let Some(menu) = &mut self.menu.core {
+                menu.input = Some(input);
+            }
+            self.menu.page = Some(Page::RenameCore);
+            cx.notify();
+            return;
+        }
+        self.dismiss_menu(window, cx);
+        match (action, target) {
+            (Action::NewTab, _) => self.new_core_terminal(window, cx),
+            (Action::Close, Target::Tab(_)) => self.close_browser_tab(tab, window, cx),
+            (Action::Close, Target::Pane { terminal, .. }) => {
+                self.close_core_pane(tab, terminal, window, cx)
+            }
+            (Action::SplitRight | Action::SplitDown, Target::Pane { terminal, .. }) => {
+                let axis = match action {
+                    Action::SplitRight => Axis::Row,
+                    _ => Axis::Column,
+                };
+                self.start_core_program(
+                    Purpose::Split {
+                        tab,
+                        at: terminal,
+                        axis,
+                    },
+                    sheprd_backend::Spawn::default(),
+                );
+            }
+            (Action::Zoom | Action::Unzoom, Target::Pane { terminal, .. }) => {
+                if let Some(shown) = self.core_terminals.tabs.get_mut(&tab) {
+                    shown.activate(terminal.clone());
+                    shown.set_zoom((action == Action::Zoom).then_some(terminal));
+                    shown.unsaved = true;
+                }
+                self.focus_core_terminal(tab, window, cx);
+                cx.notify();
+            }
+            (Action::Mirror, Target::Pane { terminal, .. }) => {
+                self.mirror_core_pane(tab, terminal, window, cx)
+            }
+            _ => {}
+        }
+    }
+
+    /// Closes a pane: its terminal ends, unless the tab only mirrors it. The
+    /// last pane closes as its tab does.
+    pub(super) fn close_core_pane(
+        &mut self,
+        tab: TabId,
+        terminal: TerminalId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(shown) = self.core_terminals.tabs.get(&tab) else {
+            return;
+        };
+        if shown.panes.count() <= 1 {
+            self.close_browser_tab(tab, window, cx);
+            return;
+        }
+        let mirror = shown.observe;
+        if self.remove_core_pane(tab, &terminal, window, cx) && !mirror {
+            self.end_core_terminal(terminal);
+        }
+    }
+
+    /// The name the user gave `target`, if any.
+    fn core_name(&self, target: &Target) -> Option<String> {
+        let shown = self.core_terminals.tabs.get(&target.tab())?;
+        match target {
+            Target::Tab(_) => shown.name.clone(),
+            Target::Pane { terminal, .. } => shown.names.get(terminal).cloned(),
+        }
+    }
+
+    /// Names the menu's tab or pane what was typed, or clears the name.
+    fn submit_core_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = &self.menu.core else {
+            return;
+        };
+        let name = menu
+            .input
+            .as_ref()
+            .and_then(|input| clean_name(input.read(cx).text()));
+        let target = menu.target.clone();
+        self.set_core_name(&target, name, cx);
+        self.dismiss_menu(window, cx);
+    }
+
+    /// Names `target`, or clears its name, and saves it with the tab.
+    pub(crate) fn set_core_name(&mut self, target: &Target, name: Option<String>, cx: &mut App) {
+        let tab = target.tab();
+        let Some(shown) = self.core_terminals.tabs.get_mut(&tab) else {
+            return;
+        };
+        match target {
+            Target::Tab(_) => shown.name.clone_from(&name),
+            Target::Pane { terminal, .. } => match &name {
+                Some(name) => {
+                    shown.names.insert(terminal.clone(), name.clone());
+                }
+                None => {
+                    shown.names.remove(terminal);
+                }
+            },
+        }
+        shown.unsaved = true;
+        // The strip shows a tab's new name at once rather than next tick.
+        if let (Target::Tab(_), Some(name)) = (target, name) {
+            Store::update(cx, |store| store.visited(tab, None, Some(&name)));
+        }
+    }
+
+    pub(crate) fn core_menu_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = &self.menu.core else {
+            return;
+        };
+        let key = event.keystroke.key.as_str();
+        let renaming = self.menu.page == Some(Page::RenameCore);
+        // The name field takes every key but Escape and Enter, and those too
+        // while an input method composes.
+        if renaming
+            && (menu
+                .input
+                .as_ref()
+                .is_some_and(|input| input.read(cx).is_composing())
+                || !matches!(key, "escape" | "enter"))
+        {
+            return;
+        }
+        cx.stop_propagation();
+        window.prevent_default();
+        let actions = self.core_menu_actions(&menu.target);
+        let selected = menu.selected;
+        match key {
+            "escape" => self.dismiss_menu(window, cx),
+            "enter" if renaming => self.submit_core_rename(window, cx),
+            "up" | "down" if !actions.is_empty() => {
+                let count = actions.len();
+                let next = match (selected, key) {
+                    (None, "up") => count - 1,
+                    (None, _) => 0,
+                    (Some(i), "up") => (i + count - 1) % count,
+                    (Some(i), _) => (i + 1) % count,
+                };
+                if let Some(menu) = &mut self.menu.core {
+                    menu.selected = Some(next);
+                }
+                cx.notify();
+            }
+            "enter" => {
+                if let Some(action) = selected.and_then(|index| actions.get(index).copied()) {
+                    self.activate_core_menu(action, window, cx);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn render_core_menu(&self, cx: &mut Context<Self>) -> Div {
+        let Some(menu) = &self.menu.core else {
+            return div();
+        };
+        let theme = &self.theme;
+        if self.menu.page == Some(Page::RenameCore) {
+            let title = match menu.target {
+                Target::Tab(_) => fl!("tab-menu-rename-title"),
+                Target::Pane { .. } => fl!("pane-menu-rename-title"),
+            };
+            return div()
+                .flex()
+                .flex_col()
+                .p(px(8.))
+                .gap(px(12.))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+                .child(
+                    div()
+                        .text_color(rgb(theme.muted))
+                        .child(fl!("pane-menu-rename-hint")),
+                )
+                .children(menu.input.clone())
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .id("core-rename-cancel")
+                                .p(px(6.))
+                                .cursor_pointer()
+                                .child(fl!("pane-menu-cancel"))
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.dismiss_menu(window, cx)
+                                    }),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("core-rename-submit")
+                                .p(px(6.))
+                                .rounded(px(crate::config::corners::CONTROL))
+                                .bg(rgb(theme.active))
+                                .cursor_pointer()
+                                .child(fl!("pane-menu-rename-submit"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.submit_core_rename(window, cx)
+                                })),
+                        ),
+                );
+        }
+        let mut body = div().flex().flex_col();
+        for (index, action) in self.core_menu_actions(&menu.target).into_iter().enumerate() {
+            body = body.child(
+                div()
+                    .id(("core-menu-action", index))
+                    .debug_selector(move || format!("core-menu-{index}"))
+                    .min_h(px(self.config.ui.line_height() + 12.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .when(menu.selected == Some(index), |row| {
+                        row.bg(rgb(theme.active))
+                    })
+                    .hover(|row| row.bg(rgb(theme.active)))
+                    .child(div().min_w_0().truncate().child(action.label(&menu.target)))
+                    .on_hover(cx.listener(move |this, hovered, _, cx| {
+                        if *hovered && let Some(menu) = &mut this.menu.core {
+                            menu.selected = Some(index);
+                            cx.notify();
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.activate_core_menu(action, window, cx)
+                    })),
+            );
+        }
+        body
+    }
+}

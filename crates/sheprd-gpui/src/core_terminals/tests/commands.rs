@@ -81,7 +81,7 @@ pub(super) fn run(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext, comma
 #[gpui::test]
 fn a_command_a_core_pane_cannot_run_says_so(cx: &mut TestAppContext) {
     let (view, cx, _) = window_with_split(cx, &["t1", "t2"]);
-    run(&view, cx, Command::RenameTab);
+    run(&view, cx, Command::MovePane);
     assert_eq!(flash(&view, cx), Some(fl!("core-terminals-unsupported")));
 }
 

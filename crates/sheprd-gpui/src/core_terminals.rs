@@ -16,6 +16,7 @@ mod error;
 mod fallback;
 mod hub;
 mod infos;
+pub(crate) mod menu;
 mod screen;
 mod selection;
 mod sidebar;
@@ -42,6 +43,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use panes::{Axis, Panes};
 use sheprd_backend::{Backend as _, Spawn, TerminalId, TerminalInfo};
+use sheprd_client::protocol::AgentStatus;
 use std::collections::HashMap;
 
 /// The workspace of a window with no Herdr 1 installed. herdr-core has no
@@ -72,6 +74,11 @@ struct TabPanes {
     /// A mirror tab only watches: it neither types nor splits.
     observe: bool,
     panes: Panes,
+    /// The name the user gave the tab, which its program's title does not
+    /// replace.
+    name: Option<String>,
+    /// Names the user gave panes.
+    names: std::collections::BTreeMap<TerminalId, String>,
     /// The pane in use before the current one, which Last Pane goes back to.
     previous: Option<TerminalId>,
     unsaved: bool,
@@ -87,6 +94,8 @@ impl TabPanes {
     fn new(panes: Panes, observe: bool) -> Self {
         Self {
             active: panes.first().clone(),
+            name: None,
+            names: Default::default(),
             observe,
             panes,
             previous: None,
@@ -96,26 +105,43 @@ impl TabPanes {
         }
     }
 
-    /// The tab as it was saved: its pane in use, and the pane filling it
-    /// already zoomed rather than growing as the window opens. A pane the
-    /// layout no longer holds is ignored.
-    fn restore(
-        panes: Panes,
-        observe: bool,
-        active: Option<&TerminalId>,
-        zoomed: Option<&TerminalId>,
-    ) -> Self {
-        let mut shown = Self::new(panes, observe);
-        if let Some(active) = active.filter(|active| shown.panes.contains(active)) {
+    /// The tab as it was saved: its pane in use, the pane filling it
+    /// already zoomed rather than growing as the window opens, and the names
+    /// the user gave. A pane the layout no longer holds is ignored.
+    fn restore(location: &Location) -> Option<Self> {
+        let Location::CoreTerminal {
+            panes,
+            observe,
+            active,
+            zoomed,
+            name,
+            names,
+        } = location
+        else {
+            return None;
+        };
+        let mut shown = Self::new(panes.clone(), *observe);
+        shown.name.clone_from(name);
+        shown.names = names
+            .iter()
+            .filter(|(terminal, _)| shown.panes.contains(terminal))
+            .map(|(terminal, name)| (terminal.clone(), name.clone()))
+            .collect();
+        if let Some(active) = active
+            .as_ref()
+            .filter(|active| shown.panes.contains(active))
+        {
             shown.active = active.clone();
         }
-        if let Some(zoomed) = zoomed.filter(|zoomed| shown.panes.contains(zoomed))
+        if let Some(zoomed) = zoomed
+            .as_ref()
+            .filter(|zoomed| shown.panes.contains(zoomed))
             && shown.panes.count() > 1
         {
             shown.zoomed = Some(zoomed.clone());
             shown.zoom.set(true, crate::motion::now(), true);
         }
-        shown
+        Some(shown)
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -126,6 +152,13 @@ impl TabPanes {
             observe: self.observe,
             active: Some(self.active.clone()),
             zoomed: self.zoomed.clone().filter(|_| self.zoom.is_open()),
+            name: self.name.clone(),
+            names: self
+                .names
+                .iter()
+                .filter(|(terminal, _)| self.panes.contains(terminal))
+                .map(|(terminal, name)| (terminal.clone(), name.clone()))
+                .collect(),
         }
     }
 
@@ -273,6 +306,18 @@ impl CoreTerminals {
             .iter()
             .find(|(_, shown)| !shown.observe && shown.panes.contains(terminal))
             .map(|(id, _)| *id)
+    }
+
+    /// How the agents in `panes` are doing, as their tab's mark shows it:
+    /// the status that most wants attention, or unknown with no agent.
+    pub(crate) fn tab_status(&self, panes: &Panes) -> AgentStatus {
+        panes
+            .terminals()
+            .into_iter()
+            .filter_map(|terminal| self.infos.get(terminal))
+            .map(|info| info.agent)
+            .max_by_key(|status| crate::sidebar::status_priority(*status))
+            .unwrap_or(AgentStatus::Unknown)
     }
 
     /// The tab and pane whose view holds the keyboard.
