@@ -61,7 +61,9 @@ impl Poller {
         }
         let saved = self.saved.as_ref().and_then(|(_, saved)| saved.as_ref());
         if let Some((_, Some(spaces))) = &self.doc {
-            return spaces.project(boot, terminals, saved, scope, &mut self.names);
+            let mut layout = spaces.project(boot, terminals, saved, scope, &mut self.names);
+            projection::lead_kept(&mut layout, saved, scope);
+            return layout;
         }
         projection::project(boot, terminals, saved, scope)
     }
