@@ -43,6 +43,26 @@ impl SheprdWindow {
         pane.foreground_cwd.clone().or_else(|| pane.cwd.clone())
     }
 
+    /// The checkout of the herdr-core pane the active group showed at the
+    /// last tick, once Git named its branch. `None` when no herdr-core tab
+    /// is shown, or its pane is in no checkout or on a detached head.
+    pub(crate) fn core_git_input(&self) -> Option<crate::pull_request::Input> {
+        let (_, terminal) = self.core_terminals.shown.as_ref()?;
+        let folder = self.core_folder(terminal)?;
+        let branch = self.core_terminals.checkout.branch(&folder)?.to_owned();
+        let checkout = folder.into_os_string().into_string().ok()?;
+        Some(crate::pull_request::Input {
+            checkout: Some(checkout),
+            repo_key: None,
+            branch,
+        })
+    }
+
+    /// Whether the active group showed a herdr-core tab at the last tick.
+    pub(crate) fn shows_core_tab(&self) -> bool {
+        self.core_terminals.shown.is_some()
+    }
+
     /// The folder the focused workspace's herdr-core tabs started in, for a
     /// workspace with no Herdr pane to name one.
     pub(crate) fn core_launch_root(&self) -> Option<String> {

@@ -11,6 +11,7 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod checkout;
 mod commands;
 mod context;
 mod error;
@@ -120,6 +121,8 @@ impl TabPanes {
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// The branch checked out where the shown pane is.
+    checkout: checkout::Checkout,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view
@@ -129,6 +132,9 @@ pub(crate) struct CoreTerminals {
     infos: infos::Infos,
     /// How the views draw now, to tell when the window's look changed.
     look: Option<Look>,
+    /// The tab the active group shows and its pane in use, as of the last
+    /// tick, for work that runs without the app's state at hand.
+    shown: Option<(TabId, TerminalId)>,
     /// A shell starting, and what for.
     starting: Option<(Purpose, Started)>,
     tabs: HashMap<TabId, TabPanes>,
@@ -359,6 +365,19 @@ impl SheprdWindow {
             .core_terminals
             .infos
             .poll(backend, std::time::Instant::now())
+        {
+            cx.notify();
+        }
+        self.core_terminals.shown = self.shown_core_pane(cx);
+        let folder = self
+            .core_terminals
+            .shown
+            .as_ref()
+            .and_then(|(_, terminal)| self.core_folder(terminal));
+        if self
+            .core_terminals
+            .checkout
+            .poll(folder.as_deref(), std::time::Instant::now())
         {
             cx.notify();
         }

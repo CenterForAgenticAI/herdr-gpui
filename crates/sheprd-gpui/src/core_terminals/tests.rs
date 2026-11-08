@@ -1,5 +1,6 @@
 mod accessibility;
 mod chats;
+mod checkout;
 mod context;
 mod focus;
 mod folders;

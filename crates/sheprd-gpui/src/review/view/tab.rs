@@ -31,16 +31,22 @@ impl SheprdWindow {
             self.show_flash(Flash::warning(fl!("review-no-checkout")), cx);
             return;
         };
-        // The workspace whose checkout the Git chip tracks, found the same way.
-        let workspace = self.live.snapshot.as_deref().and_then(|snapshot| {
-            snapshot.focused_workspace_id.clone().or_else(|| {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .find(|workspace| workspace.focused)
-                    .map(|workspace| workspace.workspace_id.clone())
+        // The workspace whose checkout the Git chip tracks, found the same
+        // way; a workspace of herdr-core tabs alone has no Herdr snapshot.
+        let workspace = self
+            .live
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| {
+                snapshot.focused_workspace_id.clone().or_else(|| {
+                    snapshot
+                        .workspaces
+                        .iter()
+                        .find(|workspace| workspace.focused)
+                        .map(|workspace| workspace.workspace_id.clone())
+                })
             })
-        });
+            .or_else(|| self.browser_key().map(|(_, workspace)| workspace));
         let Some(workspace) = workspace else {
             self.show_flash(Flash::warning(fl!("review-no-workspace")), cx);
             return;
