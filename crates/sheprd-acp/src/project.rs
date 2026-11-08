@@ -50,6 +50,10 @@ struct Open {
 
 #[derive(Debug, Default)]
 pub(crate) struct Projector {
+    /// Each child call of an agent speaking ACP directly, with the
+    /// sub-agent it went under when it started, if any. That first choice
+    /// stands, so a step never moves to another sub-agent when one ends.
+    children: HashMap<String, Option<String>>,
     /// Sub-agents of agents speaking ACP directly that have not ended.
     direct: HashSet<String>,
     next: u64,
@@ -359,10 +363,23 @@ impl Projector {
         status: Option<wire::ToolCallStatus>,
     ) -> Tag {
         if subagents::from_child(meta) {
+            if let Some(parent) = self.children.get(call_id) {
+                return Tag {
+                    activity: None,
+                    parent: parent.clone(),
+                };
+            }
             let mut running = self.direct.iter();
+            let parent = running.next().filter(|_| running.next().is_none()).cloned();
+            // Past the bound a step stays a card of its own rather than
+            // risk going under another sub-agent later.
+            if self.children.len() >= MAX_SKIPPED {
+                return Tag::default();
+            }
+            self.children.insert(call_id.to_owned(), parent.clone());
             return Tag {
                 activity: None,
-                parent: running.next().filter(|_| running.next().is_none()).cloned(),
+                parent,
             };
         }
         if !self.direct.contains(call_id) {
@@ -385,6 +402,7 @@ impl Projector {
     /// The turn ended: a sub-agent it waited for ended with it, even if the
     /// agent never said so, as on a cancelled turn.
     pub(crate) fn direct_turn_ended(&mut self, transcript: &Transcript, now: u64) -> Vec<Change> {
+        self.children.clear();
         self.direct
             .drain()
             .filter_map(|call| {

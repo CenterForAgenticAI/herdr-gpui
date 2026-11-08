@@ -125,3 +125,25 @@ fn a_sub_agent_never_reported_ended_ends_with_its_turn() {
     assert_eq!(activity.label, "Reply with OK", "it keeps its label");
     assert!(projector.direct_turn_ended(&transcript, 3_000).is_empty());
 }
+
+#[test]
+fn a_step_keeps_its_first_place_when_a_sub_agent_ends() {
+    let (mut projector, mut transcript) = (Projector::default(), Transcript::default());
+    apply(&mut projector, &mut transcript, copilot("t1"));
+    apply(&mut projector, &mut transcript, copilot("t2"));
+    apply(&mut projector, &mut transcript, child("r1", "Read a.rs"));
+    apply(
+        &mut projector,
+        &mut transcript,
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "t2", "status": "completed"}),
+    );
+    apply(
+        &mut projector,
+        &mut transcript,
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "ses_c:r1",
+               "status": "completed", "title": "Read b.rs",
+               "_meta": {"opencode/child-session": {"id": "ses_c", "parentID": "ses_p"}}}),
+    );
+    assert_eq!(tool(&transcript, "ses_c:r1").parent, None);
+    assert_eq!(transcript.activity("t1").unwrap().detail, None);
+}

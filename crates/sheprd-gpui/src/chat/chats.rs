@@ -384,6 +384,8 @@ impl ChatPane {
         }
         if changed {
             self.sync_view();
+            let busy = self.session.transcript().running().total() > 0;
+            self.rail_folds.follow(busy, crate::motion::now());
         }
         changed
     }

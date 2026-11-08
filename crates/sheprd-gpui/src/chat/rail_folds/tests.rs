@@ -51,3 +51,37 @@ fn what_ended_starts_folded_away_for_each_section_alone() {
     assert!(folds.ended_is_open(RailSection::Subagents));
     assert!(!folds.ended_is_open(RailSection::Shells));
 }
+
+#[core::prelude::v1::test]
+fn work_starting_folds_the_plan_as_a_click_would() {
+    let now = Instant::now();
+    let mut folds = RailFolds::default();
+    folds.follow(false, now);
+    assert!(!folds.moving(now), "the first look sets where it stands");
+    assert_eq!(folds.shown(RailSection::Plan, false, now), 1.);
+    folds.follow(true, now);
+    assert!(folds.moving(now));
+    assert!(
+        folds.shown(RailSection::Plan, true, now) > 0.9,
+        "it folds from open rather than vanishing"
+    );
+    let later = now + std::time::Duration::from_secs(5);
+    assert!(!folds.moving(later));
+    assert_eq!(folds.shown(RailSection::Plan, true, later), 0.);
+    folds.follow(true, later);
+    assert!(!folds.moving(later), "the same state moves nothing");
+}
+
+#[core::prelude::v1::test]
+fn a_click_during_an_automatic_fold_moves_from_where_it_is() {
+    let now = Instant::now();
+    let mut folds = RailFolds::default();
+    folds.follow(false, now);
+    folds.follow(true, now);
+    folds.toggle(RailSection::Plan, true, now);
+    assert!(folds.is_open(RailSection::Plan, true));
+    assert!(
+        folds.shown(RailSection::Plan, true, now) > 0.9,
+        "reopens from nearly open"
+    );
+}

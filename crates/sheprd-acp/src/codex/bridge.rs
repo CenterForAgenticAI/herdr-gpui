@@ -23,6 +23,8 @@ enum Pending {
     /// `turn/start`, answering nothing itself: the turn ends the prompt.
     Turn,
     Interrupt,
+    /// `turn/interrupt` of a sub-agent's turn, which says when it fails.
+    StopActivity,
 }
 
 /// The session's request to open a thread, waiting for the handshake.
@@ -226,7 +228,7 @@ impl Bridge {
             .and_then(|call| self.background.child_of(call))
             .map(|(thread, turn)| json!({"threadId": thread, "turnId": turn}));
         target
-            .map(|target| self.call("turn/interrupt", target, Pending::Interrupt))
+            .map(|target| self.call("turn/interrupt", target, Pending::StopActivity))
             .into_iter()
             .collect()
     }
@@ -290,6 +292,17 @@ impl Bridge {
                     .collect(),
             },
             Pending::Interrupt => Vec::new(),
+            Pending::StopActivity => result
+                .err()
+                .map(|message| {
+                    out::notice(
+                        self.session(),
+                        wire::NoticeSeverity::Warning,
+                        format!("Codex could not stop that sub-agent: {message}"),
+                    )
+                })
+                .into_iter()
+                .collect(),
         }
     }
 
