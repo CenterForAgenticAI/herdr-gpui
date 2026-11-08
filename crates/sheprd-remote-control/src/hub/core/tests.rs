@@ -122,6 +122,7 @@ mod socket {
     };
 
     mod chat_recovery;
+    mod holds;
     mod new_work;
     mod recovery;
     mod screens;
@@ -131,6 +132,7 @@ mod socket {
         _dir: tempfile::TempDir,
         attaches: mpsc::Receiver<Value>,
         inputs: mpsc::Receiver<Vec<u8>>,
+        resizes: mpsc::Receiver<(u16, u16)>,
         server: thread::JoinHandle<()>,
     }
 
@@ -170,6 +172,7 @@ mod socket {
         let listener = UnixListener::bind(&path).unwrap();
         let (sent, inputs) = mpsc::channel();
         let (attached, attaches) = mpsc::channel();
+        let (resized, resizes) = mpsc::channel();
         let server = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             socket
@@ -186,6 +189,11 @@ mod socket {
             let mut decoder = Decoder::default();
             let mut channel = 6;
             while let Some(frame) = receive(&mut socket, &mut decoder) {
+                if frame.kind == Kind::Resize {
+                    let side =
+                        |at: usize| u16::from_le_bytes([frame.payload[at], frame.payload[at + 1]]);
+                    resized.send((side(0), side(2))).unwrap();
+                }
                 if frame.kind != Kind::Data {
                     continue;
                 }
@@ -213,7 +221,6 @@ mod socket {
                         json!({"value": doc, "version": if doc.is_null() { 0 } else { 1 }})
                     }
                     "terminal.attach" => {
-                        assert_eq!(request["params"]["cols"], 80);
                         attached.send(request["params"].clone()).unwrap();
                         channel += 1;
                         json!({"channel": channel, "terminal": record("t1")})
@@ -277,6 +284,7 @@ mod socket {
         let source = Arc::new(Source {
             connected: AtomicBool::new(false),
             endpoint: Default::default(),
+            holds: AtomicU64::new(0),
             poller: Mutex::default(),
             scope: None,
             state: Mutex::new(State {
@@ -291,6 +299,7 @@ mod socket {
                 _dir: dir,
                 attaches,
                 inputs,
+                resizes,
                 server,
             },
         )
@@ -409,6 +418,7 @@ mod state_context;
 
 mod poller;
 mod saved_beside_spaces;
+mod screen_history;
 
 #[test]
 fn an_unreachable_core_stays_with_the_core_source() {
@@ -418,6 +428,7 @@ fn an_unreachable_core_stays_with_the_core_source() {
             socket: "/nonexistent/core.sock".into(),
             session: "test".into(),
         }),
+        holds: AtomicU64::new(0),
         poller: Mutex::default(),
         scope: None,
         state: Mutex::new(State::default()),

@@ -71,14 +71,28 @@ fn known(layout: &Layout, pane: &str) -> Result<(), ApiError> {
 
 /// The pane's visible screen, as text with SGR colors.
 pub(crate) async fn read_screen(state: &Shared, pane: &str) -> Result<String, ApiError> {
-    let read = state
-        .hub
-        .call(
-            ApiMethod::PaneRead,
-            json!({"pane_id": pane, "source": "visible", "format": "ansi"}),
-        )
-        .await?;
-    Ok(read["read"]["text"].as_str().unwrap_or_default().to_owned())
+    Ok(read_scrolled(state, pane, 0).await?.0)
+}
+
+/// The pane's screen `up` lines into its history, and how many history
+/// lines there are to scroll. Only a Herdr 2 pane scrolls its reads and
+/// counts its history; Herdr 1's attach scrolls the terminal itself.
+pub(crate) async fn read_scrolled(
+    state: &Shared,
+    pane: &str,
+    up: usize,
+) -> Result<(String, usize), ApiError> {
+    let mut params = json!({"pane_id": pane, "source": "visible", "format": "ansi"});
+    if up > 0 {
+        params["scroll"] = json!(up);
+    }
+    let read = state.hub.call(ApiMethod::PaneRead, params).await?;
+    let text = read["read"]["text"].as_str().unwrap_or_default().to_owned();
+    let history = read["read"]["history"]
+        .as_u64()
+        .and_then(|lines| usize::try_from(lines).ok())
+        .unwrap_or(0);
+    Ok((text, history))
 }
 
 pub(super) async fn fragment(

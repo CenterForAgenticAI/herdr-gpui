@@ -15,6 +15,7 @@ mod recency;
 mod sessions;
 
 pub(crate) use api::ApiMethod;
+pub(crate) use attach::TermHold;
 pub(crate) use chat::{Chat, Event, Summary, View};
 pub(crate) use convert::Error as ConvertError;
 #[cfg(test)]

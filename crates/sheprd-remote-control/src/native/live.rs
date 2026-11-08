@@ -12,7 +12,7 @@ use crate::{
     control::DeviceId,
     hub::{Chat, Event},
     web::attention::Watching,
-    web::{Shared, now_ms, read_screen},
+    web::{Shared, now_ms},
 };
 use secrecy::{ExposeSecret as _, SecretString};
 use sheprd_chat_protocol::{Change, Cursor, EntryKind, Transcript};
@@ -484,7 +484,7 @@ async fn follow_term(
         }
         let wanted = *size.borrow_and_update();
         sizing.apply(&state, &pane, wanted).await;
-        match read_screen(&state, &pane).await {
+        match sizing.read(&state, &pane).await {
             Ok(text) => {
                 failures = 0;
                 if last.as_ref() != Some(&text) {
@@ -519,7 +519,7 @@ async fn follow_term(
                 last = None;
             }
             Some(lines) = scrolls.recv() => {
-                if sizing.scroll(lines) {
+                if sizing.scroll(&pane, lines) {
                     // Read at once and again shortly, as after typing.
                     state.typed.typed(&pane);
                 } else if !told {

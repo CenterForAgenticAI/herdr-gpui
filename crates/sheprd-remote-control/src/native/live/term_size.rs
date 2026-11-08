@@ -1,17 +1,25 @@
 //! A terminal view's size: while a phone follows a terminal at its own
 //! size, the view holds a direct attach that makes Herdr size the pane's
 //! terminal to it. Dropping the view drops the attach, and Herdr sizes the
-//! terminal back to its layout.
+//! terminal back to its layout. A Herdr 2 terminal is held the same way,
+//! and its view scrolls through the history the daemon keeps.
 
 use super::super::wire::TermSize;
-use crate::web::Shared;
-use sheprd_client::{TerminalAttach, protocol::AttachScrollDirection, terminal_attach};
+use crate::{
+    hub::{Hub, TermHold},
+    web::{ApiError, Shared, read_scrolled},
+};
+use sheprd_client::{protocol::AttachScrollDirection, terminal_attach};
 
 /// The attach a terminal view holds, and the size it holds it at.
 #[derive(Default)]
 pub(super) struct Sizing {
     held: Option<Held>,
+    /// History lines above the screen at the last read of a Herdr 2 pane.
+    history: usize,
     size: Option<TermSize>,
+    /// Lines a Herdr 2 view is scrolled up into its history.
+    up: usize,
 }
 
 impl Sizing {
@@ -32,10 +40,9 @@ impl Sizing {
             self.held = None;
             return true;
         };
-        if let Some(held) = &self.held
-            && held.attach.as_ref().is_some_and(|attach| {
-                attach.is_attached() && attach.resize(size.cols, size.rows).is_ok()
-            })
+        if let Some(attach) = self.held.as_ref().and_then(|held| held.attach.as_ref())
+            && attach.is_attached()
+            && attach.resize(size.cols, size.rows).await
         {
             return true;
         }
@@ -54,10 +61,34 @@ impl Sizing {
         true
     }
 
-    /// Scrolls the held terminal `lines`, up toward its history when
-    /// positive. False when no attach holds it to take the scroll.
-    pub(super) fn scroll(&self, lines: i32) -> bool {
-        let Some(attach) = self.held.as_ref().and_then(|held| held.attach.as_ref()) else {
+    /// The screen as this view shows it: a Herdr 2 pane scrolled where the
+    /// view scrolled it.
+    pub(super) async fn read(&mut self, state: &Shared, pane: &str) -> Result<String, ApiError> {
+        let (text, history) = read_scrolled(state, pane, self.up).await?;
+        self.history = history;
+        self.up = self.up.min(history);
+        Ok(text)
+    }
+
+    /// Scrolls the view `lines`, up toward its history when positive.
+    /// False when nothing can take the scroll: a Herdr 1 terminal scrolls
+    /// only through an attach holding it.
+    pub(super) fn scroll(&mut self, pane: &str, lines: i32) -> bool {
+        if Hub::is_core_pane(pane) {
+            let by = usize::try_from(lines.unsigned_abs()).unwrap_or(usize::MAX);
+            self.up = if lines > 0 {
+                self.up.saturating_add(by).min(self.history)
+            } else {
+                self.up.saturating_sub(by)
+            };
+            return true;
+        }
+        let Some(attach) = self
+            .held
+            .as_ref()
+            .and_then(|held| held.attach.as_ref())
+            .and_then(TermHold::attach)
+        else {
             return false;
         };
         let direction = if lines > 0 {
@@ -80,7 +111,7 @@ impl Sizing {
 /// An attach dropped off the async threads: dropping one waits briefly
 /// for its worker to send `Detach`.
 struct Held {
-    attach: Option<TerminalAttach>,
+    attach: Option<TermHold>,
 }
 
 impl Drop for Held {
@@ -96,3 +127,6 @@ impl Drop for Held {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
