@@ -6,7 +6,7 @@ use super::CoreTerminalView;
 pub(super) use crate::core_terminals::worker::Answer;
 use crate::core_terminals::{Error, worker::Command};
 use gpui::Context;
-use sheprd_backend::{History, HistoryAnswer, Matches};
+use sheprd_backend::{History, HistoryAnswer, Matches, TextRange};
 use sheprd_client::{
     protocol::{PaneSurfacePane, PaneSurfaceScrollMetrics, SurfaceRect},
     scrollback::{
@@ -14,7 +14,41 @@ use sheprd_client::{
     },
 };
 
+/// A read of the text between two points, and the text revision the view
+/// showed when it asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Reading {
+    pub(super) id: u64,
+    revision: u64,
+}
+
 impl CoreTerminalView {
+    /// Reads the text of `range` from the history.
+    pub(super) fn read(&mut self, range: TextRange) -> Reading {
+        Reading {
+            id: self.ask(History::Read {
+                anchor: range.start,
+                cursor: range.end,
+            }),
+            revision: self.screen.revision,
+        }
+    }
+
+    /// Whether the rows `reading` named may now hold other text: output
+    /// into a full history dropped its oldest lines since it was asked.
+    /// The worker shows each output's screen before it answers anything
+    /// after it, and the screen is taken before the answers, so the
+    /// revision here is never older than the one the read saw.
+    fn moved(&self, reading: Reading) -> bool {
+        self.screen.history.full && self.screen.revision != reading.revision
+    }
+
+    /// Whether a copy waits on its text.
+    #[cfg(test)]
+    pub(crate) fn copy_pending(&self) -> bool {
+        self.copying.is_some()
+    }
+
     /// Sends `request` to the worker; its answer comes back under the ID.
     pub(super) fn ask(&mut self, request: History) -> u64 {
         self.next_request = self.next_request.wrapping_add(1);
@@ -33,9 +67,13 @@ impl CoreTerminalView {
             } else if self.awaits_copy_mode(id) {
                 self.copy_mode_answered(id, answer);
                 cx.notify();
-            } else if self.copying == Some(id) {
-                self.copying = None;
+            } else if let Some(reading) = self.copying.take_if(|reading| reading.id == id) {
                 match answer {
+                    // Copying other text than was selected is worse than
+                    // copying nothing.
+                    Ok(HistoryAnswer::Text(_)) if self.moved(reading) => {
+                        tracing::info!("A herdr-core selection moved before it was copied");
+                    }
                     Ok(HistoryAnswer::Text(text)) => {
                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
                     }

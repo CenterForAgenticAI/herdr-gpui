@@ -70,7 +70,7 @@ pub(crate) struct CoreTerminalView {
     bounds: Option<Bounds<Pixels>>,
     copy_mode: Option<copy_mode::CopyModeState>,
     /// The history read whose text goes to the clipboard.
-    copying: Option<u64>,
+    copying: Option<history::Reading>,
     /// The history text asked for an editor, once it arrived.
     edit_ready: Option<Result<String, super::Error>>,
     /// The history request whose text goes to an editor.

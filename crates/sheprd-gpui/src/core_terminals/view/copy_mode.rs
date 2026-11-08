@@ -170,10 +170,7 @@ impl CoreTerminalView {
     /// Reads `range` from the history and copies it once it arrives, as a
     /// selection reaching past the screen is copied.
     pub(super) fn copy_range(&mut self, range: TextRange) {
-        self.copying = Some(self.ask(History::Read {
-            anchor: range.start,
-            cursor: range.end,
-        }));
+        self.copying = Some(self.read(range));
     }
 
     fn reveal_copy_cursor(&mut self) {
