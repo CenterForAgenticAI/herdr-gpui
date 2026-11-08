@@ -9,6 +9,8 @@ use gpui::{prelude::*, *};
 use sheprd_client::protocol::*;
 use std::sync::Arc;
 
+mod core;
+
 impl SheprdWindow {
     /// Where the selected device's checkouts live, if pull requests can be
     /// looked up for them: the verified local daemon, or a saved SSH device.
@@ -186,6 +188,13 @@ impl SheprdWindow {
         let origin = self
             .pr_origin()
             .filter(|_| self.live.status.is_connected() && self.live.snapshot.is_some());
+        // The checkout of the herdr-core pane the window shows is on this
+        // computer, so it joins only this computer's lookups.
+        let core = self.core_git_input().filter(|_| {
+            origin
+                .as_ref()
+                .is_none_or(|origin| *origin == Origin::Local)
+        });
         if let Some(origin) = origin {
             self.sync_pr_scope();
             self.menu.pr_cache.idle = !self.active;
@@ -200,10 +209,11 @@ impl SheprdWindow {
                 {
                     self.menu.pr_snapshot = Some(Arc::downgrade(snapshot));
                     self.menu.pr_cache.retain(|input| {
-                        snapshot.workspaces.iter().any(|workspace| {
-                            workspace_input(workspace, &origin)
-                                .is_ok_and(|candidate| &candidate == input)
-                        })
+                        core.as_ref() == Some(input)
+                            || snapshot.workspaces.iter().any(|workspace| {
+                                workspace_input(workspace, &origin)
+                                    .is_ok_and(|candidate| &candidate == input)
+                            })
                     });
                 }
                 if self.menu.pr_cache.scan_due(now) {
@@ -222,12 +232,21 @@ impl SheprdWindow {
                     {
                         self.menu.pr_cache.expire_viewed(&input, now);
                     }
+                    if let Some(input) = &core {
+                        self.menu.pr_cache.expire_viewed(input, now);
+                    }
                     let inputs =
                         workspace_pr_inputs(snapshot, &origin, priority, self.menu.pr_cache.cursor);
-                    self.menu.pr_cache.schedule(inputs, now);
+                    // The shown herdr-core pane's checkout is asked first, as
+                    // the workspace being looked at is.
+                    self.menu
+                        .pr_cache
+                        .schedule(core.clone().into_iter().chain(inputs), now);
                 }
             }
             changed |= self.menu.pr_cache.poll(now);
+        } else if let Some(input) = core {
+            changed |= self.update_core_pr(input);
         } else {
             // A dropped connection keeps the last answers for its return.
             self.menu.pr_cache.suspend();
