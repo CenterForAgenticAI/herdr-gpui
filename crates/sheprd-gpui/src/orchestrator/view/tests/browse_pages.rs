@@ -17,6 +17,7 @@ fn show_more_reaches_the_repositories_past_a_page(cx: &mut TestAppContext) {
         workspace_id: "w1".into(),
         token: None,
         data_root: Some(dir.path().join("data")),
+        azure_store: Default::default(),
         gitlab_store: Default::default(),
         timing: Timing::default(),
     };
@@ -31,9 +32,12 @@ fn show_more_reaches_the_repositories_past_a_page(cx: &mut TestAppContext) {
     let last = format!("r{}", MAX_ROWS + 9);
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
-            let mut mine = Repo::start_remote(RemoteScope::Mine {
-                organization: "contoso".into(),
-            });
+            let mut mine = Repo::start_remote(
+                RemoteScope::Mine {
+                    organization: "contoso".into(),
+                },
+                Default::default(),
+            );
             mine.snapshot.catalog = Some(Arc::new(Catalog {
                 organization: "contoso".into(),
                 projects: vec![Project {

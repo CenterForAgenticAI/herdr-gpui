@@ -5,7 +5,7 @@
 
 use super::rows::ItemRow;
 use crate::orchestrator::{
-    Error, Item, RemoteRequest, RemoteScope, Request, Run, Service, Snapshot, Timing,
+    Error, Item, RemoteRequest, RemoteScope, Request, Run, Service, Snapshot, Stores, Timing,
 };
 use std::sync::Arc;
 
@@ -71,8 +71,9 @@ impl Repo {
     /// A repository read from Azure DevOps alone, by a worker that needs
     /// no checkout. Its request names no host or workspace: nothing it
     /// lists can be dispatched or acted on here.
-    pub(super) fn start_remote(scope: RemoteScope) -> Self {
+    pub(super) fn start_remote(scope: RemoteScope, stores: Stores) -> Self {
         let mut request = RemoteRequest::new(scope.clone());
+        request.azure_store = stores.azure;
         // Tests never run `az` or reach Azure DevOps.
         request.look_up_token = !cfg!(test);
         let (service, error) = match Service::start_remote(request) {
@@ -88,7 +89,8 @@ impl Repo {
                 checkout: scope.source().repository,
                 workspace_id: String::new(),
                 token: None,
-                gitlab_store: sheprd_credentials::Store::default(),
+                azure_store: stores.azure,
+                gitlab_store: stores.gitlab,
                 data_root: None,
                 timing: Timing::default(),
             },

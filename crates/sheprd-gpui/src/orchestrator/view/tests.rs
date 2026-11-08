@@ -37,6 +37,7 @@ mod sessions;
 mod sign_in;
 mod source_chip;
 mod status;
+mod stores;
 mod tasks;
 mod twin_text;
 mod twins;

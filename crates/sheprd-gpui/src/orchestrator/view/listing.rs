@@ -7,7 +7,7 @@ use super::{
     repo::Repo,
     rows::{self, ItemRow, Runs, Tab},
 };
-use crate::orchestrator::{Item, Provider, Snapshot};
+use crate::orchestrator::{Item, Provider, Snapshot, Stores};
 use gpui::Context;
 use std::{collections::HashSet, sync::Arc};
 
@@ -45,6 +45,7 @@ impl OrchestratorView {
         self.skipped_repos
             .retain(|key| specs.iter().any(|spec| spec.key == *key));
         specs.retain(|spec| !self.skipped_repos.contains(&spec.key));
+        self.adopt_stores(&specs);
         let checkouts = self.repos.iter().filter(|repo| repo.remote.is_none());
         let same = specs.len() == checkouts.clone().count()
             && specs
@@ -77,6 +78,42 @@ impl OrchestratorView {
         });
         self.refresh_rows();
         cx.notify();
+    }
+
+    /// Tells the workers kept across `set_repos` where pasted tokens are saved
+    /// now, or the account page and they would use different stores after
+    /// `allow_plaintext_credentials` changes. A full queue leaves the old
+    /// stores here, so the next tick asks again.
+    fn adopt_stores(&mut self, specs: &[RepoSpec]) {
+        // A repository read without a checkout reads as the checkouts do.
+        let shared = specs.first().map(|spec| spec.request.stores());
+        for repo in &mut self.repos {
+            let spec = specs.iter().find(|spec| spec.key == repo.key);
+            let Some(stores) = spec
+                .map(|spec| spec.request.stores())
+                .or(shared.filter(|_| repo.remote.is_some()))
+            else {
+                continue;
+            };
+            if stores != repo.request.stores()
+                && repo
+                    .service
+                    .as_ref()
+                    .is_none_or(|service| service.set_stores(stores))
+            {
+                repo.request.set_stores(stores);
+            }
+        }
+    }
+
+    /// Where the checkouts listed read saved tokens from, which a
+    /// repository read without one follows.
+    pub(super) fn stores(&self) -> Stores {
+        self.repos
+            .iter()
+            .find(|repo| repo.remote.is_none())
+            .map(|repo| repo.request.stores())
+            .unwrap_or_default()
     }
 
     /// Keep ordinary folders out of the project list without restarting a
