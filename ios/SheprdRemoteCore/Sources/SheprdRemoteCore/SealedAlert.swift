@@ -10,6 +10,10 @@ public struct SealedAlert: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Hashable, Sendable {
         case question
         case turnEnded = "turn_ended"
+        /// An agent in a plain terminal waits for the user, or finished:
+        /// no chat to answer or reply in, so no actions.
+        case terminalAsking = "terminal_asking"
+        case terminalDone = "terminal_done"
         case error
         case other
 
@@ -125,7 +129,7 @@ public struct AlertPresentation: Hashable, Sendable {
             category = "question." + digest.prefix(8).map { String(format: "%02x", $0) }.joined()
         case .turnEnded:
             self = Self.finished
-        case .error, .other:
+        case .terminalAsking, .terminalDone, .error, .other:
             category = nil
             actions = []
         }

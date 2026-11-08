@@ -85,7 +85,7 @@ self.addEventListener("push", (event) => {
       await self.registration.showNotification(message.title, {
         body: message.body,
         tag: message.tag,
-        renotify: message.kind === "question",
+        renotify: message.kind === "question" || message.kind === "terminal_asking",
         data: { url: message.url },
         icon: "/assets/icon-192.png",
         badge: "/assets/icon-192.png",
