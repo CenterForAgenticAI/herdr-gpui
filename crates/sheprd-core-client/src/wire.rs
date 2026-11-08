@@ -91,6 +91,20 @@ pub enum StatusState {
     Other,
 }
 
+/// The refusal kind of a send to a program that waits on the user.
+pub const BLOCKED: &str = "blocked";
+
+/// What a send found.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Sent {
+    /// Whether the program went to work within a few seconds; none when it
+    /// reports no status.
+    #[serde(default)]
+    pub started: Option<bool>,
+    /// The turn the text went in on.
+    pub turn: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct List {
     #[serde(default)]

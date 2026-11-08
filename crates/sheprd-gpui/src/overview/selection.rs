@@ -15,13 +15,7 @@ pub(crate) enum Pick {
 
 impl Row {
     pub(crate) fn pick(&self) -> Pick {
-        if let super::Open::Core { terminal, .. } = &self.open {
-            return Pick::Pane {
-                endpoint: super::core::ENDPOINT.to_owned(),
-                pane: terminal.to_string(),
-            };
-        }
-        match self.pane() {
+        match self.reply_pane() {
             Some((endpoint, pane)) => Pick::Pane {
                 endpoint: endpoint.to_owned(),
                 pane: pane.to_owned(),

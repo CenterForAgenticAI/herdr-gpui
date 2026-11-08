@@ -4,10 +4,15 @@
 //! (`sheprd_core_client::agent_kind`), its checkout by folder, and opens the
 //! tab and pane that hold it.
 
-use super::{Key, Open, Row, State, model::Since};
+use super::{
+    Error, Key, Open, Row, State,
+    model::Since,
+    replies::{BLOCKED, Presence, Reply, Target},
+};
 use crate::SheprdWindow;
-use sheprd_backend::{AgentStatus, TerminalInfo};
-use std::time::SystemTime;
+use gpui::Context;
+use sheprd_backend::{AgentStatus, TerminalId, TerminalInfo};
+use std::time::{Instant, SystemTime};
 
 /// What herdr-core agents are keyed by where a host's endpoint id would be:
 /// pane ids of one Herdr and terminal ids of the other never meet.
@@ -103,6 +108,73 @@ impl SheprdWindow {
             listed.push(info.id.to_string());
         }
         listed
+    }
+}
+
+impl SheprdWindow {
+    /// What a reply written to `agent` in herdr-core terminal `terminal`
+    /// finds there now. The core has no boot to fence on: a terminal's
+    /// address is never reused while it is listed, and the agent's name
+    /// tells a terminal that has since started another program.
+    pub(super) fn core_reply_presence(&self, terminal: &str, agent: &str) -> Presence {
+        if self.core_terminals.hub.backend().is_none() {
+            return Presence::Unreachable;
+        }
+        self.core_terminals
+            .chat_terminals()
+            .find(|info| info.id.as_str() == terminal)
+            .filter(|info| agent_name(info).as_deref() == Some(agent))
+            .map_or(Presence::Gone, |info| Presence::Here(info.agent))
+    }
+
+    /// The agent a Herdr 2 row shows, as a reply dialog's target.
+    pub(super) fn core_reply_target(&self, row: &Row, terminal: &TerminalId) -> Option<Target> {
+        let info = self
+            .core_terminals
+            .chat_terminals()
+            .find(|info| info.id == *terminal)?;
+        Some(Target {
+            title: row.title.clone(),
+            endpoint: ENDPOINT.to_owned(),
+            pane: terminal.to_string(),
+            boot: String::new(),
+            agent: agent_name(info)?,
+        })
+    }
+
+    /// Types `reply` into its terminal through the core, off the UI thread.
+    /// A blocked agent is refused by the core itself, as Herdr 1's daemon
+    /// refuses one, and the reply waits again.
+    pub(super) fn send_core_reply(&mut self, reply: Reply, cx: &mut Context<Self>) {
+        let backend = self.core_terminals.hub.backend().cloned();
+        let id = reply.id;
+        let work = cx.background_executor().spawn(async move {
+            let backend = backend.ok_or(Error::ReplyCore(sheprd_core_client::Error::Lost))?;
+            backend
+                .core()
+                .send(&reply.pane, &reply.text)
+                .map(|_| ())
+                .map_err(|error| match error {
+                    sheprd_core_client::Error::Refused {
+                        kind: Some(kind),
+                        message,
+                        ..
+                    } if kind == sheprd_core_client::wire::BLOCKED => Error::ReplyRefused {
+                        code: BLOCKED.to_owned(),
+                        message,
+                    },
+                    error => Error::ReplyCore(error),
+                })
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            this.update(cx, |this, cx| {
+                this.overview.replies.finish(id, result, Instant::now());
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 }
 

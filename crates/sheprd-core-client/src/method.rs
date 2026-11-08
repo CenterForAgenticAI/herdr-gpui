@@ -37,6 +37,7 @@ methods! {
     TerminalKill => "terminal.kill", true;
     TerminalList => "terminal.list", true;
     TerminalRun => "terminal.run", true;
+    TerminalSend => "terminal.send", false;
     // keep-sorted end
 }
 

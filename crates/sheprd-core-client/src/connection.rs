@@ -197,6 +197,18 @@ impl Core {
         self.typed(Method::TerminalRun, run)
     }
 
+    /// Pastes `text` into `terminal` and presses Enter, once nobody has
+    /// typed there for a moment. The core refuses a program that waits on
+    /// the user (`Error::Refused` of kind [`wire::BLOCKED`]), in the same
+    /// step that would have typed, so a stale status cannot answer a
+    /// question the user never saw.
+    pub fn send(&self, terminal: &str, text: &str) -> Result<wire::Sent> {
+        self.typed(
+            Method::TerminalSend,
+            &json!({"terminal": terminal, "text": text}),
+        )
+    }
+
     pub fn kill(&self, terminal: &str) -> Result<Terminal> {
         self.typed(Method::TerminalKill, &json!({"terminal": terminal}))
     }

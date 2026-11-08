@@ -67,6 +67,8 @@ pub enum Error {
     /// Herdr's own refusal: `code` is its wire code, `message` remote text.
     #[error("{message}")]
     ReplyRefused { code: String, message: String },
+    #[error("Cannot reach herdr-core: {0}")]
+    ReplyCore(#[source] sheprd_core_client::Error),
     #[error("Cannot run the host's herdr command: {0}")]
     ReplyScript(#[source] sheprd_client::Error),
 }

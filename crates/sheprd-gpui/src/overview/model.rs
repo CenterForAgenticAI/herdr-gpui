@@ -152,6 +152,16 @@ pub(crate) struct Row {
 }
 
 impl Row {
+    /// Where a reply to the row's agent goes: its Herdr 1 host and pane, or
+    /// a herdr-core terminal under [`super::core::ENDPOINT`]; a run takes
+    /// none.
+    pub(crate) fn reply_pane(&self) -> Option<(&str, &str)> {
+        match &self.open {
+            Open::Core { terminal, .. } => Some((super::core::ENDPOINT, terminal.as_str())),
+            _ => self.pane(),
+        }
+    }
+
     /// The host and pane of an agent's row; a run has neither.
     pub(crate) fn pane(&self) -> Option<(&str, &str)> {
         match &self.open {

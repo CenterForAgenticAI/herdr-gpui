@@ -79,3 +79,40 @@ fn core_agents_are_listed_and_open_their_pane(cx: &mut gpui::TestAppContext) {
         })
     });
 }
+
+#[gpui::test]
+fn a_core_agent_takes_a_reply_that_waits_for_the_core(cx: &mut gpui::TestAppContext) {
+    use crate::overview::replies::Presence;
+    let (view, cx) = window(cx);
+    let tab = TabId::test(7);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.core_terminals.show_for_test(
+                tab,
+                Panes::single(TerminalId::new("t1").unwrap()),
+                false,
+                vec![info("t1", AgentStatus::Idle, "claude")],
+            );
+            let row = view
+                .overview_rows(cx)
+                .into_iter()
+                .find(|row| matches!(row.open, Open::Core { .. }))
+                .unwrap();
+            assert_eq!(
+                row.reply_pane(),
+                Some((crate::overview::core::ENDPOINT, "t1"))
+            );
+            let target = view.overview_reply_target(&row).unwrap();
+            assert_eq!(
+                (target.pane.as_str(), target.agent.as_str()),
+                ("t1", "claude")
+            );
+            // No core is connected in the test: nothing is known, so a reply
+            // waits rather than being dropped.
+            assert_eq!(
+                view.reply_presence((crate::overview::core::ENDPOINT, "t1"), "", "claude"),
+                Presence::Unreachable
+            );
+        })
+    });
+}
