@@ -28,6 +28,7 @@ mod input_resize;
 mod progress;
 mod running;
 mod selection;
+mod states;
 mod steps;
 
 const PANE: &str = "rich-chat-preview";
@@ -130,10 +131,14 @@ impl Options {
                 | "running-open"
                 | "steps"
                 | "steps-open"
+                | "state-completed"
+                | "state-failed"
+                | "state-stopped"
+                | "state-waiting"
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -448,6 +453,9 @@ fn install(
     if options.case.starts_with("running") {
         transcript.entries = running::entries();
         transcript.activities = running::activities(super::now_ms());
+    }
+    if options.case.starts_with("state-") {
+        states::apply(&options.case, &mut transcript, super::now_ms());
     }
     if options.case == "turns" {
         transcript.entries = earlier_turns();

@@ -230,6 +230,17 @@ stays at the far right, as in `Editing server/purpose.ts… · 42s +1 more 11m 1
 Click the row to list the running steps in full, each with its own time; click
 again to close the list. It keeps the newest 16 and says how many more run. A chat from an older `sheprd-acp` has no step times.
 
+The row's dot pulses in a color for what the agent does: thinking, writing, or
+running a step. When the agent stops on your answer, the dot gives way to a
+still mark and the row says where to answer. The header gives the same state in
+a word and a mark: **Working**, **Needs input**, and once the agent is idle how
+its last turn ended, **Completed**, **Stopped** (cancelled, refused, or out of
+turns) or **Failed**. An observed CLI agent's state comes from the daemon, and
+its log only shows steps it recorded, so between them the row says **Working**.
+Times and token counts appear only when reported: the turn's line in the
+conversation has them, and the composer the context meter. A chat with no
+composer shows that meter in its header, when the pane is wide enough.
+
 ## Tool calls
 
 A folded tool call says what it did: the command, file, search, or sub-agent
@@ -401,8 +412,11 @@ readable without opening a same-named local file.
 
 Rich parsing lives in [`chat/rich`](../crates/sheprd-gpui/src/chat/rich.rs), with
 native layout in [`chat/view/rich.rs`](../crates/sheprd-gpui/src/chat/view/rich.rs).
-Math rasterization and syntax highlighting use the bounded visual worker queue;
-discarded streamed revisions retain their worker slots until completion.
+Math rasterization and syntax highlighting use the bounded visual worker queue,
+which a window's chats share: what is on screen goes first, a hidden chat starts
+nothing, and discarded streamed revisions retain their worker slots until
+completion. Scrolling back rebuilds evicted formulas and code, and a formula the
+texture budget refused is drawn again once it is on screen and room exists.
 
 - Message preparation is limited to 256 KiB and 2,000 lines. Rich fragments
   exceeding 4,096 words or 16,384 parser events use the bounded source renderer.
