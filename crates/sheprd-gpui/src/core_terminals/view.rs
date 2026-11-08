@@ -92,6 +92,11 @@ pub(crate) struct CoreTerminalView {
 }
 
 impl CoreTerminalView {
+    /// The terminal it shows.
+    pub(crate) fn terminal(&self) -> &TerminalId {
+        &self.id
+    }
+
     pub(crate) fn new(
         id: TerminalId,
         link: Link,
@@ -155,10 +160,6 @@ impl CoreTerminalView {
     #[cfg(test)]
     pub(crate) fn has_frame(&self) -> bool {
         self.screen.frame.is_some()
-    }
-
-    pub(crate) fn id(&self) -> &TerminalId {
-        &self.id
     }
 
     pub(crate) fn title(&self) -> Option<&str> {

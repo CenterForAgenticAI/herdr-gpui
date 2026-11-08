@@ -10,7 +10,7 @@ use crate::{
     browser::{Location, Store, TabId},
     controls::Command,
     core_terminals::{
-        CoreTerminalView, TabPanes,
+        CoreTerminalView, Host, TabPanes,
         panes::{Axis, Panes},
         worker,
     },
@@ -47,7 +47,7 @@ pub(super) fn window_with_split<'a>(
             .unwrap();
             view.core_terminals
                 .tabs
-                .insert(tab, TabPanes::new(panes, false));
+                .insert(tab, TabPanes::new(Host::Local, panes, false));
             for name in names {
                 let link = worker::spawn(Scripted::default(), id(name), size(80, 24), Role::Active)
                     .unwrap();
