@@ -25,6 +25,10 @@ herdr_2_terminals = true
 
 herdr-core runs only on this computer, so a new tab in a workspace on an SSH, WSL or cloud host stays a Herdr tab on that host. Sheprd joins a herdr-core that is already running, or starts your own `herdr-core` or the bundled one when a Herdr 2 terminal is first needed. `herdr-core ls` lists its terminals. If Herdr 1 is not installed, the window opens a herdr-core shell instead of asking you to install Herdr.
 
+Herdr's shared `[ui]` settings apply to Herdr 2 panes too: `copy_on_select`, `mouse_scroll_lines`, and `right_click_passthrough_modifier` (a Herdr 2 pane has no pane menu yet, so its other right-clicks also reach a program that reads the mouse).
+
+A Herdr 2 pane keeps 10,000 lines of scrollback. herdr-core itself keeps each terminal's recent output, a few thousand lines, through Sheprd and herdr-core restarts, and a pane shows it again when it opens, so scrolling back after a restart works without a switch. **Restore scrollback after Herdr restarts** and Herdr's `[advanced] scrollback_limit_bytes` apply to Herdr 1 only.
+
 **Mirror Herdr 2 Pane** opens a watch-only view of the focused pane in a new tab. In the sidebar, a Herdr 2 list under the agents shows each pane of the workspace's Herdr 2 tabs with its status.
 
 ## Splits

@@ -9,9 +9,12 @@ use std::{thread, time::Duration};
 
 const WAIT: Duration = Duration::from_secs(5);
 
+/// History lines the test backend keeps.
+const SCROLLBACK: usize = 1000;
+
 fn backend() -> (CoreBackend, MockCore) {
     let (core, mock) = connected();
-    (CoreBackend::new(core, 1000), mock)
+    (CoreBackend::new(core, SCROLLBACK), mock)
 }
 
 fn line(value: Value) -> Vec<u8> {
@@ -166,6 +169,8 @@ fn attached(backend: &CoreBackend, mock: &mut MockCore, role: Role) -> crate::Co
             request["params"]["observe"].as_bool().unwrap_or(false),
             role == Role::Observer
         );
+        // The history the backend keeps is asked for, to restore it.
+        assert_eq!(request["params"]["history"], json!(SCROLLBACK));
         let mut t1 = terminal("t1");
         (t1["cols"], t1["rows"]) = (json!(20), json!(4));
         mock.answer(&request, json!({"channel": 5, "terminal": t1}));

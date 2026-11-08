@@ -456,14 +456,24 @@ impl SheprdWindow {
 
     /// How the window draws terminals, for its herdr-core views.
     pub(crate) fn core_look(&self) -> Look {
+        let shared = self.settings.shared.as_ref();
         Look {
             background: self.fill().base(self.terminal_theme().background),
             cell_height: self.config.terminal.line_height(),
             cell_width: self.cell_width,
+            copy_on_select: shared.is_none_or(|shared| shared.copy_on_select),
             font: self.config.terminal.font(),
             ground: self.ground(),
+            keep_selection: self.config.keep_selection_after_copy,
             option_as_alt: self.config.option_as_alt,
             padding: self.config.terminal_padding,
+            right_click_passthrough: shared
+                .map(|shared| shared.right_click_passthrough)
+                .unwrap_or_default(),
+            scroll_lines: shared.map_or(
+                crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
+                |shared| shared.mouse_scroll_lines,
+            ),
         }
     }
 

@@ -269,3 +269,60 @@ fn a_real_core_through_the_backend_traits() {
     }
     backend.kill(&info.id).unwrap();
 }
+
+#[test]
+#[ignore = "needs HERDR_CORE_TEST_BINARY"]
+fn a_terminal_attached_anew_scrolls_back_through_what_it_missed() {
+    use sheprd_backend::{
+        Backend, ClientMouseKind, ClientMousePosition, ClientPaneInputEvent, Role, Size, Spawn,
+        SurfaceUpdate, Terminal as _,
+    };
+
+    let binary = std::env::var_os("HERDR_CORE_TEST_BINARY").expect("HERDR_CORE_TEST_BINARY");
+    let sandbox = Sandbox::start(binary);
+    let backend = crate::CoreBackend::new(sandbox.connect(), 1000);
+    let info = backend
+        .spawn(&Spawn {
+            argv: vec!["sh".into(), "-c".into(), "seq 1 300; exec sleep 600".into()],
+            ..Spawn::default()
+        })
+        .unwrap();
+    let size = Size::new(20, 6).unwrap();
+    // The whole screen as text after each update, until `done` holds.
+    let read_until = |terminal: &mut crate::CoreTerminal, done: &dyn Fn(&str) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut text = String::new();
+        while !done(&text) {
+            assert!(Instant::now() < deadline, "never shown: {text:?}");
+            for update in terminal.next(Duration::from_millis(100)).unwrap() {
+                if let SurfaceUpdate::Frame(frame) = update {
+                    text = frame
+                        .cells
+                        .iter()
+                        .map(|cell| cell.symbol.as_str())
+                        .collect();
+                }
+            }
+        }
+    };
+    // The output ran with no one attached; a view attached now gets the
+    // history the core kept, which the wheel scrolls back through.
+    let wait = Instant::now() + Duration::from_secs(10);
+    while backend.terminals().unwrap().iter().all(|t| t.id != info.id) {
+        assert!(Instant::now() < wait);
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let mut terminal = backend.attach(&info.id, size, Role::Active).unwrap();
+    read_until(&mut terminal, &|text| text.contains("300"));
+    terminal
+        .input(&ClientPaneInputEvent::Mouse {
+            kind: ClientMouseKind::ScrollUp,
+            position: ClientMousePosition::Cell { column: 0, row: 0 },
+            geometry: None,
+            modifiers: 0,
+            lines: 100,
+        })
+        .unwrap();
+    read_until(&mut terminal, &|text| text.contains("200"));
+    backend.kill(&info.id).unwrap();
+}

@@ -6,14 +6,13 @@
 use super::CoreTerminalView;
 use crate::{
     core_terminals::selection::{Cell, Selection},
-    terminal::{PLATFORM_NOTCH_LINES, wheel_rows},
+    terminal::wheel_rows,
     terminal_painter::{Highlight, Tint},
 };
 use gpui::{prelude::*, *};
 use sheprd_backend::{
     ClientMouseButton, ClientMouseKind, ClientMousePosition, ClientPaneInputEvent,
 };
-use std::num::NonZeroU16;
 
 /// Where a press is going: to the program, or into a selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,7 +82,8 @@ impl CoreTerminalView {
         if self.screen.mouse_reporting && !event.modifiers.shift {
             if let Some(pressed) = button(event.button) {
                 self.press = Some(Press::Reported(pressed));
-                self.report(ClientMouseKind::Down(pressed), cell, event.modifiers, 1);
+                let modifiers = self.reported_modifiers(event.button, event.modifiers);
+                self.report(ClientMouseKind::Down(pressed), cell, modifiers, 1);
             }
             return;
         }
@@ -145,12 +145,24 @@ impl CoreTerminalView {
         if self.release_link(event, window, cx) {
             return;
         }
-        if let Some(Press::Reported(pressed)) = self.press
-            && let Some(cell) = self.cell_at(event.position)
-        {
-            self.report(ClientMouseKind::Up(pressed), cell, event.modifiers, 1);
+        match self.press.take() {
+            Some(Press::Reported(pressed)) => {
+                if let Some(cell) = self.cell_at(event.position) {
+                    let modifiers = self.reported_modifiers(event.button, event.modifiers);
+                    self.report(ClientMouseKind::Up(pressed), cell, modifiers, 1);
+                }
+            }
+            // Releasing a selection copies it while `copy_on_select` is on;
+            // otherwise it stays highlighted for Cmd-C or Ctrl-C.
+            Some(Press::Selecting)
+                if self.look.copy_on_select
+                    && event.button == MouseButton::Left
+                    && self.copy_selection(cx) =>
+            {
+                self.finish_copy(window, cx);
+            }
+            Some(Press::Selecting) | None => {}
         }
-        self.press = None;
     }
 
     /// Whole rows of wheel motion, the remainder kept for the next event,
@@ -165,8 +177,7 @@ impl CoreTerminalView {
         let Some(cell) = self.cell_at(event.position) else {
             return;
         };
-        let notch = NonZeroU16::new(PLATFORM_NOTCH_LINES).unwrap_or(NonZeroU16::MIN);
-        self.wheel_rest += wheel_rows(event, self.look.cell_height, notch);
+        self.wheel_rest += wheel_rows(event, self.look.cell_height, self.look.scroll_lines);
         let steps = self.wheel_rest.trunc();
         self.wheel_rest -= steps;
         if steps == 0. {
@@ -180,6 +191,30 @@ impl CoreTerminalView {
         // Clamped to a u16 first, so the cast cannot truncate.
         let lines = steps.abs().min(f32::from(u16::MAX)) as u16;
         self.report(kind, cell, event.modifiers, lines);
+    }
+
+    /// The modifiers a press reports. A right-click held with exactly
+    /// Herdr's `right_click_passthrough_modifier` reaches the program
+    /// without it, as Herdr strips it. A herdr-core pane has no pane menu
+    /// yet, so its other right-clicks reach the program as they are.
+    fn reported_modifiers(&self, button: MouseButton, held: Modifiers) -> Modifiers {
+        if button == MouseButton::Right && self.look.right_click_passthrough.matches(held) {
+            Modifiers::default()
+        } else {
+            held
+        }
+    }
+
+    /// Ends a copy: the copied flash, and the highlight dropped unless
+    /// `keep_selection_after_copy` keeps it.
+    pub(super) fn finish_copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.look.keep_selection {
+            self.selection = None;
+        }
+        cx.notify();
+        if let Some(to_window) = &self.to_window {
+            to_window(super::ToWindow::Copied, window, cx);
+        }
     }
 
     /// Copies the selection; false when nothing is selected.
@@ -199,7 +234,7 @@ impl CoreTerminalView {
     }
 
     /// The selection as the painter tints it.
-    pub(super) fn highlights(&self) -> Vec<Highlight> {
+    pub(crate) fn highlights(&self) -> Vec<Highlight> {
         let width = self.screen.frame.as_ref().map_or(0, |frame| frame.width);
         self.selection
             .map(|selection| {

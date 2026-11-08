@@ -21,10 +21,14 @@ pub(super) fn look() -> Look {
         background: hsla(0., 0., 0., 1.),
         cell_height: 17.,
         cell_width: 8.5,
+        copy_on_select: true,
         font: gpui::font("Menlo"),
         ground: Default::default(),
+        keep_selection: true,
         option_as_alt: Default::default(),
         padding: Default::default(),
+        right_click_passthrough: Default::default(),
+        scroll_lines: crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
     }
 }
 
