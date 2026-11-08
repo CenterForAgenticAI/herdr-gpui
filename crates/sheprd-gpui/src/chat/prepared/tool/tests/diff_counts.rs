@@ -112,3 +112,26 @@ fn a_total_with_an_uncounted_edit_is_unknown_rather_than_partial() {
     merged.merge(None);
     assert_eq!(merged.lines, None);
 }
+
+#[test]
+fn an_edit_with_a_fragment_left_out_has_no_count() {
+    let small = ToolContent::Diff {
+        path: "file.rs".into(),
+        old: Some("a\n".into()),
+        new: "b\n".into(),
+    };
+    let omitted = ToolContent::Text {
+        text: EDIT_OMITTED.into(),
+    };
+    let summary = summarize(
+        &[small.clone(), omitted],
+        ToolKind::Edit,
+        &mut Visuals::default(),
+    );
+    assert!(summary.omitted);
+    assert_eq!(summary.diffs.len(), 1, "the fragment that fit stays shown");
+    assert_eq!(summary.diffs[0].lines, None, "its count is only a part");
+    let whole = summarize(&[small], ToolKind::Edit, &mut Visuals::default());
+    assert!(!whole.omitted);
+    assert!(whole.diffs[0].lines.is_some());
+}

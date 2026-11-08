@@ -8,10 +8,10 @@ use std::collections::{HashMap, HashSet};
 
 use acp::v1 as wire;
 use sheprd_chat_protocol::{
-    ActivityKind, ActivityState, Author, Change, Choice, ConfigOption, Cost, Entry, EntryId,
-    EntryKind, Image, Mode, Modes, NoticeLevel, OptionCategory, OptionKind, OptionValue, PlanEntry,
-    PlanPriority, PlanStatus, SessionInfo, SlashCommand, Tokens, Tool, ToolContent, ToolKind,
-    ToolStatus, Transcript, TurnSummary, Usage,
+    ActivityKind, ActivityState, Author, Change, Choice, ConfigOption, Cost, EDIT_OMITTED, Entry,
+    EntryId, EntryKind, Image, Mode, Modes, NoticeLevel, OptionCategory, OptionKind, OptionValue,
+    PlanEntry, PlanPriority, PlanStatus, SessionInfo, SlashCommand, Tokens, Tool, ToolContent,
+    ToolKind, ToolStatus, Transcript, TurnSummary, Usage,
 };
 
 /// Sub-agents whose step counts are kept before forgetting those that left
@@ -21,7 +21,6 @@ const MAX_ACTIVITIES_TRACKED: usize = 2 * sheprd_chat_protocol::MAX_ACTIVITIES;
 /// The most text one entry keeps; later chunks are dropped.
 pub(crate) const MAX_ENTRY_TEXT: usize = 256 * 1024;
 const TRUNCATED: &str = "\n… (truncated)";
-const EDIT_NOTICE: &str = "Original edit context exceeds live preview limits.";
 /// The most steps of one sub-agent the transcript shows; later ones only
 /// update its activity's detail.
 pub(crate) const MAX_STEPS: usize = 64;
@@ -839,7 +838,7 @@ fn tool_content(content: wire::ToolCallContent) -> ToolContent {
                     .is_some_and(|old| old.len() > MAX_ENTRY_TEXT) =>
         {
             ToolContent::Text {
-                text: EDIT_NOTICE.to_owned(),
+                text: EDIT_OMITTED.to_owned(),
             }
         }
         wire::ToolCallContent::Diff(diff) => ToolContent::Diff {

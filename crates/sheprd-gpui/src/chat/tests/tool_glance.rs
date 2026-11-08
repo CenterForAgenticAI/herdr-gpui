@@ -126,3 +126,38 @@ fn a_finished_edit_sent_without_its_text_stays_listed(cx: &mut TestAppContext) {
         assert_eq!(changed[0].lines, None);
     });
 }
+
+#[gpui::test]
+fn files_of_an_edit_with_a_fragment_left_out_have_no_count(cx: &mut TestAppContext) {
+    let (view, _peer, cx) = open(cx, ConnectTarget::Local);
+    let program = Program::new();
+    let entries = vec![Entry {
+        id: EntryId(1),
+        kind: EntryKind::Tool(Tool {
+            call_id: "call".into(),
+            content: vec![
+                ToolContent::Diff {
+                    path: "/work/a.rs".into(),
+                    old: Some("a\n".into()),
+                    new: "b\n".into(),
+                },
+                ToolContent::Text {
+                    text: sheprd_chat_protocol::EDIT_OMITTED.into(),
+                },
+            ],
+            kind: ToolKind::Edit,
+            locations: vec!["/work/a.rs".into(), "/work/b.rs".into()],
+            parent: None,
+            started_ms: None,
+            status: ToolStatus::Completed,
+            title: "MultiEdit".into(),
+        }),
+    }];
+    let _stream = attach_with(&view, &program, snapshot(cursor(1, 0), entries), cx);
+    view.read_with(cx, |view, _| {
+        let changed = view.chats.pane("w1:p1").unwrap().prepared.changed();
+        let paths: Vec<_> = changed.iter().map(|diff| diff.path.as_str()).collect();
+        assert_eq!(paths, ["/work/a.rs", "/work/b.rs"]);
+        assert!(changed.iter().all(|diff| diff.lines.is_none()));
+    });
+}

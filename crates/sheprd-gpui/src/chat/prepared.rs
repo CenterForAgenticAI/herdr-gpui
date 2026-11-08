@@ -13,8 +13,8 @@ use crate::{
     release_notes::{self, Line},
 };
 use sheprd_chat_protocol::{
-    Author, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, QuestionAnswer, Tool,
-    ToolContent, ToolKind, ToolStatus, Transcript,
+    Author, EDIT_OMITTED, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT,
+    QuestionAnswer, Tool, ToolContent, ToolKind, ToolStatus, Transcript,
 };
 use std::{
     borrow::Cow,
@@ -167,6 +167,9 @@ pub(crate) struct ToolSummary {
     /// What each content item shows once the card opens.
     pub(crate) previews: Vec<tool::Preview>,
     pub(crate) diffs: Vec<DiffSummary>,
+    /// An edit of the call was too large to send, so its files changed by
+    /// amounts nobody counted, even where another edit was counted.
+    pub(crate) omitted: bool,
     /// The first lines of its text output.
     pub(crate) lines: Vec<String>,
     /// Pictures it returned, the first [`TOOL_IMAGES`] of them.
@@ -414,7 +417,9 @@ impl Prepared {
                 continue;
             };
             let unshown = match &entry.kind {
-                EntryKind::Tool(tool) if summary.diffs.is_empty() => unshown_edits(tool),
+                EntryKind::Tool(tool) if summary.diffs.is_empty() || summary.omitted => {
+                    unshown_edits(tool)
+                }
                 _ => &[],
             };
             let unshown = unshown.iter().map(|location| DiffSummary {
@@ -701,6 +706,16 @@ pub(crate) fn summarize(
             ToolContent::Terminal { .. } => summary.terminals += 1,
         }
         summary.previews.extend(preview);
+    }
+    summary.omitted = content
+        .iter()
+        .any(|item| matches!(item, ToolContent::Text { text } if text == EDIT_OMITTED));
+    if summary.omitted {
+        // A fragment that fit is only part of the change; its count alone
+        // would read as the whole.
+        for diff in &mut summary.diffs {
+            diff.lines = None;
+        }
     }
     summary
 }

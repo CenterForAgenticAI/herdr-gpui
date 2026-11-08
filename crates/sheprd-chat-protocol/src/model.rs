@@ -300,6 +300,11 @@ pub enum ToolStatus {
     Failed,
 }
 
+/// The text an edit becomes when a side is too large to send whole: the
+/// file changed, but by how much is not said. Clients that see it beside
+/// other edits of the same call cannot total them.
+pub const EDIT_OMITTED: &str = "Original edit context exceeds live preview limits.";
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ToolContent {

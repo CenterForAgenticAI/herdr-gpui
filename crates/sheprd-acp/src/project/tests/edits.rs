@@ -10,7 +10,7 @@ fn diff(old: Option<String>, new: String) -> ToolContent {
 
 fn notice() -> ToolContent {
     ToolContent::Text {
-        text: EDIT_NOTICE.to_owned(),
+        text: EDIT_OMITTED.to_owned(),
     }
 }
 
