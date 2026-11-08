@@ -573,27 +573,40 @@ const PROGRAM: &str = if cfg!(windows) {
     "herdr-acp"
 };
 
-/// The `herdr-acp` beside this executable (the app bundle ships both),
-/// else the first on `PATH`.
+/// The `herdr-acp` beside this executable (the app bundle ships both, and
+/// pairing puts one beside the daemon on a host), else where Sheprd looks
+/// for one on an SSH host (`~/.herdr/bin`, `~/.cargo/bin`, `~/.local/bin`:
+/// a service's `PATH` often lacks them), else the first on `PATH`.
 fn locate_program() -> Option<PathBuf> {
     let renamed = PROGRAM.replacen("herdr-", "sheprd-", 1);
-    locate_named_program(&renamed).or_else(|| locate_named_program(PROGRAM))
+    let exe = std::env::current_exe().ok();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let path = std::env::var_os("PATH");
+    let dirs = program_dirs(exe.as_deref(), home.as_deref(), path.as_deref());
+    [renamed.as_str(), PROGRAM].into_iter().find_map(|program| {
+        dirs.iter()
+            .map(|dir| dir.join(program))
+            .find(|candidate| candidate.is_file())
+    })
 }
 
-fn locate_named_program(program: &str) -> Option<PathBuf> {
-    let beside = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(program)));
-    beside
+/// Where a chat program is looked for, in order. Only absolute folders: a
+/// relative one would depend on where the daemon was started.
+fn program_dirs(
+    exe: Option<&Path>,
+    home: Option<&Path>,
+    path: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    let beside = exe.and_then(Path::parent).map(Path::to_path_buf);
+    let home = home
+        .filter(|home| home.is_absolute())
         .into_iter()
-        .chain(
-            std::env::var_os("PATH")
-                .into_iter()
-                .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-                .filter(|dir| dir.is_absolute())
-                .map(|dir| dir.join(program)),
-        )
-        .find(|candidate| candidate.is_file())
+        .flat_map(|home| [".herdr/bin", ".cargo/bin", ".local/bin"].map(|dir| home.join(dir)));
+    let path = path
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .filter(|dir| dir.is_absolute());
+    beside.into_iter().chain(home).chain(path).collect()
 }
 
 /// Runs blocking core work off the runtime.
