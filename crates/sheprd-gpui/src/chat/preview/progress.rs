@@ -5,16 +5,9 @@
 
 use sheprd_chat_protocol::{Entry, EntryId, EntryKind, Tool, ToolContent, ToolKind, ToolStatus};
 
-const OUTPUT: &str = "running 454 tests
-test codex::bridge::tests::command_output::deltas_stream_into_the_card ... ok
-test harness::streaming::tests::the_first_change_is_published_at_once ... ok
-test harness::streaming::tests::later_changes_share_one_deadline ... ok
-test pi::bridge::tests::streaming::partial_results_replace_the_snapshot ... ok"; // i18n: data
+const OUTPUT: &str = "running 454 tests\ntest codex::bridge::tests::command_output::deltas_stream_into_the_card ... ok\ntest harness::streaming::tests::the_first_change_is_published_at_once ... ok\ntest harness::streaming::tests::later_changes_share_one_deadline ... ok\ntest pi::bridge::tests::streaming::partial_results_replace_the_snapshot ... ok"; // i18n: data
 
-const TASK: &str = "Reported progress: Reading the reconnect path in sheprd-client
-Latest tool: Grep
-Tools used: 7
-Elapsed: 42s"; // i18n: data
+const TASK: &str = "Reported progress: Reading the reconnect path in sheprd-client\nLatest tool: Grep\nTools used: 7\nElapsed: 42s"; // i18n: data
 
 fn tool(id: u64, kind: ToolKind, title: &str, content: Option<&str>) -> Entry {
     Entry {
