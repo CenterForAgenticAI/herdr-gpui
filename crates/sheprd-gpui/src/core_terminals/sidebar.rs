@@ -108,7 +108,7 @@ impl SheprdWindow {
 
     /// Shows `tab` with `terminal` as its pane in use, unzoomed if another
     /// pane filled it, and gives that pane the keyboard.
-    fn show_core_pane(
+    pub(crate) fn show_core_pane(
         &mut self,
         tab: TabId,
         terminal: &TerminalId,

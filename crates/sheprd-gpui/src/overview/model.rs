@@ -112,6 +112,11 @@ pub(crate) enum Open {
     },
     /// The orchestrator view that lists the run.
     Run(ViewId),
+    /// A Herdr 2 agent's pane in the window's herdr-core tab.
+    Core {
+        tab: crate::browser::TabId,
+        terminal: sheprd_backend::TerminalId,
+    },
 }
 
 /// A checkout's pull request as the prefetch last saw it.
@@ -151,7 +156,7 @@ impl Row {
     pub(crate) fn pane(&self) -> Option<(&str, &str)> {
         match &self.open {
             Open::Pane { endpoint, pane, .. } => Some((endpoint, pane)),
-            Open::Run(_) => None,
+            Open::Run(_) | Open::Core { .. } => None,
         }
     }
 }
@@ -168,13 +173,24 @@ impl Since {
     /// that did not change.
     pub(crate) fn observe(&mut self, endpoint: &str, agents: &[ClientShellAgent], now: SystemTime) {
         for agent in agents {
-            let key = (endpoint.to_owned(), agent.pane_id.clone());
-            match self.seen.get_mut(&key) {
-                Some(seen) if seen.0 == agent.agent_status => {}
-                Some(seen) => *seen = (agent.agent_status, now),
-                None => {
-                    self.seen.insert(key, (agent.agent_status, now));
-                }
+            self.observe_one(endpoint, &agent.pane_id, agent.agent_status, now);
+        }
+    }
+
+    /// Records the state of one agent, keeping its time if it did not change.
+    pub(crate) fn observe_one(
+        &mut self,
+        endpoint: &str,
+        pane: &str,
+        status: AgentStatus,
+        now: SystemTime,
+    ) {
+        let key = (endpoint.to_owned(), pane.to_owned());
+        match self.seen.get_mut(&key) {
+            Some(seen) if seen.0 == status => {}
+            Some(seen) => *seen = (status, now),
+            None => {
+                self.seen.insert(key, (status, now));
             }
         }
     }
