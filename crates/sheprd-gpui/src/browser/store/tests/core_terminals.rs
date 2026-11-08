@@ -50,3 +50,21 @@ fn a_terminal_another_tab_types_into_is_not_ended() {
     assert!(store.has_ending());
     assert!(store.take_ending().is_empty());
 }
+
+#[test]
+fn a_closed_workspace_ends_its_terminal_tabs() {
+    let mut store = Store::default();
+    open(&mut store, Panes::single(id("t1")), false);
+    open(&mut store, Panes::single(id("t1")), true);
+    let other = store
+        .open(
+            Scope::endpoint("local"),
+            "w2",
+            Some(Location::core_terminal(Panes::single(id("t2")), false)),
+            None,
+        )
+        .unwrap();
+    assert!(store.forget_workspaces(&Scope::endpoint("local"), &["w".to_owned()]));
+    assert_eq!(store.take_ending(), [id("t1")]);
+    assert!(store.get(other).is_some());
+}

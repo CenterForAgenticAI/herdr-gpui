@@ -486,14 +486,23 @@ impl Store {
     pub(crate) fn close(&mut self, id: TabId) -> Option<Tab> {
         let tab = self.detach(id)?;
         match &tab.location {
-            Some(Location::CoreTerminal { panes, observe, .. }) => {
-                if !observe {
-                    self.ending.extend(panes.terminals().into_iter().cloned());
-                }
-            }
+            Some(Location::CoreTerminal { .. }) => self.ending.extend(Self::driven_terminals(&tab)),
             _ => self.closed.push_page(tab.clone()),
         }
         Some(tab)
+    }
+
+    /// The herdr-core terminals `tab` types into; none for a mirror or a
+    /// page.
+    fn driven_terminals(tab: &Tab) -> Vec<sheprd_backend::TerminalId> {
+        match &tab.location {
+            Some(Location::CoreTerminal {
+                panes,
+                observe: false,
+                ..
+            }) => panes.terminals().into_iter().cloned().collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// Takes the terminals closed tabs left to end, but those another tab
@@ -573,8 +582,16 @@ impl Store {
     pub(crate) fn forget_workspaces(&mut self, scope: &Scope, closed: &[String]) -> bool {
         self.closed.forget_workspaces(scope, closed);
         let before = self.tabs.len();
-        self.tabs
-            .retain(|tab| &tab.scope != scope || !closed.contains(&tab.workspace_id));
+        let gone = |tab: &Tab| &tab.scope == scope && closed.contains(&tab.workspace_id);
+        // A closed workspace's terminal tabs end with it, as its panes do.
+        let ending: Vec<_> = self
+            .tabs
+            .iter()
+            .filter(|tab| gone(tab))
+            .flat_map(Self::driven_terminals)
+            .collect();
+        self.ending.extend(ending);
+        self.tabs.retain(|tab| !gone(tab));
         let changed = self.tabs.len() != before;
         if changed {
             self.save();

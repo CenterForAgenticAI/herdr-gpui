@@ -2,7 +2,7 @@
 //! the pane in use, panes whose program ended, and the layout saved with the
 //! tab once a change settles.
 
-use super::{CoreTerminalView, Start, State, TabPanes, panes::Axis, worker};
+use super::{CoreTerminalView, Start, TabPanes, panes::Axis, worker};
 use crate::{
     SheprdWindow,
     browser::{Location, Store, TabId},
@@ -310,17 +310,11 @@ impl SheprdWindow {
         {
             return;
         }
-        match self.core_terminals.hub.state() {
-            State::Ready(_) => {}
-            // No core answers, so nothing of it runs to end.
-            State::Unavailable(_) => {
-                Store::update(cx, Store::take_ending);
-                return;
-            }
-            State::Idle | State::Connecting(_) => {
-                self.core_terminals.hub.connect(Start::Join);
-                return;
-            }
+        // A failed join is retried after a pause; the terminals wait for a
+        // window that reaches the core, this one or another.
+        if self.core_terminals.hub.backend().is_none() {
+            self.core_terminals.hub.connect(Start::Join);
+            return;
         }
         for terminal in Store::update(cx, Store::take_ending) {
             self.end_core_terminal(terminal);
