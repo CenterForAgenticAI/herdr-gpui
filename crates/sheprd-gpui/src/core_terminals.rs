@@ -177,6 +177,14 @@ impl CoreTerminals {
             .filter_map(|terminal| self.infos.get(terminal))
     }
 
+    /// What herdr-core last reported of `terminal`, while it answers. A
+    /// lost core's last list may name agents that have since stopped, so
+    /// none is reported until it answers again.
+    pub(super) fn reported(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
+        self.hub.backend()?;
+        self.infos.get(terminal)
+    }
+
     /// The pane a new chat in `tab` opens beside: the one in use, in a tab
     /// that drives its terminals.
     pub(crate) fn chat_split_at(&self, tab: TabId) -> Option<TerminalId> {
