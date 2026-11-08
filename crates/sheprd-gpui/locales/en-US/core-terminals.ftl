@@ -3,7 +3,7 @@
 core-terminals-open-workspace = Open a workspace first
 # A new tab on an SSH host, cloud machine, or WSL distribution without
 # herdr-core runs in the host's Herdr instead.
-core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr
+core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr. Choose Install Herdr 2 in the host's menu to add it
 core-terminals-too-many-tabs = Too many tabs are open
 core-terminals-connecting = Connecting to herdr-core...
 # $reason is the error, in English or from herdr-core.
@@ -21,3 +21,11 @@ core-terminals-mirror-needs-pane = Click a Herdr 2 pane to mirror first
 core-terminals-watching = Watching
 # The sidebar's list of herdr-core panes, under the agents.
 core-terminals-sidebar = Herdr 2
+# Installing herdr-core (Herdr 2) on a saved device, from its menu.
+# $device is the device's name; $version is herdr-core's version.
+core-terminals-install-started = Installing Herdr 2 on { $device }...
+core-terminals-install-installed = Herdr 2 (herdr-core { $version }) is installed on { $device }
+core-terminals-install-present = { $device } already has Herdr 2
+# $reason is why, in English or from the device.
+core-terminals-install-failed = Could not install Herdr 2 on { $device }: { $reason }
+core-terminals-install-local = this computer runs the herdr-core bundled with Sheprd

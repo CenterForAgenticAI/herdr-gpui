@@ -30,6 +30,16 @@ impl Infos {
         self.known.get(id)
     }
 
+    /// How many of the core's terminals run an agent that is working.
+    pub(super) fn working(&self) -> u32 {
+        let working = self
+            .known
+            .values()
+            .filter(|info| info.agent == sheprd_client::protocol::AgentStatus::Working)
+            .count();
+        u32::try_from(working).unwrap_or(u32::MAX)
+    }
+
     /// Records a terminal just started, until the next list replaces it,
     /// and hands it back.
     pub(super) fn insert(&mut self, info: TerminalInfo) -> TerminalInfo {

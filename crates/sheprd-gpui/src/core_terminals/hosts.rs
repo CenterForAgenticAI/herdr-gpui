@@ -112,6 +112,21 @@ impl CoreTerminals {
         self.remote.insert(scope, Remote { hub, infos, target });
     }
 
+    /// `host`'s hub, which a test drives directly.
+    #[cfg(test)]
+    pub(crate) fn hub_of_mut_for_test(&mut self, host: &Host) -> Option<&mut Hub> {
+        self.hub_of_mut(host)
+    }
+
+    /// Records `info` as what `host`'s core reports, as a finished list
+    /// would.
+    #[cfg(test)]
+    pub(crate) fn record_for_test(&mut self, host: &Host, info: TerminalInfo) {
+        if let Some(infos) = self.infos_of_mut(host) {
+            infos.insert(info);
+        }
+    }
+
     /// Reads what each core reports while any of its tabs is known, for
     /// split chrome and the sidebar's rows. True when what is known changed.
     pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
@@ -124,6 +139,32 @@ impl CoreTerminals {
             }
         }
         changed
+    }
+
+    /// Drops another host's hub, its views, and a terminal wanted there; the
+    /// next ask for the host dials it anew. This computer's hub stays.
+    pub(super) fn forget_host(&mut self, host: &Host) {
+        let Host::Remote(scope) = host else {
+            return;
+        };
+        self.remote.remove(scope);
+        let tabs = &self.tabs;
+        self.views
+            .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != *host));
+        if self
+            .wanted
+            .as_ref()
+            .is_some_and(|(_, wanted, _)| wanted == host)
+        {
+            self.wanted = None;
+        }
+    }
+
+    /// How many agents `host`'s core last reported working, for ranking
+    /// hosts by how busy they are. The list is read while the window shows
+    /// a tab of that core, so a core it never showed counts none.
+    pub(crate) fn working(&self, host: &Host) -> u32 {
+        self.infos_of(host).map_or(0, Infos::working)
     }
 
     /// Whether `host` was found to have no herdr-core installed, so new
@@ -256,20 +297,8 @@ impl SheprdWindow {
             .map(|(scope, _)| scope.clone())
             .collect();
         for scope in &stale {
-            let terminals = &mut self.core_terminals;
-            terminals.remote.remove(scope);
-            let host = Host::Remote(scope.clone());
-            let tabs = &terminals.tabs;
-            terminals
-                .views
-                .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != host));
-            if terminals
-                .wanted
-                .as_ref()
-                .is_some_and(|(_, wanted, _)| *wanted == host)
-            {
-                terminals.wanted = None;
-            }
+            self.core_terminals
+                .forget_host(&Host::Remote(scope.clone()));
         }
         !stale.is_empty()
     }
