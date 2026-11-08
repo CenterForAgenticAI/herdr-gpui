@@ -9,6 +9,7 @@ pub use error::Error;
 use crate::panes::Panes;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// The largest saved tabs file read.
 pub const MAX_SAVED_BYTES: usize = 1024 * 1024;
@@ -72,6 +73,20 @@ pub const WORKSPACE_LABEL: &str = "sheprd.workspace";
 /// whose workspace it is; absent for the primary session or the app's own.
 pub const SESSION_LABEL: &str = "sheprd.session";
 
+/// The herdr-core label asking the app to keep a new workspace in this
+/// folder for a terminal started outside it, as a phone's new workspace
+/// is; the app puts the terminal in a tab there.
+pub const NEW_WORKSPACE_LABEL: &str = "sheprd.new_workspace";
+
+/// The folder a terminal's labels ask a new workspace for, when it is one
+/// the app could keep: absolute, and within its bounds.
+pub fn new_workspace(labels: &BTreeMap<String, String>) -> Option<&str> {
+    labels
+        .get(NEW_WORKSPACE_LABEL)
+        .map(String::as_str)
+        .filter(|cwd| cwd.len() <= MAX_CWD_BYTES && std::path::Path::new(cwd).is_absolute())
+}
+
 /// A workspace a terminal was started for, as its labels name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Labelled<'a> {
@@ -83,9 +98,7 @@ pub struct Labelled<'a> {
 
 /// The workspace a terminal's `labels` name, when it is one the app could
 /// keep a tab in: a Herdr 1 workspace or one the app keeps.
-pub fn labelled_workspace(
-    labels: &std::collections::BTreeMap<String, String>,
-) -> Option<Labelled<'_>> {
+pub fn labelled_workspace(labels: &BTreeMap<String, String>) -> Option<Labelled<'_>> {
     let id = labels
         .get(WORKSPACE_LABEL)
         .map(String::as_str)

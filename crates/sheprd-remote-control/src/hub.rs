@@ -344,11 +344,13 @@ impl Hub {
                 Some(branch) => {
                     core.open_worktree_chat(agent, &program, &cwd, &branch, root.as_deref())
                 }
-                None => core.open_chat(agent, &program, &cwd, None),
+                // Sheprd keeps a workspace for it, in this folder.
+                None => core.open_chat(agent, &program, &cwd, Some(core::Place::New(&cwd))),
             })
             .await?;
+            // Listed apart until Sheprd keeps its workspace.
             return Ok(CreatedWorkspace {
-                workspace: core::UNLISTED.to_owned(),
+                workspace: core::new_workspace_id(&pane),
                 pane,
             });
         }
@@ -604,9 +606,9 @@ fn locate_named_program(program: &str) -> Option<PathBuf> {
 
 /// A phone-facing workspace id as the labels name it: its own id, and its
 /// Herdr 1 session when it is a named one's.
-fn labelled(workspace: &str) -> sheprd_session::Labelled<'_> {
+fn labelled(workspace: &str) -> core::Place<'_> {
     let (session, id) = sessions::split_id(workspace);
-    sheprd_session::Labelled { id, session }
+    core::Place::Workspace(sheprd_session::Labelled { id, session })
 }
 
 /// Runs blocking core work off the runtime.

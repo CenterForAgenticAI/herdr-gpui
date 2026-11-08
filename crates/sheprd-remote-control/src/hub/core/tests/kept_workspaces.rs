@@ -114,3 +114,15 @@ fn a_terminal_started_for_a_named_sessions_workspace_is_listed_under_its_phone_i
     let layout = projection::project("fake-core", &records, None, None);
     assert_eq!(layout.workspaces[0].id, "herdr:dev:w1");
 }
+
+#[test]
+fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
+    let mut phone = record("t1");
+    phone["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/api"});
+    let records = [serde_json::from_value(phone).unwrap()];
+    let layout = projection::project("fake-core", &records, None, None);
+    let row = &layout.workspaces[0];
+    assert_eq!(row.id, new_workspace_id(&id("t1")));
+    assert_eq!((row.label.as_str(), row.cwd.as_str()), ("api", "/code/api"));
+    assert_eq!(row.terminals.len(), 1);
+}

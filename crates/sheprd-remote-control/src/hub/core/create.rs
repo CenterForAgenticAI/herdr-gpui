@@ -11,7 +11,16 @@ use crate::hub::Layout;
 use serde_json::{Value, json};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN};
 use sheprd_core_client::wire::Run;
-use sheprd_session::{Labelled, SESSION_LABEL, WORKSPACE_LABEL};
+use sheprd_session::{Labelled, NEW_WORKSPACE_LABEL, SESSION_LABEL, WORKSPACE_LABEL};
+
+/// Where new work from a phone belongs, which Sheprd gives it a tab in.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::hub) enum Place<'a> {
+    /// A workspace that exists.
+    Workspace(Labelled<'a>),
+    /// A new workspace in this folder, which Sheprd keeps.
+    New(&'a str),
+}
 use std::{
     collections::{BTreeMap, HashMap},
     path::Path,
@@ -25,15 +34,11 @@ const PANE_ENV: &str = "HERDR_PANE_ID";
 impl Source {
     /// A shell in `cwd`, or the core's default folder when it is empty,
     /// labelled for `workspace` so Sheprd puts it in a tab there.
-    pub(in crate::hub) fn open_shell(
-        &self,
-        cwd: &str,
-        workspace: Option<Labelled<'_>>,
-    ) -> Result<String> {
+    pub(in crate::hub) fn open_shell(&self, cwd: &str, place: Option<Place<'_>>) -> Result<String> {
         self.run(&Run {
             cwd: Some(cwd).filter(|cwd| !cwd.is_empty()),
             keep: true,
-            labels: workspace_label(workspace),
+            labels: place_labels(place),
             ..Run::default()
         })
     }
@@ -44,10 +49,10 @@ impl Source {
         agent: Agent,
         program: &Path,
         cwd: &str,
-        workspace: Option<Labelled<'_>>,
+        place: Option<Place<'_>>,
     ) -> Result<String> {
         let endpoint = EndpointId::random().to_string();
-        let mut labels = workspace_label(workspace);
+        let mut labels = place_labels(place);
         labels.insert(TOKEN, endpoint.as_str());
         let argv = [program.to_string_lossy().into_owned(), agent.to_string()];
         self.run(&Run {
@@ -75,15 +80,17 @@ impl Source {
         let root = root.ok_or(worktree::Error::NoHome).map_err(Error::from)?;
         let repository = Path::new(cwd);
         let checkout = worktree::add(repository, branch, root).map_err(Error::from)?;
-        // A new workspace of its own: no tab to land in yet.
-        let started = self.open_chat(agent, program, &checkout.to_string_lossy(), None);
+        // A new workspace of its own, in the new checkout.
+        let checkout = checkout.to_string_lossy().into_owned();
+        let started = self.open_chat(agent, program, &checkout, Some(Place::New(&checkout)));
+        let checkout = Path::new(&checkout);
         if let Err(error) = &started {
             // A retry must find the branch free, but only a start that
             // surely ran nothing may go: a chat may be working in the
             // checkout after any other failure.
             if !ran_nothing(error) {
                 tracing::warn!(%error, %branch, "A worktree stayed: its chat may have started");
-            } else if let Err(error) = worktree::remove(repository, &checkout, branch) {
+            } else if let Err(error) = worktree::remove(repository, checkout, branch) {
                 tracing::warn!(%error, %branch, "A worktree without a chat stayed");
             }
         }
@@ -158,15 +165,20 @@ pub(super) fn tab_panes(layout: &Layout) -> HashMap<String, Vec<String>> {
     tabs
 }
 
-/// The labels naming `workspace`, when it is one Sheprd could keep a tab in.
-fn workspace_label<'a>(workspace: Option<Labelled<'a>>) -> BTreeMap<&'static str, &'a str> {
-    let Some(workspace) = workspace.filter(|workspace| sheprd_session::tab_workspace(workspace.id))
-    else {
-        return BTreeMap::new();
-    };
-    let mut labels = BTreeMap::from([(WORKSPACE_LABEL, workspace.id)]);
-    if let Some(session) = workspace.session {
-        labels.insert(SESSION_LABEL, session);
+/// The labels naming where `place` is, when it is somewhere Sheprd could
+/// keep a tab.
+fn place_labels(place: Option<Place<'_>>) -> BTreeMap<&'static str, &str> {
+    match place {
+        Some(Place::Workspace(workspace)) if sheprd_session::tab_workspace(workspace.id) => {
+            let mut labels = BTreeMap::from([(WORKSPACE_LABEL, workspace.id)]);
+            if let Some(session) = workspace.session {
+                labels.insert(SESSION_LABEL, session);
+            }
+            labels
+        }
+        Some(Place::New(cwd)) if Path::new(cwd).is_absolute() => {
+            BTreeMap::from([(NEW_WORKSPACE_LABEL, cwd)])
+        }
+        _ => BTreeMap::new(),
     }
-    labels
 }

@@ -26,6 +26,14 @@ const EVERY: Duration = Duration::from_secs(1);
 /// and a terminal no tab holds by then may be adopted again.
 const MAX_ADOPTED: usize = 1024;
 
+/// Where a labelled terminal goes.
+enum Workspace {
+    /// A workspace that exists, by its id.
+    Known(String),
+    /// A new one in this folder, as a phone's new workspace asks.
+    New(String),
+}
+
 impl SheprdWindow {
     /// Puts each terminal labelled for one of this computer's workspaces,
     /// and in no tab here yet, in a new tab of that workspace. At most once
@@ -44,6 +52,7 @@ impl SheprdWindow {
             return;
         };
         let held = held_terminals(store);
+        let local = self.core_host().map(|index| scope(&self.endpoints[index]));
         let wanted: Vec<_> = self
             .core_terminals
             .infos
@@ -52,6 +61,12 @@ impl SheprdWindow {
                 !held.contains(&info.id) && !self.core_terminals.adopted.contains(&info.id)
             })
             .filter_map(|info| {
+                // A phone's new workspace: kept in its folder, once a tab
+                // can open there.
+                if let Some(cwd) = sheprd_session::new_workspace(&info.labels) {
+                    let scope = local.clone()?;
+                    return Some((info.id.clone(), scope, Workspace::New(cwd.to_owned())));
+                }
                 let labelled = sheprd_session::labelled_workspace(&info.labels)?;
                 let index = self.endpoint_of_session(labelled.session)?;
                 let scope = scope(&self.endpoints[index]);
@@ -66,11 +81,18 @@ impl SheprdWindow {
                                 .iter()
                                 .any(|row| row.workspace_id == labelled.id)
                         });
-                known.then(|| (info.id.clone(), scope, labelled.id.to_owned()))
+                known.then(|| {
+                    let workspace = Workspace::Known(labelled.id.to_owned());
+                    (info.id.clone(), scope, workspace)
+                })
             })
             .collect();
         let mut opened = false;
         for (terminal, scope, workspace) in wanted {
+            let Some(workspace) = self.workspace_for(&scope, workspace, cx) else {
+                // Tried again once a workspace can be kept.
+                continue;
+            };
             let location = Location::CoreTerminal {
                 panes: Panes::single(terminal.clone()),
                 observe: false,
@@ -94,6 +116,32 @@ impl SheprdWindow {
         if opened {
             self.sync_core_views(cx);
         }
+    }
+
+    /// The id of the workspace a terminal goes in: the one named, or the one
+    /// kept in its folder, kept now when there is none; `None` when the app
+    /// keeps the most it does.
+    fn workspace_for(
+        &mut self,
+        scope: &crate::browser::Scope,
+        workspace: Workspace,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let cwd = match workspace {
+            Workspace::Known(id) => return Some(id),
+            Workspace::New(cwd) => cwd,
+        };
+        if let Some(id) = self.kept_workspace_at(std::path::Path::new(&cwd)) {
+            return Some(id);
+        }
+        let label = std::path::Path::new(&cwd)
+            .file_name()
+            .map_or_else(|| cwd.clone(), |name| name.to_string_lossy().into_owned());
+        let id = Store::update(cx, |store| store.keep_workspace(scope, &label, &cwd));
+        if id.is_some() {
+            self.refresh_core_session(cx);
+        }
+        id
     }
 
     /// This computer's endpoint for the Herdr 1 session `name`, or for the

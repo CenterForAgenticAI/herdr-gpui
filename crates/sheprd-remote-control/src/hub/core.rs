@@ -3,6 +3,7 @@
 
 mod chats;
 mod create;
+pub(super) use create::Place;
 mod error;
 mod poller;
 mod projection;
@@ -39,6 +40,12 @@ const RETRY: Duration = Duration::from_secs(3);
 const PREFIX: &str = "core:";
 /// Where terminals nothing else lists go, new ones from a phone included.
 pub(super) const UNLISTED: &str = "core:terminals";
+
+/// The workspace a phone's new workspace is listed as until Sheprd keeps
+/// one for it: named for its first pane.
+pub(super) fn new_workspace_id(pane: &str) -> String {
+    format!("core:new:{pane}")
+}
 
 type Result<T> = std::result::Result<T, HubError>;
 

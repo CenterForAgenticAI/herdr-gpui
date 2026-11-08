@@ -139,10 +139,16 @@ async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
         )
         .await
         .unwrap();
-    assert_eq!(created.workspace, UNLISTED);
+    // Listed apart until Sheprd keeps a workspace for the new checkout.
+    assert_eq!(created.workspace, new_workspace_id(&created.pane));
     let checkout = root.join("project").join("topic");
     assert!(checkout.join(".git").exists());
-    assert_eq!(request(&fake)["params"]["cwd"], checkout.to_str().unwrap());
+    let params = &request(&fake)["params"];
+    assert_eq!(params["cwd"], checkout.to_str().unwrap());
+    assert_eq!(
+        params["labels"][sheprd_session::NEW_WORKSPACE_LABEL],
+        checkout.to_str().unwrap()
+    );
     drop((hub, source));
     fake.server.join().unwrap();
 }

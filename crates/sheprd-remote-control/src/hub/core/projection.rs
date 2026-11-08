@@ -77,6 +77,13 @@ pub(super) fn project(
         let tab = pane_id(boot, &record.address);
         // Started for a workspace, as by a phone: listed there before Sheprd
         // puts it in a tab of its own.
+        if let Some(cwd) = sheprd_session::new_workspace(&record.labels) {
+            // A phone's new workspace, until Sheprd keeps one for it.
+            if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
+                add_new_workspace(&mut layout, &tab, cwd, terminal);
+            }
+            continue;
+        }
         let workspace = sheprd_session::labelled_workspace(&record.labels).map_or_else(
             || super::UNLISTED.to_owned(),
             |labelled| crate::hub::sessions::join_id(labelled.session, labelled.id),
@@ -101,6 +108,25 @@ pub(super) fn lead_kept(layout: &mut Layout, saved: Option<&SavedTabs>, scope: O
         kept.iter()
             .position(|id| *id == workspace.id)
             .unwrap_or(kept.len())
+    });
+}
+
+/// A phone's new workspace in `cwd`, named for its folder, listed apart.
+fn add_new_workspace(layout: &mut Layout, pane: &str, cwd: &str, terminal: Terminal) {
+    let label = Path::new(cwd)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(cwd)
+        .to_owned();
+    layout.workspaces.push(Workspace {
+        branch: None,
+        chats: Vec::new(),
+        cwd: cwd.to_owned(),
+        id: super::new_workspace_id(pane),
+        label,
+        session: None,
+        terminals: vec![terminal],
+        worktree: None,
     });
 }
 

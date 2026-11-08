@@ -75,7 +75,12 @@ fn a_terminal_labelled_for_a_workspace_gets_a_tab_there_once(cx: &mut TestAppCon
                 panes: sheprd_session::panes::Panes::single(id("t5")),
                 observe: false,
             };
-            store.open(crate::browser::Scope::endpoint("box"), "w9", Some(location), None)
+            store.open(
+                crate::browser::Scope::endpoint("box"),
+                "w9",
+                Some(location),
+                None,
+            )
         });
         view.update(cx, |view, cx| {
             let infos = &mut view.core_terminals.infos;
@@ -100,4 +105,32 @@ fn a_terminal_labelled_for_a_workspace_gets_a_tab_there_once(cx: &mut TestAppCon
         view.update(cx, |view, cx| view.adopt_labelled_terminals(true, cx));
     });
     assert!(tabs_of(cx, "t5").is_empty());
+}
+
+#[gpui::test]
+fn a_phones_new_workspace_is_kept_in_its_folder_with_the_terminal_in_it(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx);
+    let new = |name: &str| {
+        let mut info = listed(name, None);
+        info.labels.insert(
+            sheprd_session::NEW_WORKSPACE_LABEL.to_owned(),
+            "/code/api".to_owned(),
+        );
+        info
+    };
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.core_terminals.infos.insert(new("t5"));
+            view.adopt_labelled_terminals(true, cx);
+            // A second one for the same folder joins that workspace.
+            view.core_terminals.infos.insert(new("t6"));
+            view.adopt_labelled_terminals(true, cx);
+        })
+    });
+    let kept = view.read_with(cx, |view, _| {
+        view.kept_workspace_at(std::path::Path::new("/code/api"))
+    });
+    let kept = kept.expect("a workspace kept in the folder");
+    assert_eq!(tabs_of(cx, "t5"), [kept.clone()]);
+    assert_eq!(tabs_of(cx, "t6"), [kept]);
 }
