@@ -131,6 +131,9 @@ pub(crate) struct Review {
     /// The share of a side-by-side row the old side takes.
     split_ratio: f32,
     agent: Option<Agent>,
+    /// The herdr-core tab and pane the review was opened from, whose split
+    /// its files open in, as `agent`'s pane is for a Herdr workspace.
+    core: Option<(TabId, sheprd_backend::TerminalId)>,
     /// The endpoint the agent's daemon was on when the review opened.
     origin: Option<crate::agent_notes::Origin>,
     state: State,
