@@ -4,7 +4,7 @@
 //! to the same one instead of starting another. Only when herdr-core is
 //! unavailable too does the window ask the user to install Herdr.
 
-use super::{CoreTerminalView, Start, State, worker};
+use super::{CoreTerminalView, Host, Start, State, worker};
 use crate::SheprdWindow;
 use gpui::{prelude::*, *};
 use sheprd_backend::{Backend as _, Role, Size, Spawn, TerminalId};
@@ -43,7 +43,7 @@ impl SheprdWindow {
             Fallback::Off => {}
             Fallback::Starting(found) => match found.try_recv() {
                 Ok(Ok(terminal)) if !kept => {
-                    self.end_core_terminal(terminal);
+                    self.end_core_terminal(&Host::Local, terminal);
                     self.core_terminals.fallback = Fallback::Off;
                 }
                 Ok(Ok(terminal)) => self.show_fallback_shell(terminal, cx),
@@ -57,7 +57,7 @@ impl SheprdWindow {
                 }
             },
             Fallback::Shown(view) if !kept => {
-                self.end_core_terminal(view.read(cx).terminal().clone());
+                self.end_core_terminal(&Host::Local, view.read(cx).terminal().clone());
                 self.core_terminals.fallback = Fallback::Off;
                 cx.notify();
             }

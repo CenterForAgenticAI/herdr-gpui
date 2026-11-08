@@ -63,8 +63,9 @@ as little as possible:
 
 ## Decisions
 
-- Layout stays in the app's saved tabs rather than a core document. The app's
-  core connection is local and the remote control daemon reads the same file,
+- Layout stays in the app's saved tabs rather than a core document. The app
+  saves the tabs of every core it reaches, on this computer or over SSH, and
+  the remote control daemon reads the same file,
   so a document would have no reader the file does not already serve. Revisit
   when a second client on another machine needs a core's layout.
 - Sheprd's saved tabs win on the phone. A `herdr-app` document lists what they

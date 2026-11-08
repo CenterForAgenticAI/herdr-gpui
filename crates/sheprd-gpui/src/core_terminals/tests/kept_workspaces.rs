@@ -151,7 +151,7 @@ fn a_new_tab_starts_in_its_kept_workspaces_folder(cx: &mut TestAppContext) {
         view.update(cx, |view, cx| {
             view.open_kept_workspace(None, Path::new("/src/tools"), core_tab("t3"), window, cx);
             view.new_core_terminal(window, cx);
-            let (purpose, spawn) = view.core_terminals.wanted.back().cloned().unwrap();
+            let (purpose, _, spawn) = view.core_terminals.wanted.back().cloned().unwrap();
             assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/src/tools")));
             let crate::core_terminals::Purpose::Tab { scope, workspace } = purpose else {
                 panic!("a tab");
@@ -179,7 +179,7 @@ fn workspaces_made_in_a_row_each_start_a_shell(cx: &mut TestAppContext) {
                 .core_terminals
                 .wanted
                 .iter()
-                .map(|(_, spawn)| spawn.cwd.clone().unwrap())
+                .map(|(_, _, spawn)| spawn.cwd.clone().unwrap())
                 .collect();
             assert_eq!(folders, [Path::new("/src/api"), Path::new("/src/web")]);
         })
