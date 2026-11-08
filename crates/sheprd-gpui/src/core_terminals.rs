@@ -18,6 +18,7 @@ mod hub;
 mod infos;
 mod screen;
 mod selection;
+mod session;
 mod sidebar;
 mod split;
 mod tabs;
@@ -124,6 +125,9 @@ pub(crate) struct CoreTerminals {
     infos: infos::Infos,
     /// How the views draw now, to tell when the window's look changed.
     look: Option<Look>,
+    /// The session over herdr-core of the selected host, by its scope,
+    /// while that host is this computer.
+    session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
     /// A shell starting, and what for.
     starting: Option<(Purpose, Started)>,
     tabs: HashMap<TabId, TabPanes>,
@@ -364,6 +368,7 @@ impl SheprdWindow {
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
+        self.refresh_core_session(cx);
         // A zoom in motion draws a frame each tick until it lands.
         let now = crate::motion::now();
         if self

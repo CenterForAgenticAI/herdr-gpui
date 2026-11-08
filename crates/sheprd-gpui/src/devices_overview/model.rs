@@ -3,7 +3,7 @@
 
 use super::history::Counts;
 use crate::i18n::fl;
-use crate::{endpoint::Endpoint, state::LiveState, usage::Host};
+use crate::{endpoint::Endpoint, session_model::Sessions, state::LiveState, usage::Host};
 use sheprd_client::{ConnectTarget, protocol::AgentStatus};
 
 /// A device's agents by state.
@@ -58,17 +58,24 @@ impl Tally {
     }
 }
 
-/// A reachable device's agents, counted straight from its snapshot, or None
+/// A reachable device's agents, counted straight from its sessions, or None
 /// while it cannot be reached. The tick and the sidebar's headers need only
 /// this, not a whole [`Device`].
-pub(crate) fn online_tally(endpoint: &Endpoint, live: &LiveState) -> Option<Tally> {
-    if !endpoint.enabled || !live.status.is_connected() {
+pub(crate) fn online_tally(
+    endpoint: &Endpoint,
+    live: &LiveState,
+    sessions: &Sessions,
+) -> Option<Tally> {
+    if !endpoint.enabled || !online(live, sessions) || sessions.is_empty() {
         return None;
     }
-    let snapshot = live.snapshot.as_deref()?;
-    Some(Tally::of(
-        snapshot.agents.iter().map(|agent| agent.agent_status),
-    ))
+    Some(Tally::of(sessions.agents().map(|agent| agent.status)))
+}
+
+/// Whether a host answers: its Herdr 1 daemon, or with none installed, the
+/// herdr-core the window runs its terminals in.
+fn online(live: &LiveState, sessions: &Sessions) -> bool {
+    live.status.is_connected() || (live.missing_installation && sessions.core.is_some())
 }
 
 /// Whether a device can be reached.
@@ -118,10 +125,15 @@ pub(crate) struct Device {
 }
 
 impl Device {
-    pub(crate) fn new(index: usize, endpoint: &Endpoint, live: &LiveState) -> Self {
+    pub(crate) fn new(
+        index: usize,
+        endpoint: &Endpoint,
+        live: &LiveState,
+        sessions: &Sessions,
+    ) -> Self {
         let link = if !endpoint.enabled {
             Link::Disabled
-        } else if live.status.is_connected() {
+        } else if online(live, sessions) {
             Link::Online
         } else if live.error.is_some()
             || matches!(
@@ -135,50 +147,47 @@ impl Device {
             Link::Connecting
         };
         // A device out of reach shows no agents rather than stale ones.
-        let snapshot = live.snapshot.as_deref().filter(|_| link == Link::Online);
-        let agents = snapshot.map_or(&[][..], |snapshot| &snapshot.agents[..]);
-        let mut lines: Vec<AgentLine> = agents
-            .iter()
+        let empty = Sessions::default();
+        let sessions = if link == Link::Online {
+            sessions
+        } else {
+            &empty
+        };
+        let mut lines: Vec<AgentLine> = sessions
+            .agents()
             .map(|agent| AgentLine {
-                pane_id: agent.pane_id.clone(),
-                tab_id: agent.tab_id.clone(),
-                workspace_id: agent.workspace_id.clone(),
-                name: crate::sidebar::agent_name(agent).to_owned(),
-                identity: agent.agent.clone(),
-                workspace: snapshot
-                    .and_then(|snapshot| {
-                        snapshot
-                            .workspaces
-                            .iter()
-                            .find(|workspace| workspace.workspace_id == agent.workspace_id)
-                    })
+                pane_id: agent.pane.clone(),
+                tab_id: agent.tab.clone(),
+                workspace_id: agent.workspace.clone(),
+                name: agent.name.clone(),
+                identity: agent.identity.clone(),
+                workspace: sessions
+                    .workspace(&agent.workspace)
                     .map(|workspace| workspace.label.clone())
                     .unwrap_or_default(),
-                status: agent.agent_status,
+                status: agent.status,
             })
             .collect();
+        let tally = Tally::of(lines.iter().map(|line| line.status));
         // Stable, so agents in one state keep the daemon's order.
         lines.sort_by_key(|line| order(line.status));
         let dots = lines.iter().take(DOTS).map(|line| line.status).collect();
-        let mut names: Vec<String> = agents
-            .iter()
-            .map(|agent| crate::sidebar::agent_name(agent).to_lowercase())
-            .collect();
-        if let Some(snapshot) = snapshot {
-            names.extend(
-                snapshot
-                    .workspaces
-                    .iter()
+        let names = sessions
+            .agents()
+            .map(|agent| agent.name.to_lowercase())
+            .chain(
+                sessions
+                    .workspaces()
                     .map(|workspace| workspace.label.to_lowercase()),
-            );
-        }
+            )
+            .collect();
         Self {
             index,
             id: endpoint.id.clone(),
             label: endpoint.label.clone(),
             address: address(&endpoint.connection.target),
             link,
-            tally: Tally::of(agents.iter().map(|agent| agent.agent_status)),
+            tally,
             dots,
             agents: lines,
             names,
