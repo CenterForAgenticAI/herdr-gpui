@@ -57,6 +57,7 @@ jobs:
           xcodegen -q
           python3 tools/test_branding.py
           python3 tools/test_testflight_notes.py
+          python3 tools/test_signing.py
           xcodebuild -project SheprdRemote.xcodeproj -scheme SheprdRemote \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO -quiet build
@@ -88,4 +89,6 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          IOS_SIGNING_P12_BASE64: ${{ secrets.IOS_SIGNING_P12_BASE64 }}
+          IOS_SIGNING_P12_PASSWORD: ${{ secrets.IOS_SIGNING_P12_PASSWORD }}
         run: sh ios/tools/testflight.sh

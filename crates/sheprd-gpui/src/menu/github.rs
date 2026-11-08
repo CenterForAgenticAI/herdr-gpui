@@ -17,6 +17,9 @@ mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Action {
+    /// The account menu's GitLab and Azure DevOps tabs.
+    GitLab,
+    AzureDevOps,
     Copy,
     Open,
     GitHubCli,
@@ -36,6 +39,8 @@ pub(super) enum Action {
 impl Action {
     fn id(self) -> &'static str {
         match self {
+            Self::GitLab => "accounts-tab-gitlab",
+            Self::AzureDevOps => "accounts-tab-azure",
             Self::Copy => "github-copy",
             Self::Open => "github-open",
             Self::GitHubCli => "github-cli",
@@ -254,10 +259,11 @@ impl SheprdWindow {
 
     fn github_actions(&self) -> Vec<Action> {
         let auth = self.github_auth();
-        let mut actions = Vec::new();
         if self.menu.github_token.is_some() {
             return vec![Action::SubmitToken, Action::CancelToken, Action::Close];
         }
+        // The header's other tabs come first, as on their own pages.
+        let mut actions = vec![Action::GitLab, Action::AzureDevOps];
         if auth.code().is_some() {
             actions.extend([Action::Copy, Action::Open]);
         } else if !auth.busy() && !auth.loading_profile() && !auth.connected() {
@@ -292,6 +298,14 @@ impl SheprdWindow {
             return;
         }
         match action {
+            Action::GitLab => {
+                self.menu.github_selected = None;
+                self.open_gitlab_page(window, cx);
+            }
+            Action::AzureDevOps => {
+                self.menu.github_selected = None;
+                self.open_azure_page(window, cx);
+            }
             Action::Copy => {
                 if let Some(code) = self.github_auth_mut().copy_code() {
                     cx.write_to_clipboard(ClipboardItem::new_string(code.to_owned()));
@@ -422,7 +436,9 @@ impl SheprdWindow {
         let primary = match action {
             Action::Open | Action::GitHubCli | Action::SubmitToken | Action::Approve => true,
             Action::Start => !self.github_actions().contains(&Action::GitHubCli),
-            Action::Copy
+            Action::GitLab
+            | Action::AzureDevOps
+            | Action::Copy
             | Action::Token
             | Action::Add
             | Action::CancelToken
@@ -701,11 +717,12 @@ impl SheprdWindow {
             .justify_end()
             .gap(px(8.));
         let mut has_footer = false;
-        for action in self
-            .github_actions()
-            .into_iter()
-            .filter(|action| !matches!(action, Action::Copy | Action::Close))
-        {
+        for action in self.github_actions().into_iter().filter(|action| {
+            !matches!(
+                action,
+                Action::GitLab | Action::AzureDevOps | Action::Copy | Action::Close
+            )
+        }) {
             has_footer = true;
             if action == Action::Approve {
                 let label = self
@@ -740,7 +757,11 @@ impl SheprdWindow {
                     fl!("github-menu-stop-cli")
                 }
                 Action::SignOut => fl!("github-menu-sign-out"),
-                Action::Copy | Action::Approve | Action::Close => continue,
+                Action::GitLab
+                | Action::AzureDevOps
+                | Action::Copy
+                | Action::Approve
+                | Action::Close => continue,
             };
             footer = footer.child(self.github_button(action, &label, cx));
         }

@@ -56,6 +56,7 @@ mod selection;
 mod session;
 mod start;
 mod stop;
+mod streaming;
 mod subagents;
 mod terminal_input;
 mod timeline;

@@ -172,9 +172,16 @@ app, once the repository's `testflight` environment holds these secrets:
 | `APPLE_TEAM_ID` | Your ten-character team |
 | `ASC_KEY_ID`, `ASC_ISSUER_ID` | An App Store Connect API key with the App Manager role (Users and Access > Integrations) |
 | `ASC_KEY_P8` | The key's `.p8` file, its whole text |
+| `IOS_SIGNING_P12_BASE64`, `IOS_SIGNING_P12_PASSWORD` | One Apple Development certificate with its private key, as base64 of a `.p12`, and that file's passphrase |
 
-- **How it signs:** Xcode signs automatically with that key, so no
-  certificates or profiles are stored.
+- **How it signs:** Xcode signs automatically with that key and makes the
+  profiles it needs. The archive signs with the stored development
+  certificate, imported into a keychain of its own (`ios/tools/signing.sh`,
+  which puts the keychain search list back afterwards): a runner starts with
+  none, and Xcode would otherwise create a certificate on every upload until
+  the team hits Apple's limit ("Your account has reached the maximum number
+  of certificates"). The upload refuses to run in CI without it. The export
+  signs with the team's cloud-managed distribution certificate.
 - **What it uploads:** the export re-signs for distribution and uploads to
   App Store Connect.
 - **Build number:** one more than the highest build App Store Connect has

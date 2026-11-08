@@ -3,6 +3,7 @@
 
 use super::{HostStatus, Token, connect::Connecting, keys::Action, status_line};
 use crate::i18n::fl;
+use crate::menu::azure::keys::Action as AzureAction;
 use crate::{SheprdWindow, fonts::StyledFont, menu::Page, search_input::SearchInput};
 use gpui::{prelude::*, *};
 use sheprd_orchestrator::gitlab::account::Source;
@@ -21,6 +22,8 @@ impl SheprdWindow {
     pub(in crate::menu) fn render_account_tabs(&self, page: Page, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
         let font = &self.config.ui;
+        let azure_selected =
+            |action| page == Page::AzureDevOps && self.menu.azure.is_selected(&action);
         let tab = |id: &'static str, label: &'static str, mark: Svg, shown: bool| {
             div()
                 .id(id)
@@ -77,7 +80,8 @@ impl SheprdWindow {
                     page == Page::GitHub,
                 )
                 .when(
-                    page == Page::GitLab && self.menu.gitlab.is_selected(&Action::GitHub),
+                    (page == Page::GitLab && self.menu.gitlab.is_selected(&Action::GitHub))
+                        || azure_selected(AzureAction::GitHub),
                     |tab| tab.bg(rgb(theme.active)),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -93,10 +97,42 @@ impl SheprdWindow {
                     gitlab_mark(gitlab_color),
                     page == Page::GitLab,
                 )
+                .when(
+                    (page == Page::GitHub
+                        && self.menu.github_selected == Some(crate::menu::github::Action::GitLab))
+                        || azure_selected(AzureAction::GitLab),
+                    |tab| tab.bg(rgb(theme.active)),
+                )
                 .on_click(cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
                     if this.menu.page != Some(Page::GitLab) {
                         this.open_gitlab_page(window, cx);
+                    }
+                })),
+            )
+            .child(
+                tab(
+                    "accounts-tab-azure",
+                    "Azure DevOps", // i18n: data
+                    crate::menu::azure::render::azure_mark(if page == Page::AzureDevOps {
+                        theme.foreground
+                    } else {
+                        theme.muted
+                    }),
+                    page == Page::AzureDevOps,
+                )
+                .when(
+                    (page == Page::GitHub
+                        && self.menu.github_selected
+                            == Some(crate::menu::github::Action::AzureDevOps))
+                        || (page == Page::GitLab
+                            && self.menu.gitlab.is_selected(&Action::AzureDevOps)),
+                    |tab| tab.bg(rgb(theme.active)),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    if this.menu.page != Some(Page::AzureDevOps) {
+                        this.open_azure_page(window, cx);
                     }
                 })),
             )
@@ -116,7 +152,8 @@ impl SheprdWindow {
                             && self.menu.github_selected
                                 == Some(crate::menu::github::Action::Close))
                             || (page == Page::GitLab
-                                && self.menu.gitlab.is_selected(&Action::Close)),
+                                && self.menu.gitlab.is_selected(&Action::Close))
+                            || azure_selected(AzureAction::Close),
                         |style| style.bg(rgb(theme.active)),
                     )
                     .hover(|style| style.bg(rgb(theme.active)))
@@ -125,7 +162,8 @@ impl SheprdWindow {
             )
     }
 
-    fn gitlab_button(
+    /// A page button, also the Azure DevOps page's.
+    pub(in crate::menu) fn gitlab_button(
         &self,
         id: impl Into<SharedString>,
         label: impl Into<SharedString>,
@@ -163,7 +201,7 @@ impl SheprdWindow {
     }
 
     /// How the control the keyboard selected shows, on a filled button too.
-    fn selected_look(&self, button: Stateful<Div>) -> Stateful<Div> {
+    pub(in crate::menu) fn selected_look(&self, button: Stateful<Div>) -> Stateful<Div> {
         button.border_color(rgb(self.theme.foreground))
     }
 
