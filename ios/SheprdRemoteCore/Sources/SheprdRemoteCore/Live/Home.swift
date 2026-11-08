@@ -177,16 +177,20 @@ public struct Home: Codable, Hashable, Sendable {
         public var panes: [Pane]
         /// The agent Herdr detects in it, the most pressing first.
         public var agent: DetectedAgent?
-        /// The pane whose agent the tab's menu may move into a chat
-        /// (`POST /api/v2/term/{pane}/convert`); absent when none can, and
-        /// from older computers.
-        public var convertPane: String?
+        /// What the tab's menu may move into a chat
+        /// (`POST /api/v2/term/{pane}/convert`); absent when nothing can,
+        /// and from older computers.
+        public var convert: ConvertOffer?
 
         public var id: String { tab }
 
-        enum CodingKeys: String, CodingKey {
-            case tab, label, cwd, zoomed, panes, agent
-            case convertPane = "convert_pane"
+        /// A terminal agent that may move into a chat: its pane, and which
+        /// agent it is, which the request names back so a computer refuses
+        /// one replaced since.
+        public struct ConvertOffer: Codable, Hashable, Sendable {
+            /// Herdr's name for the agent, such as `claude`.
+            public var agent: String
+            public var pane: String
         }
 
         /// The pane a phone opens first: the focused one, else the first.

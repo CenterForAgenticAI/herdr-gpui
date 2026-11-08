@@ -83,8 +83,14 @@ impl Hub {
     /// Moves the agent in terminal `pane` into a chat in the same pane, and
     /// returns once the line that continues it is typed. Every refusal comes
     /// before the agent is touched. The pane must be the one its tab offers
-    /// (`Terminal::convert`), with the agent the phone was shown there.
-    pub(crate) async fn convert_to_chat(self: &Arc<Self>, pane: &str) -> Result<Agent> {
+    /// (`Terminal::convert`), and still with `expected`, the agent the phone
+    /// was shown there: a pane whose agent was replaced since is refused
+    /// rather than stopping an agent the person never chose.
+    pub(crate) async fn convert_to_chat(
+        self: &Arc<Self>,
+        pane: &str,
+        expected: Agent,
+    ) -> Result<()> {
         // The typed line runs `sh`, as Sheprd's does.
         if cfg!(windows) {
             return Err(Error::Platform);
@@ -100,6 +106,9 @@ impl Hub {
             .filter(|(offered, _)| offered == pane)
             .map(|(_, agent)| agent)
             .ok_or(convert::Error::NoAgent)?;
+        if agent != expected {
+            return Err(convert::Error::Moved.into());
+        }
         let program = self
             .program()
             .ok_or(super::Error::ProgramMissing)?
@@ -119,7 +128,7 @@ impl Hub {
             .map_err(|_| Error::Worker)??;
         self.run_line(pane, &line).await?;
         drop(claim);
-        Ok(agent)
+        Ok(())
     }
 
     /// The shared stop loop, run on the blocking pool with each question

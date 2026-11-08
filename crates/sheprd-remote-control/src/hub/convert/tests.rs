@@ -100,7 +100,7 @@ async fn an_idle_agent_stops_on_ctrl_c_and_continues_as_a_chat() {
         layout(Agent::Claude),
         Some(dir.path().join("h-client.sock")),
     );
-    assert_eq!(hub.convert_to_chat("t2-p1").await.unwrap(), Agent::Claude);
+    hub.convert_to_chat("t2-p1", Agent::Claude).await.unwrap();
     let seen: Vec<_> = requests.try_iter().collect();
     let methods: Vec<_> = seen.iter().map(|(method, _)| method.as_str()).collect();
     assert_eq!(
@@ -137,7 +137,7 @@ async fn a_busy_agent_is_left_running() {
         Some(dir.path().join("h-client.sock")),
     );
     assert!(matches!(
-        hub.convert_to_chat("t2-p1").await,
+        hub.convert_to_chat("t2-p1", Agent::Claude).await,
         Err(Error::Refused(convert::Error::Busy(Agent::Claude)))
     ));
     let methods: Vec<_> = requests.try_iter().map(|(method, _)| method).collect();
@@ -151,7 +151,7 @@ async fn another_agent_in_the_pane_is_not_stopped() {
     let requests = serve(dir.path(), "idle");
     let hub = hub(layout(Agent::Codex), Some(dir.path().join("h-client.sock")));
     assert!(matches!(
-        hub.convert_to_chat("t2-p1").await,
+        hub.convert_to_chat("t2-p1", Agent::Codex).await,
         Err(Error::Refused(convert::Error::Moved))
     ));
     let methods: Vec<_> = requests.try_iter().map(|(method, _)| method).collect();
@@ -162,9 +162,31 @@ async fn another_agent_in_the_pane_is_not_stopped() {
 async fn a_pane_its_tab_does_not_offer_is_refused_before_herdr_is_asked() {
     let hub = hub(layout(Agent::Claude), None);
     for pane in ["t2-p2", "nope"] {
+        let refused = hub.convert_to_chat(pane, Agent::Claude).await;
+        // Windows refuses every move first, as its typed line needs `sh`.
+        if cfg!(windows) {
+            assert!(matches!(refused, Err(Error::Platform)));
+        } else {
+            assert!(matches!(
+                refused,
+                Err(Error::Refused(convert::Error::NoAgent))
+            ));
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_agent_replaced_since_the_phone_saw_it_is_refused_before_herdr_is_asked() {
+    // The phone was shown Claude; the pane now holds Codex. No socket
+    // answers, so asking Herdr anything would fail differently.
+    let hub = hub(layout(Agent::Codex), None);
+    let refused = hub.convert_to_chat("t2-p1", Agent::Claude).await;
+    if cfg!(windows) {
+        assert!(matches!(refused, Err(Error::Platform)));
+    } else {
         assert!(matches!(
-            hub.convert_to_chat(pane).await,
-            Err(Error::Refused(convert::Error::NoAgent))
+            refused,
+            Err(Error::Refused(convert::Error::Moved))
         ));
     }
 }
@@ -174,7 +196,7 @@ async fn a_herdr_2_terminal_is_refused() {
     let hub = hub(layout(Agent::Claude), None);
     let pane = "core:00000000-1";
     assert!(matches!(
-        hub.convert_to_chat(pane).await,
+        hub.convert_to_chat(pane, Agent::Claude).await,
         Err(Error::Core | Error::Platform)
     ));
 }
@@ -182,7 +204,7 @@ async fn a_herdr_2_terminal_is_refused() {
 #[tokio::test]
 async fn without_the_chat_program_nothing_is_touched() {
     let hub = Arc::new(Hub::offline_in(layout(Agent::Claude), None, None));
-    let refused = hub.convert_to_chat("t2-p1").await;
+    let refused = hub.convert_to_chat("t2-p1", Agent::Claude).await;
     if cfg!(windows) {
         assert!(matches!(refused, Err(Error::Platform)));
     } else {

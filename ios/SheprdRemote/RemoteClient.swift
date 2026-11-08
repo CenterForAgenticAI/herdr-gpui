@@ -279,15 +279,17 @@ final class RemoteClient: Sendable {
         return answer.pane
     }
 
-    /// Moves the agent in terminal `pane` into a chat in the same pane, as
+    /// Moves the agent `offer` names into a chat in the same pane, as
     /// Sheprd's Move Agent into Chat does; answers the chat's pane once it is
     /// up, or `nil` when it is still starting. Stopping the agent can take
     /// a while, so this waits longer than other requests. A refusal leaves
     /// the agent running and says why.
-    func convertToChat(pane: String, bearer: String) async throws -> String? {
+    func convertToChat(_ offer: Home.TerminalRow.ConvertOffer, bearer: String) async throws -> String? {
+        struct Body: Encodable { let agent: String }
         struct Answer: Decodable { let pane: String? }
         let answer: Answer = try await send(
-            "POST", "/api/v2/term/\(Self.segment(pane))/convert", bearer: bearer, timeout: 90
+            "POST", "/api/v2/term/\(Self.segment(offer.pane))/convert",
+            body: Body(agent: offer.agent), bearer: bearer, timeout: 90
         )
         return answer.pane
     }
