@@ -36,7 +36,13 @@ def base_names(version, legacy=False):
     if legacy:
         return [name.replace("Sheprd-", "Herdr-").replace("sheprd-remote-control-", "herdr-remote-control-")
                 .replace("sheprd-", "herdr-gpui-") for name in names]
-    return names
+    # The host builds' sheprd-acp, with their signed manifest inside
+    # (update-manifest.py pack-host-chats). No pre-rebrand release had it.
+    return names + [host_chat_archive(version)]
+
+
+def host_chat_archive(version):
+    return f"sheprd-acp-{version}-linux-musl.tar.gz"
 
 
 UPDATER_SIGNATURES = ("update-manifest.sig", "package-manifest.sig", "windows-manifest.sig",
@@ -115,14 +121,20 @@ def consolidate_checksums(directory, version, legacy=False):
         (directory / f"{name}.sha512").unlink()
 
 
-def verify_manifest(directory, version, legacy=False):
+def verify_manifest(directory, version, legacy=False, optional=()):
+    """The published checksums, which list exactly this release's assets;
+    those in `optional` may be missing, for a release published before they
+    were added."""
     entries = {}
     for line in (directory / "SHA256SUMS").read_text().splitlines():
         match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
         if not match or match[2] in entries:
             raise ValueError("Malformed or duplicate checksum entry")
         entries[match[2]] = match[1]
-    if set(entries) != set(asset_names(version, legacy)):
+    expected = set(asset_names(version, legacy))
+    missing = {name for name in expected - set(entries)
+               if not any(name.startswith(base) for base in optional)}
+    if missing or not set(entries) <= expected:
         raise ValueError("Unexpected checksum manifest")
     return entries
 
@@ -149,7 +161,9 @@ def main():
         check_aliases(directory, version, args.legacy_names)
         return
     if args.mode == "dmg":
-        entries = verify_manifest(directory, version, args.legacy_names)
+        # Promotion may publish a release built before the host chat archive.
+        entries = verify_manifest(directory, version, args.legacy_names,
+                                  optional=(host_chat_archive(version),))
         name = bases[0]
         check_files(directory, [name, "SHA256SUMS"])
         actual = digest(directory / name, "sha256")

@@ -35,7 +35,9 @@ pub mod windows;
 #[cfg(windows)]
 use windows as install;
 
-pub use release::{HOST_TARGETS, RELEASES_PAGE, download_host_build, release_page};
+pub use release::{
+    HOST_TARGETS, RELEASES_PAGE, download_host_build, download_host_chat, release_page,
+};
 
 use std::{
     ffi::OsString,
