@@ -9,7 +9,10 @@
 //! host through `herdr_cli`, on this machine or over SSH, and types the line
 //! once the window still shows that host.
 
+mod core;
 mod error;
+
+pub(crate) use core::Job as CoreJob;
 
 pub use error::Error;
 
@@ -20,7 +23,7 @@ use crate::{
     teleport::{self, Envelope, Host, ProcessInfo, ProcessInfoResult},
     window::Flash,
 };
-use gpui::Context;
+use gpui::{Context, Window};
 use sheprd_chat_protocol::Agent;
 use sheprd_client::{
     herdr::convert::{self, Resume},
@@ -180,8 +183,11 @@ impl SheprdWindow {
         if !self.config.features.acp_chats {
             return Err(Error::Disabled);
         }
-        if self.chats.converting.is_some() {
+        if self.chats.converting.is_some() || self.chats.converting_core.is_some() {
             return Err(Error::AlreadyConverting);
+        }
+        if let Some(terminal) = pane.and_then(core::terminal) {
+            return self.convert_core_to_chat(terminal);
         }
         let program = match self.chat_route().ok_or(Error::NotReachable)? {
             // `herdr pane process-info` and the typed `sh` line are Unix.
@@ -233,9 +239,14 @@ impl SheprdWindow {
         convert::tab_pane(snapshot, workspace, tab).map(|(pane, _)| pane.to_owned())
     }
 
-    /// [`Self::convert_to_chat`], reporting a failure as a flash.
-    pub(crate) fn convert_to_chat_or_flash(&mut self, cx: &mut Context<Self>) {
-        if let Err(error) = self.convert_to_chat(None) {
+    /// [`Self::convert_to_chat`] for the pane with the keyboard, a herdr-core
+    /// pane before Herdr's focused one, reporting a failure as a flash.
+    pub(crate) fn convert_to_chat_or_flash(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let core = self
+            .core_terminals
+            .focused_pane(window, cx)
+            .map(|(_, terminal)| super::core_pane::key(&terminal));
+        if let Err(error) = self.convert_to_chat(core.as_deref()) {
             self.flash_convert_error(&error, cx);
         }
         cx.notify();
@@ -278,6 +289,10 @@ impl SheprdWindow {
     /// that left the host could never type the line, so the worker must
     /// stop pressing keys there rather than finish stopping the agent.
     pub(super) fn poll_chat_convert(&mut self, cx: &mut Context<Self>) {
+        if let Some(Err(error)) = self.poll_core_convert() {
+            self.flash_convert_error(&error, cx);
+            cx.notify();
+        }
         let Some(job) = &self.chats.converting else {
             return;
         };

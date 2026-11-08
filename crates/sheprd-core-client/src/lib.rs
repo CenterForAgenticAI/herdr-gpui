@@ -4,6 +4,7 @@
 
 mod backend;
 mod connection;
+pub mod convert;
 mod endpoint;
 mod error;
 pub mod event;
