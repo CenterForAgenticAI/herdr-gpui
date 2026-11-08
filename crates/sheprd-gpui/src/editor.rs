@@ -306,6 +306,21 @@ impl SheprdWindow {
         cx.notify();
     }
 
+    /// Opens `target` in the editor in a herdr-core split beside `at` in
+    /// `tab`, whether or not the active group shows that tab.
+    pub(crate) fn open_in_core_editor(
+        &mut self,
+        target: &EditorTarget,
+        tab: TabId,
+        at: sheprd_backend::TerminalId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = self.start_core_editor(target, tab, at, cx) {
+            self.editor_failed(target, error, cx);
+        }
+        cx.notify();
+    }
+
     /// Reports why `target` did not open in the editor. A path no shell
     /// line can carry opens in the system's default app instead, as
     /// [`Error::Path`] says, under the rule a clicked path

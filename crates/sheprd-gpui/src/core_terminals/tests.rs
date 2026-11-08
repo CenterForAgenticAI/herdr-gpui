@@ -9,4 +9,5 @@ mod paste;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod split_shown;
 mod worker;
