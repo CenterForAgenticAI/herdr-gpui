@@ -3,11 +3,13 @@
 
 use crate::{
     browser::TabId,
+    core_terminals::Host,
     core_terminals::{CoreTerminals, TabPanes, panes::Panes},
 };
 use sheprd_backend::{RunState, TerminalId, TerminalInfo};
 use sheprd_client::protocol::AgentStatus;
 
+mod remote;
 mod visibility;
 
 fn id(name: &str) -> TerminalId {
@@ -35,10 +37,11 @@ fn terminals() -> CoreTerminals {
         .unwrap();
     terminals
         .tabs
-        .insert(TabId::test(1), TabPanes::new(panes, false));
-    terminals
-        .tabs
-        .insert(TabId::test(2), TabPanes::new(Panes::single(id("t3")), true));
+        .insert(TabId::test(1), TabPanes::new(Host::Local, panes, false));
+    terminals.tabs.insert(
+        TabId::test(2),
+        TabPanes::new(Host::Local, Panes::single(id("t3")), true),
+    );
     for name in ["t1", "t2", "t3", "t4"] {
         terminals.infos.insert(info(name));
     }
