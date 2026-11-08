@@ -123,9 +123,7 @@ fn daemon_with_many_questions(_: &Path, request: &Request) -> Result<Response, c
 }
 
 #[gpui::test]
-fn only_a_few_answers_run_at_once_and_no_more_questions_are_taken_meanwhile(
-    cx: &mut TestAppContext,
-) {
+fn only_a_few_answers_run_at_once_and_taking_goes_on_meanwhile(cx: &mut TestAppContext) {
     cx.update(|cx| Supervisor::fixture(cx, on(), daemon_with_many_questions));
     // Learns a phone is connected, and that the daemon has nothing yet.
     cx.update(Supervisor::tick);
@@ -147,7 +145,9 @@ fn only_a_few_answers_run_at_once_and_no_more_questions_are_taken_meanwhile(
         assert_eq!(changes.queued.len(), 2);
         Supervisor::poll_changes(cx);
     });
-    assert_eq!(LIMITED_WAITS.load(Ordering::SeqCst), waits);
+    // A split or zoom must not wait behind slow workspace answers.
+    cx.run_until_parked();
+    assert!(LIMITED_WAITS.load(Ordering::SeqCst) > waits);
 
     cx.run_until_parked();
     let mut answered = LIMITED_ANSWERS.lock().unwrap().clone();
@@ -168,7 +168,7 @@ fn daemon_with_a_layout_change(_: &Path, request: &Request) -> Result<Response, 
     match request {
         Request::Status => Ok(Response::Status(status(1))),
         Request::LayoutAnswer { id, answer } => {
-            LAYOUT_ANSWERS.lock().unwrap().push((*id, *answer));
+            LAYOUT_ANSWERS.lock().unwrap().push((*id, answer.clone()));
             Ok(Response::Done)
         }
         _ => Err(control::Error::NoAnswer),

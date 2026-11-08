@@ -327,9 +327,15 @@ pub(super) async fn action(
     if let Some(op) = op
         && let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)?
     {
-        crate::native::changes::change_layout(&state, saved, terminal, op).await?;
-        let location = format!("/term/{}", render::urlencode(&pane));
-        return Ok(Json(json!({ "location": location, "pane": pane })));
+        let created = crate::native::changes::change_layout(&state, saved, terminal, op).await?;
+        // A split shows its new shell next, as Herdr 1's does.
+        let next = match created {
+            Some(address) => state.hub.core_pane_listed(&address).await,
+            None => None,
+        }
+        .unwrap_or(pane);
+        let location = format!("/term/{}", render::urlencode(&next));
+        return Ok(Json(json!({ "location": location, "pane": next })));
     }
     // A Herdr 2 tab Sheprd keeps is named before its terminals end (they
     // leave the listing as they do), and Sheprd drops it after, or its last

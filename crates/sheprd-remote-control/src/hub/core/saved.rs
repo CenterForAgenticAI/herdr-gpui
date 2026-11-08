@@ -21,6 +21,12 @@ impl Source {
             .find(|terminal| pane_id(boot, &terminal.address) == pane)?;
         Some((id, terminal.address.clone()))
     }
+
+    /// The pane id of this core's terminal at `address`.
+    fn pane_of(&self, address: &str) -> Option<String> {
+        let state = lock(&self.state);
+        Some(pane_id(&state.core.as_ref()?.hello().core.id, address))
+    }
 }
 
 impl Hub {
@@ -35,5 +41,16 @@ impl Hub {
         let core = self.core.as_ref().ok_or(Error::Disconnected)?;
         let target = core.saved_target(tab, pane).ok_or(Error::Unsupported)?;
         Ok(Some(target))
+    }
+
+    /// The pane of the core terminal at `address`, such as a split Sheprd
+    /// made for a phone, once listed so the phone can open it; after a short
+    /// wait it is answered anyway, and the phone finds it on reload.
+    pub(crate) async fn core_pane_listed(&self, address: &str) -> Option<String> {
+        let pane = self.core.as_ref()?.pane_of(address)?;
+        let mut layout = self.layout.clone();
+        let listed = layout.wait_for(|layout| layout.terminal(&pane).is_some());
+        let _ = tokio::time::timeout(crate::hub::CORE_LISTING, listed).await;
+        Some(pane)
     }
 }

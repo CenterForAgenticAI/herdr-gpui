@@ -39,11 +39,25 @@ async fn sheprd_makes_the_change_and_the_phone_hears_when() {
     desktop(&state, |ask| {
         assert_eq!((ask.tab, ask.terminal.as_str()), (4, "t1"));
         assert_eq!(ask.op, layout::Op::SplitDown);
-        layout::Answer::Done
+        layout::Answer::Split("t9".into())
     });
-    crate::native::changes::change_layout(&state, 4, "t1".into(), layout::Op::SplitDown)
-        .await
-        .unwrap();
+    // The phone is told the new shell, to show it next.
+    let created =
+        crate::native::changes::change_layout(&state, 4, "t1".into(), layout::Op::SplitDown)
+            .await
+            .unwrap();
+    assert_eq!(created.as_deref(), Some("t9"));
+}
+
+#[test]
+fn a_split_answer_names_its_shell_on_the_wire() {
+    let answer = layout::Answer::Split("t9".into());
+    let wire = serde_json::to_value(&answer).unwrap();
+    assert_eq!(wire, serde_json::json!({"answer": "split", "detail": "t9"}));
+    assert_eq!(
+        serde_json::from_value::<layout::Answer>(wire).unwrap(),
+        answer
+    );
 }
 
 #[tokio::test]
@@ -77,7 +91,7 @@ async fn without_sheprd_the_phone_is_told_so() {
 #[test]
 fn an_unknown_failure_from_a_newer_sheprd_reads_as_refused() {
     let answer: layout::Answer =
-        serde_json::from_value(serde_json::json!({"answer": "failed", "failure": "something_new"}))
+        serde_json::from_value(serde_json::json!({"answer": "failed", "detail": "something_new"}))
             .unwrap();
     assert_eq!(answer, layout::Answer::Failed(layout::Failure::Refused));
 }

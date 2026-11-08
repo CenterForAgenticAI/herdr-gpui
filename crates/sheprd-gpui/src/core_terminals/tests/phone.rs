@@ -116,9 +116,10 @@ fn a_split_is_answered_once_its_pane_is_in_the_tab() {
         .panes
         .split(&id("t1"), Axis::Row, id("t9"))
         .unwrap();
+    // The phone is told the new shell, to show it next.
     assert_eq!(
         terminals.settled_phone_split(now),
-        Some((AskId(1), Answer::Done))
+        Some((AskId(1), Answer::Split("t9".into())))
     );
     assert!(terminals.settled_phone_split(now).is_none(), "once");
 }

@@ -22,8 +22,8 @@ const SPLIT_WAIT: Duration = Duration::from_secs(15);
 #[derive(Debug)]
 pub(super) struct Pending {
     id: AskId,
-    /// The panes the tab had before, which the split adds to.
-    panes: usize,
+    /// The terminals the tab had before, which the split adds to.
+    before: Vec<TerminalId>,
     since: Instant,
     tab: TabId,
 }
@@ -96,7 +96,7 @@ impl CoreTerminals {
         }
         self.phone_split = Some(Pending {
             id: ask.id,
-            panes: shown.panes.count(),
+            before: shown.panes.terminals().into_iter().cloned().collect(),
             since: Instant::now(),
             tab,
         });
@@ -108,23 +108,27 @@ impl CoreTerminals {
     }
 
     /// The answer to the phone's split once it is settled: the tab has a
-    /// pane more, or nothing is starting any more, or it took too long.
+    /// new pane, which the phone shows next, or nothing is starting any
+    /// more, or it took too long.
     pub(super) fn settled_phone_split(&mut self, now: Instant) -> Option<(AskId, Answer)> {
         let pending = self.phone_split.as_ref()?;
-        let placed = self
-            .tabs
-            .get(&pending.tab)
-            .is_some_and(|shown| shown.panes.count() > pending.panes);
+        let placed = self.tabs.get(&pending.tab).and_then(|shown| {
+            shown
+                .panes
+                .terminals()
+                .into_iter()
+                .find(|terminal| !pending.before.contains(terminal))
+                .cloned()
+        });
         let idle = self.starting.is_none() && self.wanted.is_none();
         let late = now.saturating_duration_since(pending.since) >= SPLIT_WAIT;
-        if !placed && !idle && !late {
+        if placed.is_none() && !idle && !late {
             return None;
         }
         let pending = self.phone_split.take()?;
-        let answer = if placed {
-            Answer::Done
-        } else {
-            Answer::Failed(Failure::Refused)
+        let answer = match placed {
+            Some(created) => Answer::Split(created.as_str().to_owned()),
+            None => Answer::Failed(Failure::Refused),
         };
         Some((pending.id, answer))
     }

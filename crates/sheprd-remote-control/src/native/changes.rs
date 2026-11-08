@@ -71,13 +71,17 @@ pub(crate) async fn change_layout(
     tab: u64,
     terminal: String,
     op: layout::Op,
-) -> Result<(), ApiError> {
+) -> Result<Option<String>, ApiError> {
     let mut pending = state
         .changes
         .ask_layout(tab, terminal, op, Instant::now())
         .map_err(ApiError::from)?;
     match tokio::time::timeout(LAYOUT_WAIT, pending.answer()).await {
-        Ok(Some(layout::Answer::Done)) => Ok(()),
+        Ok(Some(layout::Answer::Done)) => Ok(None),
+        Ok(Some(layout::Answer::Split(created))) if created.len() <= layout::MAX_TERMINAL => {
+            Ok(Some(created))
+        }
+        Ok(Some(layout::Answer::Split(_))) => Err(mismatch()),
         Ok(Some(layout::Answer::Failed(failure))) => Err(Error::Layout(failure).into()),
         Ok(None) | Err(_) => Err(Error::TimedOut.into()),
     }

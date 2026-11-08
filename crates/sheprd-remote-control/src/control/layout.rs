@@ -44,11 +44,14 @@ pub enum Op {
 }
 
 /// Sheprd's answer to an [`Ask`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "answer", content = "failure")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "answer", content = "detail")]
 pub enum Answer {
     Done,
     Failed(Failure),
+    /// A split landed: the new shell's terminal, by its herdr-core address,
+    /// which the phone shows next.
+    Split(String),
 }
 
 /// Why Sheprd did not change the tab.

@@ -7,9 +7,10 @@
 //!
 //! The daemon's limit counts only questions a phone still waits for, and an
 //! answer keeps running after its phone gives up, so the answers running here
-//! are limited too. While that many run, or questions taken wait their turn,
-//! no more are taken: the rest stay with the daemon, where a phone that stops
-//! waiting frees its place.
+//! are limited too; questions taken beyond that wait their turn here. Taking
+//! goes on meanwhile, so a split or zoom, which needs no answer worked out,
+//! never waits behind slow workspace answers. The daemon holds at most 16
+//! questions, so no more ever wait here.
 
 use super::*;
 use crate::SheprdWindow;
@@ -53,8 +54,7 @@ impl Supervisor {
             .changes
             .retry_at
             .is_some_and(|at| Instant::now() < at);
-        let busy = supervisor.changes.running >= RUNNING || !supervisor.changes.queued.is_empty();
-        if !phones || waiting || busy || supervisor.changes.polling {
+        if !phones || waiting || supervisor.changes.polling {
             return;
         }
         let Some(address) = supervisor.address.clone() else {
