@@ -9,8 +9,9 @@ use std::path::PathBuf;
 
 impl CoreTerminals {
     /// The folder a workspace's herdr-core tabs started in, as Herdr names
-    /// a workspace's by its first tab's first pane: the first pane of the
-    /// oldest tab that drives its terminals.
+    /// a workspace's by its first tab's first pane: where the first pane of
+    /// the oldest tab that drives its terminals was first seen, so moving
+    /// around in that pane does not move the workspace.
     pub(crate) fn launch_root(&self, scope: &Scope, workspace: &str) -> Option<PathBuf> {
         let (_, tab) = self
             .tabs
@@ -23,7 +24,18 @@ impl CoreTerminals {
                     .is_some_and(|(known, id)| known == scope && id == workspace)
             })
             .min_by_key(|(id, _)| **id)?;
-        self.infos.get(tab.panes.first())?.cwd.clone()
+        tab.root.clone()
+    }
+}
+
+impl super::TabPanes {
+    /// Keeps the first folder herdr-core reports for the tab's first pane.
+    pub(super) fn keep_root(&mut self, infos: &super::infos::Infos) {
+        if self.root.is_none() {
+            self.root = infos
+                .get(self.panes.first())
+                .and_then(|info| info.cwd.clone());
+        }
     }
 }
 

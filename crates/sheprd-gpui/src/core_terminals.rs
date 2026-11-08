@@ -75,6 +75,9 @@ struct TabPanes {
     /// A mirror tab only watches: it neither types nor splits.
     observe: bool,
     panes: Panes,
+    /// The folder the tab's first pane was first seen in, kept when its
+    /// program moves on, as Herdr keeps where a workspace started.
+    root: Option<std::path::PathBuf>,
     unsaved: bool,
     /// The workspace whose tab this is, known once the window has shown it.
     workspace: Option<(Scope, String)>,
@@ -92,6 +95,7 @@ impl TabPanes {
             active: panes.first().clone(),
             observe,
             panes,
+            root: None,
             unsaved: false,
             workspace: None,
             zoom: crate::motion::Toggle::default(),
@@ -194,10 +198,12 @@ impl CoreTerminals {
         observe: bool,
         infos: Vec<TerminalInfo>,
     ) {
-        self.tabs.insert(tab, TabPanes::new(panes, observe));
+        let mut shown = TabPanes::new(panes, observe);
         for info in infos {
             self.infos.insert(info);
         }
+        shown.keep_root(&self.infos);
+        self.tabs.insert(tab, shown);
     }
 
     /// Whether `tab` is a herdr-core tab that drives its terminals, not a
