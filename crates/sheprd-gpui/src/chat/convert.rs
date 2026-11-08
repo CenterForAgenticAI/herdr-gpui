@@ -230,7 +230,7 @@ impl SheprdWindow {
             return None;
         }
         let snapshot = self.live.snapshot.as_deref()?;
-        convert::tab_pane(snapshot, workspace, tab).map(str::to_owned)
+        convert::tab_pane(snapshot, workspace, tab).map(|(pane, _)| pane.to_owned())
     }
 
     /// [`Self::convert_to_chat`], reporting a failure as a flash.

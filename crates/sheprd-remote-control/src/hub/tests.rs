@@ -4,6 +4,7 @@ use sheprd_client::protocol::ClientShellSnapshot;
 mod agent_times;
 mod api_socket;
 mod chat_link;
+mod convert_offer;
 mod new_chat;
 mod projection;
 mod sessions;

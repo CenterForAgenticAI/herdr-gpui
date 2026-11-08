@@ -225,6 +225,7 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/v2/new", get(crate::native::new_options))
         .route("/api/v2/search", get(crate::native::search))
         .route("/api/v2/tags", get(tags::get).put(tags::put))
+        .route("/api/v2/term/{pane}/convert", post(crate::native::convert))
         .route("/api/v2/update", get(update::status).post(update::request))
         .route("/api/v2/workspaces", post(crate::native::create_workspace))
         .route(
@@ -446,6 +447,12 @@ impl IntoResponse for ApiError {
             Self::Hub(crate::hub::Error::UnknownChat | crate::hub::Error::UnknownWorkspace) => {
                 StatusCode::NOT_FOUND
             }
+            Self::Hub(crate::hub::Error::Convert(
+                crate::hub::ConvertError::AlreadyConverting
+                | crate::hub::ConvertError::Core
+                | crate::hub::ConvertError::Platform
+                | crate::hub::ConvertError::Refused(_),
+            )) => StatusCode::CONFLICT,
             Self::Hub(_) | Self::NoPush => StatusCode::SERVICE_UNAVAILABLE,
         };
         // The request line only has the status. A computer without push

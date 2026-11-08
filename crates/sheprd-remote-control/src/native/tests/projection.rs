@@ -139,3 +139,17 @@ fn terminal_escapes_other_than_colors_never_reach_a_run() {
     let text: String = rows[0].iter().map(|run: &Run| run.text.as_str()).collect();
     assert_eq!(text, "abcd");
 }
+
+#[test]
+fn a_terminal_names_the_pane_its_menu_may_move_into_a_chat() {
+    let home = project(HashMap::new(), &PullRequests::default());
+    let terminal = &home.workspaces[0].terminals[0];
+    assert_eq!(terminal.convert_pane.as_deref(), Some("p2"));
+    let wire = serde_json::to_value(terminal).unwrap();
+    assert_eq!(wire["convert_pane"], "p2");
+    // Absent rather than null when none can.
+    let mut none = terminal.clone();
+    none.convert_pane = None;
+    let wire = serde_json::to_value(&none).unwrap();
+    assert!(wire.get("convert_pane").is_none());
+}

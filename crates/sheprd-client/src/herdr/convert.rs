@@ -83,19 +83,20 @@ pub fn check(reported: &ClientShellAgent) -> Result<Agent, Error> {
 /// The pane of `tab` whose agent a tab's menu would move: the tab's focused
 /// pane when that one can, else its first that can. A busy agent counts, so
 /// the action stays and says why it has to wait rather than vanishing
-/// mid-turn.
+/// mid-turn. The agent comes with it, to tell a pane that has since
+/// changed hands.
 pub fn tab_pane<'a>(
     snapshot: &'a ClientShellSnapshot,
     workspace: &str,
     tab: &str,
-) -> Option<&'a str> {
+) -> Option<(&'a str, Agent)> {
     snapshot
         .agents
         .iter()
         .filter(|agent| agent.workspace_id == workspace && agent.tab_id == tab)
-        .filter(|agent| movable(agent).is_ok())
-        .min_by_key(|agent| !agent.focused)
-        .map(|agent| agent.pane_id.as_str())
+        .filter_map(|agent| Some((agent, movable(agent).ok()?)))
+        .min_by_key(|(agent, _)| !agent.focused)
+        .map(|(reported, agent)| (reported.pane_id.as_str(), agent))
 }
 
 /// Whether Herdr's own answer, fresher than a client's snapshot, still

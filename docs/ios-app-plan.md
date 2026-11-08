@@ -157,7 +157,8 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
     "terminals": [{
       "tab": "t2", "label": "zsh", "cwd": "/Users/me/code/sheprd", "zoomed": false,
       "panes": [{"pane": "p2", "label": null, "cwd": "/Users/me/code/sheprd", "focused": true}],
-      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"}
+      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"},
+      "convert_pane": "p2"
     }]
   }]
 }
@@ -171,6 +172,10 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
   with the chats, by status, and opens the agent's pane.
+- A terminal's `convert_pane` is the pane whose agent its menu may move
+  into a chat, as Sheprd's Move Agent into Chat does; absent when none can
+  (`sheprd_client::herdr::convert`), from Herdr 2 tabs, and from older
+  daemons. A busy agent is still offered, and the move says to wait.
 - `load` is the computer's CPU and memory in whole percentages, read
   every five seconds; it is absent until the first reading and from older
   daemons. A home goes out again when either figure moves by a point.
@@ -304,6 +309,13 @@ app learns the pane it should open:
 - `POST /api/v2/workspaces/{workspace}/chats` takes `{"agent", "prompt"?,
   "start"?}` and answers `{"pane": "p7", "prompted": true, "started":
   true}`.
+- `POST /api/v2/term/{pane}/convert` moves the agent in a terminal's
+  `convert_pane` into a chat in the same pane and answers `{"agent":
+  "claude", "pane": "p2"}` once the line continuing it is typed and the
+  chat is up, `pane` being `null` when it was not up within 10 s. Stopping
+  the agent can take up to 30 s. A refusal, such as a busy agent or one
+  Herdr reports no session for, is a `409` whose `error` the phone shows;
+  every refusal comes before the agent is touched, and leaves it running.
 - `start` is what the chat begins with, as last picked on the phone:
   `{"mode"?, "option"?, "auto_accept"?}`. `mode` is the mode's id, or the
   choice's when `option` names the agent's mode setting. It goes before the

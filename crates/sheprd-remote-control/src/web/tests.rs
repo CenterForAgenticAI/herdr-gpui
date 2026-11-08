@@ -15,6 +15,7 @@ use tower::ServiceExt;
 
 mod apps;
 mod attention;
+mod convert;
 #[cfg(unix)]
 mod echo;
 mod handoff;

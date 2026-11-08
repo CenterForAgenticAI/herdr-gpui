@@ -26,6 +26,8 @@ struct TerminalScreen: View {
     @State private var problem: String?
     @State private var clipboardHasText = UIPasteboard.general.hasStrings
     @State private var renaming = false
+    /// A move of the tab's agent into a chat is under way.
+    @State private var converting = false
     @State private var newName = ""
     /// Lines a swipe in progress has scrolled the terminal so far.
     @State private var swiped = 0
@@ -185,6 +187,15 @@ struct TerminalScreen: View {
                             Button("Unzoom", systemImage: "arrow.down.right.and.arrow.up.left") { run(.zoom) }
                         } else {
                             Button("Zoom", systemImage: "arrow.up.left.and.arrow.down.right") { run(.zoom) }
+                        }
+                    }
+                    if let pane = item?.terminal.convertPane {
+                        Section {
+                            Button(
+                                converting ? "Moving into Chat…" : "Move Agent into Chat",
+                                systemImage: "bubble.left.and.text.bubble.right"
+                            ) { convert(pane) }
+                            .disabled(converting)
                         }
                     }
                     Section {
@@ -366,6 +377,30 @@ struct TerminalScreen: View {
             do {
                 try await model.fleet.rename(key, to: label)
                 problem = nil
+            } catch {
+                problem = error.localizedDescription
+            }
+        }
+    }
+
+    /// Moves the tab's agent into a chat in the same pane, as Sheprd's Move
+    /// Agent into Chat does, and opens the chat once it is up. The computer
+    /// refuses a busy agent, or one Herdr reports no session for, and says
+    /// why; the agent then keeps running here.
+    private func convert(_ pane: String) {
+        converting = true
+        Task {
+            defer { converting = false }
+            do {
+                let chat = try await model.fleet.call(key.device) { client, token in
+                    try await client.convertToChat(pane: pane, bearer: token)
+                }
+                if let chat {
+                    problem = nil
+                    model.pendingRoute = .chat(PaneKey(device: key.device, pane: chat), title: name)
+                } else {
+                    problem = "The chat is still starting; it shows in your list once it is up."
+                }
             } catch {
                 problem = error.localizedDescription
             }

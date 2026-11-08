@@ -118,6 +118,11 @@ pub(crate) struct Terminal {
     pub(crate) panes: Vec<Pane>,
     /// The agent Herdr detects in the tab, the most pressing first.
     pub(crate) agent: Option<TerminalAgent>,
+    /// The pane whose agent the tab's menu offers to move into a chat
+    /// (`POST /api/v2/term/{pane}/convert`); absent when none can, and from
+    /// older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) convert_pane: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -325,6 +330,7 @@ fn terminal(terminal: &hub::Terminal) -> Terminal {
             title: agent.title.clone(),
             changed_ms: agent.changed_ms,
         }),
+        convert_pane: terminal.convert.as_ref().map(|(pane, _)| pane.clone()),
     }
 }
 
