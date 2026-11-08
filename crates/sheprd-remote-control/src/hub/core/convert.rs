@@ -32,6 +32,10 @@ impl Source {
                 .find(|terminal| pane_id(boot, &terminal.address) == pane)
                 .map(|terminal| terminal.address.clone())
                 .ok_or(sheprd_client::herdr::convert::Error::Moved)?;
+            // Another machine's terminal: its agent's records are there.
+            if address.contains('/') {
+                return Err(sheprd_client::herdr::convert::Error::NoAgent.into());
+            }
             (core, address)
         };
         let terminal =

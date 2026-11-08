@@ -117,7 +117,11 @@ impl Hub {
                 .core
                 .clone()
                 .ok_or(super::Error::from(core::Error::Disconnected))?;
-            let home = sheprd_client::local_path::home_dir().ok_or(Error::Home)?;
+            let home = self
+                .home
+                .clone()
+                .or_else(sheprd_client::local_path::home_dir)
+                .ok_or(Error::Home)?;
             let (owned, cancelled) = (pane.to_owned(), claim.cancelled.clone());
             tokio::task::spawn_blocking(move || {
                 core.convert(&owned, agent, &program, &home, &cancelled)

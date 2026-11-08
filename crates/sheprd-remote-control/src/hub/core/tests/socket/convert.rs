@@ -116,8 +116,9 @@ fn stand(status: &'static str) -> Stand {
     }
 }
 
-/// A hub listing `t1` as the core projects it, with its move offered.
-fn hub_on(stand: &Stand) -> Arc<Hub> {
+/// A hub listing `t1` as the core projects it, with its move offered, and
+/// agents' records read from `home`.
+fn hub_on(stand: &Stand, home: Option<PathBuf>) -> Arc<Hub> {
     let record = serde_json::from_value(agent_record(false, "idle")).unwrap();
     let terminal = projection::terminal("fake-core", &id("t1"), "", &[&record], |_| 0).unwrap();
     let layout = Layout {
@@ -138,6 +139,7 @@ fn hub_on(stand: &Stand) -> Arc<Hub> {
     let mut hub = Hub::offline_in(layout, None, None);
     hub.core = Some(stand.source.clone());
     hub.program = Some(PathBuf::from("/opt/sheprd/sheprd-acp"));
+    hub.home = home;
     Arc::new(hub)
 }
 
@@ -215,7 +217,7 @@ fn a_busy_agent_is_left_running() {
 #[tokio::test]
 async fn a_phone_moves_the_agent_its_herdr_2_tab_offers() {
     let stand = stand("idle");
-    let hub = hub_on(&stand);
+    let hub = hub_on(&stand, Some(stand.home.clone()));
     // The phone names an agent the tab does not run: refused, untouched.
     assert!(matches!(
         hub.convert_to_chat(&id("t1"), Agent::Codex).await,
@@ -224,21 +226,43 @@ async fn a_phone_moves_the_agent_its_herdr_2_tab_offers() {
         ))
     ));
     assert!(stand.asked.try_recv().is_err());
-    let moved = hub.convert_to_chat(&id("t1"), Agent::Claude).await;
-    // The daemon's own HOME holds no record of this test's agent unless
-    // the login environment points elsewhere, so either it moved or it was
-    // refused before anything was pressed.
-    match moved {
-        Ok(()) => {}
-        Err(ConvertError::Refused(_) | ConvertError::Home) => {
-            assert!(stand.asked.try_recv().is_err());
-        }
-        Err(error) => panic!("{error:?}"),
-    }
+    hub.convert_to_chat(&id("t1"), Agent::Claude).await.unwrap();
+    let asked: Vec<String> = stand.asked.try_iter().map(|(method, _)| method).collect();
+    assert_eq!(asked, ["terminal.keys", "terminal.send", "terminal.label"]);
     drop(hub);
     let Stand { source, server, .. } = stand;
     drop(source);
     server.join().unwrap();
+}
+
+#[tokio::test]
+async fn an_agent_whose_session_is_unknown_is_left_running() {
+    let stand = stand("idle");
+    let empty = tempfile::tempdir().unwrap();
+    let hub = hub_on(&stand, Some(empty.path().to_owned()));
+    assert!(matches!(
+        hub.convert_to_chat(&id("t1"), Agent::Claude).await,
+        Err(ConvertError::Refused(
+            sheprd_client::herdr::convert::Error::NoCoreSession(Agent::Claude)
+        ))
+    ));
+    assert!(
+        stand.asked.try_recv().is_err(),
+        "nothing was pressed or typed"
+    );
+    drop(hub);
+    let Stand { source, server, .. } = stand;
+    drop(source);
+    server.join().unwrap();
+}
+
+#[test]
+fn another_machines_terminal_offers_no_move() {
+    let mut remote = agent_record(false, "idle");
+    remote["address"] = json!("box/t7");
+    let record = serde_json::from_value(remote).unwrap();
+    let terminal = projection::terminal("fake-core", &id("box/t7"), "", &[&record], |_| 0).unwrap();
+    assert_eq!(terminal.convert, None);
 }
 
 #[test]
