@@ -93,6 +93,39 @@ impl TabPanes {
         }
     }
 
+    /// The tab as it was saved: its pane in use, and the pane filling it
+    /// already zoomed rather than growing as the window opens. A pane the
+    /// layout no longer holds is ignored.
+    fn restore(
+        panes: Panes,
+        observe: bool,
+        active: Option<&TerminalId>,
+        zoomed: Option<&TerminalId>,
+    ) -> Self {
+        let mut shown = Self::new(panes, observe);
+        if let Some(active) = active.filter(|active| shown.panes.contains(active)) {
+            shown.active = active.clone();
+        }
+        if let Some(zoomed) = zoomed.filter(|zoomed| shown.panes.contains(zoomed))
+            && shown.panes.count() > 1
+        {
+            shown.zoomed = Some(zoomed.clone());
+            shown.zoom.set(true, crate::motion::now(), true);
+        }
+        shown
+    }
+
+    /// The tab's location as it saves: the layout, the pane in use, and the
+    /// zoomed pane while the zoom is on.
+    fn location(&self) -> Location {
+        Location::CoreTerminal {
+            panes: self.panes.clone(),
+            observe: self.observe,
+            active: Some(self.active.clone()),
+            zoomed: self.zoomed.clone().filter(|_| self.zoom.is_open()),
+        }
+    }
+
     /// Zooms `terminal`, or unzooms, animating from where the zoom is now.
     fn set_zoom(&mut self, terminal: Option<TerminalId>) {
         let now = crate::motion::now();
@@ -222,6 +255,7 @@ impl CoreTerminals {
             return false;
         }
         shown.active = terminal;
+        shown.unsaved = true;
         true
     }
 
@@ -309,15 +343,15 @@ impl SheprdWindow {
     pub(crate) fn poll_core_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let connected = self.core_terminals.hub.backend().is_some();
         if self.core_terminals.hub.poll() {
-            // A lost connection ended every pane's worker. Their views go, so
-            // the next sync joins the core again and attaches each terminal
-            // anew; nothing is started or replayed. A pane that held the
-            // keyboard has its tab take it back once the new view is there.
+            // A lost connection ended every pane's worker. Their views stay
+            // on the host with their last frame dimmed, and drop what is typed
+            // until the core answers again and each terminal is attached
+            // anew; nothing is started or replayed.
             if connected && self.core_terminals.hub.backend().is_none() {
-                if let Some((tab, _)) = self.core_terminals.focused_pane(window, cx) {
-                    self.core_terminals.focus_wanted = Some(tab);
+                let views: Vec<_> = self.core_terminals.shown().cloned().collect();
+                for view in views {
+                    view.update(cx, |view, cx| view.set_stale(cx));
                 }
-                self.core_terminals.views.clear();
             }
             if let State::Unavailable(error) = self.core_terminals.hub.state()
                 && self.core_terminals.wanted.take().is_some()
@@ -332,6 +366,8 @@ impl SheprdWindow {
             cx.notify();
         }
         self.place_started_core_terminal(window, cx);
+        self.end_closed_core_terminals(cx);
+        self.relink_stale_core_views(cx);
         self.sync_core_views(cx);
         if let Some(tab) = self.core_terminals.focus_wanted
             && self.core_pane_view(tab).is_some()
@@ -348,6 +384,9 @@ impl SheprdWindow {
         self.refresh_core_looks(cx);
         if let Some(view) = self.core_fallback_view() {
             view.update(cx, |view, cx| view.poll(cx));
+            if view.read(cx).take_dropped() {
+                self.show_flash(Flash::warning(fl!("core-terminals-input-dropped")), cx);
+            }
         }
         self.poll_core_panes(window, cx);
         // Split chrome and the sidebar's rows name panes from what herdr-core
@@ -406,10 +445,7 @@ impl SheprdWindow {
         };
         match purpose {
             Purpose::Tab { scope, workspace } => {
-                let location = Location::CoreTerminal {
-                    panes: Panes::single(info.id),
-                    observe: false,
-                };
+                let location = Location::core_terminal(Panes::single(info.id), false);
                 let Some(id) = Store::update(cx, |store| {
                     store.open(scope, &workspace, Some(location), None)
                 }) else {

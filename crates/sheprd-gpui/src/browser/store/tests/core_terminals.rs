@@ -1,0 +1,52 @@
+use super::*;
+use crate::core_terminals::panes::{Axis, Panes};
+use sheprd_backend::TerminalId;
+
+fn id(name: &str) -> TerminalId {
+    TerminalId::new(name).unwrap()
+}
+
+fn open(store: &mut Store, panes: Panes, observe: bool) -> TabId {
+    store
+        .open(
+            Scope::endpoint("local"),
+            "w",
+            Some(Location::core_terminal(panes, observe)),
+            None,
+        )
+        .unwrap()
+}
+
+#[test]
+fn closing_a_terminal_tab_ends_its_terminals_and_cannot_be_reopened() {
+    let mut store = Store::default();
+    let mut panes = Panes::single(id("t1"));
+    panes.split(&id("t1"), Axis::Row, id("t2")).unwrap();
+    let tab = open(&mut store, panes, false);
+    assert!(!store.has_ending());
+    store.close(tab).unwrap();
+    assert_eq!(store.take_ending(), [id("t1"), id("t2")]);
+    assert!(!store.has_ending(), "taken once");
+    // An ended terminal has nothing to come back to.
+    assert!(store.peek_closed(&Scope::endpoint("local"), "w").is_none());
+}
+
+#[test]
+fn closing_a_mirror_only_stops_watching() {
+    let mut store = Store::default();
+    let typing = open(&mut store, Panes::single(id("t1")), false);
+    let mirror = open(&mut store, Panes::single(id("t1")), true);
+    store.close(mirror).unwrap();
+    assert!(!store.has_ending());
+    assert!(store.get(typing).is_some());
+}
+
+#[test]
+fn a_terminal_another_tab_types_into_is_not_ended() {
+    let mut store = Store::default();
+    let first = open(&mut store, Panes::single(id("t1")), false);
+    open(&mut store, Panes::single(id("t1")), false);
+    store.close(first).unwrap();
+    assert!(store.has_ending());
+    assert!(store.take_ending().is_empty());
+}

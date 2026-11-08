@@ -84,6 +84,12 @@ pub(crate) enum Location {
         /// types into it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         observe: bool,
+        /// The pane keys go to, restored with the tab.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active: Option<sheprd_backend::TerminalId>,
+        /// The pane filling the tab, restored zoomed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zoomed: Option<sheprd_backend::TerminalId>,
     },
 }
 
@@ -211,6 +217,16 @@ impl From<&ReviewCheckout> for crate::pull_request::Input {
 }
 
 impl Location {
+    /// A herdr-core tab of `panes`, its first pane in use and none zoomed.
+    pub(crate) fn core_terminal(panes: crate::core_terminals::panes::Panes, observe: bool) -> Self {
+        Self::CoreTerminal {
+            panes,
+            observe,
+            active: None,
+            zoomed: None,
+        }
+    }
+
     /// The address the page is loaded from.
     #[cfg(any(target_os = "macos", windows, test))]
     pub(crate) fn page_url(&self) -> String {

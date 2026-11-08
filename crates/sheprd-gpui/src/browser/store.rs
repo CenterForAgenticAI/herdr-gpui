@@ -205,6 +205,9 @@ pub(crate) struct Store {
     pub(super) closed: super::closed::ClosedTabs,
     writer: Option<state_file::Writer<Saved>>,
     quitting: bool,
+    /// herdr-core terminals of closed tabs, for a window connected to the
+    /// core to end.
+    ending: Vec<sheprd_backend::TerminalId>,
 }
 
 impl Global for Store {}
@@ -272,6 +275,7 @@ impl Store {
             closed: Default::default(),
             writer,
             quitting: false,
+            ending: Vec::new(),
         }
     }
 
@@ -476,10 +480,41 @@ impl Store {
         true
     }
 
+    /// Closes a tab. A herdr-core tab's terminals end with it, as a Herdr
+    /// tab's panes do, so it cannot be reopened; a mirror only stops
+    /// watching.
     pub(crate) fn close(&mut self, id: TabId) -> Option<Tab> {
         let tab = self.detach(id)?;
-        self.closed.push_page(tab.clone());
+        match &tab.location {
+            Some(Location::CoreTerminal { panes, observe, .. }) => {
+                if !observe {
+                    self.ending.extend(panes.terminals().into_iter().cloned());
+                }
+            }
+            _ => self.closed.push_page(tab.clone()),
+        }
         Some(tab)
+    }
+
+    /// Takes the terminals closed tabs left to end, but those another tab
+    /// still types into, as one a pane moved to.
+    pub(crate) fn take_ending(&mut self) -> Vec<sheprd_backend::TerminalId> {
+        let mut ending = std::mem::take(&mut self.ending);
+        ending.retain(|terminal| {
+            !self.tabs.iter().any(|tab| {
+                matches!(
+                    &tab.location,
+                    Some(Location::CoreTerminal { panes, observe: false, .. })
+                        if panes.contains(terminal)
+                )
+            })
+        });
+        ending
+    }
+
+    /// Whether closed tabs left terminals to end.
+    pub(crate) fn has_ending(&self) -> bool {
+        !self.ending.is_empty()
     }
 
     /// Removes a tab without recording it as closed, as when its view moves

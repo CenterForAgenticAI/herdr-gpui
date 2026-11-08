@@ -1,7 +1,7 @@
 //! The window's pane commands, run on a herdr-core tab's panes while one
 //! holds the keyboard: split, move focus, resize, zoom, and close. The same
 //! shortcuts work on Herdr panes, so a herdr-core tab handles them here
-//! rather than letting them reach Herdr.
+//! rather than letting them reach Herdr; one it cannot run says so.
 
 use super::{
     Purpose,
@@ -71,6 +71,7 @@ impl SheprdWindow {
                     shown.set_zoom(None);
                 }
                 shown.active = next;
+                shown.unsaved = true;
                 self.focus_core_terminal(tab, window, cx);
                 cx.notify();
             }
@@ -89,6 +90,7 @@ impl SheprdWindow {
                 if shown.panes.count() > 1 {
                     let zoom = (!shown.zoom.is_open()).then_some(terminal);
                     shown.set_zoom(zoom);
+                    shown.unsaved = true;
                     cx.notify();
                 }
             }
@@ -100,6 +102,21 @@ impl SheprdWindow {
                 if self.remove_core_pane(tab, &terminal, window, cx) && !mirror {
                     self.end_core_terminal(terminal);
                 }
+            }
+            // Pane and tab commands herdr-core panes cannot run yet say so,
+            // rather than reaching the Herdr pane behind them.
+            Command::SwapLeft
+            | Command::SwapRight
+            | Command::SwapUp
+            | Command::SwapDown
+            | Command::NextPane
+            | Command::PreviousPane
+            | Command::LastPane
+            | Command::EqualizeSplits
+            | Command::RenamePane
+            | Command::RenameTab
+            | Command::MovePane => {
+                self.show_flash(Flash::warning(fl!("core-terminals-unsupported")), cx);
             }
             _ => return false,
         }
@@ -122,10 +139,7 @@ impl SheprdWindow {
         else {
             return;
         };
-        let location = Location::CoreTerminal {
-            panes: Panes::single(terminal),
-            observe: true,
-        };
+        let location = Location::core_terminal(Panes::single(terminal), true);
         let Some(id) = Store::update(cx, |store| {
             store.open(scope, &workspace, Some(location), None)
         }) else {

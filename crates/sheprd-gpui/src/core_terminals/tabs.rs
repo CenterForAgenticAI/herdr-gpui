@@ -2,10 +2,11 @@
 //! the pane in use, panes whose program ended, and the layout saved with the
 //! tab once a change settles.
 
-use super::{CoreTerminalView, Start, TabPanes, panes::Axis, worker};
+use super::{CoreTerminalView, Start, State, TabPanes, panes::Axis, worker};
 use crate::{
     SheprdWindow,
     browser::{Location, Store, TabId},
+    i18n::fl,
     window::Flash,
 };
 use gpui::{prelude::*, *};
@@ -36,14 +37,18 @@ impl SheprdWindow {
         };
         let mut missing: Vec<(TabId, TerminalId, Role)> = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
-            let Some(Location::CoreTerminal { panes, observe }) = &tab.location else {
+            let Some(Location::CoreTerminal {
+                panes,
+                observe,
+                active,
+                zoomed,
+            }) = &tab.location
+            else {
                 continue;
             };
-            let shown = self
-                .core_terminals
-                .tabs
-                .entry(tab.id)
-                .or_insert_with(|| TabPanes::new(panes.clone(), *observe));
+            let shown = self.core_terminals.tabs.entry(tab.id).or_insert_with(|| {
+                TabPanes::restore(panes.clone(), *observe, active.as_ref(), zoomed.as_ref())
+            });
             missing.extend(
                 shown
                     .panes
@@ -97,6 +102,52 @@ impl SheprdWindow {
         cx.notify();
     }
 
+    /// Attaches the terminals of views left stale by a dropped connection
+    /// once the core answers again, joining it meanwhile.
+    pub(super) fn relink_stale_core_views(&mut self, cx: &mut Context<Self>) {
+        // The stand-in shell has no tab and always types.
+        let fallback = self.core_fallback_view().map(|view| (None, view));
+        let stale: Vec<(Option<TabId>, Entity<CoreTerminalView>)> = self
+            .core_terminals
+            .views
+            .iter()
+            .map(|((tab, _), view)| (Some(*tab), view.clone()))
+            .chain(fallback)
+            .filter(|(_, view)| view.read(cx).is_stale())
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        let Some(backend) = self.core_terminals.hub.backend().cloned() else {
+            self.core_terminals.hub.connect(Start::Join);
+            return;
+        };
+        for (tab, view) in stale {
+            let observe = tab
+                .and_then(|tab| self.core_terminals.tabs.get(&tab))
+                .is_some_and(|shown| shown.observe);
+            let role = if observe {
+                Role::Observer
+            } else {
+                Role::Active
+            };
+            let terminal = view.read(cx).id().clone();
+            let size = view
+                .read(cx)
+                .size()
+                .or_else(|| Size::new(FIRST_SIZE.0, FIRST_SIZE.1).ok());
+            let Some(size) = size else {
+                continue;
+            };
+            match worker::spawn(backend.clone(), terminal, size, role) {
+                Ok(link) => view.update(cx, |view, cx| view.relink(link, cx)),
+                Err(error) => {
+                    tracing::warn!(%error, "Could not start a herdr-core terminal worker")
+                }
+            }
+        }
+    }
+
     /// Takes every pane's new screen, follows the pane the keyboard moved
     /// to, closes panes whose program ended in a split, and titles each tab
     /// after its pane in use, as a Herdr tab is titled after its program.
@@ -106,6 +157,7 @@ impl SheprdWindow {
             && shown.active != terminal
         {
             shown.active = terminal;
+            shown.unsaved = true;
             cx.notify();
         }
         let views: Vec<((TabId, TerminalId), Entity<CoreTerminalView>)> = self
@@ -115,8 +167,10 @@ impl SheprdWindow {
             .map(|(key, view)| (key.clone(), view.clone()))
             .collect();
         let mut ended = Vec::new();
+        let mut dropped = false;
         for ((tab, terminal), view) in views {
             view.update(cx, |view, cx| view.poll(cx));
+            dropped |= view.read(cx).take_dropped();
             let split = self
                 .core_terminals
                 .tabs
@@ -125,6 +179,9 @@ impl SheprdWindow {
             if split && view.read(cx).ended() {
                 ended.push((tab, terminal));
             }
+        }
+        if dropped {
+            self.show_flash(Flash::warning(fl!("core-terminals-input-dropped")), cx);
         }
         for (tab, terminal) in ended {
             self.remove_core_pane(tab, &terminal, window, cx);
@@ -243,6 +300,32 @@ impl SheprdWindow {
         }
     }
 
+    /// Ends the terminals of closed tabs, joining the core to do it when
+    /// the window is not connected yet.
+    pub(super) fn end_closed_core_terminals(&mut self, cx: &mut Context<Self>) {
+        if !cx
+            .try_global::<Store>()
+            .is_some_and(|store| store.has_ending())
+        {
+            return;
+        }
+        match self.core_terminals.hub.state() {
+            State::Ready(_) => {}
+            // No core answers, so nothing of it runs to end.
+            State::Unavailable(_) => {
+                Store::update(cx, Store::take_ending);
+                return;
+            }
+            State::Idle | State::Connecting(_) => {
+                self.core_terminals.hub.connect(Start::Join);
+                return;
+            }
+        }
+        for terminal in Store::update(cx, Store::take_ending) {
+            self.end_core_terminal(terminal);
+        }
+    }
+
     /// Writes changed layouts into their tabs, which saves them.
     pub(super) fn save_core_panes(&mut self, cx: &mut Context<Self>) {
         let changed: Vec<(TabId, Location)> = self
@@ -250,13 +333,7 @@ impl SheprdWindow {
             .tabs
             .iter_mut()
             .filter_map(|(tab, shown)| {
-                std::mem::take(&mut shown.unsaved).then(|| {
-                    let location = Location::CoreTerminal {
-                        panes: shown.panes.clone(),
-                        observe: shown.observe,
-                    };
-                    (*tab, location)
-                })
+                std::mem::take(&mut shown.unsaved).then(|| (*tab, shown.location()))
             })
             .collect();
         for (tab, location) in changed {

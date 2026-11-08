@@ -1,9 +1,12 @@
 mod accessibility;
 mod chats;
+mod commands;
 mod focus;
 mod keys;
 mod paste;
+mod restore;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod stale;
 mod worker;

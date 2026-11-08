@@ -16,7 +16,7 @@ use gpui::{
 use sheprd_backend::{ClientPaneInputEvent, Role as AttachRole, TerminalId};
 use std::{cell::RefCell, rc::Rc};
 
-fn look() -> Look {
+pub(super) fn look() -> Look {
     Look {
         background: hsla(0., 0., 0., 1.),
         cell_height: 17.,

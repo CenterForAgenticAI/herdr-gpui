@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 
+mod core_terminals;
 mod editors;
 mod orchestrator_tabs;
 mod px0;
