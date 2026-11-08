@@ -29,6 +29,10 @@ pub struct SavedTabs {
 pub struct SavedWorkspace {
     /// Where its new terminals start.
     pub cwd: String,
+    /// Whether the user named it; otherwise the app named it after its
+    /// folder, and a linked worktree's row shows its branch instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub custom: bool,
     /// Unique among the app's workspaces; its tabs name it.
     pub id: String,
     pub label: String,

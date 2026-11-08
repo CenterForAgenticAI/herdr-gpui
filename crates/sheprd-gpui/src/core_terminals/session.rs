@@ -7,17 +7,27 @@ use crate::{
     session_model::Sessions,
 };
 use gpui::App;
-use sheprd_session::{CoreTab, CoreWorkspace, Session};
+use sheprd_session::{CoreTab, CoreWorkspace, Session, Worktree};
 use std::sync::Arc;
 
 impl SheprdWindow {
     /// Rebuilds the herdr-core session of the selected host when it is this
     /// computer, from the store's workspaces and tabs and what the core last
-    /// reported.
-    pub(crate) fn refresh_core_session(&mut self, cx: &mut App) {
+    /// reported. Whether it changed.
+    pub(crate) fn refresh_core_session(&mut self, cx: &mut App) -> bool {
         let built = (!self.selected_is_remote()).then(|| {
             let scope = scope(&self.endpoints[self.selected_endpoint]);
             self.keep_default_workspace(&scope, cx);
+            let folders = cx.try_global::<Store>().map_or_else(Vec::new, |store| {
+                store
+                    .kept_workspaces(&scope)
+                    .filter(|workspace| !workspace.cwd.is_empty())
+                    .map(|workspace| workspace.cwd.clone())
+                    .collect()
+            });
+            self.core_terminals
+                .checkouts
+                .poll(folders, std::time::Instant::now());
             let session = cx
                 .try_global::<Store>()
                 .map(|store| self.core_session_of(store, &scope))
@@ -32,10 +42,23 @@ impl SheprdWindow {
         if !unchanged {
             self.core_terminals.session = built;
         }
+        !unchanged
     }
 
     fn core_session_of(&self, store: &Store, scope: &Scope) -> Session {
-        let workspaces = store.kept_workspaces(scope).map(CoreWorkspace::from);
+        let checkouts = &self.core_terminals.checkouts;
+        let workspaces = store.kept_workspaces(scope).map(|saved| {
+            let mut workspace = CoreWorkspace::from(saved);
+            if let Some(checkout) = checkouts.get(&saved.cwd) {
+                workspace.branch = checkout.branch.as_deref();
+                workspace.worktree = Some(Worktree {
+                    key: checkout.key.clone(),
+                    label: checkout.label.clone(),
+                    linked: checkout.linked,
+                });
+            }
+            workspace
+        });
         let tabs = store.in_scope(scope).filter_map(|tab| match &tab.location {
             Some(Location::CoreTerminal {
                 panes,
@@ -57,6 +80,23 @@ impl SheprdWindow {
         Session::core(workspaces, tabs, focused, |terminal| {
             self.core_terminals.infos.get(terminal)
         })
+    }
+
+    /// The pull request and Git status lookup of each kept workspace on the
+    /// selected host that is a Git checkout on a branch, by workspace.
+    pub(crate) fn kept_checkout_inputs(&self) -> Vec<(String, crate::pull_request::Input)> {
+        let Some(core) = self.sessions(self.selected_endpoint).core else {
+            return Vec::new();
+        };
+        core.workspaces
+            .iter()
+            .filter_map(|workspace| {
+                let tree = workspace.worktree.as_ref()?;
+                let input =
+                    crate::pull_request::key_input(&tree.key, workspace.branch.as_deref()).ok()?;
+                Some((workspace.id.clone(), input))
+            })
+            .collect()
     }
 
     /// The sessions of the host at `index`: Herdr 1's, and herdr-core's

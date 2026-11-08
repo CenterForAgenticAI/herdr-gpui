@@ -122,19 +122,31 @@ impl SheprdWindow {
             } else {
                 &endpoint.live
             };
-            let (true, true, Some(host), Some(snapshot)) = (
+            let (true, true, Some(host), Some((boot, session))) = (
                 enabled,
                 endpoint.enabled && live.status.is_connected(),
                 checkpoint::host_for(&endpoint.connection.target, live.local_daemon_peer),
-                live.latest_snapshot(),
+                live.latest_session(),
             ) else {
                 continue;
             };
-            self.checkpoints.observe(&endpoint.id, &host, snapshot);
-            watched.push(endpoint.id.as_str());
+            self.checkpoints
+                .observe(&endpoint.id, &host, boot, &session);
+            watched.push(endpoint.id.clone());
+        }
+        // Herdr 2's agents on this computer, watched as an endpoint of their
+        // own so a turn is told apart from Herdr 1's.
+        if let (true, Some(host), Some(session)) = (
+            enabled,
+            checkpoint::host_for(&sheprd_client::ConnectTarget::Local, true),
+            self.sessions(self.selected_endpoint).core,
+        ) {
+            let watch = format!("{}/herdr-2", self.endpoints[self.selected_endpoint].id);
+            self.checkpoints.observe(&watch, &host, "herdr-2", &session);
+            watched.push(watch);
         }
         self.checkpoints
-            .retain_endpoints(|endpoint| watched.contains(&endpoint));
+            .retain_endpoints(|endpoint| watched.iter().any(|watched| watched == endpoint));
         let (changed, restored) = self.checkpoints.poll();
         for restored in restored {
             let flash = match restored.result {

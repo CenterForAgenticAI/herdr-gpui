@@ -626,7 +626,7 @@ impl SheprdWindow {
             return vec![];
         };
         if target.keeper == sheprd_session::Keeper::App {
-            return kept::items();
+            return kept::items(self.note_checkout().is_some());
         }
         let mut items = vec![if target.muted {
             (WorkspaceMenuAction::Unmute, Label::UNMUTE)

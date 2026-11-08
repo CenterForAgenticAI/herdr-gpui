@@ -781,11 +781,11 @@ impl SheprdWindow {
             .then(|| self.render_tab_strip(slot, ends, window, cx));
         let strip_side = strip.is_some().then(|| self.strip_side());
         let bottom = self.tab_bar_position() == TabBarPosition::Bottom;
-        let linked = self
-            .live
-            .snapshot
-            .as_deref()
-            .is_some_and(crate::worktree_identity::focused_is_linked);
+        let front = self.browser_key().map(|(_, workspace)| workspace);
+        let linked = crate::worktree_identity::front_is_linked(
+            &self.sessions(self.selected_endpoint),
+            front.as_deref(),
+        );
         let rule = self.config.worktrees.rule(linked, &self.theme);
         let rule = rule.map(|rule| rule.debug_selector(move || slot.selector("worktree-rule")));
         let strip = crate::worktree_identity::place_rule(strip, rule, bottom);

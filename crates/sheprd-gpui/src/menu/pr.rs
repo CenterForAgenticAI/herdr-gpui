@@ -40,7 +40,11 @@ impl SheprdWindow {
         };
         match &endpoint.connection.target {
             sheprd_client::ConnectTarget::Ssh { target, .. } => Some(Origin::Ssh(target.clone())),
-            _ if index == 0 && live.local_daemon_peer => Some(Origin::Local),
+            // With no Herdr 1 installed, the window's workspaces are the
+            // app's own, in this computer's folders.
+            _ if index == 0 && (live.local_daemon_peer || live.missing_installation) => {
+                Some(Origin::Local)
+            }
             _ => None,
         }
     }
@@ -183,9 +187,11 @@ impl SheprdWindow {
             }
             return changed;
         }
-        let origin = self
-            .pr_origin()
-            .filter(|_| self.live.status.is_connected() && self.live.snapshot.is_some());
+        let kept = self.kept_checkout_inputs();
+        let origin = self.pr_origin().filter(|origin| {
+            (self.live.status.is_connected() && self.live.snapshot.is_some())
+                || (*origin == Origin::Local && !kept.is_empty())
+        });
         if let Some(origin) = origin {
             self.sync_pr_scope();
             self.menu.pr_cache.idle = !self.active;
@@ -200,10 +206,11 @@ impl SheprdWindow {
                 {
                     self.menu.pr_snapshot = Some(Arc::downgrade(snapshot));
                     self.menu.pr_cache.retain(|input| {
-                        snapshot.workspaces.iter().any(|workspace| {
-                            workspace_input(workspace, &origin)
-                                .is_ok_and(|candidate| &candidate == input)
-                        })
+                        kept.iter().any(|(_, kept)| kept == input)
+                            || snapshot.workspaces.iter().any(|workspace| {
+                                workspace_input(workspace, &origin)
+                                    .is_ok_and(|candidate| &candidate == input)
+                            })
                     });
                 }
                 if self.menu.pr_cache.scan_due(now) {
@@ -224,8 +231,13 @@ impl SheprdWindow {
                     }
                     let inputs =
                         workspace_pr_inputs(snapshot, &origin, priority, self.menu.pr_cache.cursor);
-                    self.menu.pr_cache.schedule(inputs, now);
+                    let kept = kept.iter().map(|(_, input)| input.clone());
+                    self.menu.pr_cache.schedule(inputs.chain(kept), now);
                 }
+            } else if self.menu.pr_cache.scan_due(now) {
+                // Only the workspaces the app keeps for Herdr 2.
+                let kept = kept.into_iter().map(|(_, input)| input);
+                self.menu.pr_cache.schedule(kept, now);
             }
             changed |= self.menu.pr_cache.poll(now);
         } else {

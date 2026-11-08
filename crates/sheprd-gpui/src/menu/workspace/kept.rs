@@ -5,11 +5,13 @@
 use super::{Label, Page, Source, WorkspaceAction, WorkspaceMenuAction, WorkspaceTarget};
 use crate::SheprdWindow;
 use gpui::{prelude::*, *};
+use sheprd_client::protocol::ClientShellWorktree;
 use sheprd_session::Keeper;
 
-/// The rows a kept workspace's menu shows.
-pub(super) fn items() -> Vec<(WorkspaceMenuAction, Label)> {
-    vec![
+/// The rows a kept workspace's menu shows: a note too once Git says which
+/// checkout and branch its folder is.
+pub(super) fn items(checkout: bool) -> Vec<(WorkspaceMenuAction, Label)> {
+    let mut items = vec![
         (
             WorkspaceMenuAction::Dialog(WorkspaceAction::Rename),
             Label::RENAME,
@@ -18,7 +20,14 @@ pub(super) fn items() -> Vec<(WorkspaceMenuAction, Label)> {
             WorkspaceMenuAction::Dialog(WorkspaceAction::Close),
             Label::CLOSE,
         ),
-    ]
+    ];
+    if checkout {
+        items.push((
+            WorkspaceMenuAction::Dialog(WorkspaceAction::Note),
+            Label::NOTE,
+        ));
+    }
+    items
 }
 
 impl WorkspaceTarget {
@@ -28,7 +37,11 @@ impl WorkspaceTarget {
             boot_id: String::new(),
             id: workspace.id.clone(),
             label: workspace.label.clone(),
-            worktree: None,
+            worktree: workspace.worktree.as_ref().map(|tree| ClientShellWorktree {
+                key: tree.key.clone(),
+                label: tree.label.clone(),
+                is_linked_worktree: tree.linked,
+            }),
             close_members: vec![workspace.id.clone()],
             heads_group: false,
             branch: workspace.branch.clone(),

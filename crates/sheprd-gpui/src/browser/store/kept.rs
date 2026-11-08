@@ -60,6 +60,7 @@ impl Store {
     fn keep_as(&mut self, scope: &Scope, id: &str, label: &str, cwd: &str) -> bool {
         let workspace = SavedWorkspace {
             cwd: cwd.to_owned(),
+            custom: false,
             id: id.to_owned(),
             label: clean_label(label),
             scope: scope.as_str().to_owned(),
@@ -85,10 +86,11 @@ impl Store {
         else {
             return false;
         };
-        if label.is_empty() || workspace.label == label {
+        if label.is_empty() || (workspace.custom && workspace.label == label) {
             return false;
         }
         workspace.label = label;
+        workspace.custom = true;
         self.save();
         true
     }

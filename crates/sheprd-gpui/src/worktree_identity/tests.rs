@@ -150,13 +150,18 @@ fn only_linked_worktrees_are_marked() {
 
 #[test]
 fn the_focused_workspace_decides_the_terminal_rule() {
-    let mut snapshot = crate::sidebar::layout_tests::snapshot(6);
-    for (focused, linked) in [("w0", false), ("w3", false), ("w4", true), ("w5", true)] {
-        snapshot.focused_workspace_id = Some(focused.into());
-        assert_eq!(focused_is_linked(&snapshot), linked, "{focused}");
+    let snapshot = crate::sidebar::layout_tests::snapshot(6);
+    let sessions = crate::session_model::Sessions {
+        herdr_1: Some(std::sync::Arc::new(crate::session_model::of_snapshot(
+            &snapshot,
+        ))),
+        ..Default::default()
+    };
+    for (front, linked) in [("w0", false), ("w3", false), ("w4", true), ("w5", true)] {
+        assert_eq!(front_is_linked(&sessions, Some(front)), linked, "{front}");
     }
-    snapshot.focused_workspace_id = None;
-    assert!(!focused_is_linked(&snapshot));
+    assert!(!front_is_linked(&sessions, None));
+    assert!(!front_is_linked(&sessions, Some("gone")));
 }
 
 fn degrees_apart(first: u32, second: u32) -> f32 {

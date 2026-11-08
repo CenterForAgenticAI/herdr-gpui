@@ -56,6 +56,9 @@ fn a_host_lists_herdr_1_then_core_workspaces() {
     let herdr_1 = Arc::new(of_snapshot(&snapshot(2)));
     let core = Arc::new(Session::core(
         [CoreWorkspace {
+            branch: None,
+            custom_label: false,
+            worktree: None,
             cwd: "",
             id: "herdr-2",
             label: "Herdr 2",

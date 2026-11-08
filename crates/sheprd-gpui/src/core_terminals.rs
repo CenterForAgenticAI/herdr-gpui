@@ -11,6 +11,7 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod checkouts;
 mod commands;
 mod error;
 mod fallback;
@@ -117,6 +118,8 @@ impl TabPanes {
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// The Git checkout of each kept workspace's folder.
+    checkouts: checkouts::Checkouts,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view
@@ -381,7 +384,9 @@ impl SheprdWindow {
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
-        self.refresh_core_session(cx);
+        if self.refresh_core_session(cx) {
+            cx.notify();
+        }
         self.reveal_kept_workspace(window, cx);
         // A zoom in motion draws a frame each tick until it lands.
         let now = crate::motion::now();
