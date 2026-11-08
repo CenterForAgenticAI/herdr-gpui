@@ -1,0 +1,98 @@
+use super::*;
+
+fn argv(items: &[&str]) -> Vec<String> {
+    items.iter().map(|item| (*item).to_owned()).collect()
+}
+
+#[test]
+fn every_kind_is_found_by_its_own_name() {
+    for kind in AgentKind::ALL {
+        assert_eq!(AgentKind::lookup(kind.name()), Some(kind), "{kind:?}");
+        assert_eq!(AgentKind::lookup(kind.binary()), Some(kind), "{kind:?}");
+    }
+}
+
+#[test]
+fn reported_apps_use_their_long_names() {
+    for (app, kind) in [
+        ("claude-code", AgentKind::Claude),
+        ("Claude-Code", AgentKind::Claude),
+        ("github-copilot", AgentKind::Copilot),
+        ("cursor-agent", AgentKind::Cursor),
+        ("antigravity", AgentKind::Antigravity),
+    ] {
+        assert_eq!(
+            AgentKind::identify(Some(app), "sh", &[]),
+            Some(kind),
+            "{app}"
+        );
+    }
+}
+
+#[test]
+fn the_report_wins_over_the_process() {
+    assert_eq!(
+        AgentKind::identify(Some("codex"), "claude", &argv(&["claude"])),
+        Some(AgentKind::Codex)
+    );
+}
+
+#[test]
+fn an_unknown_report_falls_back_to_the_process() {
+    assert_eq!(
+        AgentKind::identify(Some("my-tool"), "claude", &argv(&["/opt/bin/claude", "-c"])),
+        Some(AgentKind::Claude)
+    );
+}
+
+#[test]
+fn programs_are_named_without_folder_or_extension() {
+    for (name, program) in [
+        ("cursor-agent", "/usr/local/bin/cursor-agent"),
+        ("codex.exe", r"C:\tools\codex.exe"),
+        ("copilot", "copilot.cmd"),
+        ("-claude", "-claude"),
+    ] {
+        assert!(
+            AgentKind::identify(None, name, &argv(&[program])).is_some(),
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn a_runtime_is_looked_past_to_its_script() {
+    assert_eq!(
+        AgentKind::identify(
+            None,
+            "node",
+            &argv(&["node", "--no-warnings", "/a/bin/codex"])
+        ),
+        Some(AgentKind::Codex)
+    );
+    assert_eq!(
+        AgentKind::identify(None, "bun", &argv(&["bun", "/a/opencode.js"])),
+        Some(AgentKind::Opencode)
+    );
+    assert_eq!(
+        AgentKind::identify(None, "node", &argv(&["node", "server.js"])),
+        None
+    );
+}
+
+#[test]
+fn shells_and_other_programs_are_not_agents() {
+    for program in ["zsh", "-bash", "vim", "python3", "cargo", "node"] {
+        assert_eq!(
+            AgentKind::identify(None, program, &argv(&[program])),
+            None,
+            "{program}"
+        );
+    }
+    // A shell running a script named like an agent is still the shell.
+    assert_eq!(
+        AgentKind::identify(None, "sh", &argv(&["sh", "-c", "claude"])),
+        None
+    );
+    assert_eq!(AgentKind::identify(None, "", &[]), None);
+}

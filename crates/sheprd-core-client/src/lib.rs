@@ -2,6 +2,7 @@
 // Tests start real processes; production code builds them with `new_command`.
 #![cfg_attr(test, allow(clippy::disallowed_methods))]
 
+mod agent;
 mod backend;
 mod connection;
 mod endpoint;
@@ -18,6 +19,7 @@ pub mod wire;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;
 
+pub use agent::agent_kind;
 pub use backend::{CoreBackend, CoreChanges, CoreTerminal};
 pub use connection::Core;
 pub use endpoint::Endpoint;

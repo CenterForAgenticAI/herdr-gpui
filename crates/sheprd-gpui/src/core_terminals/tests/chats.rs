@@ -18,9 +18,11 @@ fn info(name: &str) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: None,
+        foreground: None,
         id: id(name),
         labels: Default::default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }

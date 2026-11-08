@@ -93,13 +93,28 @@ impl fmt::Display for TerminalId {
 pub struct TerminalInfo {
     pub agent: AgentStatus,
     pub cwd: Option<PathBuf>,
+    /// What runs in front now, as the backend's host sees it; none once it
+    /// has finished or when the backend does not say.
+    pub foreground: Option<Process>,
     pub id: TerminalId,
     /// Names and values the client that started it attached, which every
     /// client sees, such as the chat endpoint a `herdr-acp` listens on.
     pub labels: BTreeMap<String, String>,
     pub name: Option<String>,
+    /// The name the program gives itself in its status reports (OSC 7501's
+    /// `app`, such as `claude-code`), in its own words: untrusted text.
+    pub reporter: Option<String>,
     pub state: RunState,
     pub title: Option<String>,
+}
+
+/// A process the backend's host runs for a terminal.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Process {
+    pub argv: Vec<String>,
+    /// Its name as the OS has it, such as `node` or `claude`.
+    pub name: String,
+    pub pid: u32,
 }
 
 /// Whether a terminal's program still runs.

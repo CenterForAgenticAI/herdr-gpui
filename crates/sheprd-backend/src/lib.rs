@@ -15,8 +15,8 @@ pub use sheprd_protocol::{
     ClientMousePosition, ClientPaneInputEvent, CursorState, FrameData, PaneSurfacePatchRow,
 };
 pub use terminal::{
-    Change, Exit, KeyReporting, MAX_CELLS, MAX_SIDE, MAX_TERMINAL_ID, Role, RunState, Size, Spawn,
-    SurfaceUpdate, TerminalId, TerminalInfo,
+    Change, Exit, KeyReporting, MAX_CELLS, MAX_SIDE, MAX_TERMINAL_ID, Process, Role, RunState,
+    Size, Spawn, SurfaceUpdate, TerminalId, TerminalInfo,
 };
 
 /// Which Herdr runs a host's terminals.

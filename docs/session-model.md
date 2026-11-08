@@ -12,7 +12,7 @@ on Herdr 1's snapshot and a new backend costs an adapter rather than a rewrite.
 | Terminals (`sheprd-backend`) | Not implemented; `sheprd-client` talks to the daemon | `CoreBackend` |
 | Tab and pane layout | The daemon's snapshot | `sheprd_session::panes`, saved with the tab |
 | Workspaces | The daemon's snapshot | One per window (`core_terminals::WORKSPACE`), only with no Herdr 1 installed |
-| Agents | The daemon's snapshot | `TerminalInfo::agent`, per terminal |
+| Agents | The daemon's snapshot | `TerminalInfo::agent`, per terminal; which agent by `sheprd_core_client::agent_kind` |
 | Commands | 43 `sheprd_client::Method` variants | Handled per feature in `core_terminals` |
 
 `sheprd-session` holds what is already shared: the pane tree and the reader of
