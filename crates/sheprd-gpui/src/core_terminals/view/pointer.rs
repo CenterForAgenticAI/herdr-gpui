@@ -81,6 +81,8 @@ impl CoreTerminalView {
             if let Some(pressed) = button(event.button) {
                 self.press = Some(Press::Reported(pressed));
                 self.report(ClientMouseKind::Down(pressed), cell, event.modifiers, 1);
+                // The program took the click, so the pane's menu stays shut.
+                cx.stop_propagation();
             }
             return;
         }

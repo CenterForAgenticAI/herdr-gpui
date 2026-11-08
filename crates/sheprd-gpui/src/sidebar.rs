@@ -61,6 +61,7 @@ pub(crate) use metrics::LABEL_WIDTH;
 pub(crate) use view::cached as cached_view;
 
 use agents::agents_sort;
+pub(crate) use agents::status_priority;
 use metrics::*;
 use row::{RowBadge, first_text};
 use workspaces::visible_workspace_entries;

@@ -25,6 +25,11 @@ pub(super) struct Scripted {
 }
 
 impl Scripted {
+    /// Queues one batch of updates for the terminal to hand out.
+    pub(super) fn push(&self, batch: Vec<SurfaceUpdate>) {
+        self.updates.lock().unwrap().push(batch);
+    }
+
     /// A backend whose terminals never attach.
     pub(super) fn failing_attach() -> Self {
         Self {

@@ -68,12 +68,12 @@ fn a_waiting_editor_tab_keeps_its_name_and_a_blank_tab_is_new() {
 
 #[test]
 fn a_terminal_tab_shows_its_programs_title_and_otherwise_terminal() {
-    let terminal = Location::CoreTerminal {
-        panes: crate::core_terminals::panes::Panes::single(
+    let terminal = Location::core_terminal(
+        crate::core_terminals::panes::Panes::single(
             sheprd_backend::TerminalId::try_from("t1".to_owned()).unwrap(),
         ),
-        observe: false,
-    };
+        false,
+    );
     let mut store = Store::default();
     let id = store
         .open(Scope::endpoint("local"), "w", Some(terminal), None)

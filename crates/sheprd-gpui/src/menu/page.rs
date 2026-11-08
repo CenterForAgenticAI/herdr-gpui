@@ -36,6 +36,8 @@ pub(crate) enum Page {
     /// Go to Symbol and Go to File over the focused pane's checkout.
     CodeSearch,
     ConfirmClose,
+    /// A herdr-core tab's or pane's right-click menu.
+    CoreMenu,
     /// Confirming new cloud machines a command asked for should be made.
     #[cfg(feature = "cloud")]
     CreateCloud,
@@ -100,6 +102,8 @@ pub(crate) enum Page {
     RemoveDevice,
     /// Confirming a saved WSL distribution should be forgotten.
     RemoveWsl,
+    /// Naming a herdr-core tab or pane from its menu.
+    RenameCore,
     RenameDevice,
     RenamePane,
     RenameTab,
@@ -118,6 +122,16 @@ pub(crate) enum Page {
     /// Asks whether to trust a repository's worktree script before it runs.
     WorktreeScript,
     // keep-sorted end
+}
+
+impl Page {
+    /// A tab's menu or rename dialog, Herdr's or a Herdr 2 tab's or pane's.
+    pub(crate) fn is_tab_menu(self) -> bool {
+        matches!(
+            self,
+            Self::Tab | Self::RenameTab | Self::CoreMenu | Self::RenameCore
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

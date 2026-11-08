@@ -35,6 +35,10 @@ pub(crate) struct Look {
     pub(crate) padding: Padding,
 }
 
+/// How much of the background covers a stale frame, as Herdr 1's
+/// reconnecting overlay dims its last picture.
+const STALE_DIM: f32 = 0.63;
+
 /// The least room a split's cells keep from their pane's edges, across
 /// and down.
 const PANE_PADDING: (f32, f32) = (6., 3.);
@@ -52,6 +56,9 @@ pub(crate) struct PaneLook {
 pub(crate) struct CoreTerminalView {
     /// Where the cells were last painted, for the IME's candidate window.
     bounds: Option<Bounds<Pixels>>,
+    /// Something typed while the connection was away, for the window to
+    /// say it was not sent.
+    dropped: std::cell::Cell<bool>,
     focus: FocusHandle,
     /// Releases for keys pressed while the program asked for them.
     held_keys: HeldKeys,
@@ -77,11 +84,19 @@ pub(crate) struct CoreTerminalView {
     screen: Screen,
     sent_focus: Option<bool>,
     sent_size: Option<Size>,
+    /// The connection to herdr-core dropped: the last frame stays, dimmed,
+    /// and nothing typed is sent until the terminal is attached again.
+    stale: bool,
     /// Wheel motion short of a whole row, kept for the next event.
     wheel_rest: f32,
 }
 
 impl CoreTerminalView {
+    /// The terminal it shows.
+    pub(crate) fn terminal(&self) -> &TerminalId {
+        &self.id
+    }
+
     pub(crate) fn new(
         id: TerminalId,
         link: Link,
@@ -92,6 +107,7 @@ impl CoreTerminalView {
     ) -> Self {
         Self {
             bounds: None,
+            dropped: std::cell::Cell::new(false),
             focus: cx.focus_handle(),
             held_keys: HeldKeys::default(),
             hovered: None,
@@ -108,8 +124,42 @@ impl CoreTerminalView {
             screen: Screen::default(),
             sent_focus: None,
             sent_size: None,
+            stale: false,
             wheel_rest: 0.,
         }
+    }
+
+    /// Keeps the last frame, dimmed, while the connection is away.
+    pub(crate) fn set_stale(&mut self, cx: &mut Context<Self>) {
+        self.stale = true;
+        cx.notify();
+    }
+
+    pub(crate) fn is_stale(&self) -> bool {
+        self.stale
+    }
+
+    /// Attaches the terminal again through `link` after a dropped
+    /// connection. The old frame shows until the new link draws one, and the
+    /// terminal is told its size and focus again.
+    pub(crate) fn relink(&mut self, link: Link, cx: &mut Context<Self>) {
+        self.link = link;
+        self.stale = false;
+        self.screen.failure = None;
+        self.sent_focus = None;
+        self.sent_size = None;
+        cx.notify();
+    }
+
+    /// Whether something was typed while the connection was away, since
+    /// the last ask.
+    pub(crate) fn take_dropped(&self) -> bool {
+        self.dropped.take()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_frame(&self) -> bool {
+        self.screen.frame.is_some()
     }
 
     pub(crate) fn title(&self) -> Option<&str> {
@@ -167,9 +217,13 @@ impl CoreTerminalView {
 
     /// Takes what the worker produced; true when there was something.
     pub(crate) fn poll(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(screen) = self.link.mailbox.take() else {
+        let Some(mut screen) = self.link.mailbox.take() else {
             return false;
         };
+        // Attached again, the last frame stays until a new one comes.
+        if screen.frame.is_none() {
+            screen.frame = self.screen.frame.take();
+        }
         self.screen = screen;
         cx.notify();
         true
@@ -181,6 +235,13 @@ impl CoreTerminalView {
     }
 
     fn send(&self, input: ClientPaneInputEvent) {
+        if self.stale {
+            // The pointer moving is not typing; only what was typed is told.
+            if !matches!(input, ClientPaneInputEvent::Mouse { .. }) {
+                self.dropped.set(true);
+            }
+            return;
+        }
         self.link.send(Command::Input(input));
     }
 
@@ -196,7 +257,7 @@ impl CoreTerminalView {
         let Ok(size) = Size::new(fits.cols, fits.rows) else {
             return;
         };
-        if self.sent_size != Some(size) {
+        if self.sent_size != Some(size) && !self.stale {
             self.sent_size = Some(size);
             self.link.send(Command::Resize(size));
         }
@@ -273,13 +334,16 @@ impl CoreTerminalView {
 
     fn report_focus(&mut self, window: &Window) {
         let focused = self.focus.is_focused(window);
-        if self.sent_focus != Some(focused) {
+        if self.sent_focus != Some(focused) && !self.stale {
             self.sent_focus = Some(focused);
             self.link.send(Command::Focus(focused));
         }
     }
 
     fn status(&self) -> Option<String> {
+        if self.stale {
+            return Some(fl!("core-terminals-reconnecting"));
+        }
         if let Some(failure) = &self.screen.failure {
             return Some(failure.clone());
         }
@@ -348,6 +412,9 @@ impl Render for CoreTerminalView {
                 )
                 .size_full(),
             )
+            .when(self.stale, |body| {
+                body.child(div().absolute().inset_0().bg(background.opacity(STALE_DIM)))
+            })
             .when_some(pane.and_then(|pane| pane.veil), |body, veil| {
                 body.child(
                     div()

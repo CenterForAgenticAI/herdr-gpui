@@ -2,7 +2,7 @@
 //! belongs to. Herdr has no browser panes, so these live only in this client;
 //! every window shows the same tabs for a workspace, each with its own page.
 use super::{Editor, Location, WebUrl, zoom::Zoom};
-use crate::i18n::fl;
+use crate::{core_terminals::Host, i18n::fl};
 use crate::{reorder::Beside, state_file};
 use gpui::{App, Global};
 use serde::{Deserialize, Serialize};
@@ -205,9 +205,15 @@ pub(crate) struct Store {
     pub(super) closed: super::closed::ClosedTabs,
     writer: Option<state_file::Writer<Saved>>,
     quitting: bool,
+    /// herdr-core terminals of closed tabs and the core each runs in, for a
+    /// window connected to that core to end.
+    ending: Vec<Ending>,
 }
 
 impl Global for Store {}
+
+/// A herdr-core terminal to end, and the core it runs in.
+pub(crate) type Ending = (Host, sheprd_backend::TerminalId);
 
 /// Page titles are untrusted: one line, bounded, and free of control and
 /// bidirectional formatting characters that could disguise a tab.
@@ -272,6 +278,7 @@ impl Store {
             closed: Default::default(),
             writer,
             quitting: false,
+            ending: Vec::new(),
         }
     }
 
@@ -329,6 +336,11 @@ impl Store {
         self.tabs
             .iter()
             .filter(move |tab| &tab.scope == scope && tab.workspace_id == workspace_id)
+    }
+
+    /// Every tab of one host, in the order they were opened.
+    pub(crate) fn in_scope<'a>(&'a self, scope: &'a Scope) -> impl Iterator<Item = &'a Tab> + 'a {
+        self.tabs.iter().filter(move |tab| &tab.scope == scope)
     }
 
     /// The workspace's VS Code tab, if it has one.
@@ -476,10 +488,68 @@ impl Store {
         true
     }
 
+    /// Closes a tab. A herdr-core tab's terminals end with it, as a Herdr
+    /// tab's panes do, so it cannot be reopened; a mirror only stops
+    /// watching.
     pub(crate) fn close(&mut self, id: TabId) -> Option<Tab> {
         let tab = self.detach(id)?;
-        self.closed.push_page(tab.clone());
+        match &tab.location {
+            Some(Location::CoreTerminal { .. }) => self.ending.extend(Self::driven_terminals(&tab)),
+            _ => self.closed.push_page(tab.clone()),
+        }
         Some(tab)
+    }
+
+    /// The herdr-core terminals `tab` types into; none for a mirror or a
+    /// page.
+    fn driven_terminals(tab: &Tab) -> Vec<Ending> {
+        match &tab.location {
+            Some(Location::CoreTerminal {
+                panes,
+                observe: false,
+                ..
+            }) => {
+                let host = Host::of(&tab.scope);
+                panes
+                    .terminals()
+                    .into_iter()
+                    .map(|terminal| (host.clone(), terminal.clone()))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Takes the terminals closed tabs left to end, each once, but those
+    /// another tab of the same core still types into, as one a pane moved
+    /// to.
+    pub(crate) fn take_ending(&mut self) -> Vec<Ending> {
+        let mut ending: Vec<Ending> = Vec::new();
+        for queued in std::mem::take(&mut self.ending) {
+            let (host, terminal) = &queued;
+            let held = self.tabs.iter().any(|tab| {
+                matches!(
+                    &tab.location,
+                    Some(Location::CoreTerminal { panes, observe: false, .. })
+                        if panes.contains(terminal) && Host::of(&tab.scope) == *host
+                )
+            });
+            if !held && !ending.contains(&queued) {
+                ending.push(queued);
+            }
+        }
+        ending
+    }
+
+    /// Queues `terminals` of a tab already closed to end, as a layout split
+    /// after its last save still holds.
+    pub(crate) fn end_terminals(&mut self, terminals: impl IntoIterator<Item = Ending>) {
+        self.ending.extend(terminals);
+    }
+
+    /// Whether closed tabs left terminals to end.
+    pub(crate) fn has_ending(&self) -> bool {
+        !self.ending.is_empty()
     }
 
     /// Removes a tab without recording it as closed, as when its view moves
@@ -538,8 +608,16 @@ impl Store {
     pub(crate) fn forget_workspaces(&mut self, scope: &Scope, closed: &[String]) -> bool {
         self.closed.forget_workspaces(scope, closed);
         let before = self.tabs.len();
-        self.tabs
-            .retain(|tab| &tab.scope != scope || !closed.contains(&tab.workspace_id));
+        let gone = |tab: &Tab| &tab.scope == scope && closed.contains(&tab.workspace_id);
+        // A closed workspace's terminal tabs end with it, as its panes do.
+        let ending: Vec<_> = self
+            .tabs
+            .iter()
+            .filter(|tab| gone(tab))
+            .flat_map(Self::driven_terminals)
+            .collect();
+        self.ending.extend(ending);
+        self.tabs.retain(|tab| !gone(tab));
         let changed = self.tabs.len() != before;
         if changed {
             self.save();

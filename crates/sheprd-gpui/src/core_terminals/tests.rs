@@ -1,10 +1,16 @@
 mod accessibility;
 mod chats;
+mod close;
+mod commands;
 mod focus;
 mod keys;
+mod menus;
+mod pane_keys;
 mod paste;
 mod phone;
+mod restore;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod stale;
 mod worker;
