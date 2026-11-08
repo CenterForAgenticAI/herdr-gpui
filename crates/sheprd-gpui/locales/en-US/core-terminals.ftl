@@ -1,7 +1,9 @@
 # Terminals that herdr-core (Herdr 2) runs, drawn by the app in tabs.
 
 core-terminals-open-workspace = Open a workspace first
-core-terminals-local-only = Herdr 2 terminals run only on this computer
+# A new tab on an SSH host, cloud machine, or WSL distribution without
+# herdr-core runs in the host's Herdr instead.
+core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr
 core-terminals-too-many-tabs = Too many tabs are open
 core-terminals-connecting = Connecting to herdr-core...
 # $reason is the error, in English or from herdr-core.
@@ -20,3 +22,6 @@ core-terminals-watching = Watching
 # The sidebar's list of herdr-core panes, under the agents.
 core-terminals-sidebar = Herdr 2
 core-terminals-edit-failed = Could not open the history in an editor
+# Editing scrollback saves it on this computer, so it is refused for a pane
+# running on another machine's Herdr 2.
+core-terminals-edit-remote = Editing scrollback works only for panes on this computer
