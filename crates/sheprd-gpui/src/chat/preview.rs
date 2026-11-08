@@ -122,6 +122,7 @@ impl Options {
                 | "jump"
                 | "conversation"
                 | "existing"
+                | "loading"
                 | "input-resize"
                 | "tools"
                 | "turns"
@@ -139,7 +140,7 @@ impl Options {
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, loading, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -409,7 +410,10 @@ fn install(
         "all" | "jump" => format!("{MATH}\n{CODE}\n{DIAGRAM}\n{widget}"),
         _ => MATH.to_owned(),
     };
-    let existing = matches!(options.case.as_str(), "existing" | "input-resize");
+    let existing = matches!(
+        options.case.as_str(),
+        "existing" | "input-resize" | "loading"
+    );
     let mut transcript = Transcript {
         agent: "Codex".into(), // i18n: data
         status: if options.working {
@@ -522,6 +526,13 @@ fn install(
         },
         transcript,
     )?;
+    if options.case == "loading"
+        && let Some(pane) = view.chats.pane_mut(PANE)
+    {
+        // A first snapshot still pending, with no agent or observer socket.
+        pane.session = Default::default();
+        pane.prepared = Default::default();
+    }
     if options.case == "selection"
         && let Some(pane) = view.chats.pane_mut(PANE)
     {
