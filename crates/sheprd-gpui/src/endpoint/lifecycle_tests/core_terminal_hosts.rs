@@ -201,14 +201,37 @@ fn an_edited_or_removed_device_drops_its_core_hub(cx: &mut gpui::TestAppContext)
             );
             view.poll_core_terminals(window, cx);
             assert!(view.core_terminals.hub_of(&host).is_some());
+            // A terminal the old machine started is still on its way.
+            view.core_terminals.start_for_test(
+                crate::core_terminals::Purpose::Tab {
+                    scope: scope(),
+                    workspace: "w1".into(),
+                },
+                host.clone(),
+                Ok(sheprd_backend::TerminalInfo {
+                    agent: AgentStatus::Unknown,
+                    cwd: None,
+                    id: sheprd_backend::TerminalId::new("t1").unwrap(),
+                    labels: Default::default(),
+                    name: None,
+                    state: sheprd_backend::RunState::Running,
+                    title: None,
+                }),
+            );
             // The device now reaches another machine: the hub that dials
-            // the old one goes, and the next ask makes one for the new one.
+            // the old one goes, with the terminal it was starting, and the
+            // next ask makes one for the new one.
             view.endpoints[1].connection.target = ConnectTarget::Ssh {
                 target: "elsewhere".into(),
                 session: "default".into(),
             };
             view.poll_core_terminals(window, cx);
             assert!(view.core_terminals.hub_of(&host).is_none());
+            assert!(!view.core_terminals.is_starting());
+            let placed = cx
+                .try_global::<crate::browser::Store>()
+                .is_some_and(|store| store.in_workspace(&scope(), "w1").next().is_some());
+            assert!(!placed);
             view.core_terminals.set_remote_hub_for_test(
                 scope(),
                 ssh(),
