@@ -67,6 +67,12 @@ impl CoreTerminalView {
         self.copy_mode.is_some()
     }
 
+    /// The cells copy mode has marked with `v` or `V`, if any.
+    pub(super) fn copy_mode_marked(&self) -> Option<TextRange> {
+        let pane = self.surface_pane()?;
+        self.copy_mode.as_ref()?.mode.marked(&pane)
+    }
+
     /// Whether copy mode is on with no motion or search waiting on its
     /// answer.
     #[cfg(test)]

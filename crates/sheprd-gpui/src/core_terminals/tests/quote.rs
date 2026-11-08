@@ -157,3 +157,30 @@ fn a_quote_whose_rows_moved_while_it_was_read_fails(cx: &mut gpui::TestAppContex
     });
     assert!(matches!(quote, Err(crate::core_terminals::Error::Moved)));
 }
+
+#[gpui::test]
+fn copy_modes_marked_cells_are_quoted(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    cx.run_until_parked();
+    let bounds = cx.update(|_, cx| view.read(cx).bounds()).unwrap();
+    cx.update(|window, cx| view.update(cx, |view, cx| view.enter_copy_mode(window, cx)));
+    // A cursor alone marks nothing.
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(!view.quote_selection())));
+    // From the start of the last row, history row 9, three cells.
+    cx.simulate_keystrokes("v l l");
+    cx.update(|_, cx| {
+        view.update(cx, |view, _| {
+            let anchor = view.selection_anchor().unwrap();
+            assert_eq!(anchor.origin, bounds.origin + at(px(0.), px(34.)));
+            assert_eq!(anchor.size.width, px(8.5 * 3.));
+            assert!(view.quote_selection());
+        })
+    });
+    assert_eq!(
+        requests(&backend, 1),
+        vec![History::Read {
+            anchor: point(9, 0),
+            cursor: point(9, 2),
+        }]
+    );
+}

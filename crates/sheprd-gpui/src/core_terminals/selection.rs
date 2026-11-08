@@ -84,6 +84,15 @@ impl Selection {
         }
     }
 
+    /// The cells of `range`, as copy mode marks them.
+    pub(crate) fn of(range: TextRange) -> Self {
+        Self {
+            anchor: range.start,
+            head: range.end,
+            picked: true,
+        }
+    }
+
     pub(crate) fn extend(&mut self, to: TextPoint) {
         self.head = to;
     }
