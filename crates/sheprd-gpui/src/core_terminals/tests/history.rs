@@ -97,6 +97,7 @@ fn find_searches_the_views_history_and_shows_its_match(cx: &mut TestAppContext) 
             total: 1,
             current: Some(0),
             current_global: Some(0),
+            revision: 4,
         }));
     cx.update(|window, cx| view.update(cx, |view, cx| view.open_find(window, cx)));
     cx.run_until_parked();

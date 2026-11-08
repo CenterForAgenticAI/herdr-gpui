@@ -53,7 +53,10 @@ impl Emulator {
             return Err(Error::QueryTooLarge);
         }
         if search.query.is_empty() {
-            return Ok(Matches::default());
+            return Ok(Matches {
+                revision: self.revision,
+                ..Matches::default()
+            });
         }
         let mut regex = RegexSearch::new(&escape(&search.query)).map_err(Error::Search)?;
         let origin = match (search.direction, search.previous) {
@@ -75,7 +78,10 @@ impl Emulator {
             total += 1;
         }
         let Some(last) = total.checked_sub(1) else {
-            return Ok(Matches::default());
+            return Ok(Matches {
+                revision: self.revision,
+                ..Matches::default()
+            });
         };
         // Nothing past the origin: the search wraps around.
         let current = current.unwrap_or(match search.direction {
@@ -97,6 +103,7 @@ impl Emulator {
             total,
             current: u32::try_from(current - first).ok(),
             current_global: Some(current),
+            revision: self.revision,
         })
     }
 

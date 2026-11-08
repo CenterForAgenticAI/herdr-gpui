@@ -106,6 +106,24 @@ impl CoreTerminal {
         self.role == Role::Active
     }
 
+    /// The view's place in its history and what changed on screen, when
+    /// either changed since the view was last told.
+    fn push_view(&mut self, updates: &mut Vec<SurfaceUpdate>) {
+        let scroll = (self.emulator.scroll_metrics(), self.emulator.revision());
+        if self.scroll != Some(scroll) {
+            self.scroll = Some(scroll);
+            updates.push(SurfaceUpdate::Scroll {
+                metrics: scroll.0,
+                revision: scroll.1,
+            });
+        }
+        match self.emulator.take_damage() {
+            Damage::Full(frame) => updates.push(SurfaceUpdate::Frame(frame)),
+            damage if damage.is_empty() => {}
+            Damage::Rows { rows, cursor } => updates.push(SurfaceUpdate::Rows { cursor, rows }),
+        }
+    }
+
     fn release_stale_sync(&mut self) {
         if !self.emulator.sync_pending() {
             self.sync_since = None;
@@ -170,7 +188,13 @@ impl sheprd_backend::Terminal for CoreTerminal {
     fn next(&mut self, timeout: Duration) -> Result<Vec<SurfaceUpdate>> {
         match &self.end {
             Some(End::Lost) => return Err(Error::Lost),
-            Some(End::Closed(_)) => return Ok(Vec::new()),
+            // The program is gone but its history stays: what a history
+            // request changed (a scroll, a clear) is still shown.
+            Some(End::Closed(_)) => {
+                let mut updates = Vec::new();
+                self.push_view(&mut updates);
+                return Ok(updates);
+            }
             None => {}
         }
         // A held update is released on time even when no bytes follow it.
@@ -207,19 +231,7 @@ impl sheprd_backend::Terminal for CoreTerminal {
             self.reporting = Some(reporting);
             updates.push(SurfaceUpdate::MouseReporting(reporting));
         }
-        let scroll = (self.emulator.scroll_metrics(), self.emulator.revision());
-        if self.scroll != Some(scroll) {
-            self.scroll = Some(scroll);
-            updates.push(SurfaceUpdate::Scroll {
-                metrics: scroll.0,
-                revision: scroll.1,
-            });
-        }
-        match self.emulator.take_damage() {
-            Damage::Full(frame) => updates.push(SurfaceUpdate::Frame(frame)),
-            damage if damage.is_empty() => {}
-            Damage::Rows { rows, cursor } => updates.push(SurfaceUpdate::Rows { cursor, rows }),
-        }
+        self.push_view(&mut updates);
         match chunk.end {
             Some(End::Closed(closed)) => {
                 updates.push(SurfaceUpdate::Ended(Exit {

@@ -7,12 +7,17 @@ use super::{CoreTerminalView, Error, Purpose, fallback::Fallback, panes::Axis};
 use crate::{SheprdWindow, controls::Command, i18n::fl, window::Flash};
 use gpui::{prelude::*, *};
 use sheprd_backend::{Spawn, TerminalId};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// A tab's pane, by its tab and terminal.
 type Pane = (crate::browser::TabId, TerminalId);
 
 impl super::CoreTerminals {
+    /// Whether `view` is on screen: a tab's pane or the stand-in shell.
+    pub(crate) fn shows(&self, view: &Entity<CoreTerminalView>) -> bool {
+        self.shown().any(|shown| shown == view)
+    }
+
     /// The view holding the keyboard, a tab's pane or the stand-in shell,
     /// even while its own find bar has it.
     pub(crate) fn focused_view(
@@ -93,10 +98,14 @@ impl SheprdWindow {
             },
         };
         let saved = cx.background_spawn(async move { save_history(&text) });
+        // A window closed meanwhile drops the file with this task.
         cx.spawn(async move |this, cx| {
             let saved = saved.await;
             let _ = this.update(cx, |this, cx| match saved {
-                Ok(path) => this.start_core_program(purpose, editor_spawn(&path)),
+                Ok(file) => {
+                    let spawn = editor_spawn(&file);
+                    this.start_core_program_with(purpose, spawn, Some(file));
+                }
                 Err(error) => this.core_edit_failed(&error, cx),
             });
         })
@@ -109,9 +118,9 @@ impl SheprdWindow {
     }
 }
 
-/// Saves `text` to a file only the user can read, kept for the editor,
-/// which removes it when it quits.
-fn save_history(text: &str) -> Result<PathBuf, Error> {
+/// Saves `text` to a file only the user can read. The file is removed when
+/// the returned path drops, until the editor's start hands it over.
+fn save_history(text: &str) -> Result<tempfile::TempPath, Error> {
     use std::io::Write as _;
     let mut file = tempfile::Builder::new()
         .prefix("sheprd-scrollback-")
@@ -119,8 +128,8 @@ fn save_history(text: &str) -> Result<PathBuf, Error> {
         .tempfile()
         .map_err(Error::EditFile)?;
     file.write_all(text.as_bytes()).map_err(Error::EditFile)?;
-    let (_, path) = file.keep().map_err(|error| Error::EditFile(error.error))?;
-    Ok(path)
+    file.flush().map_err(Error::EditFile)?;
+    Ok(file.into_temp_path())
 }
 
 /// The editor herdr-core runs on `path`: `$VISUAL`, else `$EDITOR`, else

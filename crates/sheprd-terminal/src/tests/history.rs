@@ -46,6 +46,8 @@ fn a_search_counts_every_match_and_finds_the_nearest_older_one() {
     );
     assert_eq!(found.total, 3);
     assert_eq!((found.current, found.current_global), (Some(2), Some(2)));
+    // The matches hold for the text they were found in.
+    assert_eq!(found.revision, emulator.revision());
 }
 
 #[test]

@@ -232,7 +232,7 @@ fn dropping_the_link_stops_the_worker() {
 }
 
 #[test]
-fn an_ended_terminal_keeps_its_screen_and_stops_its_worker() {
+fn an_ended_terminal_keeps_its_screen_and_history_until_its_view_goes() {
     let backend = Scripted::default();
     backend
         .updates
@@ -250,9 +250,16 @@ fn an_ended_terminal_keeps_its_screen_and_stops_its_worker() {
     .unwrap();
     let screen = until(|| link.mailbox.take());
     assert_eq!(screen.ended, Some(sheprd_backend::Exit { code: Some(0) }));
-    // The link is still held: the worker ended on its own.
-    until(|| (Arc::strong_count(&backend.received) == 1).then_some(()));
+    // The program is gone; its history still answers.
+    link.send(Command::History {
+        id: 3,
+        request: History::Text,
+    });
+    let answers = until(|| Some(link.mailbox.take_answers()).filter(|answers| !answers.is_empty()));
+    assert_eq!(answers[0].0, 3);
+    // Only the view going ends the worker.
     drop(link);
+    until(|| (Arc::strong_count(&backend.received) == 1).then_some(()));
 }
 
 mod history;

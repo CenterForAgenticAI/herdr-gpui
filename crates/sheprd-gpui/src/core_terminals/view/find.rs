@@ -12,8 +12,7 @@ use crate::{
     terminal_painter::Highlight,
 };
 use gpui::{prelude::*, *};
-use sheprd_backend::{HistoryAnswer, Matches};
-use sheprd_client::scrollback::{CopySearchResult, EndpointErrorCode};
+use sheprd_client::scrollback::ScrollbackResponse;
 use std::time::Instant;
 
 pub(super) struct Find {
@@ -141,25 +140,10 @@ impl CoreTerminalView {
         let Some(find) = &mut self.find else {
             return;
         };
-        let answer = match answer {
-            Ok(HistoryAnswer::Matches(Matches {
-                matches,
-                total,
-                current,
-                current_global,
-            })) => Ok(CopySearchResult {
-                pane_id: pane.pane_id.clone(),
-                content_revision: pane.content_revision,
-                matches,
-                total,
-                current,
-                current_global,
-            }),
+        let answer = match super::history::scrollback(&pane, answer) {
+            Ok(ScrollbackResponse::PaneCopySearch(result)) => Ok(result),
             Ok(_) => Err(sheprd_client::Error::ResponseType),
-            Err(error) => Err(sheprd_client::Error::Endpoint {
-                code: EndpointErrorCode::Other("history".into()),
-                message: error.to_string(),
-            }),
+            Err(error) => Err(error),
         };
         let reveal = find.search.answer(&id.to_string(), answer);
         if let Some(offset) = reveal.and_then(|range| reveal_offset(&pane, range)) {

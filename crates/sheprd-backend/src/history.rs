@@ -93,6 +93,8 @@ pub struct Matches {
     pub current: Option<u32>,
     /// The current match's index among all `total`, top first.
     pub current_global: Option<u64>,
+    /// The text revision searched, which the matches' points hold for.
+    pub revision: u64,
 }
 
 /// A question about, or a change to, the history an attached view keeps.

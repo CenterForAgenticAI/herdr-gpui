@@ -107,6 +107,11 @@ pub(crate) fn render(
         .text_size(px(bar.text_size))
         .shadow_md()
         .on_key_down(on_key_down)
+        // Presses anywhere on the bar stay off the terminal under it.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+        .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_scroll(|_, _, cx| cx.stop_propagation())
         .child(div().flex_1().min_w_0().child(bar.input.clone()))
         .child(

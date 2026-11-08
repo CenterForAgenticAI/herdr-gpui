@@ -6,8 +6,13 @@ use super::CoreTerminalView;
 pub(super) use crate::core_terminals::worker::Answer;
 use crate::core_terminals::{Error, worker::Command};
 use gpui::Context;
-use sheprd_backend::{History, HistoryAnswer};
-use sheprd_client::protocol::{PaneSurfacePane, PaneSurfaceScrollMetrics, SurfaceRect};
+use sheprd_backend::{History, HistoryAnswer, Matches};
+use sheprd_client::{
+    protocol::{PaneSurfacePane, PaneSurfaceScrollMetrics, SurfaceRect},
+    scrollback::{
+        CopyMotionResult, CopySearchResult, EndpointErrorCode, ScrollbackResponse, SelectionResult,
+    },
+};
 
 impl CoreTerminalView {
     /// Sends `request` to the worker; its answer comes back under the ID.
@@ -91,5 +96,48 @@ impl CoreTerminalView {
     /// The text [`Self::request_edit`] asked for, once.
     pub(crate) fn take_edit(&mut self) -> Option<Result<String, Error>> {
         self.edit_ready.take()
+    }
+}
+
+/// `answer` as Herdr 1's daemon would have given it for `pane`, so the
+/// shared find and copy mode read both generations alike. A failure keeps
+/// its message for the user; the emulator refuses nothing as stale.
+pub(super) fn scrollback(
+    pane: &PaneSurfacePane,
+    answer: Answer,
+) -> sheprd_client::Result<ScrollbackResponse> {
+    let pane_id = pane.pane_id.clone();
+    match answer {
+        Ok(HistoryAnswer::Matches(Matches {
+            matches,
+            total,
+            current,
+            current_global,
+            revision,
+        })) => Ok(ScrollbackResponse::PaneCopySearch(CopySearchResult {
+            pane_id,
+            // Doubled as the pane's is: see `CoreTerminalView::surface_pane`.
+            content_revision: revision.wrapping_mul(2),
+            matches,
+            total,
+            current,
+            current_global,
+        })),
+        Ok(HistoryAnswer::Point(cursor)) => {
+            Ok(ScrollbackResponse::PaneCopyMotion(CopyMotionResult {
+                pane_id,
+                cursor,
+                content_revision: pane.content_revision,
+            }))
+        }
+        Ok(HistoryAnswer::Text(text)) => Ok(ScrollbackResponse::PaneSelection(SelectionResult {
+            pane_id,
+            text,
+        })),
+        Ok(HistoryAnswer::Done) => Ok(ScrollbackResponse::Ok {}),
+        Err(error) => Err(sheprd_client::Error::Endpoint {
+            code: EndpointErrorCode::Other("history".into()),
+            message: error.to_string(),
+        }),
     }
 }

@@ -64,6 +64,10 @@ pub(crate) enum Purpose {
     },
 }
 
+/// A terminal to start, what for, and a file its program takes over once
+/// it starts: removed with the request if the start fails or is dropped.
+type Wanted = (Purpose, Spawn, Option<tempfile::TempPath>);
+
 /// One tab's panes as the window holds them. The tab's saved location
 /// follows, written when a change settles rather than on every drag step.
 #[derive(Debug)]
@@ -131,7 +135,7 @@ pub(crate) struct CoreTerminals {
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// A terminal to start once the hub connects: a shell, or the program
     /// its spawn names.
-    wanted: Option<(Purpose, Spawn)>,
+    wanted: Option<Wanted>,
 }
 
 impl CoreTerminals {
@@ -270,7 +274,19 @@ impl SheprdWindow {
 
     /// Starts `spawn` in herdr-core for `purpose`, once the hub connects.
     pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn) {
-        self.core_terminals.wanted = Some((purpose, spawn));
+        self.start_core_program_with(purpose, spawn, None);
+    }
+
+    /// Starts `spawn` as [`Self::start_core_program`] does, handing `file`
+    /// to its program once it starts. Until then the file is the window's,
+    /// removed if the start fails or a newer one replaces it.
+    pub(crate) fn start_core_program_with(
+        &mut self,
+        purpose: Purpose,
+        spawn: Spawn,
+        file: Option<tempfile::TempPath>,
+    ) {
+        self.core_terminals.wanted = Some((purpose, spawn, file));
         self.core_terminals.hub.connect(Start::IfMissing);
         self.start_core_shell();
     }
@@ -285,7 +301,7 @@ impl SheprdWindow {
         let Some(backend) = terminals.hub.backend().cloned() else {
             return;
         };
-        let Some((purpose, mut spawn)) = terminals.wanted.take() else {
+        let Some((purpose, mut spawn, file)) = terminals.wanted.take() else {
             return;
         };
         if spawn.cwd.is_none()
@@ -297,7 +313,16 @@ impl SheprdWindow {
         let spawned = std::thread::Builder::new()
             .name("herdr-core-spawn".into())
             .spawn(move || {
-                let _ = send.send(backend.spawn(&spawn));
+                let started = backend.spawn(&spawn);
+                // The program removes its file; a failed start leaves it
+                // here, where dropping it removes it.
+                if started.is_ok()
+                    && let Some(file) = file
+                    && let Err(error) = file.keep()
+                {
+                    tracing::warn!(%error, "Could not hand a file to a herdr-core program");
+                }
+                let _ = send.send(started);
             });
         match spawned {
             Ok(_) => terminals.starting = Some((purpose, receive)),
