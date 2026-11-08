@@ -4,7 +4,7 @@
 use crate::{
     browser::Location,
     core_terminals::{
-        TabPanes,
+        Host, TabPanes,
         panes::{Axis, Panes},
     },
 };
@@ -22,7 +22,7 @@ fn split() -> Panes {
 
 #[test]
 fn the_pane_in_use_and_the_zoom_save_and_come_back() {
-    let mut shown = TabPanes::new(split(), false);
+    let mut shown = TabPanes::new(Host::Local, split(), false);
     shown.active = id("t2");
     shown.set_zoom(Some(id("t2")));
     let location = shown.location();
@@ -38,7 +38,13 @@ fn the_pane_in_use_and_the_zoom_save_and_come_back() {
     else {
         panic!("a terminal tab");
     };
-    let restored = TabPanes::restore(panes, observe, active.as_ref(), zoomed.as_ref());
+    let restored = TabPanes::restore(
+        Host::Local,
+        panes,
+        observe,
+        active.as_ref(),
+        zoomed.as_ref(),
+    );
     assert_eq!(restored.active, id("t2"));
     assert_eq!(restored.zoomed, Some(id("t2")));
     // Already zoomed as the window opens, not growing.
@@ -49,7 +55,7 @@ fn the_pane_in_use_and_the_zoom_save_and_come_back() {
 
 #[test]
 fn an_unzoomed_tab_saves_no_zoom() {
-    let mut shown = TabPanes::new(split(), false);
+    let mut shown = TabPanes::new(Host::Local, split(), false);
     shown.set_zoom(Some(id("t1")));
     shown.set_zoom(None);
     let Location::CoreTerminal { zoomed, .. } = shown.location() else {
@@ -60,11 +66,23 @@ fn an_unzoomed_tab_saves_no_zoom() {
 
 #[test]
 fn panes_the_layout_no_longer_holds_are_ignored() {
-    let restored = TabPanes::restore(split(), false, Some(&id("t9")), Some(&id("t9")));
+    let restored = TabPanes::restore(
+        Host::Local,
+        split(),
+        false,
+        Some(&id("t9")),
+        Some(&id("t9")),
+    );
     assert_eq!(restored.active, id("t1"));
     assert!(!restored.zoom.is_open());
     // One pane has nothing to zoom over.
-    let single = TabPanes::restore(Panes::single(id("t1")), false, None, Some(&id("t1")));
+    let single = TabPanes::restore(
+        Host::Local,
+        Panes::single(id("t1")),
+        false,
+        None,
+        Some(&id("t1")),
+    );
     assert!(!single.zoom.is_open());
 }
 
@@ -80,7 +98,13 @@ fn a_tab_saved_without_them_starts_on_its_first_pane() {
     else {
         panic!("a terminal tab");
     };
-    let restored = TabPanes::restore(panes, observe, active.as_ref(), zoomed.as_ref());
+    let restored = TabPanes::restore(
+        Host::Local,
+        panes,
+        observe,
+        active.as_ref(),
+        zoomed.as_ref(),
+    );
     assert_eq!(restored.active, id("t1"));
     assert!(!restored.zoom.is_open());
 }

@@ -2,6 +2,7 @@
 //! provider-owned credentials alive while a background operation runs.
 
 use super::CloudProvider;
+use sheprd_client::{Bridge, ConnectTarget};
 use std::{
     io,
     process::Command,
@@ -22,6 +23,27 @@ pub fn with_command<T>(
         ));
     }
     super::providers::run_command(provider, account, id, cancelled, run)
+}
+
+/// herdr-core on a saved cloud machine, through the same authenticated
+/// command its Herdr 1 connection runs; `hc connect` starts the machine's core
+/// when none is running. Runs on a worker: `stop` cancels it.
+pub fn connect_core(target: &ConnectTarget, stop: &AtomicBool) -> io::Result<Bridge> {
+    let ConnectTarget::Cloud {
+        provider,
+        account,
+        id,
+        ..
+    } = target
+    else {
+        return Err(io::Error::other(super::Error::Invalid(
+            super::Invalid::Target,
+        )));
+    };
+    with_command(*provider, account, id, stop, |command| {
+        sheprd_client::core_bridge::command(command, stop)
+    })?
+    .map_err(|error| io::Error::new(error.kind(), error))
 }
 
 #[cfg(test)]

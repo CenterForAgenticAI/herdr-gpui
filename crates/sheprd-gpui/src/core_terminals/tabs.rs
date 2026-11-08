@@ -2,7 +2,7 @@
 //! the pane in use, panes whose program ended, and the layout saved with the
 //! tab once a change settles.
 
-use super::{CoreTerminalView, Start, TabPanes, panes::Axis, worker};
+use super::{CoreTerminalView, Host, Start, TabPanes, panes::Axis, worker};
 use crate::{
     SheprdWindow,
     browser::{Location, Store, TabId},
@@ -32,7 +32,11 @@ impl SheprdWindow {
         terminals.tabs.retain(|id, shown| {
             let open = store.get(*id).is_some();
             if !open && !shown.observe {
-                closed.extend(shown.panes.terminals().into_iter().cloned());
+                let host = &shown.host;
+                closed.extend(
+                    (shown.panes.terminals().into_iter())
+                        .map(|terminal| (host.clone(), terminal.clone())),
+                );
             }
             open
         });
@@ -50,7 +54,7 @@ impl SheprdWindow {
         let Some((scope, workspace)) = self.browser_key() else {
             return;
         };
-        let mut missing: Vec<(TabId, TerminalId, Role)> = Vec::new();
+        let mut missing: Vec<(TabId, TerminalId, Role, Host)> = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
             let Some(Location::CoreTerminal {
                 panes,
@@ -62,7 +66,13 @@ impl SheprdWindow {
                 continue;
             };
             let shown = self.core_terminals.tabs.entry(tab.id).or_insert_with(|| {
-                TabPanes::restore(panes.clone(), *observe, active.as_ref(), zoomed.as_ref())
+                TabPanes::restore(
+                    Host::of(&tab.scope),
+                    panes.clone(),
+                    *observe,
+                    active.as_ref(),
+                    zoomed.as_ref(),
+                )
             });
             missing.extend(
                 shown
@@ -81,20 +91,23 @@ impl SheprdWindow {
                         } else {
                             Role::Active
                         };
-                        (tab.id, terminal.clone(), role)
+                        (tab.id, terminal.clone(), role, shown.host.clone())
                     }),
             );
         }
         if missing.is_empty() {
             return;
         }
-        // Restored tabs join a running core; only a command starts one.
-        let Some(backend) = self.core_terminals.hub.backend().cloned() else {
-            self.core_terminals.hub.connect(Start::Join);
-            return;
-        };
         let look = self.core_look();
-        for (tab, terminal, role) in missing {
+        for (tab, terminal, role, host) in missing {
+            // Restored tabs join a running core; only a command starts one
+            // here, while another host's bridge starts its own.
+            let Some(backend) = self.core_terminals.backend_of(&host).cloned() else {
+                if let Some(hub) = self.core_hub(&host) {
+                    hub.connect(Start::Join);
+                }
+                continue;
+            };
             let Ok(size) = Size::new(FIRST_SIZE.0, FIRST_SIZE.1) else {
                 continue;
             };
@@ -130,14 +143,14 @@ impl SheprdWindow {
             .chain(fallback)
             .filter(|(_, view)| view.read(cx).is_stale())
             .collect();
-        if stale.is_empty() {
-            return;
-        }
-        let Some(backend) = self.core_terminals.hub.backend().cloned() else {
-            self.core_terminals.hub.connect(Start::Join);
-            return;
-        };
         for (tab, view) in stale {
+            let host = tab.map_or(Host::Local, |tab| self.core_terminals.host_of(tab));
+            let Some(backend) = self.core_terminals.backend_of(&host).cloned() else {
+                if let Some(hub) = self.core_hub(&host) {
+                    hub.connect(Start::Join);
+                }
+                continue;
+            };
             let observe = tab
                 .and_then(|tab| self.core_terminals.tabs.get(&tab))
                 .is_some_and(|shown| shown.observe);
@@ -146,7 +159,7 @@ impl SheprdWindow {
             } else {
                 Role::Active
             };
-            let terminal = view.read(cx).id().clone();
+            let terminal = view.read(cx).terminal().clone();
             let size = view
                 .read(cx)
                 .size()
@@ -224,28 +237,31 @@ impl SheprdWindow {
         }
     }
 
-    /// Puts a started terminal beside `at` in `tab`, and gives it the
-    /// keyboard. One that cannot be placed is ended rather than left behind.
+    /// Puts a started terminal of `host`'s core beside `at` in `tab`, and
+    /// gives it the keyboard. One that cannot be placed is ended in the core
+    /// it started in rather than left behind.
     pub(super) fn place_split(
         &mut self,
         tab: TabId,
         at: &TerminalId,
         axis: Axis,
-        new: TerminalId,
+        (host, new): (Host, TerminalId),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let placed = match self.core_terminals.tabs.get_mut(&tab) {
-            Some(shown) => shown.panes.split(at, axis, new.clone()).map(|()| {
-                shown.active = new.clone();
-                shown.set_zoom(None);
-                shown.unsaved = true;
-            }),
-            None => Err(super::panes::Error::Missing(at.clone())),
+            Some(shown) if shown.host == host => {
+                shown.panes.split(at, axis, new.clone()).map(|()| {
+                    shown.active = new.clone();
+                    shown.set_zoom(None);
+                    shown.unsaved = true;
+                })
+            }
+            _ => Err(super::panes::Error::Missing(at.clone())),
         };
         if let Err(error) = placed {
             self.show_flash(Flash::warning(error.to_string()), cx);
-            self.end_core_terminal(new);
+            self.end_core_terminal(&host, new);
             return;
         }
         self.sync_core_views(cx);
@@ -297,10 +313,10 @@ impl SheprdWindow {
         true
     }
 
-    /// Ends a terminal on a worker thread, so herdr-core's answer is never
-    /// awaited on the UI thread.
-    pub(super) fn end_core_terminal(&self, terminal: TerminalId) {
-        let Some(backend) = self.core_terminals.hub.backend().cloned() else {
+    /// Ends a terminal of `host`'s core on a worker thread, so herdr-core's
+    /// answer is never awaited on the UI thread.
+    pub(super) fn end_core_terminal(&self, host: &Host, terminal: TerminalId) {
+        let Some(backend) = self.core_terminals.backend_of(host).cloned() else {
             return;
         };
         let ended = std::thread::Builder::new()
@@ -324,14 +340,21 @@ impl SheprdWindow {
         {
             return;
         }
-        // A failed join is retried after a pause; the terminals wait for a
-        // window that reaches the core, this one or another.
-        if self.core_terminals.hub.backend().is_none() {
-            self.core_terminals.hub.connect(Start::Join);
-            return;
+        // A core not reached yet is joined, and its terminals wait for a
+        // window that reaches it, this one or another; a failed join is
+        // retried after a pause. A host no longer saved cannot be reached,
+        // so its terminals are left to it.
+        let mut waiting = Vec::new();
+        for (host, terminal) in Store::update(cx, Store::take_ending) {
+            if self.core_terminals.backend_of(&host).is_some() {
+                self.end_core_terminal(&host, terminal);
+            } else if let Some(hub) = self.core_hub(&host) {
+                hub.connect(Start::Join);
+                waiting.push((host, terminal));
+            }
         }
-        for terminal in Store::update(cx, Store::take_ending) {
-            self.end_core_terminal(terminal);
+        if !waiting.is_empty() {
+            Store::update(cx, |store| store.end_terminals(waiting));
         }
     }
 
