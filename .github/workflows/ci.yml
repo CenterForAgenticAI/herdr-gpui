@@ -65,6 +65,7 @@ jobs:
     outputs:
       code: ${{ steps.changes.outputs.code }}
       windows_package: ${{ steps.changes.outputs.windows_package }}
+      website: ${{ steps.changes.outputs.website }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -378,10 +379,42 @@ jobs:
       - name: Install and uninstall the Windows installer
         run: python scripts/release/windows-installer.py smoke "dist/Sheprd-$VERSION-$TARGET-setup.exe"
 
+  # sheprd.org and its docs, which Netlify builds at deploy time. Python only,
+  # so a website-only change runs this and skips every native job; a broken
+  # link or page fails here before the deploy does.
+  website:
+    if: >-
+      needs.commits.outputs.website == 'true' &&
+      (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
+      (github.event_name == 'pull_request' ||
+       ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+        github.actor == 'penso' && github.triggering_actor == 'penso' &&
+        github.ref == 'refs/heads/main'))
+    name: Website and docs
+    needs: [zizmor, commits]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the docs site
+        run: |
+          python3 -m venv "$RUNNER_TEMP/docs-venv"
+          "$RUNNER_TEMP/docs-venv/bin/pip" install --quiet --require-hashes -r website/requirements.txt
+          "$RUNNER_TEMP/docs-venv/bin/python" website/tools/test_docs.py
+          "$RUNNER_TEMP/docs-venv/bin/python" website/tools/docs.py --check
+      - name: Test the sheprd.org publishing contracts
+        run: python3 -m unittest discover -s site/tests -v
+
   # Keep the branch-protection context stable while requiring every platform.
   checks-passed:
     name: Format, lint, and test
-    needs: [checks, windows, windows-native, windows-package, build-macos, commits]
+    needs: [checks, windows, windows-native, windows-package, build-macos, commits, website]
     if: >-
       always() &&
       (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
@@ -404,6 +437,8 @@ jobs:
           COMMITS: ${{ needs.commits.result }}
           CODE: ${{ needs.commits.outputs.code }}
           PACKAGE_INPUTS: ${{ needs.commits.outputs.windows_package }}
+          SITE: ${{ needs.website.result }}
+          SITE_INPUTS: ${{ needs.commits.outputs.website }}
         run: |
           test "$COMMITS" = success || exit 1
           if [ "$CODE" = true ]; then
@@ -418,9 +453,14 @@ jobs:
             test "$MACOS_RELEASE" = skipped || exit 1
           fi
           if [ "$PACKAGE_INPUTS" = true ]; then
-            test "$PACKAGE" = success
+            test "$PACKAGE" = success || exit 1
           else
-            test "$PACKAGE_INPUTS" = false && test "$PACKAGE" = skipped
+            test "$PACKAGE_INPUTS" = false && test "$PACKAGE" = skipped || exit 1
+          fi
+          if [ "$SITE_INPUTS" = true ]; then
+            test "$SITE" = success
+          else
+            test "$SITE_INPUTS" = false && test "$SITE" = skipped
           fi
 
   # Linux release builds on main, which the release gate requires. The release

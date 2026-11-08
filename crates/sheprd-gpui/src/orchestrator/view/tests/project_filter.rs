@@ -56,6 +56,7 @@ fn view(cx: &mut TestAppContext) -> (gpui::Entity<OrchestratorView>, &mut Visual
         workspace_id: "w1".into(),
         token: None,
         data_root: Some(dir.path().join("data")),
+        azure_store: Default::default(),
         gitlab_store: Default::default(),
         timing: Timing::default(),
     };
@@ -86,19 +87,22 @@ fn view(cx: &mut TestAppContext) -> (gpui::Entity<OrchestratorView>, &mut Visual
                 1,
                 "2026-10-04T00:00:00Z",
             )]);
-            let mut mine = Repo::start_remote(RemoteScope::Mine {
-                organization: "contoso".into(),
-            });
+            let mut mine = Repo::start_remote(
+                RemoteScope::Mine {
+                    organization: "contoso".into(),
+                },
+                Default::default(),
+            );
             mine.snapshot.items = Arc::new(vec![
                 pull("contoso/Fabrikam/web", 1, "2026-10-04T00:00:00Z"),
                 pull("contoso/Fabrikam/api", 2, "2026-10-03T00:00:00Z"),
                 pull("contoso/Tools/cli", 3, "2026-10-02T00:00:00Z"),
             ]);
             view.repos.push(mine);
-            view.repos
-                .push(Repo::start_remote(RemoteScope::Repository(azure(
-                    "contoso/Tools/cli",
-                ))));
+            view.repos.push(Repo::start_remote(
+                RemoteScope::Repository(azure("contoso/Tools/cli")),
+                Default::default(),
+            ));
             view.tab = Tab::PullRequests;
             view.refresh_rows();
             cx.notify();

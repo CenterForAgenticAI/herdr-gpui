@@ -191,6 +191,7 @@ impl Localize for sheprd_chat_protocol::Rejection {
             Self::UnknownOption => fl!("error-chat-rejection-unknown-option"),
             Self::UnknownMode => fl!("error-chat-rejection-unknown-mode"),
             Self::UnknownSetting => fl!("error-chat-rejection-unknown-setting"),
+            Self::UnknownActivity => fl!("error-chat-rejection-unknown-activity"),
             Self::UnknownQueued => fl!("error-chat-rejection-unknown-queued"),
             Self::AgentUnavailable => fl!("error-chat-rejection-agent-unavailable"),
             Self::TooManyAttachments => fl!(

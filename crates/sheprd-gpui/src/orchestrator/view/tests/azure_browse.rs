@@ -117,6 +117,7 @@ fn an_organizations_own_pull_requests_and_browsed_repositories_join_the_list(
         workspace_id: "w1".into(),
         token: None,
         data_root: Some(dir.path().join("data")),
+        azure_store: Default::default(),
         gitlab_store: Default::default(),
         timing: Timing::default(),
     };
@@ -235,6 +236,7 @@ fn mine_on_azure_devops_matches_the_reader_by_identity(cx: &mut TestAppContext) 
         workspace_id: "w1".into(),
         token: None,
         data_root: Some(dir.path().join("data")),
+        azure_store: Default::default(),
         gitlab_store: Default::default(),
         timing: Timing::default(),
     };
@@ -283,6 +285,7 @@ fn azure_mine_keeps_the_readers_own_and_not_a_namesakes(cx: &mut TestAppContext)
         workspace_id: "w1".into(),
         token: None,
         data_root: Some(dir.path().join("data")),
+        azure_store: Default::default(),
         gitlab_store: Default::default(),
         timing: Timing::default(),
     };
@@ -359,6 +362,7 @@ fn organizations_kept_for_the_session_count_toward_the_cap(cx: &mut TestAppConte
         workspace_id: "w1".into(),
         token: None,
         data_root: Some(dir.path().join("data")),
+        azure_store: Default::default(),
         gitlab_store: Default::default(),
         timing: Timing::default(),
     };
@@ -373,9 +377,12 @@ fn organizations_kept_for_the_session_count_toward_the_cap(cx: &mut TestAppConte
         view.update(cx, |view, _| {
             // Organizations read earlier, whose checkouts have since closed.
             for index in 0..MAX_ORGANIZATIONS {
-                view.repos.push(Repo::start_remote(RemoteScope::Mine {
-                    organization: format!("contoso-{index}"),
-                }));
+                view.repos.push(Repo::start_remote(
+                    RemoteScope::Mine {
+                        organization: format!("contoso-{index}"),
+                    },
+                    Default::default(),
+                ));
             }
             view.repo_mut().snapshot.repo = Some(RepoInfo {
                 repository: crate::orchestrator::Repository::Local(dir.path().join(".git")),
@@ -416,6 +423,7 @@ fn organization_view(
                     RemoteScope::Mine {
                         organization: "contoso".into(),
                     },
+                    Default::default(),
                 ));
             view.tab = Tab::PullRequests;
             view.refresh_rows();
@@ -477,7 +485,10 @@ fn the_projects_menu_says_why_reading_failed(cx: &mut TestAppContext) {
         .chars()
         .filter(|ch| !matches!(ch, '\u{2068}' | '\u{2069}'))
         .collect();
-    assert!(plain.contains("Sign in to read contoso"), "{plain}");
+    assert!(
+        plain.contains("Connect Azure DevOps from the account menu to read contoso"),
+        "{plain}"
+    );
     // A later read that succeeds replaces it.
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {

@@ -17,6 +17,9 @@ use unicode_width::UnicodeWidthStr;
 const BLUE_DARK: u32 = 0x0a_84_ff;
 const BLUE_LIGHT: u32 = 0x00_7a_ff;
 const WHITE: u32 = 0xff_ff_ff;
+/// How much of the foreground fills the agent's gray bubbles.
+const REPLY_TINT: u32 = 14;
+const THOUGHT_TINT: u32 = 8;
 /// Space above a bubble where the speaker changes, and within a run.
 const GAP: f32 = 14.;
 const RUN_GAP: f32 = 2.;
@@ -54,9 +57,9 @@ impl ChatLayout for IMessage {
                     Side::User => (user_blue(look), WHITE),
                     Side::Agent => {
                         let share = if matches!(kind, EntryKind::Thought { .. }) {
-                            8
+                            THOUGHT_TINT
                         } else {
-                            14
+                            REPLY_TINT
                         };
                         let fill = mix(theme.background, theme.foreground, share);
                         (fill, theme.text_on(fill))
@@ -137,9 +140,9 @@ impl ChatLayout for IMessage {
         None
     }
 
-    /// Links keep the bubble's text color, which reads on its fill.
-    fn link(&self, _look: &Look<'_>) -> Option<u32> {
-        None
+    /// The user's blue takes no accent, so their words stay white.
+    fn ground(&self, side: Side, look: &Look<'_>) -> Option<u32> {
+        (side == Side::Agent).then(|| mix(look.theme.background, look.theme.foreground, REPLY_TINT))
     }
 
     /// Bubbles are filled, so what the theme's ink is drawn for keeps the
@@ -155,14 +158,23 @@ impl ChatLayout for IMessage {
         working: Option<&super::super::working::Working>,
         look: &Look<'_>,
     ) -> Option<Div> {
+        use super::super::working::{Phase, sign};
+        // Stopped on the user's answer, the other side is not typing.
+        let waiting = working.filter(|working| working.phase == Phase::Waiting);
         Some(
             div()
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .when(working.is_some(), |row| {
-                    row.debug_selector(|| "chat-typing".into())
-                        .child(super::super::working::pulse(look))
+                .when_some(working, |row, working| {
+                    row.debug_selector(|| {
+                        if working.phase == Phase::Waiting {
+                            "chat-waiting".into()
+                        } else {
+                            "chat-typing".into()
+                        }
+                    })
+                    .child(sign(working.phase, look))
                 })
                 .when(working.is_none(), |row| row.invisible())
                 .px(px(16. + 12. * look.text / TEXT))
@@ -170,7 +182,7 @@ impl ChatLayout for IMessage {
                 .text_size(px((look.text - 2.).max(10.)))
                 .italic()
                 .text_color(rgb(look.theme.muted))
-                .child(fl!("chat-typing")),
+                .child(waiting.map_or_else(|| fl!("chat-typing"), |working| working.doing.clone())),
         )
     }
 

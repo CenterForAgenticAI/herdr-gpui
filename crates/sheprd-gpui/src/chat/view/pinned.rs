@@ -107,7 +107,12 @@ impl SheprdWindow {
         )
     }
 
-    fn go_to_chat_prompt(&mut self, pane_id: &str, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn go_to_chat_prompt(
+        &mut self,
+        pane_id: &str,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(pane) = self.chats.pane_mut(pane_id) {
             pane.list.scroll_to(ListOffset {
                 item_ix: index,

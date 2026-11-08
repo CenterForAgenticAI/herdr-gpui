@@ -27,16 +27,21 @@ pub fn program(argv: &[String]) -> Option<&str> {
 /// Whether `argv` runs `agent` itself, directly or as a Node or Bun script,
 /// rather than naming it as an argument to some other program.
 pub fn is_agent(agent: Agent, argv: &[String]) -> bool {
-    let Some(program) = program(argv) else {
-        return false;
-    };
+    agent_args(agent, argv).is_some()
+}
+
+/// The arguments given to `agent` when `argv` runs it, natively or through
+/// one of the Node or Bun launchers [`is_agent`] knows.
+pub fn agent_args(agent: Agent, argv: &[String]) -> Option<&[String]> {
+    let program = program(argv)?;
     if program == agent.name() {
-        return true;
+        return Some(&argv[1..]);
     }
     if !matches!(program, "node" | "nodejs" | "bun") {
-        return false;
+        return None;
     }
-    argv.get(1).is_some_and(|script| match agent {
+    let script = argv.get(1)?;
+    let matches = match agent {
         Agent::Claude => {
             script.ends_with("/@anthropic-ai/claude-code/cli.js") || script.ends_with("/claude")
         }
@@ -44,7 +49,8 @@ pub fn is_agent(agent: Agent, argv: &[String]) -> bool {
             script.ends_with("/@openai/codex/bin/codex.js") || script.ends_with("/codex")
         }
         _ => false,
-    })
+    };
+    matches.then_some(&argv[2..])
 }
 
 #[cfg(test)]

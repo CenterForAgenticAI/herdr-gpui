@@ -71,7 +71,7 @@ impl OrchestratorView {
             if running >= MAX_ORGANIZATIONS {
                 break;
             }
-            self.repos.push(Repo::start_remote(scope));
+            self.repos.push(Repo::start_remote(scope, self.stores()));
             running += 1;
             added = true;
         }
@@ -120,7 +120,7 @@ impl OrchestratorView {
         if browsed >= MAX_BROWSED {
             return;
         }
-        self.repos.push(Repo::start_remote(scope));
+        self.repos.push(Repo::start_remote(scope, self.stores()));
         self.refresh_rows();
     }
 

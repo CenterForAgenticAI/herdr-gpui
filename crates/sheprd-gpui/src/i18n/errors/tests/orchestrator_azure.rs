@@ -7,6 +7,8 @@ fn every_azure_variant_has_a_message() {
     assert_localized(&[
         azure::Error::Address("contoso/repo".into()),
         azure::Error::Authentication,
+        azure::Error::Directory(sheprd_client::local_path::PathError::MissingHome),
+        azure::Error::EnvironmentRefused,
         azure::Error::Forbidden {
             repository: repository(),
         },
@@ -18,19 +20,31 @@ fn every_azure_variant_has_a_message() {
         azure::Error::NoCheckout {
             repository: repository(),
         },
+        azure::Error::NoOrganization("contoso".into()),
+        azure::Error::NoStore(sheprd_credentials::Error::Policy),
         azure::Error::NotFound {
             repository: repository(),
         },
+        azure::Error::Organization("two words".into()),
         azure::Error::RateLimit,
         azure::Error::Read(std::io::Error::other("pipe closed")),
         azure::Error::Reader,
+        azure::Error::Record,
+        azure::Error::RecordSize,
         azure::Error::SignIn {
             repository: repository(),
         },
         azure::Error::Size,
         azure::Error::Status(500),
+        azure::Error::Store(sheprd_credentials::Error::Permissions),
         azure::Error::Token,
+        azure::Error::TokenLength { limit: 1024 },
+        azure::Error::TooManyOrganizations,
     ]);
+    #[cfg(target_os = "linux")]
+    assert_localized(&[azure::Error::NoKeyring(
+        sheprd_credentials::Error::SecretServiceUnavailable,
+    )]);
 }
 
 #[test]

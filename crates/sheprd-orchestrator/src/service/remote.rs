@@ -101,6 +101,8 @@ impl RemoteScope {
 #[derive(Clone, Debug)]
 pub struct RemoteRequest {
     pub scope: RemoteScope,
+    /// Where tokens pasted in the account menu are saved.
+    pub azure_store: sheprd_credentials::Store,
     pub timing: Timing,
     /// Whether to look the Azure DevOps token up; tests turn it off, so
     /// nothing runs `az` and every read asks to sign in instead.
@@ -111,6 +113,7 @@ impl RemoteRequest {
     pub fn new(scope: RemoteScope) -> Self {
         Self {
             scope,
+            azure_store: sheprd_credentials::Store::default(),
             timing: Timing {
                 sync: SYNC,
                 ..Timing::default()
@@ -251,7 +254,7 @@ struct RemoteWorker {
     visible: Arc<AtomicBool>,
     snapshot: Snapshot,
     /// The token, once looked up; Refresh and a refusal look again.
-    token: Option<Option<azure::token::Token>>,
+    token: Option<Option<azure::token::Found>>,
     cooldown: Option<Duration>,
     /// A failed read waits until then before the timer reads again.
     retry_until: Option<Instant>,
@@ -274,6 +277,14 @@ impl RemoteWorker {
                     self.token = None;
                     self.retry_until = None;
                     self.catalog = true;
+                    self.sync();
+                    last_sync = Instant::now();
+                }
+                // A token saved or forgotten in the account menu reads now.
+                Ok(Command::Stores(stores)) => {
+                    self.request.azure_store = stores.azure;
+                    self.token = None;
+                    self.retry_until = None;
                     self.sync();
                     last_sync = Instant::now();
                 }
@@ -344,9 +355,15 @@ impl RemoteWorker {
     /// an hour, and a new `az login` must take over from a refused personal
     /// access token, which the environment keeps until the app restarts.
     fn renew_token(&mut self) {
+        let refused = self.token.take().flatten();
         let cancelled = &self.cancelled;
         self.token = Some(if self.request.look_up_token {
-            azure::token::renew(&|| cancelled.load(Ordering::Relaxed))
+            azure::token::renew(
+                self.request.scope.organization(),
+                self.request.azure_store,
+                refused.as_ref().map(|found| &found.token),
+                &|| cancelled.load(Ordering::Relaxed),
+            )
         } else {
             None
         });
@@ -356,12 +373,17 @@ impl RemoteWorker {
         if self.token.is_none() {
             let cancelled = &self.cancelled;
             self.token = Some(if self.request.look_up_token {
-                azure::token::lookup(&|| cancelled.load(Ordering::Relaxed))
+                azure::token::lookup(
+                    self.request.scope.organization(),
+                    self.request.azure_store,
+                    &|| cancelled.load(Ordering::Relaxed),
+                )
             } else {
                 None
             });
         }
-        let token = self.token.as_ref().and_then(Option::as_ref);
+        let found = self.token.as_ref().and_then(Option::as_ref);
+        let token = found.map(|found| &found.token);
         let cancelled = &self.cancelled;
         let scope = &self.request.scope;
         let catalog = self.catalog;
@@ -372,5 +394,9 @@ impl RemoteWorker {
             &mut self.cooldown,
             |mut fetch| read(scope, catalog, &mut fetch),
         )
+        .map_err(|error| match (error, found) {
+            (Error::Azure(error), Some(found)) => Error::Azure(error.from_source(found.source)),
+            (error, _) => error,
+        })
     }
 }

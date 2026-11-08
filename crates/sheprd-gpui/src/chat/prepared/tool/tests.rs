@@ -3,6 +3,8 @@ use super::*;
 #[allow(clippy::unwrap_used)]
 mod diff;
 #[allow(clippy::unwrap_used)]
+mod diff_counts;
+#[allow(clippy::unwrap_used)]
 mod highlighting;
 
 fn previews(
@@ -18,10 +20,14 @@ fn text(text: &str) -> ToolContent {
     ToolContent::Text { text: text.into() }
 }
 
+#[allow(clippy::unwrap_used)]
 fn counts(changes: &[DiffSummary]) -> Vec<(&str, usize, usize)> {
     changes
         .iter()
-        .map(|change| (change.path.as_str(), change.added, change.removed))
+        .map(|change| {
+            let lines = change.lines.unwrap();
+            (change.path.as_str(), lines.added, lines.removed)
+        })
         .collect()
 }
 
@@ -130,7 +136,9 @@ fn every_content_item_stays_shown_past_the_structured_limit() {
     content.push(text(r#"{"command":"ls"}"#));
     let (preview, changes) = previews(&content, ToolKind::Edit, &mut Visuals::default());
     assert_eq!(preview.len(), content.len());
-    assert_eq!(counts(&changes), [("overflow.rs", 1, 1)]);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].path, "overflow.rs");
+    assert_eq!(changes[0].lines, None, "it was shown but never compared");
     assert!(preview[MAX_PARTS].before.is_some());
     assert_eq!(&*preview[MAX_PARTS + 1].code.source, r#"{"command":"ls"}"#);
 }

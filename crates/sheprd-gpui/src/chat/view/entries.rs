@@ -5,7 +5,10 @@
 use super::{
     super::{
         chats::ChatPane,
-        prepared::{Body, Part, ToolSummary, folded_thought, notice_label, tool_header},
+        prepared::{
+            Body, LineChanges, Part, ToolSummary, folded_thought, notice_label, tool_header,
+            total_lines,
+        },
         rich::{Block, Inline},
         selection::{Cell, Region},
         visual::Visuals,
@@ -13,7 +16,7 @@ use super::{
     Hues,
     copy::CopyPlacement,
     disclosure::{HeaderText, chevron},
-    layout::{Row, ToolFold, layout_for, side},
+    layout::{Row, Side, ToolFold, Voice, layout_for, side},
     visuals::Frame,
 };
 use crate::{SheprdWindow, config::corners, fonts::StyledFont, i18n::fl, notifications::safe_text};
@@ -125,15 +128,21 @@ impl SheprdWindow {
         {
             return div().into_any_element();
         }
+        chat.prepared
+            .request_visible(entry.id, chat.expanded.contains(&entry.id));
         let body = chat.prepared.body(entry.id);
         let content = match &entry.kind {
             EntryKind::User { text, .. } | EntryKind::Agent { text } => {
                 // A layout may set the user's prompts in a quieter voice.
-                let size = match &entry.kind {
-                    EntryKind::User { .. } => {
-                        layout_for(self.config.chat.layout).prompt_text(&self.chat_look())
-                    }
-                    _ => self.chat_text_size(),
+                let voice = match &entry.kind {
+                    EntryKind::User { .. } => Voice {
+                        side: Side::User,
+                        size: layout_for(self.config.chat.layout).prompt_text(&self.chat_look()),
+                    },
+                    _ => Voice {
+                        side: Side::Agent,
+                        size: self.chat_text_size(),
+                    },
                 };
                 let message = match body.as_deref() {
                     Some(Body::Message(parts)) => self.render_chat_message(
@@ -141,7 +150,7 @@ impl SheprdWindow {
                         entry.id,
                         parts,
                         &chat.prepared.visuals,
-                        size,
+                        voice,
                         cx,
                     ),
                     Some(Body::Summary(summary)) => {
@@ -336,11 +345,8 @@ impl SheprdWindow {
         // On one line, the files' changes join the title as totals.
         let totals = summary
             .filter(|summary| fold == ToolFold::Line && !expanded && !summary.diffs.is_empty())
-            .map(|summary| {
-                let (added, removed) =
-                    summary.diffs.iter().fold((0, 0), |(added, removed), diff| {
-                        (added + diff.added, removed + diff.removed)
-                    });
+            .and_then(|summary| total_lines(&summary.diffs))
+            .map(|LineChanges { added, removed }| {
                 div()
                     .debug_selector(move || format!("chat-tool-totals-{}", entry.0))
                     .flex_none()
@@ -515,18 +521,18 @@ impl SheprdWindow {
                 .text_size(small)
                 .text_color(rgb(theme.muted))
                 .child(div().min_w_0().truncate().child(safe_text(&diff.path, 300)))
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(rgb(hues.green))
-                        .child(format!("+{}", diff.added)),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(rgb(hues.red))
-                        .child(format!("\u{2212}{}", diff.removed)),
-                )
+                .children(diff.lines.iter().flat_map(|lines| {
+                    [
+                        div()
+                            .flex_none()
+                            .text_color(rgb(hues.green))
+                            .child(format!("+{}", lines.added)),
+                        div()
+                            .flex_none()
+                            .text_color(rgb(hues.red))
+                            .child(format!("\u{2212}{}", lines.removed)),
+                    ]
+                }))
                 .into_any_element()
         }));
         if !summary.images.is_empty() {

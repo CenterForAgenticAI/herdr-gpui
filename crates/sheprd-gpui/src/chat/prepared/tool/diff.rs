@@ -26,11 +26,7 @@ impl Shown {
     pub(super) fn change(&self) -> Option<DiffSummary> {
         self.counts
             .as_ref()
-            .map(|(path, added, removed)| DiffSummary {
-                path: path.clone(),
-                added: *added,
-                removed: *removed,
-            })
+            .map(|(path, added, removed)| DiffSummary::counted(path.clone(), *added, *removed))
     }
 
     pub(super) fn into_preview(self, original: Arc<str>) -> Preview {

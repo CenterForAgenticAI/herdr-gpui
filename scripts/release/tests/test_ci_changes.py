@@ -118,3 +118,36 @@ class WindowsPackageChanges(GitFixture):
     def test_manual_and_unknown_base_run_the_installer_check(self):
         self.assertEqual(self.outputs("workflow_dispatch")["windows_package"], "true")
         self.assertEqual(self.outputs("push", "0" * 40)["windows_package"], "true")
+
+
+class WebsiteChanges(GitFixture):
+    """The Python-only website job, and what a website-only change skips."""
+
+    def test_website_only_changes_skip_native_jobs(self):
+        for path in ("website/docs/install.md", "website/site/index.html",
+                     "website/tools/docs.py", "website/tools/docs-theme/docs.js",
+                     "website/requirements.txt", "website/netlify.toml",
+                     "docs/cli.md", "site/tests/test_website.py"):
+            self.base = self.git("rev-parse", "HEAD").strip()
+            self.commit_path(path)
+            outputs = self.outputs()
+            self.assertEqual((outputs["code"], outputs["website"]), ("false", "true"), path)
+
+    def test_markdown_anywhere_checks_the_docs(self):
+        # Docs pages link to READMEs and other guides, so moving one can break them.
+        for path in ("README.md", "crates/sheprd-gpui/README.md"):
+            self.base = self.git("rev-parse", "HEAD").strip()
+            self.commit_path(path)
+            self.assertEqual(self.outputs()["website"], "true", path)
+
+    def test_build_inputs_also_check_the_docs(self):
+        self.commit_path("crates/sheprd-gpui/config-gpui.example.toml")
+        self.assertEqual(self.outputs()["website"], "true")
+
+    def test_other_changes_skip_the_website_job(self):
+        self.commit_path("setup.sh")
+        self.assertEqual(self.outputs()["website"], "false")
+
+    def test_manual_and_unknown_base_check_the_website(self):
+        self.assertEqual(self.outputs("workflow_dispatch")["website"], "true")
+        self.assertEqual(self.outputs("push", "0" * 40)["website"], "true")
