@@ -407,6 +407,7 @@ mod socket {
 
 mod state_context;
 
+mod kept_workspaces;
 mod poller;
 mod saved_beside_spaces;
 

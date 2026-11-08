@@ -29,6 +29,24 @@ pub(super) fn project(
         working: working(records),
         workspaces: Vec::new(),
     };
+    // The app's own Herdr 2 workspaces come first, in the user's order,
+    // with their names and folders, even before they hold a tab.
+    for kept in saved
+        .zip(scope)
+        .into_iter()
+        .flat_map(|(saved, scope)| saved.workspaces(scope))
+    {
+        layout.workspaces.push(Workspace {
+            branch: None,
+            chats: Vec::new(),
+            cwd: kept.cwd.clone(),
+            id: kept.id.clone(),
+            label: kept.label.clone(),
+            session: None,
+            terminals: Vec::new(),
+            worktree: None,
+        });
+    }
     let mut assigned = HashSet::new();
     let tabs = saved
         .zip(scope)

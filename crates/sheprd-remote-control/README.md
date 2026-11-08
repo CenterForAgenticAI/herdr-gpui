@@ -70,7 +70,9 @@ their workspace and split membership. The file is read beside the explicit
 remote `--state-dir`
 (for example, `gpui/browser-tabs.json` beside `gpui/remote`), using the
 desktop state context instead of the service environment. Only tabs for the
-selected local Herdr 1 endpoint are used.
+selected local Herdr 1 endpoint are used. The workspaces Sheprd keeps for
+Herdr 2 terminals in the same file come first, in the user's order, with
+their names and folders, even before they hold a tab.
 Other core terminals appear in a **Herdr 2** workspace, including terminals
 created by `hc` and the desktop's shell when Herdr 1 is absent. Status comes
 from the core's terminal records. The phone reports **Herdr not running**
