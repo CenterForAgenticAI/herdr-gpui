@@ -85,12 +85,25 @@ impl SnapshotSession {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Sessions {
     pub(crate) core: Option<Arc<Session>>,
+    /// Whether the core behind `core` answers, which a host with no Herdr 1
+    /// installed is online by.
+    pub(crate) core_answers: bool,
     pub(crate) herdr_1: Option<Arc<Session>>,
 }
 
 impl Sessions {
     fn each(&self) -> impl Iterator<Item = &Session> {
         self.herdr_1.iter().chain(&self.core).map(Arc::as_ref)
+    }
+
+    /// Each session with who keeps its workspaces.
+    pub(crate) fn keyed(&self) -> impl Iterator<Item = (Keeper, &Session)> {
+        let herdr_1 = self
+            .herdr_1
+            .as_deref()
+            .map(|session| (Keeper::Herdr1, session));
+        let core = self.core.as_deref().map(|session| (Keeper::App, session));
+        herdr_1.into_iter().chain(core)
     }
 
     pub(crate) fn agents(&self) -> impl Iterator<Item = &Agent> {

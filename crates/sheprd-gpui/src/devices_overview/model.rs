@@ -5,6 +5,7 @@ use super::history::Counts;
 use crate::i18n::fl;
 use crate::{endpoint::Endpoint, session_model::Sessions, state::LiveState, usage::Host};
 use sheprd_client::{ConnectTarget, protocol::AgentStatus};
+use sheprd_session::Keeper;
 
 /// A device's agents by state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -75,7 +76,7 @@ pub(crate) fn online_tally(
 /// Whether a host answers: its Herdr 1 daemon, or with none installed, the
 /// herdr-core the window runs its terminals in.
 fn online(live: &LiveState, sessions: &Sessions) -> bool {
-    live.status.is_connected() || (live.missing_installation && sessions.core.is_some())
+    live.status.is_connected() || (live.missing_installation && sessions.core_answers)
 }
 
 /// Whether a device can be reached.
@@ -90,7 +91,11 @@ pub(crate) enum Link {
 /// One agent as an expanded device row lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AgentLine {
+    /// Herdr 1's pane, or for an agent the app keeps a tab of, the
+    /// herdr-core terminal.
     pub pane_id: String,
+    /// Who keeps its tab, which decides how a click shows it.
+    pub keeper: Keeper,
     /// The Herdr tab and workspace holding the pane, so a click can show
     /// that tab even when the daemon's focus does not move.
     pub tab_id: String,
@@ -154,8 +159,10 @@ impl Device {
             &empty
         };
         let mut lines: Vec<AgentLine> = sessions
-            .agents()
-            .map(|agent| AgentLine {
+            .keyed()
+            .flat_map(|(keeper, session)| session.agents.iter().map(move |agent| (keeper, agent)))
+            .map(|(keeper, agent)| AgentLine {
+                keeper,
                 pane_id: agent.pane.clone(),
                 tab_id: agent.tab.clone(),
                 workspace_id: agent.workspace.clone(),

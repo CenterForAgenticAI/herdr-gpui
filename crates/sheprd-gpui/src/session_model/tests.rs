@@ -66,6 +66,7 @@ fn a_host_lists_herdr_1_then_core_workspaces() {
     ));
     let sessions = Sessions {
         core: Some(core),
+        core_answers: true,
         herdr_1: Some(herdr_1),
     };
     let ids: Vec<_> = sessions.workspaces().map(|w| w.id.as_str()).collect();
@@ -79,4 +80,15 @@ fn a_host_lists_herdr_1_then_core_workspaces() {
     );
     assert!(!sessions.is_empty());
     assert!(Sessions::default().is_empty());
+}
+
+#[test]
+fn each_session_names_its_keeper() {
+    let sessions = Sessions {
+        core: Some(Arc::new(Session::default())),
+        core_answers: false,
+        herdr_1: Some(Arc::new(of_snapshot(&snapshot(1)))),
+    };
+    let keepers: Vec<_> = sessions.keyed().map(|(keeper, _)| keeper).collect();
+    assert_eq!(keepers, [Keeper::Herdr1, Keeper::App]);
 }

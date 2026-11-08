@@ -49,6 +49,10 @@ use std::collections::HashMap;
 /// workspaces of its own, so its tabs gather here until the app keeps them.
 pub(crate) const WORKSPACE: &str = "herdr-2";
 
+/// The tab the shell shown in place of Herdr 1 counts as in a session: no
+/// store tab, whose IDs count up from zero, ever reaches it.
+pub(crate) const SHELL_TAB: u64 = u64::MAX;
+
 type Started = std::sync::mpsc::Receiver<Result<TerminalInfo, sheprd_core_client::Error>>;
 
 /// What a terminal being started is for.
@@ -356,7 +360,7 @@ impl SheprdWindow {
         self.poll_core_panes(window, cx);
         // Split chrome and the sidebar's rows name panes from what herdr-core
         // reports, so it is read while any herdr-core tab is known.
-        let listed = !self.core_terminals.tabs.is_empty();
+        let listed = !self.core_terminals.tabs.is_empty() || self.core_fallback_view().is_some();
         let backend = listed.then(|| self.core_terminals.hub.backend()).flatten();
         if self
             .core_terminals
