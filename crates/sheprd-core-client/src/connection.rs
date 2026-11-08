@@ -119,6 +119,16 @@ impl Core {
         Self::over(stream)
     }
 
+    /// Runs the protocol over a bridge to another machine's core, such as
+    /// `sheprd_client::core_bridge::ssh`. The bridge's child lives as long as
+    /// the connection. Blocking: never call it on the UI thread.
+    pub fn bridged(mut bridge: sheprd_client::Bridge) -> Result<Self> {
+        // A bridge writes through `ssh` or `wsl.exe`, which may stall as long
+        // as a socket here may.
+        bridge.stream_mut().set_write_timeout(Some(WRITE_TIMEOUT))?;
+        Self::over(bridge)
+    }
+
     /// Runs the protocol over `stream`, whose reads must time out after
     /// about `POLL` so the worker can write in between.
     pub(crate) fn over(mut stream: impl Read + Write + Send + 'static) -> Result<Self> {
