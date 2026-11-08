@@ -6,6 +6,8 @@ pub enum Error {
     Answer(#[source] serde_json::Error),
     #[error("Still ending the last processes. Try again in a moment.")]
     Busy,
+    #[error("Could not ask herdr-core which process the terminal runs.")]
+    Core(#[source] sheprd_core_client::Error),
     #[error("The herdr executable's path is not valid UTF-8.")]
     Executable,
     #[error("Herdr did not name a process for this pane.")]
@@ -16,6 +18,8 @@ pub enum Error {
     RootExited,
     #[error("The process list stopped updating. Reopen it to try again.")]
     Stopped,
+    #[error("herdr-core no longer runs this terminal.")]
+    TerminalGone,
     #[error("Could not start watching the pane's processes.")]
     Worker(#[source] std::io::Error),
 }

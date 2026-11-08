@@ -119,7 +119,7 @@ fn family(name: &str) -> &'static str {
             "sheprd ports [list]\n    Ports the caller's workspace's processes listen on, and forwards.\n    Listening ports are known only while show_listening_ports is on.\nsheprd ports forward|unforward PORT\n    Forward a port of the workspace's SSH host to this machine, or stop.\nsheprd ports open PORT\n    Show localhost:PORT in a browser tab, forwarding it first if remote.\nsheprd ports all\n    Every TCP port this computer's user listens on, whoever started it:\n    process, pid, directory, uptime, and the workspace that started it.\n    macOS and Linux only. Exits 4 when nothing listens.\nsheprd ports stop|pause PORT\n    Ask in Sheprd to stop (SIGTERM, then SIGKILL) or pause (SIGSTOP) the\n    processes listening on PORT of this computer. Nothing is signalled\n    until the user confirms there. Exits 6 while a dialog is open.\nsheprd ports resume PORT\n    Resume (SIGCONT) a paused process listening on PORT."
         }
         "processes" => {
-            "sheprd processes [--pane ID]\n    The processes under a pane (default HERDR_PANE_ID), with CPU and\n    memory. Runs here; Sheprd need not run."
+            "sheprd processes [--pane ID | --terminal ID]\n    The processes under a Herdr pane or a herdr-core terminal (default the\n    caller's: HC_TERMINAL_ID, else HERDR_PANE_ID), with CPU and memory.\n    Runs here; Sheprd need not run."
         }
         "usage" => "sheprd usage\n    AI plan usage on the window's selected host.",
         "security" => {

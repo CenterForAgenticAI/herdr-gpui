@@ -181,7 +181,7 @@ not take it either.
 | `cloud destroy ID... \| --batch BATCH` | Ask in the window to delete saved machines at their providers and forget them; the user confirms there, once for all of them. Prints the batch to follow (below) |
 | `cloud wait BATCH [--timeout S]` | Each machine of a batch once all are settled, or after S seconds (default 60, at most 600) |
 | `cloud batches` | The batches the app keeps, newest last; the oldest are left out when they would not fit in one answer |
-| `processes [--pane ID]` | The processes under a pane, with CPU and memory (no app needed) |
+| `processes [--pane ID \| --terminal ID]` | The processes under a Herdr pane or a herdr-core terminal, with CPU and memory; by default the caller's own (`HC_TERMINAL_ID`, else `HERDR_PANE_ID`). No app needed |
 | `search symbol\|file QUERY` | Go to Symbol or Go to File over the current checkout (no app needed) |
 
 ### Settings and services
