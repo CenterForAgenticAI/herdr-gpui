@@ -13,15 +13,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Sandbox {
-    _dir: tempfile::TempDir,
-    binary: OsString,
+pub(super) struct Sandbox {
+    pub(super) dir: tempfile::TempDir,
+    pub(super) binary: OsString,
     child: Child,
-    vars: Vec<(&'static str, OsString)>,
+    pub(super) vars: Vec<(&'static str, OsString)>,
 }
 
 impl Sandbox {
-    fn start(binary: OsString) -> Self {
+    pub(super) fn start(binary: OsString) -> Self {
         let parent = std::env::var_os("HERDR_TEST_TMPDIR").unwrap_or_else(|| "/tmp".into());
         let dir = tempfile::Builder::new()
             .prefix("hc")
@@ -43,7 +43,7 @@ impl Sandbox {
             .spawn()
             .unwrap();
         Self {
-            _dir: dir,
+            dir,
             binary,
             child,
             vars,
