@@ -45,7 +45,10 @@ fn a_bridged_core_runs_and_lists_terminals() {
     let set = core
         .label(&started.address, &[("herdr-gpui-1", "open")].into())
         .unwrap();
-    assert_eq!(set.labels.get("herdr-gpui-1").map(String::as_str), Some("open"));
+    assert_eq!(
+        set.labels.get("herdr-gpui-1").map(String::as_str),
+        Some("open")
+    );
     let cleared = core
         .label(&started.address, &[("herdr-gpui-1", "")].into())
         .unwrap();

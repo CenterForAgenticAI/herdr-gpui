@@ -104,8 +104,7 @@ impl CoreTerminals {
 
     /// Uses `hub` for the core of the host `scope` names, as the first ask
     /// for it would, so a test never dials a real host.
-    // Only the lifecycle tests, which need Unix sockets, use it.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn set_remote_hub_for_test(
         &mut self,
         scope: Scope,
