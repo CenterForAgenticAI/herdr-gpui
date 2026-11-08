@@ -88,3 +88,41 @@ fn an_edit_too_large_to_compare_stays_listed_without_a_count(cx: &mut TestAppCon
         );
     });
 }
+
+#[gpui::test]
+fn a_finished_edit_sent_without_its_text_stays_listed(cx: &mut TestAppContext) {
+    let (view, _peer, cx) = open(cx, ConnectTarget::Local);
+    let program = Program::new();
+    let call = |id, kind, status, location: &str| Entry {
+        id: EntryId(id),
+        kind: EntryKind::Tool(Tool {
+            call_id: format!("call-{id}"),
+            content: vec![ToolContent::Text {
+                text: "Original edit context exceeds live preview limits.".into(),
+            }],
+            kind,
+            locations: vec![location.into()],
+            parent: None,
+            started_ms: None,
+            status,
+            title: "Edit".into(),
+        }),
+    };
+    let entries = vec![
+        call(
+            1,
+            ToolKind::Edit,
+            ToolStatus::Completed,
+            "/work/data.csv:12",
+        ),
+        call(2, ToolKind::Edit, ToolStatus::Failed, "/work/failed.csv"),
+        call(3, ToolKind::Read, ToolStatus::Completed, "/work/read.csv"),
+    ];
+    let _stream = attach_with(&view, &program, snapshot(cursor(1, 0), entries), cx);
+    view.read_with(cx, |view, _| {
+        let changed = view.chats.pane("w1:p1").unwrap().prepared.changed();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].path, "/work/data.csv");
+        assert_eq!(changed[0].lines, None);
+    });
+}

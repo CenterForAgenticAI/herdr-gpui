@@ -13,8 +13,8 @@ use crate::{
     release_notes::{self, Line},
 };
 use sheprd_chat_protocol::{
-    Author, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, QuestionAnswer,
-    ToolContent, ToolKind, Transcript,
+    Author, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, QuestionAnswer, Tool,
+    ToolContent, ToolKind, ToolStatus, Transcript,
 };
 use std::{
     borrow::Cow,
@@ -111,6 +111,28 @@ pub(crate) fn total_lines(diffs: &[DiffSummary]) -> Option<LineChanges> {
         .try_fold(LineChanges::default(), |total, diff| {
             Some(total + diff.lines?)
         })
+}
+
+/// The files a finished edit changed without saying how, as when its sides
+/// were too large to send: the file still changed.
+fn unshown_edits(tool: &Tool) -> &[String] {
+    if tool.kind == ToolKind::Edit && tool.status == ToolStatus::Completed {
+        &tool.locations
+    } else {
+        &[]
+    }
+}
+
+/// A tool location's path, without the `:line` an agent may add to it.
+fn location_path(location: &str) -> &str {
+    match location.rsplit_once(':') {
+        Some((path, line))
+            if !path.is_empty() && !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            path
+        }
+        _ => location,
+    }
 }
 
 /// Characters of a tool call's header.
@@ -376,14 +398,22 @@ impl Prepared {
             let Body::Tool(summary) = &**body else {
                 continue;
             };
-            for diff in &summary.diffs {
+            let unshown = match &entry.kind {
+                EntryKind::Tool(tool) if summary.diffs.is_empty() => unshown_edits(tool),
+                _ => &[],
+            };
+            let unshown = unshown.iter().map(|location| DiffSummary {
+                path: location_path(location).to_owned(),
+                lines: None,
+            });
+            for diff in summary.diffs.iter().cloned().chain(unshown) {
                 match self
                     .changed
                     .iter_mut()
                     .find(|known| known.path == diff.path)
                 {
                     Some(known) => known.merge(diff.lines),
-                    None => self.changed.push(diff.clone()),
+                    None => self.changed.push(diff),
                 }
             }
         }

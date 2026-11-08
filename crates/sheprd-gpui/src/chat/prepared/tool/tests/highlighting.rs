@@ -6,7 +6,7 @@ fn transcript() -> (Transcript, Vec<(EntryId, u64)>) {
     let mut transcript = Transcript::new("Agent");
     transcript.entries.push(Entry {
         id: EntryId(1),
-        kind: EntryKind::Tool(sheprd_chat_protocol::Tool {
+        kind: EntryKind::Tool(Tool {
             call_id: "call".into(),
             content: vec![text(r#"{"command":"ls"}"#)],
             kind: ToolKind::Execute,
