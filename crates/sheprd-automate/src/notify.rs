@@ -50,12 +50,15 @@ pub fn show(title: &str, body: &str, give_up: impl Fn() -> bool) -> Result<(), E
         .spawn()
         .map_err(launch)?;
     let stderr = child.stderr.take();
+    // Read to the end, so a long complaint never meets a closed pipe.
     let complaint = thread::spawn(move || {
-        let mut text = String::new();
+        let mut kept = Vec::new();
         if let Some(stderr) = stderr {
-            let _ = stderr.take(MAX_COMPLAINT_BYTES).read_to_string(&mut text);
+            let mut limited = stderr.take(MAX_COMPLAINT_BYTES);
+            let _ = limited.read_to_end(&mut kept);
+            let _ = std::io::copy(&mut limited.into_inner(), &mut std::io::sink());
         }
-        text
+        String::from_utf8_lossy(&kept).into_owned()
     });
     let deadline = Instant::now() + TIMEOUT;
     let status = loop {

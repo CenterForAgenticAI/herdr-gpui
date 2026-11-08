@@ -190,3 +190,41 @@ fn giving_up_kills_git_and_says_so() {
     .unwrap_err();
     assert!(matches!(error, Error::GaveUp), "{error}");
 }
+
+#[test]
+fn output_past_the_bound_is_read_to_its_end_and_dropped() {
+    let long = vec![b'x'; usize::try_from(MAX_OUTPUT).unwrap() * 3];
+    let mut reader = std::io::Cursor::new(long);
+    let kept = bounded(&mut reader);
+    assert_eq!(kept.len(), usize::try_from(MAX_OUTPUT).unwrap());
+    assert_eq!(reader.position(), MAX_OUTPUT * 3, "read to the end");
+}
+
+#[test]
+fn a_hook_that_prints_a_lot_still_gets_its_worktree() {
+    let dir = tempdir().unwrap();
+    let repository = committed_repository(dir.path());
+    let hook = repository.join(".git/hooks/post-checkout");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh
+head -c 300000 /dev/zero | tr '\\0' x
+head -c 300000 /dev/zero | tr '\\0' y >&2
+",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let checkout = add(
+        &repository,
+        "topic",
+        "HEAD",
+        &dir.path().join("worktrees"),
+        never,
+    )
+    .unwrap();
+    assert!(checkout.join(".git").exists());
+}

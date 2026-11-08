@@ -157,14 +157,28 @@ fn git<'a>(
     Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
+/// Reads `pipe` to its end, so a chatty hook never meets a closed pipe,
+/// keeping only the first [`MAX_OUTPUT`] bytes.
 fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        if let Some(pipe) = pipe {
-            let _ = pipe.take(MAX_OUTPUT).read_to_end(&mut bytes);
+    thread::spawn(move || pipe.map(bounded).unwrap_or_default())
+}
+
+/// Everything `reader` gives until its end, of which the first
+/// [`MAX_OUTPUT`] bytes are kept.
+fn bounded(mut reader: impl Read) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut chunk = [0; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => return kept,
+            Ok(read) => {
+                let room = usize::try_from(MAX_OUTPUT)
+                    .unwrap_or(usize::MAX)
+                    .saturating_sub(kept.len());
+                kept.extend_from_slice(&chunk[..read.min(room)]);
+            }
         }
-        bytes
-    })
+    }
 }
 
 fn joined(reader: thread::JoinHandle<Vec<u8>>) -> Vec<u8> {
