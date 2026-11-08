@@ -114,8 +114,9 @@ keepawake            = { default-features = false, version = "0.6.1" }
 image                = { default-features = false, features = ["gif", "jpeg", "png", "webp"], version = "0.25.10" }
 # The sandboxed Luau interpreter behind automation scripts, built from source.
 mlua                 = { features = ["error-send", "luau"], version = "0.12.2" }
-# The window `sheprd-moonframe` lays out in Luau.
-moonframe            = { default-features = false, git = "https://github.com/moonframehq/moonframe", rev = "cc1736b76a345de740a355b482451c127c29b618" }
+# The window `sheprd-moonframe` lays out in Luau; pinned to
+# moonframehq/moonframe#125 until it merges.
+moonframe            = { default-features = false, git = "https://github.com/moonframehq/moonframe", rev = "756db2fab402c6e2369831b0ac0fa95e5df2ddfb" }
 # Mermaid fences in chat answers become diagrams: parse, lay out, and write
 # SVG in pure Rust; GPUI rasterizes the SVG. No CLI and no PNG writer.
 mermaid-rs-renderer  = { default-features = false, version = "0.3.1" }
