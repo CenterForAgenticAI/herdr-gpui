@@ -72,7 +72,7 @@ class BuildTests(unittest.TestCase):
     def test_pages_links_callouts_and_search(self):
         fx = Fixture(self, {
             "website/docs/introduction.md": page("Introduction", "See [setup](setup.md#first-run) and [the guide](../../docs/guide.md).\n"),
-            "website/docs/setup.md": page("Setup", "## First run\n\n> **Note.** Read this.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n", "blurb: Set up.\nstatus: optin\nplatforms: macOS\n"),
+            "website/docs/setup.md": page("Setup", "## First run\n\n> **Note.** Read this.\n\n| a | b |\n| - | - |\n| 1 | `on\\|off` |\n", "blurb: Set up.\nstatus: optin\nplatforms: macOS\n"),
             "docs/guide.md": "# Guide\n\nAll about it. See [code](../src/main.rs).\n\n## Use it\n\nText.\n",
             "src/main.rs": "fn main() {}\n",
         })
@@ -86,11 +86,20 @@ class BuildTests(unittest.TestCase):
         setup = files["setup/index.html"]
         self.assertIn('<aside class="note"><b>Note</b>', setup)
         self.assertIn('<div class="table-wrap"><table>', setup)
+        self.assertIn("<code>on|off</code>", setup)
         self.assertIn('<span class="st st-optin">Opt-in</span>', setup)
         self.assertIn('href="#first-run" data-toc="first-run"', setup)
         self.assertIn('<a href="/docs/setup/" class="on" aria-current="page">Setup</a>', setup)
         self.assertIn("https://github.com/sheprd-labs/sheprd/blob/main/src/main.rs", files["guide/index.html"])
         self.assertIn('"id":"use-it"', files["search.js"])
+        self.assertNotIn("search.js", setup)  # loaded when search first opens
+
+    def test_search_keeps_whole_sections(self):
+        body = "## Long\n\n" + " ".join(f"word{i}" for i in range(400)) + " needle\n"
+        fx = Fixture(self, {"website/docs/introduction.md": page("Introduction", body)})
+        files, errors = fx.build([("Start", ["introduction"])])
+        self.assertEqual(errors, [])
+        self.assertIn("needle", files["search.js"])
 
     def test_broken_links_and_anchors_are_reported(self):
         fx = Fixture(self, {

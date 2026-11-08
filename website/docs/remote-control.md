@@ -83,7 +83,7 @@ Workspace headers show their pull request's number and status color, as on the d
 
 The installed app gets Web Push notifications when an agent asks a question or a permission, when a turn ends, and when an agent stops on an error. On iOS 16.4 and later, push reaches only an installed app (added to the Home Screen); on Android it works installed or not.
 
-By default a notification says which chat needs you, without the message text. Choose **Excerpt** under **Notifications** in Settings to add a short excerpt. Notifications are encrypted end to end, so the push services relay them without reading them.
+By default a notification includes a short excerpt of the message, which can show on your phone's lock screen. To say only which chat needs you, without its text, choose **Generic** under **Notifications** in Settings, or set `notifications = "generic"` under `[remote]`. Notifications are encrypted end to end, so the push services relay them without reading them.
 
 The app icon's badge counts agents that want you: those with a question, those Herdr reports blocked, and those that finished and nobody has opened yet. Phone notifications come from the daemon, so muting a workspace or tab in Sheprd does not hold them back.
 

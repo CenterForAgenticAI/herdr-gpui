@@ -85,8 +85,10 @@ td { border-bottom: 1px solid var(--rule); padding: .6rem .8rem .6rem 0; vertica
 .pager a:hover { color: var(--acc); }
 .pager .next { margin-left: auto; text-align: right; }
 
-#palette { position: fixed; inset: 0; z-index: 150; background: rgba(35, 24, 15, .35); padding: 12vh 1rem 1rem; }
-.pal-box { width: min(38rem, 100%); margin: 0 auto; background: var(--bg); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; box-shadow: 0 24px 60px rgba(35, 24, 15, .3); font-family: var(--sans); }
+/* The modal search dialog; Escape closes it natively. */
+#palette { border: 0; padding: 0; margin: 12vh auto 0; width: min(38rem, 100% - 2rem); max-width: none; max-height: none; background: transparent; overflow: visible; }
+#palette::backdrop { background: rgba(35, 24, 15, .35); }
+.pal-box { width: 100%; background: var(--bg); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; box-shadow: 0 24px 60px rgba(35, 24, 15, .3); font-family: var(--sans); }
 .pal-box input { width: 100%; border: 0; outline: 0; background: none; padding: 1rem 1.1rem; font: 1rem var(--sans); color: var(--fg); border-bottom: 1px solid var(--rule); }
 .pal-box ul { list-style: none; margin: 0; padding: .35rem; max-height: min(26rem, 60vh); overflow: auto; }
 .pal-box li a { display: block; padding: .55rem .7rem; border-radius: 7px; }

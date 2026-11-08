@@ -188,7 +188,9 @@ _CALLOUT = re.compile(r"<blockquote>\s*<p><strong>([^<]+?)</strong>\s*(.*?)</blo
 def decorate(body: str) -> str:
     body = _CALLOUT.sub(lambda m: f'<aside class="note"><b>{m.group(1).rstrip(".:")}</b><p>{m.group(2)}</aside>', body)
     body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
-    return body
+    # GitHub reads `\|` in a table cell as a literal pipe, even inside code;
+    # Python-Markdown keeps the backslash in code spans.
+    return re.sub(r"<table>.*?</table>", lambda m: m.group(0).replace("\\|", "|"), body, flags=re.S)
 
 
 def load_page(slug: str, group: str, source: Path, meta: dict[str, str], repo_root: Path) -> Page:
@@ -219,7 +221,7 @@ def sections_for_search(body: str) -> list[dict[str, str]]:
     out = []
     for i in range(1, len(parts) - 1, 3):
         text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", parts[i + 2]))).strip()
-        out.append({"id": parts[i], "title": html.unescape(re.sub(r"<[^>]+>", "", parts[i + 1])), "text": text[:600]})
+        out.append({"id": parts[i], "title": html.unescape(re.sub(r"<[^>]+>", "", parts[i + 1])), "text": text})
     return out
 
 
