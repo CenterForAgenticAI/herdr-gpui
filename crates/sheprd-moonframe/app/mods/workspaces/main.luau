@@ -81,7 +81,6 @@ end
 local function parent_row(workspace: any, theme: any)
 	return ui.row {
 		class = "worktree-row",
-		state = if workspace.focused then "selected" else nil,
 		align = "start",
 		height = ROW,
 		shrink = false,
@@ -107,7 +106,6 @@ end
 local function child_row(workspace: any, last: boolean, theme: any)
 	return ui.row {
 		class = "worktree-row worktree-child",
-		state = if workspace.focused then "selected" else nil,
 		align = "start",
 		gap = "none",
 		height = ROW,
@@ -142,7 +140,6 @@ end
 local function compact_row(workspace: any, theme: any)
 	return ui.column {
 		class = "worktree-tile",
-		state = if workspace.focused then "selected" else nil,
 		align = "center",
 		justify = "center",
 		height = 36,
@@ -164,7 +161,6 @@ local function agent_row(agent: any, workspace: any, theme: any)
 	local focused = workspace ~= nil and workspace.focused
 	return ui.row {
 		class = "agent-row",
-		state = if focused then "selected" else nil,
 		align = "start",
 		height = ROW,
 		shrink = false,

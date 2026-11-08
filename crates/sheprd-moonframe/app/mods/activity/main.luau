@@ -14,7 +14,6 @@ local ICONS = {
 local function button(id: string, icon: string, label: string?, count: any, selected: boolean, msg: any, theme: any)
 	return ui.row {
 		class = "activity-button",
-		state = if selected then "selected" else nil,
 		align = "center",
 		gap = "none",
 		height = 36,

@@ -7,7 +7,8 @@ local function region(name: string)
 end
 
 return mod {
-	window = { titlebar = "hidden", traffic_lights = { x = 9, y = 9 } },
+	-- Sheprd's own window opens at 1200 by 780 too.
+	window = { size = { width = 1200, height = 780 }, titlebar = "hidden", traffic_lights = { x = 9, y = 9 } },
 
 	init = function(previous)
 		-- Sizes come from Sheprd as soon as it starts; `details` is the user's.
