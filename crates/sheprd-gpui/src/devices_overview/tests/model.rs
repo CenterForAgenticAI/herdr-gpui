@@ -169,6 +169,9 @@ fn herdr_2_agents_count_on_a_computer_without_herdr_1() {
     let device = Device::new(0, &endpoint, &live, &sessions);
     assert_eq!(device.link, Link::Online);
     assert_eq!(device.agents[0].workspace, "Herdr 2");
+    // A click shows it through the app's tab, not Herdr 1's pane focus.
+    assert_eq!(device.agents[0].keeper, sheprd_session::Keeper::App);
+    assert_eq!(device.agents[0].tab_id, "1");
     assert!(device.matches("claude"));
     let offline = Device::new(0, &endpoint, &live, &Default::default());
     assert_ne!(offline.link, Link::Online);
