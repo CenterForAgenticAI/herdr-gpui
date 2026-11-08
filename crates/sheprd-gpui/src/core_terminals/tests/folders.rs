@@ -70,3 +70,21 @@ fn a_core_workspace_stays_where_it_started_when_its_pane_moves() {
         Some(PathBuf::from("/start"))
     );
 }
+
+#[test]
+fn only_this_computers_terminals_are_placed_for_its_port_scan() {
+    let mut terminals = CoreTerminals::default();
+    tab(&mut terminals, 0, "t0", "w", false);
+    let mut remote = TabPanes::new(
+        Host::Remote(Scope::endpoint("box")),
+        Panes::single(id("t1")),
+        false,
+    );
+    remote.workspace = Some((Scope::endpoint("box"), "w".to_owned()));
+    terminals.tabs.insert(TabId::test(1), remote);
+    // t1 on the saved host would name an unrelated local terminal t1.
+    assert_eq!(
+        terminals.terminal_workspaces(),
+        [("t0".to_owned(), "w".to_owned())]
+    );
+}

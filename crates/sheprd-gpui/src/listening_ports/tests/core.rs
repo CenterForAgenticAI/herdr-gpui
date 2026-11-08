@@ -74,3 +74,26 @@ fn core_ports_follow_the_workspace_each_terminal_is_shown_in() {
     assert!(ports.core_ports("herdr-2").is_none());
     assert_eq!(ports.core_ports("other").unwrap().ports.len(), 1);
 }
+
+#[test]
+fn shared_lookups_find_core_ports_where_herdr_names_none() {
+    let mut ports = ListeningPorts::default();
+    ports.seed(
+        Host::Local,
+        parse("L 10 *:5173 node\nL 11 *:3000 rails\nC 10 t1\nE 11 w1\n").unwrap(),
+    );
+    ports.place_terminals(vec![("t1".to_owned(), "herdr-2".to_owned())]);
+    let local = Daemon::of(&ConnectTarget::Socket("/run/h/herdr-client.sock".into())).unwrap();
+    // The workspace's chips and the Ports section agree on the listener.
+    assert_eq!(
+        ports.get(&local, "herdr-2").unwrap().ports,
+        [port(5173, Bind::Any, "node")]
+    );
+    assert_eq!(ports.workspace_of(&local, 10), Some("herdr-2"));
+    // A saved host's daemon never takes this computer's terminals.
+    let remote = remote("default");
+    assert!(ports.get(&remote, "herdr-2").is_none());
+    assert_eq!(ports.workspace_of(&remote, 10), None);
+    // A pid no terminal is placed for has no workspace.
+    assert_eq!(ports.workspace_of(&local, 99), None);
+}

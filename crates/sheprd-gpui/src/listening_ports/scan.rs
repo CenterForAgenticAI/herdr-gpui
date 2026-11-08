@@ -243,6 +243,8 @@ pub(crate) struct Scan {
     /// Each herdr-core terminal's ports, lowest first, for listeners no
     /// Herdr workspace claims.
     pub terminals: HashMap<Terminal, Vec<Port>>,
+    /// The herdr-core terminal each such listening process was started in.
+    pub terminal_pids: HashMap<u32, Terminal>,
 }
 
 /// Parses what [`COMMAND`] printed.
@@ -306,6 +308,7 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
             scan.pids.insert(pid, owner.clone());
             add(scan.ports.entry(owner.clone()).or_default(), port);
         } else if let Some(terminal) = terminals.get(&pid) {
+            scan.terminal_pids.insert(pid, terminal.clone());
             add(scan.terminals.entry(terminal.clone()).or_default(), port);
         }
     }

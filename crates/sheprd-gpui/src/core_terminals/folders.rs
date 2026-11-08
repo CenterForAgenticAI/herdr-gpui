@@ -40,11 +40,19 @@ impl super::TabPanes {
 }
 
 impl CoreTerminals {
-    /// Each known tab's terminals and the workspace the tab is in, by
-    /// address, for what names a terminal but not its workspace.
+    /// Each terminal of this computer's core the window shows and the
+    /// workspace it is in, by address, for what names a terminal but not
+    /// its workspace: the terminals of its tabs, and the shell shown in
+    /// place of Herdr 1, in the workspace that stands in for Herdr's. A
+    /// saved host's terminals run elsewhere, and their addresses mean
+    /// nothing here.
     pub(crate) fn terminal_workspaces(&self) -> Vec<(String, String)> {
+        let fallback = self
+            .fallback_terminal()
+            .map(|terminal| (terminal.as_str().to_owned(), super::WORKSPACE.to_owned()));
         self.tabs
             .values()
+            .filter(|shown| shown.host == super::Host::Local)
             .filter_map(|shown| Some((shown, &shown.workspace.as_ref()?.1)))
             .flat_map(|(shown, workspace)| {
                 shown
@@ -53,6 +61,7 @@ impl CoreTerminals {
                     .into_iter()
                     .map(move |terminal| (terminal.as_str().to_owned(), workspace.clone()))
             })
+            .chain(fallback)
             .collect()
     }
 }

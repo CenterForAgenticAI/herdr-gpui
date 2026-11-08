@@ -57,14 +57,8 @@ impl SheprdWindow {
         };
         let workspace = snapshot.focused_workspace_id.as_deref()?;
         let daemon = super::Daemon::of(&endpoint.connection.target)?;
-        let listed = self.listening_ports.get(&daemon, workspace);
-        // A herdr-core tab in a Herdr workspace names the workspace itself;
-        // a terminal started outside the app is placed by its tab.
-        let listed = listed.or_else(|| {
-            (!endpoint.connection.target.is_remote())
-                .then(|| self.listening_ports.core_ports(workspace))
-                .flatten()
-        })?;
+        // Falls back to the workspace's herdr-core terminals on this computer.
+        let listed = self.listening_ports.get(&daemon, workspace)?;
         Some((endpoint.id.as_str(), workspace, listed))
     }
 
