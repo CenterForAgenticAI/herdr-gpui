@@ -65,6 +65,7 @@ fn a_selection_reaching_past_the_screen_is_read_from_the_history(cx: &mut gpui::
             offset: 5,
             history: 7,
             rows: 3,
+            full: false,
         },
         revision: 4,
     }]);
@@ -78,7 +79,7 @@ fn a_selection_reaching_past_the_screen_is_read_from_the_history(cx: &mut gpui::
     });
     cx.simulate_mouse_move(cell(1., 0.), Some(MouseButton::Left), Modifiers::none());
     cx.simulate_mouse_up(cell(1., 0.), MouseButton::Left, Modifiers::none());
-    cx.update(|_, cx| view.update(cx, |view, cx| assert!(view.copy_selection(cx))));
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(view.copy_selection())));
     assert_eq!(
         requests(&backend, 1),
         vec![History::Read {
@@ -102,4 +103,61 @@ fn a_drag_held_above_the_screen_scrolls_the_history(cx: &mut gpui::TestAppContex
     );
     cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx)));
     assert_eq!(requests(&backend, 1), vec![History::ScrollTo { offset: 1 }]);
+}
+
+#[gpui::test]
+fn a_shown_selection_is_read_from_the_history_too(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    cx.run_until_parked();
+    let bounds = cx.update(|_, cx| view.read(cx).bounds()).unwrap();
+    let cell =
+        |column: f32, row: f32| bounds.origin + at(px(8.5 * column + 1.), px(17. * row + 1.));
+    // Rows 8 and 9 of the history, both on the screen: copied the same
+    // way as one reaching past it, so wrapped rows join alike.
+    cx.simulate_mouse_down(cell(1., 1.), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(cell(3., 2.), Some(MouseButton::Left), Modifiers::none());
+    cx.simulate_mouse_up(cell(3., 2.), MouseButton::Left, Modifiers::none());
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(view.copy_selection())));
+    assert_eq!(
+        requests(&backend, 1),
+        vec![History::Read {
+            anchor: point(8, 1),
+            cursor: point(9, 3),
+        }]
+    );
+}
+
+#[gpui::test]
+fn output_into_a_full_history_drops_the_selection(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    cx.run_until_parked();
+    let bounds = cx.update(|_, cx| view.read(cx).bounds()).unwrap();
+    let cell =
+        |column: f32, row: f32| bounds.origin + at(px(8.5 * column + 1.), px(17. * row + 1.));
+    cx.simulate_mouse_down(cell(1., 1.), MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(cell(3., 2.), Some(MouseButton::Left), Modifiers::none());
+    cx.simulate_mouse_up(cell(3., 2.), MouseButton::Left, Modifiers::none());
+    let full = |revision| {
+        vec![SurfaceUpdate::Scroll {
+            metrics: ScrollMetrics {
+                offset: 0,
+                history: 7,
+                rows: 3,
+                full: true,
+            },
+            revision,
+        }]
+    };
+    // Full, but nothing new: the rows still hold the selected text.
+    backend.push(full(4));
+    until(|| {
+        cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx).then_some(())))
+    });
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(view.copy_selection())));
+    // New output drops the oldest line, moving every row under it.
+    backend.push(full(5));
+    until(|| {
+        cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx).then_some(())))
+    });
+    cx.update(|_, cx| view.update(cx, |view, _| assert!(!view.copy_selection())));
 }

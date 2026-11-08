@@ -246,23 +246,15 @@ impl CoreTerminalView {
         self.report(kind, cell, event.modifiers, lines);
     }
 
-    /// Copies the selection; false when nothing is selected. What the
-    /// screen shows is copied at once; a selection reaching into the
-    /// history is read from it and copied when the text arrives.
-    pub(crate) fn copy_selection(&mut self, cx: &mut App) -> bool {
-        let Some(selection) = self.selection.filter(|selection| !selection.is_empty()) else {
+    /// Copies the selection; false when nothing is selected. The text is
+    /// read from the history, shown or not, so wrapped rows are joined the
+    /// same way however far the view has scrolled, and copied when it
+    /// arrives.
+    pub(crate) fn copy_selection(&mut self) -> bool {
+        let Some(range) = self.selection.and_then(|selection| selection.range()) else {
             return false;
         };
-        let shown = self
-            .screen
-            .frame
-            .as_deref()
-            .and_then(|frame| selection.text(frame, self.top()));
-        match (shown, selection.range()) {
-            (Some(text), _) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
-            (None, Some(range)) => self.copy_range(range),
-            (None, None) => return false,
-        }
+        self.copy_range(range);
         true
     }
 

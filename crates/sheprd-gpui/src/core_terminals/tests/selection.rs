@@ -1,7 +1,34 @@
-use crate::core_terminals::selection::{Cell, Selection};
+use crate::core_terminals::selection::{Cell, Selection, symbol};
 use sheprd_backend::FrameData;
 use sheprd_backend::TextPoint;
 use sheprd_client::protocol::CellData;
+
+/// The selected text as the screen shows it, read from `frame` whose top
+/// row is `top`: each row's cells with trailing blanks dropped, rows joined
+/// by newlines. `None` when part of the selection is off the screen.
+trait Shown {
+    fn text(&self, frame: &FrameData, top: u32) -> Option<String>;
+}
+
+impl Shown for Selection {
+    fn text(&self, frame: &FrameData, top: u32) -> Option<String> {
+        let rows = self.rows(frame.width);
+        let visible = self.visible_rows(frame.width, top, frame.height);
+        if visible.len() != rows.len() {
+            return None;
+        }
+        Some(
+            visible
+                .into_iter()
+                .map(|(row, columns)| {
+                    let text: String = columns.map(|column| symbol(frame, row, column)).collect();
+                    text.trim_end().to_owned()
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+}
 
 /// A frame showing `rows`, each padded with blanks to `width`.
 fn frame(width: u16, rows: &[&str]) -> FrameData {

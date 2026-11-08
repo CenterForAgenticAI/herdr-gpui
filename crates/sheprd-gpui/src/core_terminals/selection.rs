@@ -137,33 +137,11 @@ impl Selection {
             })
             .collect()
     }
-
-    /// The selected text, read from `frame` whose top row is `top`: each
-    /// row's cells with trailing blanks dropped, rows joined by newlines.
-    /// `None` when part of the selection is off the screen, where only the
-    /// history has it.
-    pub(crate) fn text(&self, frame: &FrameData, top: u32) -> Option<String> {
-        let rows = self.rows(frame.width);
-        let visible = self.visible_rows(frame.width, top, frame.height);
-        if visible.len() != rows.len() {
-            return None;
-        }
-        Some(
-            visible
-                .into_iter()
-                .map(|(row, columns)| {
-                    let text: String = columns.map(|column| symbol(frame, row, column)).collect();
-                    text.trim_end().to_owned()
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    }
 }
 
 /// What a cell shows. A wide character's second cell shows nothing, so
-/// the character is copied once.
-fn symbol(frame: &FrameData, row: u16, column: u16) -> &str {
+/// the character is read once.
+pub(super) fn symbol(frame: &FrameData, row: u16, column: u16) -> &str {
     let index = usize::from(row) * usize::from(frame.width) + usize::from(column);
     frame
         .cells
