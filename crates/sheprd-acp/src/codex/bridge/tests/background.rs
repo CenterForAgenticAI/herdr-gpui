@@ -182,3 +182,30 @@ fn a_failed_spawn_fails_its_sub_agent_and_unknown_threads_stay_skipped() {
     );
     assert!(child.is_empty(), "a failed spawn has no thread to follow");
 }
+
+#[test]
+fn a_refused_stop_says_so() {
+    let mut bridge = spawned();
+    let started = notify(
+        &mut bridge,
+        "turn/started",
+        json!({"threadId": CHILD, "turn": {"id": "t-c", "status": "inProgress"}}),
+    );
+    assert_eq!(tag(update(&started[0]))["activity"]["stoppable"], true);
+    let outs = bridge.on_session(Inbound::Notification {
+        method: STOP_METHOD.to_owned(),
+        params: json!({"callId": "call_spawn"}),
+    });
+    let interrupt = harness(&outs[0]).clone();
+    assert_eq!(interrupt["method"], "turn/interrupt");
+    assert_eq!(
+        interrupt["params"],
+        json!({"threadId": CHILD, "turnId": "t-c"})
+    );
+    let refused = bridge.on_harness(&json!({
+        "id": interrupt["id"], "error": {"code": -32600, "message": "no active turn"},
+    }));
+    let notice = update(&refused[0]);
+    assert_eq!(notice["severity"], "warning");
+    assert!(notice["title"].as_str().unwrap().contains("no active turn"));
+}

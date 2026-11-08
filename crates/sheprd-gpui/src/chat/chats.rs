@@ -148,8 +148,10 @@ pub(crate) struct ChatPane {
     pub(crate) prepared: Prepared,
     #[cfg(feature = "integration-test")]
     preview: bool,
-    /// Whether the plan and changed files show beside the entries.
+    /// Whether the rail shows beside the entries.
     pub(crate) rail: bool,
+    /// Which of the rail's sections show.
+    pub(crate) rail_folds: super::rail_folds::RailFolds,
     /// A read-only overlay owns the keyboard without installing an input handler.
     pub(crate) read_only_focus: Option<FocusHandle>,
     retry_at: Option<Instant>,
@@ -260,6 +262,7 @@ impl ChatPane {
             #[cfg(feature = "integration-test")]
             preview: false,
             rail: true,
+            rail_folds: Default::default(),
             read_only_focus: None,
             retry_at: None,
             running: Default::default(),
@@ -381,6 +384,8 @@ impl ChatPane {
         }
         if changed {
             self.sync_view();
+            let busy = self.session.transcript().running().total() > 0;
+            self.rail_folds.follow(busy, crate::motion::now());
         }
         changed
     }
@@ -502,6 +507,8 @@ pub(crate) enum Toward {
 /// Every chat pane of the window's daemon, in its snapshot's order.
 #[derive(Default)]
 pub(crate) struct Chats {
+    /// Visual workers running, including those of panes since hidden or gone.
+    pub(crate) active_visual_jobs: usize,
     /// The agents installed on each host new chats may start on.
     pub(crate) agents: super::harnesses::Harnesses,
     /// The terminal agent moving into a chat, one at a time.
@@ -544,6 +551,8 @@ pub(crate) struct Chats {
     pub(crate) ticked: u64,
     /// A new chat whose tab is being made.
     pub(crate) starting: Option<super::start::Starting>,
+    /// The visible pane offered a worker next, so busy splits take turns.
+    pub(crate) visual_cursor: usize,
 }
 
 impl Chats {

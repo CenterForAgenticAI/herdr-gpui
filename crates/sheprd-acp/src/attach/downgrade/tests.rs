@@ -16,6 +16,7 @@ fn activity() -> Change {
             label: "Review the reducer tests".to_owned(),
             started_ms: 1_000,
             state: ActivityState::Running,
+            stoppable: false,
         },
     }
 }

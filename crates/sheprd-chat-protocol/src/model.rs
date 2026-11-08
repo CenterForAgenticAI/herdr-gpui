@@ -115,6 +115,7 @@ impl Transcript {
             match activity.kind {
                 ActivityKind::Subagent => running.subagents += 1,
                 ActivityKind::Shell => running.shells += 1,
+                ActivityKind::Monitor => running.monitors += 1,
                 ActivityKind::Other => running.other += 1,
             }
         }
