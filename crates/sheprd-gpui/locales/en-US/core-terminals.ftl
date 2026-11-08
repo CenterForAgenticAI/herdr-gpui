@@ -1,7 +1,11 @@
 # Terminals that herdr-core (Herdr 2) runs, drawn by the app in tabs.
 
 core-terminals-open-workspace = Open a workspace first
-core-terminals-local-only = Herdr 2 terminals run only on this computer
+# The app keeps Herdr 2 workspaces for this computer only.
+core-terminals-workspaces-local-only = Herdr 2 workspaces are only on this computer
+# A new tab on an SSH host, cloud machine, or WSL distribution without
+# herdr-core runs in the host's Herdr instead.
+core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr
 core-terminals-too-many-tabs = Too many tabs are open
 core-terminals-connecting = Connecting to herdr-core...
 # $reason is the error, in English or from herdr-core.

@@ -3,7 +3,7 @@
 //! no workspaces, so these are the app's own, saved with its tabs
 //! (`browser::Store`), and shown beside Herdr 1's on this computer.
 
-use super::{Purpose, WORKSPACE};
+use super::{Host, Purpose, WORKSPACE};
 use crate::{
     SheprdWindow,
     browser::{Location, Scope, Store, scope},
@@ -131,7 +131,7 @@ impl SheprdWindow {
         } = location
         {
             for terminal in panes.terminals() {
-                self.end_core_terminal(terminal.clone());
+                self.end_core_terminal(&Host::Local, terminal.clone());
             }
         }
     }
@@ -199,7 +199,10 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         if self.selected_is_remote() {
-            self.show_flash(Flash::warning(fl!("core-terminals-local-only")), cx);
+            self.show_flash(
+                Flash::warning(fl!("core-terminals-workspaces-local-only")),
+                cx,
+            );
             return None;
         }
         let scope = scope_of(self);
