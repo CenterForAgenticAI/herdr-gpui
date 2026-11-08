@@ -317,6 +317,20 @@ pub(super) async fn action(
             })
             .ok_or(ApiError::NotFound)?
     };
+    // Sheprd keeps a Herdr 2 tab's layout: it makes the change.
+    let op = match request.action {
+        Action::SplitRight => Some(crate::control::layout::Op::SplitRight),
+        Action::SplitDown => Some(crate::control::layout::Op::SplitDown),
+        Action::Zoom => Some(crate::control::layout::Op::Zoom),
+        Action::ClosePane | Action::CloseTab | Action::NewTab => None,
+    };
+    if let Some(op) = op
+        && let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)?
+    {
+        crate::native::changes::change_layout(&state, saved, terminal, op).await?;
+        let location = format!("/term/{}", render::urlencode(&pane));
+        return Ok(Json(json!({ "location": location, "pane": pane })));
+    }
     let core_tab = if request.action == Action::NewTab {
         state.hub.new_core_tab(&workspace).await?
     } else {

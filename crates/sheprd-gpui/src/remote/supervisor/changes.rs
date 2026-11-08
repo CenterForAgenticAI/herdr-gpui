@@ -1,7 +1,9 @@
 //! The supervisor's part in answering phones about workspaces: while a phone
 //! is connected it waits on the daemon for their questions, one long request
 //! at a time, the next tick starting the next, and answers each on the
-//! background executor. With no phone connected it asks nothing.
+//! background executor. With no phone connected it asks nothing. A phone's
+//! split or zoom of a Herdr 2 tab arrives the same way, and the window that
+//! holds the tab makes it at once.
 //!
 //! The daemon's limit counts only questions a phone still waits for, and an
 //! answer keeps running after its phone gives up, so the answers running here
@@ -10,8 +12,12 @@
 //! waiting frees its place.
 
 use super::*;
+use crate::SheprdWindow;
 use crate::remote::changes::Sources;
-use sheprd_remote_control::control::changes::Ask;
+use sheprd_remote_control::control::{
+    changes::{Ask, AskId},
+    layout,
+};
 use std::collections::VecDeque;
 
 /// How long after a failed wait the daemon is asked again.
@@ -67,7 +73,7 @@ impl Supervisor {
     pub(super) fn take_asks(cx: &mut App, answer: Result<Response, control::Error>) {
         let supervisor = cx.global_mut::<Self>();
         supervisor.changes.polling = false;
-        let Ok(Response::ChangeAsks { asks }) = answer else {
+        let Ok(Response::ChangeAsks { asks, layout }) = answer else {
             // A daemon that does not know the request answers at once.
             supervisor.changes.retry_at = Some(Instant::now() + RETRY);
             return;
@@ -75,6 +81,27 @@ impl Supervisor {
         supervisor.changes.retry_at = None;
         supervisor.changes.queued.extend(asks);
         Self::start_answers(cx);
+        for ask in layout {
+            let answer = change_layout(cx, &ask);
+            Self::send_layout_answer(cx, ask.id, answer);
+        }
+    }
+
+    /// Hands what a window did with a phone's layout change to the daemon.
+    fn send_layout_answer(cx: &mut App, id: AskId, answer: layout::Answer) {
+        let supervisor = cx.global::<Self>();
+        let Some(address) = supervisor.address.clone() else {
+            return;
+        };
+        let send = supervisor.send;
+        cx.background_executor()
+            .spawn(async move {
+                let request = Request::LayoutAnswer { id, answer };
+                if let Err(error) = send(&address, &request) {
+                    tracing::debug!(%error, "The daemon did not take a layout answer for a phone");
+                }
+            })
+            .detach();
     }
 
     /// Starts queued answers while fewer than `RUNNING` run.
@@ -108,6 +135,23 @@ impl Supervisor {
             .detach();
         }
     }
+}
+
+/// Makes a phone's change in the window that holds its tab.
+fn change_layout(cx: &mut App, ask: &layout::Ask) -> layout::Answer {
+    if !ask.valid() {
+        return layout::Answer::Failed(layout::Failure::Refused);
+    }
+    for handle in cx.windows() {
+        let Some(window) = handle.downcast::<SheprdWindow>() else {
+            continue;
+        };
+        let made = window.update(cx, |this, _, cx| this.phone_layout(ask, cx));
+        if let Ok(Some(answer)) = made {
+            return answer;
+        }
+    }
+    layout::Answer::Failed(layout::Failure::Gone)
 }
 
 /// Works out one answer and hands it to the daemon. Blocking.

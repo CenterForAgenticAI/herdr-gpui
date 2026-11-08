@@ -16,6 +16,7 @@ mod error;
 mod fallback;
 mod hub;
 mod infos;
+mod phone;
 mod screen;
 mod selection;
 mod sidebar;

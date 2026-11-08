@@ -6,6 +6,7 @@ mod create;
 mod error;
 mod poller;
 mod projection;
+mod saved;
 mod screen;
 mod spaces;
 pub(super) mod worktree;

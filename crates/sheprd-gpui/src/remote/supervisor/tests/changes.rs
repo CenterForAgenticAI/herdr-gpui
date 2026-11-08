@@ -1,6 +1,9 @@
 use super::*;
 use crate::remote::supervisor::changes::RUNNING;
-use sheprd_remote_control::control::changes::{Answer, Ask, AskId, Failure, Wanted};
+use sheprd_remote_control::control::{
+    changes::{Answer, Ask, AskId, Failure, Wanted},
+    layout,
+};
 use std::sync::Mutex;
 
 static NO_PHONE_WAITS: AtomicUsize = AtomicUsize::new(0);
@@ -10,7 +13,10 @@ fn daemon_without_phones(_: &Path, request: &Request) -> Result<Response, contro
         Request::Status => Ok(Response::Status(status(0))),
         Request::ChangeAsks => {
             NO_PHONE_WAITS.fetch_add(1, Ordering::SeqCst);
-            Ok(Response::ChangeAsks { asks: Vec::new() })
+            Ok(Response::ChangeAsks {
+                asks: Vec::new(),
+                layout: Vec::new(),
+            })
         }
         _ => Ok(Response::Done),
     }
@@ -64,6 +70,7 @@ fn daemon_with_a_question(_: &Path, request: &Request) -> Result<Response, contr
                     workspace_id: "w".into(),
                     wanted: Wanted::Checks,
                 }],
+                layout: Vec::new(),
             })
         }
         Request::ChangeAsks => Err(control::Error::NoAnswer),
@@ -125,7 +132,15 @@ fn only_a_few_answers_run_at_once_and_no_more_questions_are_taken_meanwhile(
     cx.run_until_parked();
     let waits = LIMITED_WAITS.load(Ordering::SeqCst);
     let asks = (0..RUNNING as u64 + 2).map(ask).collect();
-    cx.update(|cx| Supervisor::take_asks(cx, Ok(Response::ChangeAsks { asks })));
+    cx.update(|cx| {
+        Supervisor::take_asks(
+            cx,
+            Ok(Response::ChangeAsks {
+                asks,
+                layout: Vec::new(),
+            }),
+        )
+    });
     cx.update(|cx| {
         let changes = &cx.global::<Supervisor>().changes;
         assert_eq!(changes.running, RUNNING);
@@ -145,4 +160,51 @@ fn only_a_few_answers_run_at_once_and_no_more_questions_are_taken_meanwhile(
         let changes = &cx.global::<Supervisor>().changes;
         assert_eq!((changes.running, changes.queued.len()), (0, 0));
     });
+}
+
+static LAYOUT_ANSWERS: Mutex<Vec<(AskId, layout::Answer)>> = Mutex::new(Vec::new());
+
+fn daemon_with_a_layout_change(_: &Path, request: &Request) -> Result<Response, control::Error> {
+    match request {
+        Request::Status => Ok(Response::Status(status(1))),
+        Request::LayoutAnswer { id, answer } => {
+            LAYOUT_ANSWERS.lock().unwrap().push((*id, *answer));
+            Ok(Response::Done)
+        }
+        _ => Err(control::Error::NoAnswer),
+    }
+}
+
+#[gpui::test]
+fn a_layout_change_no_window_holds_is_answered_as_gone(cx: &mut TestAppContext) {
+    cx.update(|cx| Supervisor::fixture(cx, on(), daemon_with_a_layout_change));
+    cx.update(Supervisor::tick);
+    cx.run_until_parked();
+    let change = |id, terminal: &str| layout::Ask {
+        id: AskId(id),
+        tab: 4,
+        terminal: terminal.into(),
+        op: layout::Op::SplitRight,
+    };
+    let layout = vec![change(7, "t1"), change(8, "")];
+    cx.update(|cx| {
+        Supervisor::take_asks(
+            cx,
+            Ok(Response::ChangeAsks {
+                asks: Vec::new(),
+                layout,
+            }),
+        )
+    });
+    cx.run_until_parked();
+    let mut answers = LAYOUT_ANSWERS.lock().unwrap().clone();
+    answers.sort_by_key(|(id, _)| id.0);
+    assert_eq!(
+        answers,
+        [
+            (AskId(7), layout::Answer::Failed(layout::Failure::Gone)),
+            // Out of bounds, it reaches no window.
+            (AskId(8), layout::Answer::Failed(layout::Failure::Refused)),
+        ]
+    );
 }
