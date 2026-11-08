@@ -5,6 +5,8 @@ core-terminals-open-workspace = Open a workspace first
 # herdr-core runs in the host's Herdr instead.
 core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr
 core-terminals-too-many-tabs = Too many tabs are open
+# An automation's agent runs in this computer's Herdr 2, not on the host shown.
+core-terminals-this-computer = This agent runs on this computer; show it to open the agent
 core-terminals-connecting = Connecting to herdr-core...
 # $reason is the error, in English or from herdr-core.
 core-terminals-unavailable = herdr-core is unavailable: { $reason }

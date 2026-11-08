@@ -149,7 +149,7 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         if self.selected_is_remote() {
-            self.show_flash(Flash::warning(fl!("core-terminals-local-only")), cx);
+            self.show_flash(Flash::warning(fl!("core-terminals-this-computer")), cx);
             return;
         }
         let Some((scope, workspace)) = self.browser_key() else {
