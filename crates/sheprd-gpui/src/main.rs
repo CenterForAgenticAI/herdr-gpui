@@ -132,6 +132,7 @@ mod review;
 mod scrollback;
 mod search_input;
 mod security;
+mod session_model;
 mod sessions;
 mod settings_panel;
 mod settings_window;

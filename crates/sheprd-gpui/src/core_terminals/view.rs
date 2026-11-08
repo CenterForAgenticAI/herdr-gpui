@@ -105,6 +105,11 @@ pub(crate) struct CoreTerminalView {
 }
 
 impl CoreTerminalView {
+    /// The terminal it shows.
+    pub(crate) fn terminal(&self) -> &TerminalId {
+        &self.id
+    }
+
     pub(crate) fn new(
         id: TerminalId,
         link: Link,
@@ -162,10 +167,6 @@ impl CoreTerminalView {
             self.remote = remote;
             self.rehover_link(cx);
         }
-    }
-
-    pub(crate) fn terminal(&self) -> &TerminalId {
-        &self.id
     }
 
     pub(crate) fn title(&self) -> Option<&str> {
