@@ -5,6 +5,7 @@ use super::{
     history::{frame, shown},
     worker::until,
 };
+use gpui::{point as at, px};
 use sheprd_backend::{ScrollMetrics, SurfaceUpdate};
 use std::time::Duration;
 
@@ -83,4 +84,26 @@ fn a_scroll_during_a_slide_goes_no_further_than_the_frame_behind(cx: &mut gpui::
     let sliding = lift(cx, 2);
     assert_eq!(sliding.behind_at, 1.);
     assert!(sliding.lift <= 1., "{}", sliding.lift);
+}
+
+#[gpui::test]
+fn a_press_during_a_slide_lands_on_the_row_drawn_under_it(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    cx.run_until_parked();
+    backend.push(scrolled(2, 4));
+    let now = crate::motion::now();
+    let sliding = until(|| {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.poll(window, cx);
+                view.sliding(now)
+            })
+        })
+    });
+    // The frame is drawn about two rows up, so its third row is painted
+    // at the top of the view.
+    assert!(sliding.lift > 1.5, "{}", sliding.lift);
+    let bounds = cx.update(|_, cx| view.read(cx).bounds()).unwrap();
+    let top = bounds.origin + at(px(1.), px(1.));
+    cx.update(|_, cx| assert_eq!(view.read(cx).row_at(top, now), Some(2)));
 }

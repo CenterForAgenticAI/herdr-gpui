@@ -71,6 +71,19 @@ impl CoreTerminalView {
         });
     }
 
+    /// Rows the frame is drawn above its place at `now`, so the pointer
+    /// lands on the row painted under it while a slide is under way.
+    pub(super) fn lift(&self, now: Instant) -> f32 {
+        self.slide
+            .as_ref()
+            .and_then(|slide| {
+                let progress =
+                    crate::motion::progress(slide.since, now, crate::motion::duration(SPREAD))?;
+                Some(slide.from * (1. - progress))
+            })
+            .unwrap_or(0.)
+    }
+
     /// The slide at `now`, or `None` once it has landed.
     pub(crate) fn sliding(&mut self, now: Instant) -> Option<Sliding> {
         let slide = self.slide.as_ref()?;

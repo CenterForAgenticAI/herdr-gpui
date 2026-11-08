@@ -310,6 +310,13 @@ impl CopyMode {
         self.entry_offset
     }
 
+    /// Forgets the mark once the rows it names hold other text, as when a
+    /// herdr-core pane's full history drops its oldest line or a resize
+    /// rewraps it, so `y` cannot copy text that was never marked.
+    pub(crate) fn forget_mark(&mut self) {
+        self.mark = None;
+    }
+
     pub(crate) fn in_flight(&self) -> Option<&str> {
         self.in_flight.as_ref().map(|sent| sent.request.as_str())
     }

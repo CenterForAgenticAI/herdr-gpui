@@ -265,3 +265,32 @@ fn a_match_rewritten_while_it_was_read_copies_nothing(cx: &mut gpui::TestAppCont
     });
     cx.update(|_, cx| assert!(cx.read_from_clipboard().is_none()));
 }
+
+#[gpui::test]
+fn output_into_a_full_history_drops_copy_modes_mark(cx: &mut gpui::TestAppContext) {
+    let (view, cx, backend) = shown(cx);
+    cx.update(|window, cx| view.update(cx, |view, cx| view.enter_copy_mode(window, cx)));
+    cx.simulate_keystrokes("v l");
+    // New output drops the oldest line, moving the marked rows under it.
+    backend.push(vec![SurfaceUpdate::Scroll {
+        metrics: ScrollMetrics {
+            offset: 0,
+            history: 7,
+            rows: 3,
+            full: true,
+        },
+        revision: 5,
+    }]);
+    until(|| {
+        cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx).then_some(())))
+    });
+    // With nothing marked, `y` leaves without reading anything.
+    cx.simulate_keystrokes("y");
+    cx.update(|_, cx| assert!(!view.read(cx).copy_mode_active()));
+    let sent = requests(&backend, 1);
+    assert!(
+        sent.iter()
+            .all(|request| !matches!(request, History::Read { .. })),
+        "{sent:?}"
+    );
+}

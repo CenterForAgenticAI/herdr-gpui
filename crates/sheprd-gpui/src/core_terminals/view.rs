@@ -226,12 +226,15 @@ impl CoreTerminalView {
             let before = std::mem::replace(&mut self.screen, screen);
             self.slide_from(&before);
             // Output into a full history drops its oldest lines, and a
-            // resize rewraps them, so the rows a selection holds now hold
-            // other text.
+            // resize rewraps them, so the rows a selection or copy mode's
+            // mark holds now hold other text.
             if self.screen.revision != before.revision
                 && (self.screen.history.full || self.screen.grid() != before.grid())
             {
                 self.selection = None;
+                if let Some(state) = &mut self.copy_mode {
+                    state.forget_mark();
+                }
             }
             cx.notify();
         }

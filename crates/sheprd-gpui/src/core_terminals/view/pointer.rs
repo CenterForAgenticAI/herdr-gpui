@@ -53,13 +53,25 @@ impl CoreTerminalView {
 
     /// The cell under `position`, held inside the screen.
     fn cell_at(&self, position: Point<Pixels>) -> Option<Cell> {
+        self.cell_at_when(position, crate::motion::now())
+    }
+
+    /// The row under `position` at `now`, as a press would find it.
+    #[cfg(test)]
+    pub(crate) fn row_at(&self, position: Point<Pixels>, now: Instant) -> Option<u16> {
+        self.cell_at_when(position, now).map(|cell| cell.row)
+    }
+
+    /// The cell painted under `position` at `now`, a slide's lift included.
+    fn cell_at_when(&self, position: Point<Pixels>, now: Instant) -> Option<Cell> {
         let bounds = self.bounds?;
         let frame = self.screen.frame.as_ref()?;
         if frame.width == 0 || frame.height == 0 {
             return None;
         }
         let x = f32::from(position.x - bounds.origin.x) / self.look.cell_width.max(1.);
-        let y = f32::from(position.y - bounds.origin.y) / self.look.cell_height.max(1.);
+        let y = f32::from(position.y - bounds.origin.y) / self.look.cell_height.max(1.)
+            + self.lift(now);
         // Clamped to the screen first, so the casts cannot truncate.
         let column = x.clamp(0., f32::from(frame.width - 1)) as u16;
         let row = y.clamp(0., f32::from(frame.height - 1)) as u16;
