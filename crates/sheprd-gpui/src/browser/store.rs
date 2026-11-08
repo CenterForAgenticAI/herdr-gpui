@@ -11,6 +11,8 @@ use std::path::PathBuf;
 
 mod kept;
 
+pub(crate) use kept::is_kept_id;
+
 const MAX_TABS: usize = 256;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_TITLE_CHARS: usize = 200;
@@ -201,7 +203,11 @@ struct Saved {
     tabs: Vec<Tab>,
     /// The workspaces the app keeps for Herdr 2 terminals; files from before
     /// them have none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "sheprd_session::saved::readable_workspaces",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     workspaces: Vec<SavedWorkspace>,
 }
 
@@ -210,6 +216,8 @@ pub(crate) struct Store {
     tabs: Vec<Tab>,
     /// Herdr 2 workspaces, in the user's order (`kept.rs`).
     pub(super) workspaces: Vec<SavedWorkspace>,
+    /// The last kept workspace number handed out this run.
+    last_kept: u64,
     next: u64,
     pub(super) closed: super::closed::ClosedTabs,
     writer: Option<state_file::Writer<Saved>>,
@@ -291,6 +299,7 @@ impl Store {
         Self {
             tabs,
             workspaces: Vec::new(),
+            last_kept: 0,
             next,
             closed: Default::default(),
             writer,

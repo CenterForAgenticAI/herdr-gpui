@@ -288,7 +288,15 @@ impl SheprdWindow {
             return;
         };
         self.dismiss_menu(window, cx);
-        self.start_core_program(Purpose::Tab { scope, workspace }, Spawn::default());
+        // A kept workspace's folder is the app's to give: herdr-core knows
+        // no workspaces to start a shell in.
+        let spawn = Spawn {
+            cwd: self
+                .kept_in_front()
+                .and_then(|_| self.front_workspace_cwd()),
+            ..Spawn::default()
+        };
+        self.start_core_program(Purpose::Tab { scope, workspace }, spawn);
     }
 
     /// Starts `spawn` in herdr-core for `purpose`, once the hub connects.
@@ -433,6 +441,13 @@ impl SheprdWindow {
             }
         };
         match purpose {
+            // The kept workspace it was for closed while it started: end it
+            // rather than leave a shell no tab shows.
+            Purpose::Tab { scope, workspace }
+                if self.kept_workspace_gone(&scope, &workspace, cx) =>
+            {
+                self.end_core_terminal(info.id);
+            }
             Purpose::Tab { scope, workspace } => {
                 let location = Location::CoreTerminal {
                     panes: Panes::single(info.id),

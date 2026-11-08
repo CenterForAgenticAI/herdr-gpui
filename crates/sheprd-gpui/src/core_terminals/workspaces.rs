@@ -228,8 +228,18 @@ impl SheprdWindow {
         moved
     }
 
+    /// Whether `workspace` was a kept workspace of `scope` that has closed:
+    /// a kept ID the store no longer holds.
+    pub(super) fn kept_workspace_gone(&self, scope: &Scope, workspace: &str, cx: &App) -> bool {
+        crate::browser::is_kept_id(workspace)
+            && cx
+                .try_global::<Store>()
+                .is_none_or(|store| store.kept_workspace(scope, workspace).is_none())
+    }
+
     /// Shows a tab of the kept workspace just brought to the front, so its
-    /// groups do not keep drawing Herdr 1's terminal.
+    /// groups do not keep drawing Herdr 1's terminal, and gives a terminal
+    /// shown there the keyboard.
     pub(super) fn reveal_kept_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !std::mem::take(&mut self.core_terminals.reveal) {
             return;
@@ -237,11 +247,24 @@ impl SheprdWindow {
         let Some((scope, workspace)) = self.browser_key() else {
             return;
         };
+        if !self.is_kept_workspace(&workspace) {
+            return;
+        }
         let shown = self
             .active_group()
             .and_then(|group| self.group_pick(group))
-            .is_some_and(|pick| matches!(pick, crate::browser::Pick::Page(_)));
-        if shown || !self.is_kept_workspace(&workspace) {
+            .and_then(|pick| match pick {
+                crate::browser::Pick::Page(id) => Some(id),
+                _ => None,
+            });
+        if let Some(tab) = shown {
+            let terminal = cx
+                .try_global::<Store>()
+                .and_then(|store| store.get(tab))
+                .is_some_and(|tab| matches!(tab.location, Some(Location::CoreTerminal { .. })));
+            if terminal {
+                self.focus_core_terminal(tab, window, cx);
+            }
             return;
         }
         let first = cx

@@ -41,14 +41,22 @@ impl Store {
         label: &str,
         cwd: &str,
     ) -> Option<String> {
+        // Past every ID kept or handed out before, so a closed workspace's
+        // ID is never given to another while a late answer may still name it.
         let next = self
             .workspaces
             .iter()
             .filter_map(|workspace| workspace.id.strip_prefix(PREFIX)?.parse::<u64>().ok())
+            .chain(std::iter::once(self.last_kept))
             .max()
-            .map_or(1, |last| last + 1);
+            .unwrap_or(0)
+            + 1;
         let id = format!("{PREFIX}{next}");
-        self.keep_as(scope, &id, label, cwd).then_some(id)
+        let kept = self.keep_as(scope, &id, label, cwd);
+        if kept {
+            self.last_kept = next;
+        }
+        kept.then_some(id)
     }
 
     /// Keeps `id`, unless it is kept already, as the workspace a window with
@@ -145,6 +153,11 @@ impl Store {
         self.save();
         true
     }
+}
+
+/// Whether `id` names a workspace the app keeps rather than Herdr 1's.
+pub(crate) fn is_kept_id(id: &str) -> bool {
+    id == crate::core_terminals::WORKSPACE || id.starts_with(PREFIX)
 }
 
 /// A name the user typed, on one line and within bounds.

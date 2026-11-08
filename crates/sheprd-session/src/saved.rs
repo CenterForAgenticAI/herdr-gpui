@@ -19,7 +19,7 @@ pub const MAX_SAVED_TABS: usize = 256;
 pub struct SavedTabs {
     tabs: Vec<SavedTab>,
     /// Files from before the app kept workspaces have none.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "readable_workspaces")]
     workspaces: Vec<SavedWorkspace>,
 }
 
@@ -49,6 +49,20 @@ impl SavedWorkspace {
             && self.label.chars().count() <= MAX_LABEL_CHARS
             && self.cwd.len() <= MAX_CWD_BYTES
     }
+}
+
+/// The saved workspaces that read, each on its own, so one damaged record
+/// costs only itself rather than every tab and workspace in the file. For
+/// any reader of the file, the app's own included.
+pub fn readable_workspaces<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<SavedWorkspace>, D::Error> {
+    let values = Vec::<Value>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .filter_map(|value| serde_json::from_value::<SavedWorkspace>(value).ok())
+        .filter(SavedWorkspace::valid)
+        .collect())
 }
 
 /// The longest workspace ID kept, as for a tab's workspace.

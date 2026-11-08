@@ -62,10 +62,12 @@ fn a_kept_workspace_renames_moves_and_closes_with_its_tabs() {
 
 #[test]
 fn kept_workspaces_survive_a_restart_and_a_damaged_one_costs_only_itself() {
-    let saved = r#"{"tabs": [], "workspaces": [
+    let saved = r#"{"workspaces": [
         {"id": "space-1", "scope": "s", "label": "api", "cwd": "/a"},
-        {"id": "", "scope": "s", "label": "bad", "cwd": ""}
-    ]}"#;
+        {"id": "", "scope": "s", "label": "bad", "cwd": ""},
+        {"id": "space-2", "scope": "s", "label": 7},
+        {"id": "space-3"}
+    ], "tabs": []}"#;
     let restored = parse(saved.as_bytes()).unwrap();
     assert_eq!(restored.workspaces.len(), 1);
     let bytes = serde_json::to_vec(&restored).unwrap();
@@ -95,4 +97,16 @@ fn the_app_keeps_a_bounded_number_of_workspaces() {
             .keep_workspace(&scope, "w", &"x".repeat(5000))
             .is_none()
     );
+}
+
+#[test]
+fn a_closed_workspace_id_is_not_given_again() {
+    let scope = Scope::endpoint("here");
+    let mut store = Store::default();
+    let first = store.keep_workspace(&scope, "a", "").unwrap();
+    store.forget_kept(&scope, &first);
+    let second = store.keep_workspace(&scope, "b", "").unwrap();
+    assert_ne!(first, second);
+    assert!(is_kept_id(&second) && is_kept_id(crate::core_terminals::WORKSPACE));
+    assert!(!is_kept_id("w_1"));
 }
