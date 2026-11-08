@@ -131,6 +131,8 @@ fn comments_inside_strings_survive() {
     );
 }
 
+// The check runs the layer's `printf` with `/bin/sh`.
+#[cfg(unix)]
 #[test]
 fn the_layer_adds_the_pinned_herdr_core_beside_herdr() {
     let layer = layer(Some("me"));

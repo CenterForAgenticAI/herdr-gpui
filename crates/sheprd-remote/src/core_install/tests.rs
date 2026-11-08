@@ -155,6 +155,32 @@ fn an_existing_hc_is_left_alone() {
 }
 
 #[test]
+fn an_image_install_ignores_a_core_only_the_building_user_has() {
+    let machine = Machine::new();
+    let own = machine.home().join(".local/bin");
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::write(own.join("herdr-core"), "#!/bin/sh\n").unwrap();
+    make_executable(&own.join("herdr-core"));
+    let shared = machine.root.join("image-bin");
+    let pinned = machine.pinned(&machine.checksum());
+    let script = render(&pinned, Dir::At(shared.to_str().unwrap())).unwrap();
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .env_clear()
+        .env("HOME", machine.home())
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", machine.root.join("tools").display()),
+        );
+    assert_eq!(
+        run(&script, Target::Command(command), &AtomicBool::new(false)).unwrap(),
+        Outcome::Installed
+    );
+    assert!(shared.join("herdr-core").exists());
+}
+
+#[test]
 fn a_download_that_does_not_match_its_checksum_installs_nothing() {
     let machine = Machine::new();
     let pinned = machine.pinned(&"0".repeat(64));

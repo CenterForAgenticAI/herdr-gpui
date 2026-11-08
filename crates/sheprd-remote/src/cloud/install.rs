@@ -16,6 +16,9 @@ use std::{
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// The pinned herdr-core is a few megabytes; a download stalled longer than
+/// this gives up on the core alone.
+const CORE_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const OUTPUT_LIMIT: usize = 8 * 1024;
 const TAIL_LINES: usize = 6;
 /// The installer script's exit code when the workspace has no `curl`.
@@ -34,23 +37,6 @@ exit 3"#;
 
 const INSTALL: &str = r#"command -v curl >/dev/null 2>&1 || { echo "curl is required to install Herdr" >&2; exit 4; }
 curl -fsSL https://herdr.dev/install.sh | sh"#;
-
-/// [`INSTALL`], then the pinned herdr-core beside Herdr unless the machine
-/// has a core, so the machine runs Herdr 2 terminals too. A core that cannot
-/// be installed leaves Herdr working: the machine's new tabs stay with it.
-fn install_script() -> String {
-    match crate::core_install::script(crate::core_install::Dir::UserBin) {
-        Ok(core) => format!(
-            "{INSTALL} || exit $?
-/bin/sh -c {} || echo 'herdr-core was not installed; Herdr 2 terminals stay unavailable here' >&2",
-            quote(&core)
-        ),
-        Err(error) => {
-            tracing::warn!(%error, "No herdr-core to install beside Herdr");
-            INSTALL.to_owned()
-        }
-    }
-}
 
 /// Why Herdr is not ready on a cloud machine after the probe or the
 /// installer ran. Only [`Failure::Output`] holds text from the machine; the
@@ -261,14 +247,13 @@ pub fn reach(ssh: Command, cancelled: &impl Fn() -> bool) -> Result<Finished> {
     run(ssh, PROBE_TIMEOUT, cancelled)
 }
 
-/// Run Herdr's installer on the machine, then add the pinned herdr-core.
-/// Only called after the user approved it.
+/// Run Herdr's installer on the machine. Only called after the user approved it.
 pub fn install(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
     tracing::info!(
         category = "cloud_install",
         "Installing Herdr on a cloud machine"
     );
-    ssh.arg(remote(&install_script()));
+    ssh.arg(remote(INSTALL));
     let finished = run(ssh, INSTALL_TIMEOUT, cancelled)?;
     match finished.code {
         Some(0) => Ok(()),
@@ -278,6 +263,34 @@ pub fn install(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
         } else {
             Failure::Output(finished.output)
         })),
+    }
+}
+
+/// Add the pinned herdr-core beside Herdr, for a setup that approved
+/// installing, whether Herdr was installed now or was already there. A
+/// machine with a core is left alone. Its own deadline bounds it, and any
+/// failure, a timeout included, only leaves the machine without Herdr 2
+/// terminals: its new tabs stay Herdr tabs. Only cancellation is an error.
+pub fn add_core(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
+    let script = match crate::core_install::script(crate::core_install::Dir::UserBin) {
+        Ok(script) => script,
+        Err(error) => {
+            tracing::warn!(%error, "No herdr-core to install beside Herdr");
+            return Ok(());
+        }
+    };
+    ssh.arg(remote(&script));
+    match run(ssh, CORE_TIMEOUT, cancelled) {
+        Err(Error::Cancelled) => Err(Error::Cancelled),
+        Ok(Finished { code: Some(0), .. }) => Ok(()),
+        Ok(Finished { code, .. }) => {
+            tracing::warn!(?code, "herdr-core was not installed beside Herdr");
+            Ok(())
+        }
+        Err(error) => {
+            tracing::warn!(%error, "herdr-core was not installed beside Herdr");
+            Ok(())
+        }
     }
 }
 

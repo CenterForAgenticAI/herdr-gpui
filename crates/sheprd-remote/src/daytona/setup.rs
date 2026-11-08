@@ -97,6 +97,9 @@ fn finish(
             return Err(cloud::Error::Install(install::Failure::Missing).into());
         }
     }
+    if install {
+        install::add_core(connect::gateway(request, &sandbox)?.command, &cancelled)?;
+    }
     let device = SavedDevice {
         provider: CloudProvider::Daytona,
         id: sandbox.id,

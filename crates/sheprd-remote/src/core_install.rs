@@ -102,17 +102,25 @@ fn render(pinned: &Pinned, dir: Dir<'_>) -> Result<String, Error> {
             ));
         }
     }
-    let dir = match dir {
-        Dir::UserBin => "\"$HOME/.local/bin\"".to_owned(),
+    // A user's install looks where the bridge does. An image looks only in
+    // its own folder: a core in the building user's home is not one every
+    // user of the image can run.
+    let (dir, present) = match dir {
+        Dir::UserBin => (
+            "\"$HOME/.local/bin\"".to_owned(),
+            format!(
+                "{CANDIDATES}\n    if [ -n \"$path\" ] && [ -x \"$path\" ]; then echo {PRESENT}; exit 0; fi\ndone"
+            ),
+        ),
         Dir::At(dir) if dir.starts_with('/') && !dir.chars().any(char::is_control) => {
-            shell_quote(dir)
+            let dir = shell_quote(dir);
+            let present = format!("if [ -x {dir}/herdr-core ]; then echo {PRESENT}; exit 0; fi");
+            (dir, present)
         }
         Dir::At(_) => return Err(Error::Dir),
     };
     Ok(format!(
-        r#"{CANDIDATES}
-    if [ -n "$path" ] && [ -x "$path" ]; then echo {PRESENT}; exit 0; fi
-done
+        r#"{present}
 command -v curl >/dev/null 2>&1 || {{ echo "curl is required to install herdr-core" >&2; exit {NO_CURL}; }}
 platform="$(PATH=/usr/bin:/bin uname -s) $(PATH=/usr/bin:/bin uname -m)"
 case "$platform" in

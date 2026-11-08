@@ -89,13 +89,13 @@ fn output_is_bounded() {
     assert!(text.len() <= OUTPUT_LIMIT);
 }
 
-#[test]
-fn a_core_that_cannot_be_installed_leaves_herdr_installed() {
+/// A machine whose `curl` serves Herdr's installer, which puts `herdr` in
+/// place, and fails every other download, such as herdr-core's.
+fn machine_without_core_downloads() -> tempfile::TempDir {
     use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir().unwrap();
     let tools = home.path().join("tools");
     std::fs::create_dir_all(&tools).unwrap();
-    // Herdr's installer works; the core's download fails.
     let curl = tools.join("curl");
     std::fs::write(
         &curl,
@@ -108,10 +108,35 @@ esac
     )
     .unwrap();
     std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let mut command = local(home.path());
-    command.env("PATH", format!("{}:/usr/bin:/bin", tools.display()));
-    install(command, &|| false).unwrap();
+    home
+}
+
+/// [`local`] with the machine's own `curl` first on PATH.
+fn on(home: &std::path::Path) -> Command {
+    let mut command = local(home);
+    command.env(
+        "PATH",
+        format!("{}:/usr/bin:/bin", home.join("tools").display()),
+    );
+    command
+}
+
+#[test]
+fn a_core_that_cannot_be_installed_leaves_herdr_installed() {
+    let home = machine_without_core_downloads();
+    install(on(home.path()), &|| false).unwrap();
+    // The core's download fails; the step still succeeds.
+    add_core(on(home.path()), &|| false).unwrap();
     assert!(home.path().join(".local/bin/herdr").exists());
     assert!(!home.path().join(".local/bin/herdr-core").exists());
     assert!(installed(local(home.path()), &|| false).unwrap());
+}
+
+#[test]
+fn adding_the_core_stops_when_cancelled() {
+    let home = machine_without_core_downloads();
+    assert!(matches!(
+        add_core(on(home.path()), &|| true),
+        Err(Error::Cancelled)
+    ));
 }

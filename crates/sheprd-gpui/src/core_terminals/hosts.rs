@@ -127,6 +127,26 @@ impl CoreTerminals {
         }
     }
 
+    /// A terminal for `purpose` on `host` that started as `outcome` says,
+    /// waiting to be placed.
+    #[cfg(test)]
+    pub(crate) fn start_for_test(
+        &mut self,
+        purpose: Purpose,
+        host: Host,
+        outcome: Result<TerminalInfo, sheprd_core_client::Error>,
+    ) {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let _ = send.send(outcome);
+        self.starting = Some((purpose, host, receive));
+    }
+
+    /// Whether a started terminal waits to be placed.
+    #[cfg(test)]
+    pub(crate) fn is_starting(&self) -> bool {
+        self.starting.is_some()
+    }
+
     /// Reads what each core reports while any of its tabs is known, for
     /// split chrome and the sidebar's rows. True when what is known changed.
     pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
@@ -141,8 +161,11 @@ impl CoreTerminals {
         changed
     }
 
-    /// Drops another host's hub, its views, and a terminal wanted there; the
-    /// next ask for the host dials it anew. This computer's hub stays.
+    /// Drops another host's hub, its views, and a terminal wanted or
+    /// starting there; the next ask for the host dials it anew. A terminal
+    /// that was starting keeps running on the machine it started on, but is
+    /// never placed in a tab, which would attach its ID on another machine.
+    /// This computer's hub stays.
     pub(super) fn forget_host(&mut self, host: &Host) {
         let Host::Remote(scope) = host else {
             return;
@@ -157,6 +180,13 @@ impl CoreTerminals {
             .is_some_and(|(_, wanted, _)| wanted == host)
         {
             self.wanted = None;
+        }
+        if self
+            .starting
+            .as_ref()
+            .is_some_and(|(_, starting, _)| starting == host)
+        {
+            self.starting = None;
         }
     }
 
