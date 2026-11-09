@@ -12,6 +12,7 @@ use super::{
 use crate::SheprdWindow;
 use gpui::{Context, Window};
 use sheprd_backend::TerminalId;
+use sheprd_core_client::reply;
 use std::time::{Instant, SystemTime};
 
 /// What herdr-core agents are keyed by where a host's endpoint id would be:
@@ -161,25 +162,30 @@ impl SheprdWindow {
         let id = reply.id;
         let work = cx.background_executor().spawn(async move {
             let backend = backend.ok_or(Error::ReplyCore(sheprd_core_client::Error::Lost))?;
-            backend
-                .core()
-                .send(&sheprd_core_client::wire::SendText {
-                    terminal: &reply.pane,
-                    text: &reply.text,
-                    ..Default::default()
-                })
-                .map(|_| ())
+            // Checked again against the core as it goes: the list the
+            // presence came from is a few seconds old, and the terminal
+            // takes text whatever program has it.
+            let replied = reply::reply(backend.core(), &reply.pane, &reply.agent, &reply.text)
                 .map_err(|error| match error {
                     sheprd_core_client::Error::Refused {
                         kind: Some(kind),
                         message,
                         ..
-                    } if kind == sheprd_core_client::wire::BLOCKED => Error::ReplyRefused {
-                        code: BLOCKED.to_owned(),
-                        message,
-                    },
+                    } if kind == sheprd_core_client::wire::BLOCKED
+                        || kind == sheprd_core_client::wire::STATUS_MISMATCH =>
+                    {
+                        // Nothing was typed; it waits for the agent again.
+                        Error::ReplyRefused {
+                            code: BLOCKED.to_owned(),
+                            message,
+                        }
+                    }
                     error => Error::ReplyCore(error),
-                })
+                })?;
+            match replied {
+                reply::Replied::Sent => Ok(()),
+                reply::Replied::Gone => Err(Error::ReplyGone),
+            }
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
