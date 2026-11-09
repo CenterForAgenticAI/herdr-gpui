@@ -5,6 +5,7 @@ mod chats;
 mod create;
 mod error;
 mod hold;
+mod lines;
 mod poller;
 mod projection;
 mod screen;
