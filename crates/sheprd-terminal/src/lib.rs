@@ -34,6 +34,9 @@ pub const MAX_SCROLLBACK_CELLS: usize = 10_000_000;
 /// The longest OSC string (title, hyperlink) the emulator reads; longer ones
 /// are dropped whole rather than buffered without bound.
 pub const MAX_OSC_BYTES: usize = 8 * 1024;
+/// The most text one OSC 52 clipboard write may carry, decoded. Its OSC
+/// string may hold the base64 for this much, past [`MAX_OSC_BYTES`].
+pub const MAX_CLIPBOARD_BYTES: usize = 2 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests;
