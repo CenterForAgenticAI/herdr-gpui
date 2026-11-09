@@ -294,3 +294,56 @@ fn an_untracked_file_listed_after_a_path_too_long_to_send_is_still_read() {
     assert_eq!(file(&list, "zz.bin").shown, Shown::Binary);
     assert_eq!(file(&list, "zz.txt").added, Some(2));
 }
+
+#[test]
+fn a_git_that_never_ends_is_ended_at_its_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let slow = git_bounded(
+        dir.path(),
+        &["-c", "alias.slow=!sleep 60", "slow"],
+        MAX_LISTING,
+    );
+    assert_eq!(slow.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+    assert!(started.elapsed() < GIT_TIMEOUT * 2);
+}
+
+#[test]
+fn a_sha256_repository_without_a_commit_lists_its_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository = dir.path().join("fresh");
+    std::fs::create_dir(&repository).unwrap();
+    run(&repository, &["init", "--quiet", "--object-format=sha256"]);
+    std::fs::write(repository.join("first.txt"), "x\n").unwrap();
+    let list = listed(answer(
+        &repository,
+        &Wanted::Files {
+            scope: Scope::Uncommitted,
+        },
+    ));
+    assert_eq!(list.total, 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_name_that_is_not_utf8_is_listed_but_not_read() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tempfile::tempdir().unwrap();
+    let repository = repository(dir.path());
+    let name = std::ffi::OsStr::from_bytes(b"bad\xff.txt");
+    std::fs::write(repository.join(name), "x\n").unwrap();
+    let list = listed(answer(
+        &repository,
+        &Wanted::Files {
+            scope: Scope::Uncommitted,
+        },
+    ));
+    let bad = list
+        .files
+        .iter()
+        .find(|file| file.path.contains(char::REPLACEMENT_CHARACTER))
+        .unwrap();
+    assert_eq!(bad.shown, Shown::Unreadable);
+    let diff = diff_of(&repository, &bad.path.clone());
+    assert_eq!(diff.shown, Shown::Unreadable);
+}

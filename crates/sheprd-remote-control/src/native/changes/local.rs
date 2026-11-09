@@ -16,10 +16,12 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Duration,
 };
 
-/// Git's empty tree: what a repository with no commit yet compares with.
-const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+/// How long one Git command may run: a slow checkout or a stuck hook must
+/// not hold a blocking thread after the phone gave up.
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// The most Git output read for a listing; more is unreadable here.
 const MAX_LISTING: u64 = 8 * 1024 * 1024;
 /// The largest untracked file read to count or show its lines.
@@ -47,7 +49,15 @@ struct Compared {
 fn compared(cwd: &Path, scope: Scope) -> Result<Compared, Failure> {
     let head = git(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]).ok();
     if scope == Scope::Uncommitted {
-        let rev = head.map_or_else(|| EMPTY_TREE.to_owned(), |head| head.trim().to_owned());
+        let rev = match head {
+            Some(head) => head.trim().to_owned(),
+            // Before a first commit, the empty tree in the repository's own
+            // object format (SHA-1 or SHA-256), never written.
+            None => git(cwd, &["hash-object", "-t", "tree", "--stdin"])
+                .map_err(|_| Failure::Unreadable)?
+                .trim()
+                .to_owned(),
+        };
         return Ok(Compared { rev, base: None });
     }
     head.ok_or(Failure::NoBase)?;
@@ -105,7 +115,7 @@ fn bounded(root: &Path, base: Option<String>, files: Vec<ChangedFile>) -> FileLi
     for file in list
         .files
         .iter_mut()
-        .filter(|file| file.status == FileStatus::Untracked)
+        .filter(|file| file.status == FileStatus::Untracked && file.shown == Shown::Text)
     {
         match read_untracked(&root.join(&file.path)) {
             Ok(text) => file.added = u32::try_from(text.lines().count()).ok(),
@@ -145,6 +155,7 @@ fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
     )
     .map_err(|_| Failure::Unreadable)?;
     let mut files = parse_name_status(&statuses);
+    let named = |file: &ChangedFile| !file.path.contains(char::REPLACEMENT_CHARACTER);
     for (path, added, removed) in parse_numstat(&counts) {
         if let Some(file) = files.iter_mut().find(|file| file.path == path) {
             file.added = added;
@@ -167,6 +178,12 @@ fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
                 ..ChangedFile::default()
             }),
     );
+    // A name that is not UTF-8 reached here with its bytes replaced, and
+    // would name no file back to Git: listed, but not read.
+    for file in files.iter_mut().filter(|file| !named(file)) {
+        file.shown = Shown::Unreadable;
+        (file.added, file.removed) = (None, None);
+    }
     Ok(files)
 }
 
@@ -385,10 +402,26 @@ fn git(cwd: &Path, args: &[&str]) -> std::io::Result<String> {
 /// cut there; Git stops once nothing reads the rest.
 fn git_bounded(cwd: &Path, args: &[&str], limit: u64) -> std::io::Result<(String, bool)> {
     let mut child = command(cwd, args).spawn()?;
-    let mut bytes = Vec::new();
-    if let Some(stdout) = child.stdout.take() {
-        stdout.take(limit + 1).read_to_end(&mut bytes)?;
-    }
+    let stdout = child.stdout.take();
+    // Read beside the wait, so a Git that never ends is ended at the limit.
+    let (sender, read) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("remote-git-read".into())
+        .spawn(move || {
+            let mut bytes = Vec::new();
+            let result = stdout.map_or(Ok(0), |stdout| {
+                stdout.take(limit + 1).read_to_end(&mut bytes)
+            });
+            let _ = sender.send(result.map(|_| bytes));
+        })?;
+    let mut bytes = match read.recv_timeout(GIT_TIMEOUT) {
+        Ok(read) => read?,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::from(std::io::ErrorKind::TimedOut));
+        }
+    };
     let cut = bytes.len() as u64 > limit;
     if cut {
         bytes.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
