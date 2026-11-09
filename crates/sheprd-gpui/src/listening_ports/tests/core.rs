@@ -2,6 +2,7 @@
 //! shows each terminal.
 
 use super::*;
+use crate::browser::Scope;
 
 #[test]
 fn a_listener_in_a_core_terminal_names_its_terminal_unless_a_workspace_claims_it() {
@@ -40,6 +41,22 @@ fn a_listener_in_a_core_terminal_names_its_terminal_unless_a_workspace_claims_it
     );
 }
 
+/// The local daemon the fixtures' core terminals belong to.
+const SOCKET: &str = "/run/h/herdr-client.sock";
+
+fn local(socket: &str) -> Daemon {
+    Daemon::of(&ConnectTarget::Socket(socket.into())).unwrap()
+}
+
+fn scope() -> Scope {
+    Scope::local(std::path::Path::new(SOCKET))
+}
+
+/// Terminal `terminal` in `workspace` of the fixtures' daemon.
+fn at(terminal: &str, workspace: &str) -> (String, (Scope, String)) {
+    (terminal.to_owned(), (scope(), workspace.to_owned()))
+}
+
 #[test]
 fn core_ports_follow_the_workspace_each_terminal_is_shown_in() {
     let mut ports = ListeningPorts::default();
@@ -51,14 +68,10 @@ fn core_ports_follow_the_workspace_each_terminal_is_shown_in() {
         )
         .unwrap(),
     );
-    assert!(ports.core_ports("herdr-2").is_none());
-    let places = vec![
-        ("t2".to_owned(), "herdr-2".to_owned()),
-        ("t1".to_owned(), "herdr-2".to_owned()),
-        ("t3".to_owned(), "other".to_owned()),
-    ];
+    assert!(ports.core_ports(&scope(), "herdr-2").is_none());
+    let places = vec![at("t2", "herdr-2"), at("t1", "herdr-2"), at("t3", "other")];
     assert!(ports.place_terminals(places.clone()));
-    let listed = ports.core_ports("herdr-2").unwrap();
+    let listed = ports.core_ports(&scope(), "herdr-2").unwrap();
     assert_eq!(
         listed.ports,
         [
@@ -67,12 +80,12 @@ fn core_ports_follow_the_workspace_each_terminal_is_shown_in() {
         ]
     );
     assert_eq!(*listed.origin, Origin::Local);
-    assert_eq!(ports.core_ports("other").unwrap().ports.len(), 1);
+    assert_eq!(ports.core_ports(&scope(), "other").unwrap().ports.len(), 1);
     // The same places and scan change nothing; a moved tab does.
     assert!(!ports.place_terminals(places));
-    assert!(ports.place_terminals(vec![("t1".to_owned(), "other".to_owned())]));
-    assert!(ports.core_ports("herdr-2").is_none());
-    assert_eq!(ports.core_ports("other").unwrap().ports.len(), 1);
+    assert!(ports.place_terminals(vec![at("t1", "other")]));
+    assert!(ports.core_ports(&scope(), "herdr-2").is_none());
+    assert_eq!(ports.core_ports(&scope(), "other").unwrap().ports.len(), 1);
 }
 
 #[test]
@@ -82,8 +95,8 @@ fn shared_lookups_find_core_ports_where_herdr_names_none() {
         Host::Local,
         parse("L 10 *:5173 node\nL 11 *:3000 rails\nC 10 t1\nE 11 w1\n").unwrap(),
     );
-    ports.place_terminals(vec![("t1".to_owned(), "herdr-2".to_owned())]);
-    let local = Daemon::of(&ConnectTarget::Socket("/run/h/herdr-client.sock".into())).unwrap();
+    ports.place_terminals(vec![at("t1", "herdr-2")]);
+    let local = local(SOCKET);
     // The workspace's chips and the Ports section agree on the listener.
     assert_eq!(
         ports.get(&local, "herdr-2").unwrap().ports,
@@ -96,4 +109,18 @@ fn shared_lookups_find_core_ports_where_herdr_names_none() {
     assert_eq!(ports.workspace_of(&remote, 10), None);
     // A pid no terminal is placed for has no workspace.
     assert_eq!(ports.workspace_of(&local, 99), None);
+}
+
+#[test]
+fn core_ports_stay_with_the_local_daemon_whose_tab_holds_them() {
+    let mut ports = ListeningPorts::default();
+    ports.seed(Host::Local, parse("L 10 *:5173 node\nC 10 t1\n").unwrap());
+    ports.place_terminals(vec![at("t1", "w1")]);
+    // Another daemon on this computer with a workspace of the same ID.
+    let other = local("/run/other/herdr-client.sock");
+    assert!(ports.get(&other, "w1").is_none());
+    assert_eq!(ports.workspace_of(&other, 10), None);
+    let own = local(SOCKET);
+    assert!(ports.get(&own, "w1").is_some());
+    assert_eq!(ports.workspace_of(&own, 10), Some("w1"));
 }

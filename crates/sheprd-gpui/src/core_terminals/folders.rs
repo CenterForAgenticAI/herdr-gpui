@@ -51,20 +51,32 @@ impl CoreTerminals {
     /// place of Herdr 1, in the workspace that stands in for Herdr's. A
     /// saved host's terminals run elsewhere, and their addresses mean
     /// nothing here.
-    pub(crate) fn terminal_workspaces(&self) -> Vec<(String, String)> {
+    ///
+    /// Each workspace is named with the daemon whose tabs hold it, and the
+    /// shell's with `fallback`, the daemon of the host the window shows.
+    pub(crate) fn terminal_workspaces(
+        &self,
+        fallback: Option<Scope>,
+    ) -> Vec<(String, crate::listening_ports::Place)> {
         let fallback = self
             .fallback_terminal()
-            .map(|terminal| (terminal.as_str().to_owned(), super::WORKSPACE.to_owned()));
+            .zip(fallback)
+            .map(|(terminal, scope)| {
+                (
+                    terminal.as_str().to_owned(),
+                    (scope, super::WORKSPACE.to_owned()),
+                )
+            });
         self.tabs
             .values()
             .filter(|shown| shown.host == super::Host::Local)
-            .filter_map(|shown| Some((shown, &shown.workspace.as_ref()?.1)))
-            .flat_map(|(shown, workspace)| {
+            .filter_map(|shown| Some((shown, shown.workspace.as_ref()?)))
+            .flat_map(|(shown, place)| {
                 shown
                     .panes
                     .terminals()
                     .into_iter()
-                    .map(move |terminal| (terminal.as_str().to_owned(), workspace.clone()))
+                    .map(move |terminal| (terminal.as_str().to_owned(), place.clone()))
             })
             .chain(fallback)
             .collect()

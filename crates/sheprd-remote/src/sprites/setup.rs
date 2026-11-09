@@ -105,6 +105,9 @@ fn prepare(
             return Err(cloud::Error::Install(install::Failure::Missing).into());
         }
     }
+    if approved {
+        install::add_core(relay_command(settings, sprite), &cancelled)?;
+    }
     report(cloud::Step::Starting);
     api.serve_herdr(sprite)?;
     Ok(())

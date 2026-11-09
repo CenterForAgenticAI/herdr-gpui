@@ -224,6 +224,13 @@ tell whether a window opened the page, so say what you asked for. Notes the
 user sends on the page arrive as your next prompt; `browser feedback` does
 not work there.
 
+In a Herdr 2 terminal on such a host (`HC_TERMINAL_ID` set, no
+`HERDR_WORKSPACE_ID`), the shim reaches the app through that terminal's
+labels instead, and only `sheprd browser open` with a web address works:
+`browser reload` exits 8, and notes on the page do not come back to you.
+Ask the user to tell you what they want changed, and after editing, to
+reload the tab themselves.
+
 On Linux the app has no embedded browser yet: web pages open in the system
 browser, and local files and annotations are not available.
 
