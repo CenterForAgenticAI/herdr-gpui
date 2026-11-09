@@ -260,9 +260,21 @@ fn edit_file(
 ) -> std::result::Result<(), Error> {
     // Phones' edits run on the blocking pool side by side: one at a time,
     // or two could read the same file and the later write drop the other.
-    // The modified time catches Sheprd writing meanwhile.
     static EDITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _editing = lock(&EDITING);
+    // Sheprd holds this from before it reads its tabs until it quits: one
+    // starting or running now would overwrite the edit, so it is refused.
+    let owner = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(sheprd_session::saved::lock_path(path))?;
+    match owner.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => return Err(Error::SheprdOpen),
+        Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+    }
+    // The modified time catches anything else writing meanwhile.
     let modified =
         |path: &Path| -> std::io::Result<SystemTime> { std::fs::metadata(path)?.modified() };
     let before = modified(path)?;

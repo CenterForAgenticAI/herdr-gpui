@@ -12,6 +12,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// The lock beside the saved tabs at `tabs`. The app holds it from before
+/// it reads them until it quits, as it alone writes them then; anything
+/// else edits them only while it can take the lock itself.
+pub fn lock_path(tabs: &std::path::Path) -> std::path::PathBuf {
+    tabs.with_extension("lock")
+}
+
 /// The largest saved tabs file read.
 pub const MAX_SAVED_BYTES: usize = 1024 * 1024;
 /// The most saved tabs read.

@@ -130,3 +130,27 @@ fn the_daemon_zooms_and_names_tabs_no_saved_tab_holds() {
         Err(HubError::Core(super::super::Error::Unsupported))
     ));
 }
+
+#[test]
+fn a_starting_or_running_sheprd_holding_its_tabs_keeps_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = saved_file(dir.path());
+    let before = std::fs::read(&path).unwrap();
+    let sheprd = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(sheprd_session::saved::lock_path(&path))
+        .unwrap();
+    sheprd.lock().unwrap();
+    let source = tests_support_source(Some(path.clone()), Some(SCOPE));
+    assert!(matches!(
+        source.arrange_saved(4, "t2", &Op::Zoom),
+        Err(HubError::Core(super::super::Error::Arrange(
+            Error::SheprdOpen
+        )))
+    ));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    drop(sheprd);
+    source.arrange_saved(4, "t2", &Op::Zoom).unwrap();
+}
