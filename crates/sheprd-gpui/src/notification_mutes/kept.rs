@@ -86,6 +86,21 @@ impl Mutes {
         changed
     }
 
+    /// Forgets the mutes of tabs `open` says the app no longer holds. Called
+    /// at launch, before a tab opens: the app numbers its tabs on from the
+    /// highest one it restored, so a closed tab's ID can come back on a new
+    /// tab after a restart. Returns whether anything changed.
+    pub(crate) fn forget_closed_tabs(&mut self, open: impl Fn(&str, &str) -> bool) -> bool {
+        let before = self.kept.len();
+        self.kept
+            .retain(|mute| mute.kind != Scope::Tab || open(&mute.scope, &mute.id));
+        let changed = self.kept.len() != before;
+        if changed {
+            self.changed();
+        }
+        changed
+    }
+
     /// Forgets the mutes of the app's workspace `workspace` in `scope` and
     /// of `tabs`, which closed with it. Returns whether anything changed.
     pub(crate) fn forget_kept(&mut self, scope: &str, workspace: &str, tabs: &[String]) -> bool {
