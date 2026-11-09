@@ -2,10 +2,15 @@
 //! the pane in use, panes whose program ended, and the layout saved with the
 //! tab once a change settles.
 
-use super::{CoreTerminalView, Host, Start, TabPanes, panes::Axis, worker};
+use super::{
+    CoreTerminalView, Host, Start, TabPanes,
+    panes::{Axis, Panes},
+    worker,
+};
 use crate::{
     SheprdWindow,
     browser::{Location, Store, TabId},
+    i18n::fl,
     window::Flash,
 };
 use gpui::{prelude::*, *};
@@ -54,25 +59,27 @@ impl SheprdWindow {
             return;
         };
         let mut missing: Vec<(TabId, TerminalId, Role, Host)> = Vec::new();
+        let mut overflow = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
             let Some(location) = &tab.location else {
                 continue;
             };
             let shown = match self.core_terminals.tabs.entry(tab.id) {
-                std::collections::hash_map::Entry::Occupied(shown) => {
-                    let shown = shown.into_mut();
-                    // Names are shared: another window showing the tab may
-                    // have renamed it or its panes.
-                    shown.refresh_names(location);
-                    shown
-                }
+                std::collections::hash_map::Entry::Occupied(shown) => shown.into_mut(),
                 std::collections::hash_map::Entry::Vacant(place) => {
-                    let Some(restored) = TabPanes::restore(Host::of(&tab.scope), location) else {
+                    let Some(mut restored) = TabPanes::restore(Host::of(&tab.scope), location)
+                    else {
                         continue;
                     };
+                    restored.saved = Some(location.clone());
                     place.insert(restored)
                 }
             };
+            // Each window holds its own copy: one another window saved over
+            // is read again, names and all, before this one can save.
+            if shown.saved.as_ref() != Some(location) {
+                overflow.extend(shown.refresh(location));
+            }
             if shown.workspace.is_none() {
                 shown.workspace = Some((scope.clone(), workspace.clone()));
             }
@@ -100,6 +107,22 @@ impl SheprdWindow {
                         (tab.id, terminal.clone(), role, shown.host.clone())
                     }),
             );
+        }
+        // Panes another window opened in a tab this one filled meanwhile
+        // run on in a tab of their own rather than in none.
+        for terminal in overflow {
+            let location = Location::core_terminal(Panes::single(terminal.clone()), false);
+            let opened = Store::update(cx, |store| {
+                store.open(scope.clone(), &workspace, Some(location), None)
+            });
+            let said = match opened {
+                Some(_) => fl!("core-terminals-pane-own-tab"),
+                None => {
+                    tracing::warn!(%terminal, "No room for a herdr-core pane's own tab");
+                    fl!("core-terminals-too-many-tabs")
+                }
+            };
+            self.show_flash(Flash::warning(said), cx);
         }
         if missing.is_empty() {
             return;
@@ -373,11 +396,21 @@ impl SheprdWindow {
         let Some(backend) = self.core_terminals.backend_of(host).cloned() else {
             return;
         };
+        let unended = std::sync::Arc::clone(&self.core_terminals.unended);
+        let host = host.clone();
         let ended = std::thread::Builder::new()
             .name("herdr-core-kill".into())
             .spawn(move || {
-                if let Err(error) = backend.kill(&terminal) {
-                    tracing::warn!(%error, %terminal, "Could not end a herdr-core terminal");
+                let Err(error) = backend.kill(&terminal) else {
+                    return;
+                };
+                tracing::warn!(%error, %terminal, "Could not end a herdr-core terminal");
+                // The core's refusal, as for a terminal already gone, is
+                // its answer; anything else did not reach it.
+                if !matches!(error, sheprd_core_client::Error::Refused { .. })
+                    && let Ok(mut unended) = unended.lock()
+                {
+                    unended.push((host, terminal));
                 }
             });
         if let Err(error) = ended {
@@ -388,6 +421,13 @@ impl SheprdWindow {
     /// Ends the terminals of closed tabs, joining the core to do it when
     /// the window is not connected yet.
     pub(super) fn end_closed_core_terminals(&mut self, cx: &mut Context<Self>) {
+        let unended = match self.core_terminals.unended.lock() {
+            Ok(mut unended) => std::mem::take(&mut *unended),
+            Err(_) => Vec::new(),
+        };
+        if !unended.is_empty() {
+            Store::update(cx, |store| store.end_terminals(unended));
+        }
         if !cx
             .try_global::<Store>()
             .is_some_and(|store| store.has_ending())
@@ -419,7 +459,11 @@ impl SheprdWindow {
             .tabs
             .iter_mut()
             .filter_map(|(tab, shown)| {
-                std::mem::take(&mut shown.unsaved).then(|| (*tab, shown.location()))
+                std::mem::take(&mut shown.unsaved).then(|| {
+                    let location = shown.location();
+                    shown.saved = Some(location.clone());
+                    (*tab, location)
+                })
             })
             .collect();
         for (tab, location) in changed {

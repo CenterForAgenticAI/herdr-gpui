@@ -21,6 +21,7 @@ mod open_terminal;
 mod pane_keys;
 mod paste;
 mod phone;
+mod refresh;
 mod requests;
 mod restore;
 mod saved_tabs;
