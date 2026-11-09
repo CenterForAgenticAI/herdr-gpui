@@ -77,7 +77,7 @@ The pairing page offers the certificate authority to install on the phone. Pairi
 
 Add the page to your Home Screen to install it as an app. On iOS, Safari and the Home Screen app keep separate storage; the paired browser hands its pairing over to the installed app without a second approval. An unpaired Home Screen app can also scan a fresh pairing code directly.
 
-Workspace headers show their pull request's number and status color, as on the desktop. Tapping the badge opens the pull request. No GitHub credentials are sent to the phone.
+Workspace headers show their pull request's number and status color, as on the desktop, for Herdr 2 workspaces too. Tapping the badge opens the pull request. No GitHub credentials are sent to the phone.
 
 ## Notifications
 
