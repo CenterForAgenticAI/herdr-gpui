@@ -213,6 +213,11 @@ pub fn run(
         || std::thread::sleep(convert::POLL),
         cancelled,
     )?;
+    // Stopped once the agent left, as when chats were turned off: its
+    // session is left to continue by hand, and no chat starts.
+    if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(convert::Error::Stopped.into());
+    }
     core.send(&crate::wire::SendText {
         terminal: terminal.as_str(),
         text: &line,

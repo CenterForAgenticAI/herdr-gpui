@@ -22,6 +22,22 @@ pub(crate) struct Job {
     result: mpsc::Receiver<Result<(), Error>>,
 }
 
+impl Job {
+    /// A move whose worker has not answered yet, and the flag it watches.
+    #[cfg(test)]
+    pub(crate) fn waiting_for_test() -> (Self, Arc<AtomicBool>) {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let (sender, result) = mpsc::sync_channel(1);
+        // Kept open, so the worker seems still at work.
+        std::mem::forget(sender);
+        let job = Self {
+            cancelled: cancelled.clone(),
+            result,
+        };
+        (job, cancelled)
+    }
+}
+
 impl Drop for Job {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Release);
@@ -92,11 +108,14 @@ impl SheprdWindow {
         Ok((core_pane::key(&terminal), agent))
     }
 
-    /// The outcome of a herdr-core move, once its worker is done; a lost
-    /// connection to the core stops it.
+    /// The outcome of a herdr-core move, once its worker is done. Turning
+    /// ACP chats off or losing the core stops it: dropping the job tells the
+    /// worker, which checks between rounds, before it types the chat's line.
     pub(super) fn poll_core_convert(&mut self) -> Option<Result<(), Error>> {
         let job = self.chats.converting_core.as_ref()?;
-        let result = if self.core_terminals.hub.backend().is_none() {
+        let result = if !self.config.features.acp_chats {
+            Err(Error::Disabled)
+        } else if self.core_terminals.hub.backend().is_none() {
             Err(convert::Error::Stopped.into())
         } else {
             match job.result.try_recv() {
