@@ -4,8 +4,10 @@
 //! Where Herdr 1 is installed it stays the user's to start: moving to
 //! Herdr 2 is their choice.
 
-use super::{Hub, Result, core, locate, on_core};
+use super::{Hub, Result, core, locate, locate_on, on_core};
 use std::{
+    ffi::OsStr,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -39,7 +41,11 @@ impl Hub {
         if let Some(core) = self.active_core() {
             return Ok(Some(core));
         }
-        let Some((core, binary)) = self.startable() else {
+        let Some(core) = self.startable() else {
+            return Ok(None);
+        };
+        // The login shell's PATH can take a moment to read the first time.
+        let Some(binary) = on_core(|| Ok(core_program())).await? else {
             return Ok(None);
         };
         let mut failed = self.waking.lock().await;
@@ -88,17 +94,31 @@ impl Hub {
         });
     }
 
-    /// This machine's core source and the program to start it with, when
-    /// no Herdr 1 session answers or is installed here.
-    fn startable(&self) -> Option<(Arc<core::Source>, std::path::PathBuf)> {
+    /// This machine's core source, when no Herdr 1 session answers; whether
+    /// Herdr 1 is installed is [`core_program`]'s to say.
+    fn startable(&self) -> Option<Arc<core::Source>> {
         // Tests' hubs look for no programs, and start nothing.
         let core = self.core.clone().filter(|_| self.search_program)?;
-        if self.primary.borrow().connected
-            || self.sessions.first_connected().is_some()
-            || locate(HERDR).is_some()
-        {
+        if self.primary.borrow().connected || self.sessions.first_connected().is_some() {
             return None;
         }
-        Some((core, locate(sheprd_core_client::PROGRAM)?))
+        Some(core)
     }
+}
+
+/// The program to start this machine's core with, when Herdr 1 is not
+/// installed here. Blocking: it may read the login shell's environment.
+fn core_program() -> Option<PathBuf> {
+    let login = sheprd_client::login_env::path();
+    if installed(HERDR, login.as_deref()) {
+        return None;
+    }
+    locate(sheprd_core_client::PROGRAM)
+}
+
+/// Whether `program` is where the daemon looks, or on the login shell's
+/// `login` PATH: a service's own PATH can leave out a directory the user's
+/// shell adds, such as Homebrew's, and Herdr 1 there is still installed.
+pub(super) fn installed(program: &str, login: Option<&OsStr>) -> bool {
+    locate(program).is_some() || login.is_some_and(|path| locate_on(program, Some(path)).is_some())
 }

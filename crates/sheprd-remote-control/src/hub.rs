@@ -600,10 +600,14 @@ fn locate_program() -> Option<PathBuf> {
 
 /// The first runnable `program` where [`program_dirs`] looks.
 fn locate(program: &str) -> Option<PathBuf> {
+    locate_on(program, std::env::var_os("PATH").as_deref())
+}
+
+/// [`locate`] with `path` searched in place of this process's `PATH`.
+fn locate_on(program: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok();
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path = std::env::var_os("PATH");
-    program_dirs(exe.as_deref(), home.as_deref(), path.as_deref())
+    program_dirs(exe.as_deref(), home.as_deref(), path)
         .into_iter()
         .map(|dir| dir.join(program))
         .find(|candidate| runnable(candidate))
