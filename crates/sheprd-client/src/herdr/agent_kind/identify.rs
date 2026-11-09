@@ -6,7 +6,7 @@
 use super::AgentKind;
 
 /// Runtimes that run an agent's script rather than being one.
-const RUNTIMES: &[&str] = &["bun", "deno", "node"];
+const RUNTIMES: &[&str] = &["bun", "deno", "node", "nodejs"];
 /// Runtime options whose value is the next argument, not the script.
 const VALUED: &[&str] = &[
     "-r",
@@ -79,8 +79,8 @@ impl AgentKind {
         if !RUNTIMES.contains(&runtime.as_str()) {
             return None;
         }
-        // `bun run x.js` and `deno run x.js`; to `node`, `run` is a script.
-        let subcommand = runtime != "node";
+        // `bun run x.js` and `deno run x.js`; to Node, `run` is a script.
+        let subcommand = !matches!(runtime.as_str(), "node" | "nodejs");
         let script = script(argv, subcommand)?;
         package(script).or_else(|| Self::lookup(script))
     }

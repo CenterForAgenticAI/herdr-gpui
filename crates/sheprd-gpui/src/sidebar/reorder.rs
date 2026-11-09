@@ -18,10 +18,8 @@ use crate::{
     reorder::{LIFT_DELAY, LIFT_DISTANCE, SETTLE_TIMEOUT, SLIDE, Slide, slot_for},
 };
 use gpui::{Context, Pixels, Point, Task};
-use sheprd_client::{
-    protocol::ClientShellWorkspace,
-    workspaces::{WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceReorder},
-};
+use sheprd_client::workspaces::{WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceReorder};
+use sheprd_session::{Keeper, Workspace};
 use std::{cell::RefCell, collections::HashMap, time::Instant};
 
 use super::workspaces::{grouped_keys, workspace_entries};
@@ -29,6 +27,9 @@ use super::workspaces::{grouped_keys, workspace_entries};
 /// A press on a workspace row that may become a reorder.
 pub(crate) struct WorkspaceDrag {
     boot: String,
+    /// Who carries out the move: Herdr 1's daemon, or the app for the
+    /// workspaces it keeps for Herdr 2, which are reordered among themselves.
+    pub(super) keeper: Keeper,
     pub(super) workspace: String,
     origin: Point<Pixels>,
     pub(super) pointer: Point<Pixels>,
@@ -85,12 +86,13 @@ impl WorkspaceDrag {
 
     /// Whether the list should show the drop in place: while it floats, and
     /// after it is dropped until the daemon's order replaces the old one.
-    pub(super) fn previewing(&self, workspaces: &[ClientShellWorkspace]) -> bool {
+    pub(super) fn previewing(&self, workspaces: &[Workspace]) -> bool {
         self.lifted
             && self.dropped.as_ref().is_none_or(|order| {
-                order.iter().map(String::as_str).eq(workspaces
+                order
                     .iter()
-                    .map(|workspace| workspace.workspace_id.as_str()))
+                    .map(String::as_str)
+                    .eq(workspaces.iter().map(|workspace| workspace.id.as_str()))
             })
     }
 }
@@ -130,14 +132,14 @@ impl MoveBlock {
     /// daemon offers it (`single`), so it announces `workspace.moved` as the
     /// same drag in Herdr's TUI does. A group's members may sit apart in the
     /// daemon's order, which only `workspace.move_block` gathers in one step.
-    fn reorder(&self, workspaces: &[ClientShellWorkspace], single: bool) -> WorkspaceReorder {
+    fn reorder(&self, workspaces: &[Workspace], single: bool) -> WorkspaceReorder {
         if single && let [workspace_id] = self.workspace_ids.as_slice() {
             // The index counts the workspace still in place, so landing
             // before `before` is `before`'s own index, and last is the length.
             let insert_index = match &self.before {
                 Some(before) => workspaces
                     .iter()
-                    .position(|workspace| &workspace.workspace_id == before),
+                    .position(|workspace| &workspace.id == before),
                 None => Some(workspaces.len()),
             };
             if let Some(insert_index) = insert_index {
@@ -166,10 +168,8 @@ pub(super) struct Plan {
 
 impl Plan {
     /// `None` when the pressed row has nowhere else to go.
-    pub(super) fn new(workspaces: &[ClientShellWorkspace], workspace: &str) -> Option<Self> {
-        let pressed = workspaces
-            .iter()
-            .position(|w| w.workspace_id == workspace)?;
+    pub(super) fn new(workspaces: &[Workspace], workspace: &str) -> Option<Self> {
+        let pressed = workspaces.iter().position(|w| w.id == workspace)?;
         // A group's rows are contiguous, so a block is a run of one grouped
         // repository's rows, or a single ungrouped row.
         let grouped = grouped_keys(workspaces);
@@ -236,16 +236,12 @@ impl Plan {
 
     /// The move that dropping into `slot`, the gap before unit `slot`, makes.
     /// `None` for the two gaps around the carried unit, which move nothing.
-    pub(super) fn request(
-        &self,
-        workspaces: &[ClientShellWorkspace],
-        slot: usize,
-    ) -> Option<MoveBlock> {
+    pub(super) fn request(&self, workspaces: &[Workspace], slot: usize) -> Option<MoveBlock> {
         if slot == self.dragged || slot == self.dragged + 1 || slot > self.units.len() {
             return None;
         }
         let moved = &self.units[self.dragged];
-        let id = |index: usize| workspaces[index].workspace_id.clone();
+        let id = |index: usize| workspaces[index].id.clone();
         // A group shows where its earliest member sits, so landing before a
         // unit means landing before that member.
         let before = match self.units.get(slot) {
@@ -279,13 +275,24 @@ impl SheprdWindow {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let Some(snapshot) = &self.live.snapshot else {
+        let sessions = self.sessions(self.selected_endpoint);
+        let Some(session) = sessions
+            .each()
+            .find(|session| session.workspace(workspace).is_some())
+        else {
             return;
         };
-        if self.menu.page.is_some()
-            || !self.live.status.is_connected()
-            || Plan::new(&snapshot.workspaces, workspace).is_none()
-        {
+        let keeper = session
+            .workspace(workspace)
+            .map_or(Keeper::Herdr1, |workspace| workspace.keeper);
+        let boot = match keeper {
+            Keeper::Herdr1 => match &self.live.snapshot {
+                Some(snapshot) if self.live.status.is_connected() => snapshot.boot_id.clone(),
+                _ => return,
+            },
+            Keeper::App => String::new(),
+        };
+        if self.menu.page.is_some() || Plan::new(&session.workspaces, workspace).is_none() {
             return;
         }
         let lift = cx.spawn(async move |this, cx| {
@@ -293,7 +300,8 @@ impl SheprdWindow {
             let _ = this.update(cx, |this, cx| this.lift_workspace(cx));
         });
         self.workspace_drag = Some(WorkspaceDrag {
-            boot: snapshot.boot_id.clone(),
+            boot,
+            keeper,
             workspace: workspace.to_owned(),
             origin: position,
             pointer: position,
@@ -362,8 +370,14 @@ impl SheprdWindow {
         let Some(target) = &drag.target else {
             return true;
         };
+        if drag.keeper == Keeper::App {
+            self.drop_kept_workspace(&drag.workspace, &target.request, cx);
+            return true;
+        }
         let connection = &self.endpoints[self.selected_endpoint].connection;
-        let (Some(handle), Some(snapshot)) = (&connection.handle, &self.live.snapshot) else {
+        let (Some(handle), Some(snapshot), Some(session)) =
+            (&connection.handle, &self.live.snapshot, self.live.session())
+        else {
             return true;
         };
         if snapshot.boot_id != drag.boot {
@@ -371,14 +385,14 @@ impl SheprdWindow {
         }
         let reorder = target
             .request
-            .reorder(&snapshot.workspaces, self.live.supports_workspace_move);
+            .reorder(&session.workspaces, self.live.supports_workspace_move);
         match handle.reorder_workspaces(&drag.boot, &reorder) {
             Ok(_) => {
                 drag.dropped = Some(
-                    snapshot
+                    session
                         .workspaces
                         .iter()
-                        .map(|workspace| workspace.workspace_id.clone())
+                        .map(|workspace| workspace.id.clone())
                         .collect(),
                 );
                 drag._timer = cx.spawn(async move |this, cx| {
@@ -398,6 +412,29 @@ impl SheprdWindow {
             }
         }
         true
+    }
+
+    /// Moves a kept workspace where it was dropped. The app keeps the order,
+    /// so it lands at once and no preview waits on an answer.
+    fn drop_kept_workspace(
+        &mut self,
+        workspace: &str,
+        request: &MoveBlock,
+        cx: &mut Context<Self>,
+    ) {
+        let order: Vec<String> = self
+            .sessions(self.selected_endpoint)
+            .core
+            .map(|core| core.workspaces.iter().map(|w| w.id.clone()).collect())
+            .unwrap_or_default();
+        let beside = match &request.before {
+            Some(before) => crate::reorder::Beside::Before(before.as_str()),
+            None => match order.iter().rfind(|id| *id != workspace) {
+                Some(last) => crate::reorder::Beside::After(last.as_str()),
+                None => return,
+            },
+        };
+        self.move_kept_workspace(workspace, beside, cx);
     }
 
     /// Drops a lifted row where it came from. Returns whether one was lifted.

@@ -7,7 +7,7 @@ use sheprd_session::CoreWorkspace;
 fn a_herdr_1_snapshot_reads_as_its_session() {
     let snapshot = snapshot(4);
     let session = of_snapshot(&snapshot);
-    assert_eq!(session.focused, None);
+    assert_eq!(session.focused.as_deref(), Some("w0"), "marked focused");
     let ids: Vec<_> = session.workspaces.iter().map(|w| w.id.as_str()).collect();
     assert_eq!(ids, ["w0", "w1", "w2", "w3"]);
     let first = session.workspace("w0").unwrap();
@@ -56,6 +56,9 @@ fn a_host_lists_herdr_1_then_core_workspaces() {
     let herdr_1 = Arc::new(of_snapshot(&snapshot(2)));
     let core = Arc::new(Session::core(
         [CoreWorkspace {
+            branch: None,
+            custom_label: false,
+            worktree: None,
             cwd: "",
             id: "herdr-2",
             label: "Herdr 2",
@@ -91,4 +94,43 @@ fn each_session_names_its_keeper() {
     };
     let keepers: Vec<_> = sessions.keyed().map(|(keeper, _)| keeper).collect();
     assert_eq!(keepers, [Keeper::Herdr1, Keeper::App]);
+}
+
+#[test]
+fn core_agents_in_herdr_1_workspaces_bring_their_checkouts() {
+    use sheprd_session::Agent;
+    let herdr_1 = Arc::new(of_snapshot(&snapshot(4)));
+    let agent = |workspace: &str| Agent {
+        focused: false,
+        identity: None,
+        name: "claude".into(),
+        pane: "t1".into(),
+        status: AgentStatus::Working,
+        tab: "1".into(),
+        workspace: workspace.into(),
+    };
+    let alone = Arc::new(Session {
+        agents: vec![agent("herdr-2")],
+        ..Session::default()
+    });
+    let sessions = Sessions {
+        core: Some(alone.clone()),
+        core_answers: true,
+        herdr_1: Some(herdr_1.clone()),
+    };
+    let same = core_with_checkouts(&sessions).unwrap();
+    assert!(Arc::ptr_eq(&same, &alone), "nothing missing, nothing built");
+    let sessions = Sessions {
+        core: Some(Arc::new(Session {
+            agents: vec![agent("w3")],
+            ..Session::default()
+        })),
+        core_answers: true,
+        herdr_1: Some(herdr_1),
+    };
+    let joined = core_with_checkouts(&sessions).unwrap();
+    let ids: Vec<_> = joined.workspaces.iter().map(|w| w.id.as_str()).collect();
+    assert_eq!(ids, ["w3"]);
+    assert!(joined.workspace("w3").unwrap().worktree.is_some());
+    assert!(core_with_checkouts(&Sessions::default()).is_none());
 }
