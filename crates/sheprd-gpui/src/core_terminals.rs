@@ -358,6 +358,12 @@ impl TabPanes {
 /// The most terminals waiting to start at once.
 const MAX_WANTED: usize = 16;
 
+/// The kills every window's herdr-core terminals left unended.
+#[derive(Default)]
+pub(crate) struct Unended(std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>);
+
+impl Global for Unended {}
+
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
@@ -399,7 +405,9 @@ pub(crate) struct CoreTerminals {
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
     /// Terminals a kill did not reach, as when the connection dropped while
-    /// it was sent, put back to end once their core answers again.
+    /// it was sent, put back to end once their core answers again. Shared
+    /// by every window (`Unended`), so one closed before its core answered
+    /// leaves them to another.
     unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// Terminals to start, one after another, once the hub of each one's
@@ -410,6 +418,15 @@ pub(crate) struct CoreTerminals {
 }
 
 impl CoreTerminals {
+    /// A window's state, whose kills left unended wait with every other
+    /// window's.
+    pub(crate) fn shared(cx: &mut App) -> Self {
+        Self {
+            unended: std::sync::Arc::clone(&cx.default_global::<Unended>().0),
+            ..Self::default()
+        }
+    }
+
     /// Every view on screen: the tabs' panes and the stand-in shell.
     fn shown(&self) -> impl Iterator<Item = &Entity<CoreTerminalView>> {
         let fallback = match &self.fallback {

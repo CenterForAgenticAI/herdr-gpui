@@ -127,6 +127,7 @@ impl SheprdWindow {
         });
         let window_closed = Self::give_back_torn_tabs(cx);
         let terminal_focus = Self::leave_region_with_terminal(&focus, window, cx);
+        let core_terminals = crate::core_terminals::CoreTerminals::shared(cx);
         let mut this = Self {
             // keep-sorted start
             _activation: activation,
@@ -174,7 +175,7 @@ impl SheprdWindow {
             config_watch: None,
             configured_terminal_size,
             copy_mode: None,
-            core_terminals: Default::default(),
+            core_terminals,
             daemon_text: Default::default(),
             deliveries: Default::default(),
             device_drag: None,
