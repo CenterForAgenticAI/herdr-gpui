@@ -7,7 +7,7 @@ use sheprd_session::CoreWorkspace;
 fn a_herdr_1_snapshot_reads_as_its_session() {
     let snapshot = snapshot(4);
     let session = of_snapshot(&snapshot);
-    assert_eq!(session.focused, None);
+    assert_eq!(session.focused.as_deref(), Some("w0"), "marked focused");
     let ids: Vec<_> = session.workspaces.iter().map(|w| w.id.as_str()).collect();
     assert_eq!(ids, ["w0", "w1", "w2", "w3"]);
     let first = session.workspace("w0").unwrap();

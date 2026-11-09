@@ -2,7 +2,7 @@
 //! in them, and the core reports each terminal's agent.
 
 use super::{Agent, Keeper, Session, Tab, Workspace, most_pressing};
-use crate::CoreTab;
+use crate::{CoreTab, SavedWorkspace};
 use sheprd_backend::{AgentStatus, TerminalId, TerminalInfo};
 
 /// A workspace the app keeps for herdr-core terminals.
@@ -13,14 +13,24 @@ pub struct CoreWorkspace<'a> {
     pub label: &'a str,
 }
 
+impl<'a> From<&'a SavedWorkspace> for CoreWorkspace<'a> {
+    fn from(saved: &'a SavedWorkspace) -> Self {
+        Self {
+            cwd: &saved.cwd,
+            id: &saved.id,
+            label: &saved.label,
+        }
+    }
+}
+
 impl Session {
     /// The session of herdr-core terminals: `workspaces` in order, each with
     /// its tabs among `tabs`, and an agent for every terminal `info` reports
     /// one in. A tab in a workspace not listed, such as a Herdr 1 workspace
     /// a core tab opened in, adds its agents but no workspace.
-    pub fn core<'a, 'i>(
-        workspaces: impl IntoIterator<Item = CoreWorkspace<'a>>,
-        tabs: impl IntoIterator<Item = CoreTab<'a>>,
+    pub fn core<'w, 't, 'i>(
+        workspaces: impl IntoIterator<Item = CoreWorkspace<'w>>,
+        tabs: impl IntoIterator<Item = CoreTab<'t>>,
         focused: Option<&str>,
         info: impl Fn(&TerminalId) -> Option<&'i TerminalInfo>,
     ) -> Self {
@@ -30,6 +40,7 @@ impl Session {
             workspaces: workspaces
                 .into_iter()
                 .map(|workspace| Workspace {
+                    ahead_behind: None,
                     branch: None,
                     cwd: workspace.cwd.to_owned(),
                     custom_label: true,
@@ -38,6 +49,7 @@ impl Session {
                     label: workspace.label.to_owned(),
                     status: AgentStatus::Unknown,
                     tabs: Vec::new(),
+                    tokens: Vec::new(),
                     worktree: None,
                 })
                 .collect(),
