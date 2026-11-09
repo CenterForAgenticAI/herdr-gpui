@@ -258,6 +258,11 @@ fn edit_file(
     path: &Path,
     change: impl FnOnce(&[u8]) -> std::result::Result<Vec<u8>, edit::Error>,
 ) -> std::result::Result<(), Error> {
+    // Phones' edits run on the blocking pool side by side: one at a time,
+    // or two could read the same file and the later write drop the other.
+    // The modified time catches Sheprd writing meanwhile.
+    static EDITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _editing = lock(&EDITING);
     let modified =
         |path: &Path| -> std::io::Result<SystemTime> { std::fs::metadata(path)?.modified() };
     let before = modified(path)?;

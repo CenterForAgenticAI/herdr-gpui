@@ -172,8 +172,9 @@ impl Source {
                 self.tabs.as_deref(),
                 self.scope.as_deref(),
             );
+            let held = poller.held(self.scope.as_deref());
             let mut own = lock(&self.own);
-            if own.fit(&boot, &terminals)
+            if own.fit(&boot, &terminals, &held)
                 && let Err(error) = own.save()
             {
                 tracing::warn!(%error, "The phone's Herdr 2 tab layouts were not saved");
@@ -393,6 +394,10 @@ fn merge(daemon: &Layout, core: &Layout) -> Layout {
         merged.boot = core.boot.clone();
     }
     for workspace in &core.workspaces {
+        // An empty stand-in shows only when nothing else is listed (below).
+        if empty_unlisted(workspace) {
+            continue;
+        }
         if let Some(existing) = merged
             .workspaces
             .iter_mut()
@@ -417,13 +422,23 @@ fn merge(daemon: &Layout, core: &Layout) -> Layout {
             chats: Vec::new(),
             cwd: home.to_string_lossy().into_owned(),
             id: UNLISTED.to_owned(),
-            label: "Herdr 2".to_owned(),
+            // The name a phone gave it, kept by the core's source.
+            label: core
+                .workspaces
+                .iter()
+                .find(|workspace| empty_unlisted(workspace))
+                .map_or_else(|| "Herdr 2".to_owned(), |workspace| workspace.label.clone()),
             session: None,
             terminals: Vec::new(),
             worktree: None,
         });
     }
     merged
+}
+
+/// The group of unlisted terminals with none in it.
+fn empty_unlisted(workspace: &Workspace) -> bool {
+    workspace.id == UNLISTED && workspace.chats.is_empty() && workspace.terminals.is_empty()
 }
 
 pub(super) async fn merge_sources(

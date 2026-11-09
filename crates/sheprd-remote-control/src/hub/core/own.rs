@@ -90,9 +90,10 @@ impl Store {
         super::arrange::write_atomically(path, &bytes)
     }
 
-    /// Keeps only what `core`'s `records` still hold. Answers whether that
-    /// changed anything, which is then saved.
-    pub(super) fn fit(&mut self, core: &str, records: &[Record]) -> bool {
+    /// Keeps only what `core`'s `records` still hold and none of Sheprd's
+    /// saved tabs has taken in (`held`). Answers whether that changed
+    /// anything, which is then saved.
+    pub(super) fn fit(&mut self, core: &str, records: &[Record], held: &HashSet<String>) -> bool {
         let layouts = &mut self.layouts;
         if layouts.core != core {
             self.fresh.clear();
@@ -106,10 +107,16 @@ impl Store {
         let mut live: HashSet<&str> = records
             .iter()
             .map(|record| record.address.as_str())
+            .filter(|address| !held.contains(*address))
             .collect();
         self.fresh
             .retain(|address, at| !live.contains(address.as_str()) && at.elapsed() < FRESH);
-        live.extend(self.fresh.keys().map(String::as_str));
+        live.extend(
+            self.fresh
+                .keys()
+                .map(String::as_str)
+                .filter(|address| !held.contains(*address)),
+        );
         let before = (layouts.tabs.len(), layouts.names.len());
         let mut changed = false;
         layouts.tabs.retain_mut(|tab| {
@@ -265,6 +272,22 @@ impl Layouts {
             if let Some((workspace, index)) = lone_row(layout, lead) {
                 layout.workspaces[workspace].terminals[index] = merged;
             }
+        }
+        // A named group with nothing in it yet still carries its name, for
+        // the stand-in a phone sees when nothing else is listed.
+        if let Some(name) = self.workspaces.get(super::UNLISTED)
+            && layout.workspace(super::UNLISTED).is_none()
+        {
+            layout.workspaces.push(crate::hub::Workspace {
+                branch: None,
+                chats: Vec::new(),
+                cwd: String::new(),
+                id: super::UNLISTED.to_owned(),
+                label: name.clone(),
+                session: None,
+                terminals: Vec::new(),
+                worktree: None,
+            });
         }
         for workspace in &mut layout.workspaces {
             if let Some(name) = self.workspaces.get(&workspace.id) {
