@@ -164,6 +164,47 @@ fn moving_on_from_a_named_pane_drops_its_name_from_the_strip(cx: &mut TestAppCon
     assert_eq!(title(cx), opened);
 }
 
+#[gpui::test]
+fn closing_a_pane_while_disconnected_ends_it_once_the_core_answers(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.close_core_pane(tab, id("t2"), window, cx)
+        })
+    });
+    let unended = cx.update(|_, cx| view.read(cx).core_terminals.unended.lock().unwrap().clone());
+    assert_eq!(unended, [(crate::core_terminals::Host::Local, id("t2"))]);
+}
+
+#[gpui::test]
+fn a_menu_left_on_a_pane_that_went_closes_nothing(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            // t2's program ended while its menu was open.
+            view.remove_core_pane(tab, &id("t2"), window, cx);
+            view.close_core_pane(tab, id("t2"), window, cx);
+        })
+    });
+    let open = cx.update(|_, cx| cx.global::<Store>().get(tab).is_some());
+    assert!(open, "t1, the pane left, still runs in its tab");
+}
+
+#[gpui::test]
+fn closing_a_menu_gives_the_keyboard_back_to_the_pane(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    run(&view, cx, Command::RenameTab);
+    let focused = cx.update(|window, cx| {
+        view.update(cx, |view, cx| view.dismiss_menu(window, cx));
+        let view = view.read(cx);
+        view.core_terminals.views[&(tab, id("t1"))]
+            .read(cx)
+            .focus_handle()
+            .is_focused(window)
+    });
+    assert!(focused);
+}
+
 #[test]
 fn a_name_is_one_bounded_line() {
     assert_eq!(clean_name(" a\u{202e}b\n"), Some("ab".into()));
@@ -177,4 +218,60 @@ fn closing_a_pane_from_its_menu_keeps_the_tab(cx: &mut TestAppContext) {
     run(&view, cx, Command::ClosePane);
     let panes = cx.update(|_, cx| view.read(cx).core_terminals.tabs[&tab].panes.count());
     assert_eq!(panes, 1);
+}
+
+#[gpui::test]
+fn closing_a_pane_that_already_exited_leaves_its_tab(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1"]);
+    // The menu named `t2`, which exited while it was open.
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.close_core_pane(tab, id("t2"), window, cx)
+        })
+    });
+    let open = cx.update(|_, cx| cx.global::<Store>().get(tab).is_some());
+    assert!(open, "the tab and its remaining terminal stay");
+    let shown = cx.update(|_, cx| view.read(cx).core_terminals.tabs.contains_key(&tab));
+    assert!(shown);
+}
+
+#[gpui::test]
+fn zooming_a_pane_that_already_exited_changes_nothing(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    let gone = Target::Pane {
+        tab,
+        terminal: id("t9"),
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_core_menu(gone, point(px(10.), px(10.)), window, cx);
+            view.activate_core_menu(Action::Zoom, window, cx);
+            let shown = &view.core_terminals.tabs[&tab];
+            assert_eq!(shown.zoomed, None, "the split stays drawn");
+            assert!(view.menu.core.is_none(), "the menu still closes");
+        })
+    });
+}
+
+#[gpui::test]
+fn a_cleared_name_gives_way_to_the_default_title(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1"]);
+    let title = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| cx.global::<Store>().get(tab).unwrap().title.clone())
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&Target::Tab(tab), clean_name("build"), cx);
+            view.poll_core_panes(window, cx);
+        })
+    });
+    assert_eq!(title(cx), "build");
+    // The program never set a title of its own.
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&Target::Tab(tab), clean_name(""), cx);
+            view.poll_core_panes(window, cx);
+        })
+    });
+    assert_eq!(title(cx), "Terminal");
 }

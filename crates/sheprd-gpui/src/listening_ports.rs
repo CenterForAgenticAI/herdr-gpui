@@ -8,6 +8,8 @@
 //! blocks rendering or delays another host.
 // i18n: migrated
 
+mod core;
+pub(crate) use core::Place;
 mod error;
 mod render;
 mod scan;
@@ -77,6 +79,17 @@ impl Daemon {
             None => target.socket_path().ok().map(Identity::Client),
         };
         Some(Self { host, identity })
+    }
+
+    /// How browser tabs name this daemon, for one on this computer whose
+    /// client socket is known: its herdr-core tabs' workspaces are its own.
+    pub(crate) fn scope(&self) -> Option<crate::browser::Scope> {
+        match (&self.host, &self.identity) {
+            (Host::Local, Some(Identity::Client(socket))) => {
+                Some(crate::browser::Scope::local(socket))
+            }
+            _ => None,
+        }
     }
 
     #[cfg(test)]
@@ -271,36 +284,42 @@ pub(crate) struct Listed<'a> {
 /// Every scanned host's listening ports, keyed by host.
 #[derive(Default)]
 pub(crate) struct ListeningPorts {
+    /// This computer's herdr-core terminals' ports, by workspace.
+    core: core::Placed,
     monitors: HashMap<Host, Monitor>,
 }
 
 impl ListeningPorts {
     /// The ports `workspace` of `daemon` listens on, lowest first, and where
     /// they open; None while it listens on none.
+    ///
+    /// A workspace whose Herdr panes listen on none lists what its
+    /// herdr-core terminals on this computer listen on instead.
     pub fn get(&self, daemon: &Daemon, workspace: &str) -> Option<Listed<'_>> {
         let reading = &self.monitors.get(&daemon.host)?.reading;
-        reading.scan.ports.iter().find_map(|(owner, ports)| {
+        let herdr = reading.scan.ports.iter().find_map(|(owner, ports)| {
             (owner.workspace == workspace && daemon.owns(&owner.socket) && !ports.is_empty())
                 .then_some(Listed {
                     ports,
                     origin: &reading.origin,
                 })
-        })
+        });
+        herdr.or_else(|| self.core_ports(&daemon.scope()?, workspace))
     }
 
     /// The workspace of `daemon` whose pane started the listening process
     /// `pid`, as the latest scan of its host found it.
     pub fn workspace_of(&self, daemon: &Daemon, pid: u32) -> Option<&str> {
-        let owner = self
-            .monitors
-            .get(&daemon.host)?
-            .reading
-            .scan
-            .pids
-            .get(&pid)?;
-        daemon
-            .owns(&owner.socket)
-            .then_some(owner.workspace.as_str())
+        let owner = self.monitors.get(&daemon.host)?.reading.scan.pids.get(&pid);
+        match owner {
+            Some(owner) => daemon
+                .owns(&owner.socket)
+                .then_some(owner.workspace.as_str()),
+            // Started in a herdr-core terminal of this computer: the
+            // workspace whose tab shows it.
+            None if daemon.host == Host::Local => self.core_workspace_of(daemon, pid),
+            None => None,
+        }
     }
 
     /// Whether a port listed on `key`'s host still tunnels to exactly `key`.

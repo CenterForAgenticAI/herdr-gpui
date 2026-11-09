@@ -178,7 +178,10 @@ fn handle(
     let out = outbound.clone();
     let state = state.clone();
     match view.clone() {
-        View::Home => views.start(view, follow_home(state, out)),
+        View::Home => {
+            state.hub.wake_for_phone();
+            views.start(view, follow_home(state, out))
+        }
         View::Chat { pane } => {
             let Some(link) = layout.chat(&pane).and_then(|_| state.hub.chat(&pane)) else {
                 return Some("no such chat");

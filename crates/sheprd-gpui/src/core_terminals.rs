@@ -11,6 +11,8 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod adopt;
+mod asks;
 mod checkouts;
 mod commands;
 mod context;
@@ -41,10 +43,11 @@ mod workspaces;
 mod tests;
 
 pub(crate) use error::Error;
+pub(crate) use fallback::Holder;
 pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
-pub(crate) use view::{CoreTerminalView, Look};
+pub(crate) use view::{CoreTerminalView, LinkClick, Look};
 
 use crate::{
     SheprdWindow,
@@ -79,6 +82,23 @@ pub(crate) enum Purpose {
         at: TerminalId,
         axis: Axis,
     },
+}
+
+/// What refreshing a tab another window saved leaves for the window to do.
+#[derive(Debug, Default, PartialEq)]
+struct Refreshed {
+    /// Panes the other window opened that the tab had no room left for.
+    overflow: Vec<TerminalId>,
+    /// Each window closed the other's last pane, so none is left.
+    emptied: bool,
+}
+
+impl Refreshed {
+    /// Whether nothing is left to do.
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// One tab's panes as the window holds them. The tab's saved location
@@ -193,11 +213,12 @@ impl TabPanes {
     /// a zoom stands only on that pane, so commands never reach a pane
     /// hidden behind another.
     ///
-    /// Returns the other window's new panes this tab had no room left for.
+    /// Returns what is left for the window to do: panes the other window
+    /// opened that this tab had no room left for, or that it emptied.
     #[must_use]
-    fn refresh(&mut self, location: &Location) -> Vec<TerminalId> {
+    fn refresh(&mut self, location: &Location) -> Refreshed {
         let Some(mut fresh) = Self::restore(self.host.clone(), location) else {
-            return Vec::new();
+            return Refreshed::default();
         };
         let Some(Location::CoreTerminal {
             panes: base,
@@ -207,25 +228,38 @@ impl TabPanes {
         }) = &self.saved
         else {
             *self = fresh;
-            return Vec::new();
+            return Refreshed::default();
         };
-        let mut overflow = Vec::new();
+        let mut left = Refreshed::default();
         if self.panes != *base {
-            fresh.panes = if fresh.panes == *base {
-                self.panes.clone()
+            if fresh.panes == *base {
+                fresh.panes = self.panes.clone();
             } else {
-                let (panes, left) = merged(&self.panes, base, &fresh.panes, &self.active);
-                overflow = left;
-                panes
-            };
+                let (panes, overflow) = merged(&self.panes, base, &fresh.panes, &self.active);
+                left.overflow = overflow;
+                match panes {
+                    Some(panes) => fresh.panes = panes,
+                    None => left.emptied = true,
+                }
+            }
         }
-        // Names this window changed since it last read the tab stand too.
+        // Names this window changed since it last read the tab stand too:
         if self.name != *base_name {
             fresh.name = self.name.take();
         }
-        if self.names != *base_names {
-            fresh.names = std::mem::take(&mut self.names);
+        // Pane by pane, so a name given here and one given there both stand.
+        let touched = (self.names.keys())
+            .chain(base_names.keys())
+            .filter(|terminal| self.names.get(*terminal) != base_names.get(*terminal));
+        for terminal in touched.cloned().collect::<Vec<_>>() {
+            match self.names.get(&terminal) {
+                Some(name) => fresh.names.insert(terminal, name.clone()),
+                None => fresh.names.remove(&terminal),
+            };
         }
+        fresh
+            .names
+            .retain(|terminal, _| fresh.panes.contains(terminal));
         if fresh.panes.contains(&self.active) {
             fresh.active = self.active.clone();
         } else if !fresh.panes.contains(&fresh.active) {
@@ -257,7 +291,7 @@ impl TabPanes {
         fresh.unsaved = self.unsaved;
         fresh.saved = Some(location.clone());
         *self = fresh;
-        overflow
+        left
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -314,6 +348,11 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// When terminals labelled for a workspace were last looked at.
+    adopt_checked: Option<std::time::Instant>,
+    /// Terminals labelled for a workspace that were put in a tab, so each
+    /// is put in one only once.
+    adopted: std::collections::HashSet<TerminalId>,
     /// The Git checkout of each kept workspace's folder and of the shown
     /// pane's.
     checkouts: checkouts::Checkouts,
@@ -421,6 +460,14 @@ impl CoreTerminals {
         self.tabs.insert(tab, shown);
     }
 
+    /// Places `tab` in `workspace` of `scope`, as showing the workspace does.
+    #[cfg(test)]
+    pub(crate) fn place_for_test(&mut self, tab: TabId, scope: Scope, workspace: &str) {
+        if let Some(shown) = self.tabs.get_mut(&tab) {
+            shown.workspace = Some((scope, workspace.to_owned()));
+        }
+    }
+
     /// Whether `tab` is a herdr-core tab that holds chats: it drives its
     /// terminals, rather than a mirror that only watches, on this computer.
     pub(crate) fn drives(&self, tab: TabId) -> bool {
@@ -461,15 +508,11 @@ impl CoreTerminals {
             .map(|(id, _)| *id)
     }
 
-    /// How the agents in `panes`, terminals of `host`'s core, are doing, as
-    /// their tab's mark shows it: the status that most wants attention, or
-    /// unknown with no agent. A core that does not answer reports none, as
-    /// its last list may name agents that have since stopped.
+    /// How the agents in `panes` on `host` are doing, as their tab's mark
+    /// shows it: the status that most wants attention, or unknown with no
+    /// agent. Terminal ids are only unique within a host.
     pub(crate) fn tab_status(&self, host: &Host, panes: &Panes) -> AgentStatus {
-        let Some(infos) = self
-            .infos_of(host)
-            .filter(|_| self.backend_of(host).is_some())
-        else {
+        let Some(infos) = self.infos_of(host) else {
             return AgentStatus::Unknown;
         };
         panes
@@ -486,6 +529,14 @@ impl CoreTerminals {
         self.tabs
             .get(&tab)
             .is_some_and(|shown| shown.name.is_some())
+    }
+
+    /// Whether a tab on this computer's core shows `terminal`, a mirror
+    /// included, which [`Self::tab_of`] leaves out.
+    pub(crate) fn mirrors(&self, terminal: &TerminalId) -> bool {
+        self.tabs
+            .values()
+            .any(|shown| shown.host == Host::Local && shown.panes.contains(terminal))
     }
 
     /// The tab and pane whose view holds the keyboard.
@@ -627,9 +678,28 @@ impl SheprdWindow {
             cx,
         );
         self.poll_core_panes(window, cx);
+        // While a phone may start work here, this computer's core is joined
+        // (never started) to see it, with or without a tab of its own.
+        if crate::remote::supervisor::Supervisor::enabled(cx) {
+            self.core_terminals.hub.connect(Start::Join);
+        }
+        // Split chrome and the sidebar's rows name panes from what herdr-core
+        // reports, and the shell shown in place of Herdr 1 reads its links
+        // against its folder, which this computer's core reports.
+        let fallback = self.core_fallback_view();
         self.answer_phone_split(cx);
-        if self.core_terminals.poll_infos(std::time::Instant::now()) {
+        let listed = self.core_terminals.poll_infos(std::time::Instant::now());
+        self.adopt_labelled_terminals(listed, cx);
+        if listed {
             cx.notify();
+        }
+        if let Some(view) = fallback {
+            let cwd = self
+                .core_terminals
+                .infos_of(&Host::Local)
+                .and_then(|infos| infos.named(view.read(cx).terminal()))
+                .and_then(|info| info.cwd.clone());
+            view.update(cx, |view, cx| view.set_cwd(cwd.as_deref(), cx));
         }
         self.core_terminals.shown = self.shown_core_pane(cx);
         if !cx.has_active_drag() {
@@ -737,14 +807,24 @@ impl SheprdWindow {
 
     /// How the window draws terminals, for its herdr-core views.
     pub(crate) fn core_look(&self) -> Look {
+        let shared = self.settings.shared.as_ref();
         Look {
             background: self.fill().base(self.terminal_theme().background),
             cell_height: self.config.terminal.line_height(),
             cell_width: self.cell_width,
+            copy_on_select: shared.is_none_or(|shared| shared.copy_on_select),
             font: self.config.terminal.font(),
             ground: self.ground(),
+            keep_selection: self.config.keep_selection_after_copy,
             option_as_alt: self.config.option_as_alt,
             padding: self.config.terminal_padding,
+            right_click_passthrough: shared
+                .map(|shared| shared.right_click_passthrough)
+                .unwrap_or_default(),
+            scroll_lines: shared.map_or(
+                crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
+                |shared| shared.mouse_scroll_lines,
+            ),
         }
     }
 
@@ -769,19 +849,21 @@ impl SheprdWindow {
 /// `here`, a layout changed since `base`, with the changes `there` made to
 /// `base` too: its closed panes go, and its new ones split off `active`
 /// while there is room. The new ones a full layout cannot take come back
-/// beside it, for the caller to give a tab of their own.
+/// beside it, for the caller to give a tab of their own. `None` when every
+/// pane went, each window having closed the other's last.
 fn merged(
     here: &Panes,
     base: &Panes,
     there: &Panes,
     active: &TerminalId,
-) -> (Panes, Vec<TerminalId>) {
+) -> (Option<Panes>, Vec<TerminalId>) {
     let mut panes = here.clone();
     let mut overflow = Vec::new();
-    for gone in base.terminals() {
-        if !there.contains(gone) {
-            panes.remove(gone);
-        }
+    let gone: Vec<&TerminalId> = (base.terminals().into_iter())
+        .filter(|terminal| !there.contains(terminal))
+        .collect();
+    for terminal in &gone {
+        panes.remove(terminal);
     }
     for new in there.terminals() {
         if !base.contains(new) && !panes.contains(new) {
@@ -795,7 +877,15 @@ fn merged(
             }
         }
     }
-    (panes, overflow)
+    // The last pane cannot go while it is alone; with the other side's new
+    // panes in, it can, and if it still cannot, nothing is left.
+    for terminal in &gone {
+        panes.remove(terminal);
+    }
+    if gone.iter().any(|terminal| panes.contains(terminal)) {
+        return (None, overflow);
+    }
+    (Some(panes), overflow)
 }
 
 /// Whether a pane waiting for the keyboard may take it: nothing holds it, or

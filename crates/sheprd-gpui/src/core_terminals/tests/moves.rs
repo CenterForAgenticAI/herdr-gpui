@@ -147,3 +147,23 @@ fn the_move_picker_opens_where_asked_without_dimming(cx: &mut TestAppContext) {
     });
     assert!(!dims && anchored);
 }
+
+#[gpui::test]
+fn a_move_reads_what_another_window_saved_first(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["a", "b"]);
+    // Another window moved b out, leaving a alone in the tab.
+    cx.update(|_, cx| {
+        let location = Location::core_terminal(Panes::single(id("a")), false);
+        Store::update(cx, |store| store.visited(tab, Some(location), None));
+    });
+    let tabs = |cx: &mut VisualTestContext| cx.update(|_, cx| cx.global::<Store>().tabs().count());
+    let before = tabs(cx);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.move_core_pane(tab, id("a"), Destination::NewTab, window, cx)
+        })
+    });
+    // Alone, a has no new tab to go to: it stays, and only once.
+    assert_eq!(tabs(cx), before);
+    assert_eq!(panes_of(cx, tab), Some(vec!["a".into()]));
+}

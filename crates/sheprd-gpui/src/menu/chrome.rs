@@ -57,11 +57,9 @@ impl SheprdWindow {
         {
             crate::agent_skill::AgentSkill::choose(crate::agent_skill::Choice::Declined, cx);
         }
-        let return_focus = self
-            .menu
-            .application
-            .as_ref()
-            .and_then(|menu| menu.return_focus.clone());
+        let application = self.menu.application.as_ref();
+        let return_focus = (application.and_then(|menu| menu.return_focus.clone()))
+            .or_else(|| self.core_menu_return_focus(cx));
         // The Overview shows no terminal, which must not take the keys next.
         let section = self
             .activity

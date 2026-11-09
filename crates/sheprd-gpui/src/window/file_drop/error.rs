@@ -9,6 +9,8 @@ pub enum Error {
     EmptyPath,
     #[error("Dropped paths must be UTF-8.")]
     Encoding,
+    #[error("Files on this computer cannot be dropped into another host's Herdr 2 terminal.")]
+    OtherHost,
     #[error("File drop exceeds 256 paths or 64 KiB of quoted text.")]
     Size,
     // keep-sorted end

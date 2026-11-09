@@ -32,6 +32,11 @@ pub(crate) fn key(terminal: &TerminalId) -> String {
     format!("core:{terminal}")
 }
 
+/// The herdr-core terminal a [`key`] names, if it is one.
+pub(crate) fn terminal_of(key: &str) -> Option<TerminalId> {
+    TerminalId::new(key.strip_prefix("core:")?).ok()
+}
+
 /// The chats among `terminals`, in their order, one per terminal and at
 /// most [`MAX_CHATS`]. A terminal on another machine this core added
 /// (`box/t7`) runs its program there, out of reach.
@@ -140,9 +145,6 @@ impl SheprdWindow {
         Ok(())
     }
 
-    /// `terminal`'s pane in `tab`: its view, with its chat drawn over it when
-    /// one is attached, or the button that brings the chat back over a pane
-    /// turned to its terminal. A mirror only watches, so it keeps the view.
     /// `view`, opening its pane's menu on a right-click the program does not
     /// take, as a Herdr pane does.
     fn core_pane_menu_area(
@@ -177,6 +179,9 @@ impl SheprdWindow {
             .into_any_element()
     }
 
+    /// `terminal`'s pane in `tab`: its view, with its chat drawn over it when
+    /// one is attached, or the button that brings the chat back over a pane
+    /// turned to its terminal. A mirror only watches, so it keeps the view.
     pub(crate) fn core_pane_body(
         &self,
         tab: TabId,
@@ -213,7 +218,8 @@ impl SheprdWindow {
             .min_w_0()
             .min_h_0()
             .size_full()
-            .child(view.clone())
+            // Turned to its terminal, the pane still opens its menu there.
+            .child(self.core_pane_menu_area(tab, terminal, view.clone(), cx))
             .child(overlay)
             .into_any_element()
     }

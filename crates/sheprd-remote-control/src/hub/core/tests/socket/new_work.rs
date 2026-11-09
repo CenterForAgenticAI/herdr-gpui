@@ -121,6 +121,8 @@ async fn a_chat_starts_on_the_core_with_its_endpoint_labelled() {
     assert_eq!(params["cwd"], "/code/one");
     assert_eq!(params["env"][ENDPOINT_ENV], params["labels"][TOKEN]);
     assert_eq!(params["env"]["HERDR_PANE_ID"], "");
+    // Sheprd puts it in a tab of the workspace it was asked for.
+    assert_eq!(params["labels"][sheprd_session::WORKSPACE_LABEL], "w1");
     drop((hub, source));
     fake.server.join().unwrap();
 }
@@ -158,10 +160,19 @@ async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
         )
         .await
         .unwrap();
-    assert_eq!(created.workspace, UNLISTED);
+    // Listed apart until Sheprd keeps a workspace for the new checkout.
     let checkout = root.join("project").join("topic");
+    assert_eq!(
+        created.workspace,
+        new_workspace_id(checkout.to_str().unwrap())
+    );
     assert!(checkout.join(".git").exists());
-    assert_eq!(request(&fake)["params"]["cwd"], checkout.to_str().unwrap());
+    let params = &request(&fake)["params"];
+    assert_eq!(params["cwd"], checkout.to_str().unwrap());
+    assert_eq!(
+        params["labels"][sheprd_session::NEW_WORKSPACE_LABEL],
+        checkout.to_str().unwrap()
+    );
     drop((hub, source));
     fake.server.join().unwrap();
 }
@@ -263,7 +274,67 @@ async fn a_new_tab_opens_a_shell_in_the_workspace_folder_and_answers_its_pane() 
     assert_eq!(run["params"]["cwd"], "/code/one");
     assert_eq!(run["params"]["keep"], true);
     assert!(run["params"].get("argv").is_none());
+    assert_eq!(
+        run["params"]["labels"][sheprd_session::WORKSPACE_LABEL],
+        "w1"
+    );
     drop((hub, source));
+    fake.server.join().unwrap();
+}
+
+#[tokio::test]
+async fn a_new_tab_in_a_named_session_names_the_session_apart() {
+    let records = vec![record("t1"), record("t9")];
+    let (source, fake) = fake_with_doc(false, Value::Null, records);
+    let mut layout = source.poll().unwrap();
+    layout
+        .workspaces
+        .push(workspace("herdr:dev:w1", "/code/one"));
+    let hub = hub_on(&source, layout);
+    hub.new_core_tab("herdr:dev:w1").await.unwrap().unwrap();
+    let labels = &request(&fake)["params"]["labels"];
+    assert_eq!(labels[sheprd_session::WORKSPACE_LABEL], "w1");
+    assert_eq!(labels[sheprd_session::SESSION_LABEL], "dev");
+    drop((hub, source));
+    fake.server.join().unwrap();
+}
+
+#[tokio::test]
+async fn a_second_tab_in_a_phones_new_workspace_joins_it_by_folder() {
+    let records = vec![record("t1"), record("t9")];
+    let (source, fake) = fake_with_doc(false, Value::Null, records);
+    let mut layout = source.poll().unwrap();
+    // Listed under its folder until Sheprd keeps a workspace for it.
+    let new = new_workspace_id("/code/one");
+    layout.workspaces.push(workspace(&new, "/code/one"));
+    let hub = hub_on(&source, layout);
+    hub.new_core_tab(&new).await.unwrap().unwrap();
+    let labels = &request(&fake)["params"]["labels"];
+    assert_eq!(labels[sheprd_session::NEW_WORKSPACE_LABEL], "/code/one");
+    assert!(labels.get(sheprd_session::WORKSPACE_LABEL).is_none());
+    drop((hub, source));
+    fake.server.join().unwrap();
+}
+
+#[test]
+fn work_in_a_phones_new_workspace_is_listed_in_one_row() {
+    let labelled = |address: &str| {
+        let mut record = record(address);
+        record["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/one"});
+        record
+    };
+    let records = vec![labelled("t1"), labelled("t9"), record("t2")];
+    let (source, fake) = fake_with_doc(false, Value::Null, records);
+    let layout = source.poll().unwrap();
+    let rows: Vec<_> = layout
+        .workspaces
+        .iter()
+        .filter(|row| row.cwd == "/code/one")
+        .collect();
+    assert_eq!(rows.len(), 1, "one workspace for the folder");
+    assert_eq!(rows[0].id, new_workspace_id("/code/one"));
+    assert_eq!(rows[0].terminals.len(), 2);
+    drop(source);
     fake.server.join().unwrap();
 }
 

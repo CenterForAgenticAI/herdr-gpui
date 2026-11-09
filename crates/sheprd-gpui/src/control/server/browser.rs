@@ -61,11 +61,8 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
         }
     }
     let caller = &request.caller;
-    let target = Target {
-        daemon: caller.daemon_socket.as_deref().map(Path::new),
-        workspace: caller.workspace_id.as_deref(),
-        pane: caller.pane_id.as_deref(),
-    };
+    holders_first(&mut windows, caller.terminal_id.as_deref(), cx);
+    let target = super::target(caller);
     // First the window connected to the caller's own daemon; then, when the
     // socket paths are spelled differently, any window showing its workspace.
     for strict in [true, false] {
@@ -105,17 +102,37 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
     )
 }
 
+/// Puts the windows holding the caller's herdr-core `terminal` first, keeping
+/// the frontmost order otherwise: several windows may show the workspace of
+/// a terminal in a Herdr workspace, and only the one holding its tab can
+/// place a page beside it.
+pub(super) fn holders_first(
+    windows: &mut [gpui::WindowHandle<crate::SheprdWindow>],
+    terminal: Option<&str>,
+    cx: &App,
+) {
+    let Some(terminal) = terminal else {
+        return;
+    };
+    windows.sort_by_cached_key(|handle| {
+        !handle
+            .read_with(cx, |view, _| view.holds_core_terminal(terminal))
+            .unwrap_or(false)
+    });
+}
+
 /// Reloads every page the calling pane opened, in every window.
 pub(super) fn reload(caller: &Caller, cx: &mut App) -> Response {
-    let Some(pane) = caller.pane_id.as_deref().filter(|pane| plain(pane, 256)) else {
+    let pane = crate::control::origin(caller.pane_id.as_deref(), caller.terminal_id.as_deref());
+    let Some(pane) = pane.filter(|pane| valid_caller(caller) && plain(pane, 256)) else {
         return Response::error(
             ErrorCode::InvalidRequest,
-            "browser reload runs in the Herdr pane that opened the page",
+            "browser reload runs in the pane that opened the page",
         );
     };
     let tabs: Vec<_> = cx
         .try_global::<crate::browser::Store>()
-        .map(|store| store.opened_by(pane).map(|tab| tab.id).collect())
+        .map(|store| store.opened_by(&pane).map(|tab| tab.id).collect())
         .unwrap_or_default();
     for handle in main_windows(cx) {
         let _ = handle.update(cx, |view, _, _| view.reload_browser_tabs(&tabs));
@@ -136,10 +153,11 @@ fn pastable(text: &str) -> String {
 /// none they are kept for `browser feedback`.
 pub(super) fn notes(request: &NotesRequest, cx: &mut App) -> Response {
     let caller = &request.caller;
-    let Some(pane) = caller.pane_id.as_deref().filter(|_| valid_caller(caller)) else {
+    let pane = crate::control::origin(caller.pane_id.as_deref(), caller.terminal_id.as_deref());
+    let Some(pane) = pane.filter(|_| valid_caller(caller)) else {
         return Response::error(
             ErrorCode::InvalidRequest,
-            "Notes are sent from the Herdr pane of the agent they are for",
+            "Notes are sent from the pane of the agent they are for",
         );
     };
     let Some(daemon) = caller.daemon_socket.as_deref() else {
@@ -150,7 +168,7 @@ pub(super) fn notes(request: &NotesRequest, cx: &mut App) -> Response {
     };
     let recipient = FeedbackKey {
         scope: Scope::local(Path::new(daemon)),
-        pane_id: pane.to_owned(),
+        pane_id: pane.clone().into_owned(),
     };
     let text = pastable(&request.text);
     if text.trim().is_empty() {
@@ -167,7 +185,8 @@ pub(super) fn notes(request: &NotesRequest, cx: &mut App) -> Response {
     let target = Target {
         daemon: caller.daemon_socket.as_deref().map(Path::new),
         workspace: None,
-        pane: Some(pane),
+        pane: Some(&pane),
+        terminal: None,
     };
     for handle in main_windows(cx) {
         let taken = handle.update(cx, |view, _, cx| {
@@ -224,8 +243,12 @@ pub(super) fn feedback(
         ));
         return;
     };
+    // A herdr-core terminal's notes are kept under the daemon of the tab
+    // holding it, where its pages opened, which need not be the session
+    // whose socket the terminal inherited.
+    let scope = core_scope(&request.pane_id, cx).unwrap_or_else(|| Scope::local(Path::new(daemon)));
     let target = FeedbackKey {
-        scope: Scope::local(Path::new(daemon)),
+        scope,
         pane_id: request.pane_id.clone(),
     };
     let kept = take_feedback(&target, cx);
@@ -253,6 +276,18 @@ pub(super) fn feedback(
             + std::time::Duration::from_secs(request.wait_seconds.min(MAX_WAIT_SECONDS)),
         incoming,
     });
+}
+
+/// The daemon whose tab holds the herdr-core terminal `pane_id` names, as
+/// browser tabs name it, in the first window holding it.
+pub(super) fn core_scope(pane_id: &str, cx: &App) -> Option<Scope> {
+    let terminal = crate::chat::core_pane::terminal_of(pane_id)?;
+    main_windows(cx).into_iter().find_map(|handle| {
+        handle
+            .read_with(cx, |view, _| view.core_terminal_scope(terminal.as_str()))
+            .ok()
+            .flatten()
+    })
 }
 
 /// Takes what is kept for `target`. A tab shows its batch as kept until an

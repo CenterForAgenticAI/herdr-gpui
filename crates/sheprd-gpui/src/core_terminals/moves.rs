@@ -109,6 +109,10 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Another window may have saved the tab since this one read it, as
+        // when it moved the other pane out: where this pane can go, and
+        // whether it is alone, are read from that.
+        self.sync_core_views(cx);
         if !self
             .core_moves(tab, &terminal, cx)
             .iter()

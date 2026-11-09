@@ -158,7 +158,12 @@ impl SheprdWindow {
         }
     }
 
-    fn activate_core_menu(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn activate_core_menu(
+        &mut self,
+        action: Action,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(target) = self.menu.core.as_ref().map(|menu| menu.target.clone()) else {
             return;
         };
@@ -184,6 +189,18 @@ impl SheprdWindow {
             return;
         }
         self.dismiss_menu(window, cx);
+        // A pane that exited while its menu was open is no longer the tab's:
+        // acting on it would zoom, split, or mirror nothing, or close the rest.
+        if let Target::Pane { terminal, .. } = &target
+            && !self
+                .core_terminals
+                .tabs
+                .get(&tab)
+                .is_some_and(|shown| shown.panes.contains(terminal))
+        {
+            cx.notify();
+            return;
+        }
         match (action, target) {
             (Action::NewTab, _) => self.new_core_terminal(window, cx),
             (Action::Close, Target::Tab(_)) => self.close_browser_tab(tab, window, cx),
@@ -221,6 +238,14 @@ impl SheprdWindow {
         }
     }
 
+    /// Where the keyboard goes back to as a herdr-core menu closes: the
+    /// pane in use of its tab, which held it before, rather than the
+    /// window, whose keys a Herdr pane would take.
+    pub(crate) fn core_menu_return_focus(&self, cx: &App) -> Option<FocusHandle> {
+        let tab = self.menu.core.as_ref()?.target.tab();
+        Some(self.core_pane_view(tab)?.read(cx).focus_handle().clone())
+    }
+
     /// Closes a pane: its terminal ends, unless the tab only mirrors it. The
     /// last pane closes as its tab does.
     pub(super) fn close_core_pane(
@@ -230,7 +255,14 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(shown) = self.core_terminals.tabs.get(&tab) else {
+        // A menu left open over a pane that has since exited names one
+        // the tab no longer holds: closing it must stop nothing else.
+        let Some(shown) = self
+            .core_terminals
+            .tabs
+            .get(&tab)
+            .filter(|shown| shown.panes.contains(&terminal))
+        else {
             return;
         };
         if shown.panes.count() <= 1 {

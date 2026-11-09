@@ -185,7 +185,7 @@ fn a_pane_a_full_tab_cannot_take_comes_back_for_a_tab_of_its_own() {
     let mut theirs = panes(&names);
     theirs.split(&id("p14"), Axis::Row, id("theirs")).unwrap();
     let left = here.refresh(&Location::core_terminal(theirs, false));
-    assert_eq!(left, [id("theirs")]);
+    assert_eq!(left.overflow, [id("theirs")]);
     assert!(here.panes.contains(&id("mine")));
     assert_eq!(here.panes.count(), 16);
 }
@@ -204,4 +204,28 @@ fn closing_the_pane_in_use_elsewhere_leaves_the_keyboard_on_one_still_there() {
     assert!(here.refresh(&there).is_empty());
     assert_eq!(here.panes, Panes::single(id("B")));
     assert_eq!(here.active, id("B"));
+}
+
+#[test]
+fn names_given_to_different_panes_in_two_windows_both_stand() {
+    let mut here = shown(&["t1", "t2"]);
+    here.names.insert(id("t1"), "api".into());
+    here.unsaved = true;
+    let mut there = Location::core_terminal(panes(&["t1", "t2"]), false);
+    if let Location::CoreTerminal { names, .. } = &mut there {
+        names.insert(id("t2"), "tests".into());
+    }
+    assert!(here.refresh(&there).is_empty());
+    assert_eq!(here.names.get(&id("t1")).map(String::as_str), Some("api"));
+    assert_eq!(here.names.get(&id("t2")).map(String::as_str), Some("tests"));
+}
+
+#[test]
+fn each_window_closing_the_others_last_pane_empties_the_tab() {
+    let mut here = shown(&["a", "b"]);
+    // This window closes a; the other closes b.
+    here.panes.remove(&id("a"));
+    here.unsaved = true;
+    let left = here.refresh(&Location::core_terminal(panes(&["a"]), false));
+    assert!(left.emptied, "b must not come back");
 }

@@ -555,6 +555,42 @@ impl SheprdWindow {
         }
     }
 
+    /// Opens a link clicked in a herdr-core pane as a Herdr pane's opens
+    /// when no plugin handler claims it: herdr-core has none.
+    pub(crate) fn open_core_link(
+        &mut self,
+        click: crate::core_terminals::LinkClick,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let in_tab =
+            (self.config.open_links_in == crate::config::LinkTarget::BrowserTab) != click.alt;
+        let fallback = match click.target {
+            RowTarget::Web(url) => WebUrl::try_from(url.as_str()).ok().map(Fallback::Web),
+            RowTarget::Path {
+                path,
+                line,
+                explicit,
+            } => Some(Fallback::File {
+                link: FileLink {
+                    path,
+                    line,
+                    pane_id: click.terminal.to_string(),
+                    cwd: click.cwd,
+                    explicit,
+                },
+                in_editor: (self.config.open_files_in == crate::config::FileTarget::Editor)
+                    != click.alt,
+            }),
+            RowTarget::External(url) => Some(Fallback::External(url)),
+            RowTarget::OtherHost(host) => {
+                Some(Fallback::Unopened(crate::Error::LinkOnAnotherHost { host }))
+            }
+            RowTarget::Malformed => Some(Fallback::Unopened(crate::Error::MalformedLink)),
+        };
+        self.open_link(fallback, in_tab, window, cx);
+    }
+
     fn open_link(
         &mut self,
         link: Option<Fallback>,
