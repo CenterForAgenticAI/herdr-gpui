@@ -160,15 +160,8 @@ impl SheprdWindow {
         cwd: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        if self.selected_is_remote() {
-            let Some(index) = self.core_host() else {
-                return;
-            };
-            let local = self.endpoints[index].id.clone();
-            if !self.select_endpoint(&local, cx) {
-                return;
-            }
-            self.refresh_core_session(cx);
+        if !self.show_this_computer(cx) {
+            return;
         }
         match self.kept_workspace_at(&cwd) {
             Some(id) => {
@@ -176,6 +169,23 @@ impl SheprdWindow {
             }
             None => self.new_kept_workspace(Some(label), Some(cwd), cx),
         }
+    }
+
+    /// Shows this computer, whose workspaces the app keeps, when another
+    /// host is shown; whether it is shown now.
+    pub(crate) fn show_this_computer(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.selected_is_remote() {
+            return true;
+        }
+        let Some(index) = self.core_host() else {
+            return false;
+        };
+        let local = self.endpoints[index].id.clone();
+        if !self.select_endpoint(&local, cx) {
+            return false;
+        }
+        self.refresh_core_session(cx);
+        true
     }
 
     /// The kept workspace on the selected host whose folder is `cwd`.
@@ -255,8 +265,19 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let scope = scope_of(self);
-        let tabs = Store::update(cx, |store| store.forget_kept(&scope, id));
+        self.close_kept_workspace_in(&scope_of(self), id, window, cx);
+    }
+
+    /// [`Self::close_kept_workspace`] for a workspace kept for `scope`, such
+    /// as one whose checkout was removed while another host was shown.
+    pub(crate) fn close_kept_workspace_in(
+        &mut self,
+        scope: &Scope,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tabs = Store::update(cx, |store| store.forget_kept(scope, id));
         for location in tabs.iter().filter_map(|tab| tab.location.as_ref()) {
             self.end_location(location);
         }

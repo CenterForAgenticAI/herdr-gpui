@@ -157,9 +157,9 @@ fn a_made_checkout_lands_in_a_kept_workspace(cx: &mut TestAppContext) {
                 cx,
             );
             view.menu.creation = Some("kept-1".into());
-            view.kept_worktree_done = Some(KeptDone::Checkout {
+            view.kept_worktree_done.push(KeptDone::Checkout {
                 request: "kept-1".into(),
-                landing: KeptLanding::shell(Some("lane")),
+                landing: Box::new(KeptLanding::shell(Some("lane"))),
                 result: Ok((
                     Ask::Create {
                         branch: "lane".into(),
@@ -195,9 +195,9 @@ fn a_refused_checkout_keeps_the_dialog_open(cx: &mut TestAppContext) {
                 cx,
             );
             view.menu.creation = Some("kept-2".into());
-            view.kept_worktree_done = Some(KeptDone::Checkout {
+            view.kept_worktree_done.push(KeptDone::Checkout {
                 request: "kept-2".into(),
-                landing: KeptLanding::shell(None),
+                landing: Box::new(KeptLanding::shell(None)),
                 result: Err(crate::Error::StaleWorkspace),
             });
             view.poll_kept_worktree(window, cx);
@@ -228,7 +228,8 @@ fn deleting_a_kept_checkout_names_its_folder_and_closes_it(cx: &mut TestAppConte
             let deletion = view.menu.deletion.as_mut().unwrap();
             assert_eq!(deletion.path.as_deref(), Some(LINKED));
             deletion.pending = Some("kept-3".into());
-            view.kept_worktree_done = Some(KeptDone::Removed {
+            view.kept_worktree_done.push(KeptDone::Removed {
+                scope: crate::browser::scope(&view.endpoints[0]),
                 request: "kept-3".into(),
                 workspace: id.clone(),
                 result: Ok(()),
@@ -259,7 +260,8 @@ fn a_kept_checkout_with_changes_asks_to_discard_them(cx: &mut TestAppContext) {
                 path: Some(LINKED.into()),
                 ..Deletion::new(None, false)
             });
-            view.kept_worktree_done = Some(KeptDone::Removed {
+            view.kept_worktree_done.push(KeptDone::Removed {
+                scope: crate::browser::scope(&view.endpoints[0]),
                 request: "kept-4".into(),
                 workspace: id.clone(),
                 result: Err(sheprd_remote::work::Error::Dirty.into()),
@@ -271,5 +273,28 @@ fn a_kept_checkout_with_changes_asks_to_discard_them(cx: &mut TestAppContext) {
         assert!(view.menu.deletion.as_ref().unwrap().force);
         assert!(view.menu.error.is_some());
         assert!(view.is_kept_workspace(&id), "nothing was removed");
+    });
+}
+
+#[gpui::test]
+fn work_finishing_together_all_lands(cx: &mut TestAppContext) {
+    let (view, cx, _) = window(cx, LINKED, Some(true));
+    let other = "/src/app-other";
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            for (request, path) in [("kept-5", NEW), ("kept-6", other)] {
+                view.kept_worktree_done.push(KeptDone::Checkout {
+                    request: request.into(),
+                    landing: Box::new(KeptLanding::shell(None)),
+                    result: Ok((Ask::Open { path: path.into() }, path.into())),
+                });
+            }
+            view.poll_kept_worktree(window, cx);
+        })
+    });
+    view.read_with(cx, |view, _| {
+        assert!(view.kept_workspace_at(Path::new(NEW)).is_some());
+        assert!(view.kept_workspace_at(Path::new(other)).is_some());
+        assert!(view.kept_worktree_done.is_empty());
     });
 }

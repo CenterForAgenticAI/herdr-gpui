@@ -68,13 +68,16 @@ pub(crate) enum KeptDone {
     /// A checkout made or opened for `request`, and where it lands.
     Checkout {
         request: String,
-        landing: Landing,
+        landing: Box<Landing>,
         result: crate::Result<(Ask, String)>,
     },
     /// A linked checkout removed for `request`, whose kept `workspace`
     /// closes with it.
     Removed {
         request: String,
+        /// The host the workspace is kept for, whichever is shown when the
+        /// removal finishes.
+        scope: crate::browser::Scope,
         workspace: String,
         result: crate::Result<()>,
     },
@@ -91,9 +94,13 @@ pub(crate) struct Landing {
     group: Option<String>,
     /// The repository, whose dispatch ranking learns this computer's pick.
     repo: Option<String>,
+    /// The device the checkout was asked on, which that ranking names.
+    endpoint: String,
+    /// The pull request or issue note the new checkout gets.
+    note: Option<crate::menu::worktree_source::Note>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 impl Landing {
     /// A landing in a shell, named `label`, for tests that finish Git work
     /// without running Git.
@@ -103,6 +110,8 @@ impl Landing {
             chosen: None,
             group: None,
             repo: None,
+            endpoint: String::new(),
+            note: None,
         }
     }
 }
@@ -249,6 +258,10 @@ impl SheprdWindow {
                 .and_then(|target| target.worktree.as_ref())
                 .map(|tree| tree.key.clone()),
             repo: self.menu.dispatch_repo(),
+            endpoint: self.endpoints[self.selected_endpoint].id.clone(),
+            note: matches!(ask, Ask::Create { .. })
+                .then(|| self.worktree_note())
+                .flatten(),
         };
         let work = cx
             .background_executor()
@@ -256,9 +269,9 @@ impl SheprdWindow {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                this.kept_worktree_done = Some(KeptDone::Checkout {
+                this.kept_worktree_done.push(KeptDone::Checkout {
                     request,
-                    landing,
+                    landing: Box::new(landing),
                     result,
                 });
                 cx.notify();
@@ -270,20 +283,25 @@ impl SheprdWindow {
 
     /// Lands Git work a kept workspace's dialog finished off the UI thread.
     pub(crate) fn poll_kept_worktree(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.kept_worktree_done.take() {
-            None => {}
-            Some(KeptDone::Checkout {
+        for done in std::mem::take(&mut self.kept_worktree_done) {
+            self.land_kept_done(done, window, cx);
+        }
+    }
+
+    fn land_kept_done(&mut self, done: KeptDone, window: &mut Window, cx: &mut Context<Self>) {
+        match done {
+            KeptDone::Checkout {
                 request,
                 landing,
                 result,
-            }) => {
+            } => {
                 let current = self.menu.creation.as_deref() == Some(request.as_str());
                 if current {
                     self.menu.creation = None;
                 }
                 match result {
                     Ok((ask, path)) => {
-                        self.land_kept_checkout(&ask, landing, path, current, window, cx)
+                        self.land_kept_checkout(&ask, *landing, path, current, window, cx)
                     }
                     Err(error) if current => {
                         if let Some(source) = &mut self.menu.worktree {
@@ -298,11 +316,12 @@ impl SheprdWindow {
                     }
                 }
             }
-            Some(KeptDone::Removed {
+            KeptDone::Removed {
                 request,
+                scope,
                 workspace,
                 result,
-            }) => self.finish_kept_removal(&request, &workspace, result, window, cx),
+            } => self.finish_kept_removal(&request, &scope, &workspace, result, window, cx),
         }
     }
 
@@ -318,12 +337,12 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         if matches!(ask, Ask::Create { .. }) {
-            if current {
-                self.write_worktree_note_at(path.clone(), cx);
+            if let Some(note) = landing.note {
+                crate::menu::worktree_source::write_note(note, path.clone(), cx);
             }
             if let Some(repo) = &landing.repo {
-                let endpoint = self.endpoints[self.selected_endpoint].id.clone();
-                crate::dispatch::History::update(cx, |history| history.record(repo, &endpoint));
+                let endpoint = &landing.endpoint;
+                crate::dispatch::History::update(cx, |history| history.record(repo, endpoint));
             }
         }
         if current {
@@ -371,6 +390,7 @@ impl SheprdWindow {
             return;
         };
         let force = deletion.force;
+        let scope = crate::browser::scope(&self.endpoints[self.selected_endpoint]);
         let request = format!("kept-{}", uuid::Uuid::new_v4().simple());
         deletion.pending = Some(request.clone());
         self.menu.error = None;
@@ -381,8 +401,9 @@ impl SheprdWindow {
         cx.spawn(async move |this, cx| {
             let result = removed.await;
             let _ = this.update(cx, |this, cx| {
-                this.kept_worktree_done = Some(KeptDone::Removed {
+                this.kept_worktree_done.push(KeptDone::Removed {
                     request,
+                    scope,
                     workspace,
                     result,
                 });
@@ -398,6 +419,7 @@ impl SheprdWindow {
     fn finish_kept_removal(
         &mut self,
         request: &str,
+        scope: &crate::browser::Scope,
         workspace: &str,
         result: crate::Result<()>,
         window: &mut Window,
@@ -422,7 +444,7 @@ impl SheprdWindow {
             self.dismiss_menu(window, cx);
         }
         match result {
-            Ok(()) => self.close_kept_workspace(workspace, window, cx),
+            Ok(()) => self.close_kept_workspace_in(scope, workspace, window, cx),
             Err(error) => {
                 self.local_error = Some(error.localize());
                 cx.notify();
