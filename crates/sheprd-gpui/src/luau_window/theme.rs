@@ -3,12 +3,12 @@
 //! in Moonframe's own look beside Sheprd's panes.
 
 use {
+    crate::embed::Palette,
     moonframe::gpui_kit::{
         App, Hsla, SharedString,
         component::{ActiveTheme, Theme, ThemeConfig, ThemeConfigColors, ThemeMode},
         px,
     },
-    sheprd_gpui::embed::Palette,
     std::rc::Rc,
 };
 

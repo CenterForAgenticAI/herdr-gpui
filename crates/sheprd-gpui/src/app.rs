@@ -311,6 +311,12 @@ pub(crate) fn run() -> std::process::ExitCode {
     if let Some(exit) = run_helpers(&mut args) {
         return exit;
     }
+    // A build with the `moonframe` feature opens the Luau window on a plain
+    // launch; everything else stays the app's own.
+    #[cfg(feature = "moonframe")]
+    if crate::luau_window::wanted(&args) {
+        return crate::luau_window::run();
+    }
     // A control command asked for JSON gets its usage errors as JSON too.
     let json_errors = cli::control::wants_json(&args);
     let LaunchOptions { target, mut mode } = match LaunchOptions::parse(&args) {

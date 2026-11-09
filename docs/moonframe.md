@@ -1,10 +1,13 @@
 # Sheprd on Moonframe
 
 `just run-moonframe` starts Sheprd in a window [Moonframe](https://moonframe.dev)
-lays out. It is early and separate from the app `just run` starts: quit Sheprd
-first, as both use your settings and daemon.
+lays out. It is the `moonframe` feature of `sheprd-gpui`, off by default, so the
+app `just run` starts is unchanged. A build with it opens this window on a plain
+launch; `sheprd` commands and `--socket` or `--session` launches stay the app's
+own. Quit Sheprd first, as both use your settings and daemon. CI builds and
+tests the feature (the all-features legs) and loads its Luau with `--check`.
 
-Everything around the terminals is Luau in `crates/sheprd-moonframe/app`:
+Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 
 | File | Draws |
 | --- | --- |
@@ -29,7 +32,7 @@ it brings the original back. The sparkles at the bottom right ask an agent to
 make a change, and it asks before each edit. View > Inspect Element (⌥⌘I, or
 ⇧⌘X to go straight to picking) shows what built any part, and its file and line.
 
-Run `cargo run -p sheprd-moonframe -- --check` after a change. It loads what is
+Run `just run-moonframe --check` after a change. It loads what is
 drawn at that moment, so a mistake in a row that only appears with an agent
 shows in the log when one appears: `unknown key` names it.
 
@@ -115,7 +118,7 @@ runs several times slower. GPUI times every frame in either app, so the same
 line reads both:
 
 ```sh
-ZED_MEASUREMENTS=1 RUST_LOG=moonframe::perf=debug target/release/sheprd-moonframe
+ZED_MEASUREMENTS=1 RUST_LOG=moonframe::perf=debug target/moonframe/release/sheprd
 ZED_MEASUREMENTS=1 target/release/sheprd
 ```
 

@@ -137,3 +137,13 @@ fn a_dropped_row_and_a_dragged_edge_become_their_actions() {
     );
     assert_eq!(edge("hover", 1.0), None);
 }
+
+#[test]
+fn a_plain_launch_opens_the_luau_window_and_commands_stay_the_apps() {
+    let args = |list: &[&str]| -> Vec<std::ffi::OsString> { list.iter().map(Into::into).collect() };
+    assert!(super::wanted(&args(&[])));
+    assert!(super::wanted(&args(&["--check"])));
+    assert!(!super::wanted(&args(&["browser", "open", "x.html"])));
+    assert!(!super::wanted(&args(&["--socket", "/tmp/c.sock"])));
+    assert!(!super::wanted(&args(&["--session", "work"])));
+}

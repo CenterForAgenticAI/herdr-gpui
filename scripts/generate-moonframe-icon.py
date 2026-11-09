@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the Moonframe build's icon from crates/sheprd-moonframe/assets/icon.svg.
+"""Render the Moonframe build's icon from crates/sheprd-gpui/moonframe/assets/icon.svg.
 
 Writes icon.png (1024px, the About image and Moonframe's Dock icon) and
 Sheprd-Moonframe.icns beside it. Each size is rendered from the vector with
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "crates" / "sheprd-moonframe" / "assets"
+ASSETS = ROOT / "crates" / "sheprd-gpui" / "moonframe" / "assets"
 SOURCE = ASSETS / "icon.svg"
 # Pixel margins of Apple's app icon template, by size, as Sheprd's icon uses.
 INSETS = {16: 1, 32: 2, 64: 6, 128: 12, 256: 25, 512: 50, 1024: 100}

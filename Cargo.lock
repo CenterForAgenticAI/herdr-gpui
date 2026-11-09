@@ -10199,6 +10199,7 @@ dependencies = [
  "accesskit_macos",
  "ammonia",
  "anyhow",
+ "async-channel",
  "base64 0.23.1",
  "block2 0.6.2",
  "chrono",
@@ -10223,6 +10224,7 @@ dependencies = [
  "libc",
  "mdns-sd",
  "mermaid-rs-renderer",
+ "moonframe",
  "nix",
  "nucleo-matcher",
  "objc",
@@ -10336,17 +10338,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.6+spec-1.1.0",
-]
-
-[[package]]
-name = "sheprd-moonframe"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "futures-lite",
- "moonframe",
- "serde_json",
- "sheprd-gpui",
 ]
 
 [[package]]

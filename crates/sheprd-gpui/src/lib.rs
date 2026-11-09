@@ -94,6 +94,8 @@ mod listening_ports;
 mod local_ports;
 mod log_targets;
 mod log_window;
+#[cfg(feature = "moonframe")]
+mod luau_window;
 mod mark_layer;
 mod menu;
 mod menus;

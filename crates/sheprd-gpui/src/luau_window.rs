@@ -1,7 +1,10 @@
-//! All of Sheprd in a window Moonframe lays out from `app/main.luau`, so the
-//! layout around it can change without a rebuild.
+//! All of Sheprd in a window Moonframe lays out from `moonframe/app/main.luau`,
+//! so the layout around it can change without a rebuild: the `moonframe`
+//! feature, off by default. A build with it opens this window on a plain
+//! launch; see [`wanted`].
 
 use {
+    crate::embed::{Action, Drag, Host, HostedState, Menu, Region, Sizes, Stamp, Startup},
     async_channel::{Receiver, Sender, bounded},
     futures_lite::future::or,
     moonframe::{
@@ -9,7 +12,6 @@ use {
         gpui_kit::{prelude::*, *},
     },
     serde_json::Value,
-    sheprd_gpui::embed::{Action, Drag, Host, HostedState, Menu, Region, Sizes, Stamp, Startup},
     std::{
         cell::RefCell,
         process::ExitCode,
@@ -27,9 +29,9 @@ const REFRESH: Duration = Duration::from_secs(2);
 /// Actions waiting for the UI: clicks, so few. More are dropped, not queued.
 const ACTION_QUEUE: usize = 64;
 /// The build's own icon: Sheprd's paw in Moonframe's frame. Regenerate with
-/// `scripts/generate-moonframe-icon.py` after changing `assets/icon.svg`.
-const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
-const ICON_ICNS: &[u8] = include_bytes!("../assets/Sheprd-Moonframe.icns");
+/// `scripts/generate-moonframe-icon.py` after changing `moonframe/assets/icon.svg`.
+const ICON_PNG: &[u8] = include_bytes!("../moonframe/assets/icon.png");
+const ICON_ICNS: &[u8] = include_bytes!("../moonframe/assets/Sheprd-Moonframe.icns");
 
 /// One provider's data: `app.<name>`, published as it changes. Each part of
 /// the state has its own, so a change runs only the views that read that part.
@@ -228,14 +230,21 @@ struct Shared {
     woken: Receiver<()>,
 }
 
-fn main() -> ExitCode {
-    // Sheprd starts its own executable to read the clipboard, update itself,
-    // or relay a command: answer those before Moonframe reads the arguments.
-    if let Some(exit) = sheprd_gpui::embed::run_helpers() {
-        return exit;
+/// Whether this launch opens the Luau window: a plain launch, or Moonframe's
+/// own `--check` of the layout. Anything else (a `sheprd` command for the
+/// running app, `--socket`, `--session`) is the app's, as without the feature.
+pub(crate) fn wanted(args: &[std::ffi::OsString]) -> bool {
+    match args {
+        [] => true,
+        [first, ..] => first == "--check",
     }
+}
+
+/// Runs the app in the Luau window until it quits. The app's private entry
+/// points (`app::run_helpers`) have already had their turn.
+pub(crate) fn run() -> ExitCode {
     // Before the app's startup sets the Dock icon and the About image.
-    sheprd_gpui::embed::icon(ICON_PNG, ICON_ICNS);
+    crate::embed::icon(ICON_PNG, ICON_ICNS);
     // Read before the event loop, as the app's own startup does.
     let (actions, received) = bounded(ACTION_QUEUE);
     // One is enough: a wake only says to look.
@@ -254,7 +263,7 @@ fn main() -> ExitCode {
         actions: received,
         feeds,
         host: None,
-        startup: Some(sheprd_gpui::embed::prepare()),
+        startup: Some(crate::embed::prepare()),
         wake,
         woken,
     }));
@@ -262,14 +271,14 @@ fn main() -> ExitCode {
         .title("Sheprd")
         .app_id("dev.sheprd.moonframe")
         .version(env!("CARGO_PKG_VERSION"))
-        .app_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/app"))
+        .app_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/moonframe/app"))
         .icon(ICON_PNG)
-        .assets(sheprd_gpui::embed::assets())
+        .assets(crate::embed::assets())
         // Sheprd's own menu bar, as its window has it; Moonframe adds its
         // Developer menu.
-        .menus(sheprd_gpui::embed::menus)
+        .menus(crate::embed::menus)
         // Sheprd's log file, which its Logs window reads, beside stderr.
-        .log_layer(sheprd_gpui::embed::log_layer())
+        .log_layer(crate::embed::log_layer())
         // The sparkles: ask an agent to change the layout or add something.
         .keep(["feedback"])
         .native("sheprd", move || bridge.clone())
@@ -309,7 +318,7 @@ impl SheprdRegion {
             Some(region) => host.region(region, cx),
             None => host.main(),
         };
-        #[cfg(feature = "drive")]
+        #[cfg(feature = "integration-test")]
         if region.is_none() {
             drive(&view, window, cx);
         }
@@ -432,7 +441,7 @@ fn host(shared: &RefCell<Shared>, window: &mut Window, cx: &mut App) -> Host {
         .get_or_insert_with(|| {
             // Before the host installs: from then on Sheprd's own changes to
             // its menus (a layout picked, the language) rebuild Moonframe's bar.
-            sheprd_gpui::embed::keep_menus(moonframe::refresh_menus, cx);
+            crate::embed::keep_menus(moonframe::refresh_menus, cx);
             Host::new(startup.take(), window, cx)
         })
         .clone()
@@ -465,9 +474,9 @@ impl Render for SheprdRegion {
 
 /// Sends `SPIKE_DRIVE` to the view, steps apart by `;` a second after each
 /// other: `keys:a b enter`, `drag:x1,y1,x2,y2`, `hover:x,y`, or `scroll:x,y,by`.
-#[cfg(feature = "drive")]
+#[cfg(feature = "integration-test")]
 fn drive(view: &AnyView, window: &Window, cx: &mut App) {
-    use sheprd_gpui::embed::Drive;
+    use crate::embed::Drive;
     let Ok(steps) = std::env::var("SPIKE_DRIVE") else {
         return;
     };
@@ -501,7 +510,7 @@ fn drive(view: &AnyView, window: &Window, cx: &mut App) {
             }
         };
         let delay = Duration::from_secs(start + index as u64);
-        sheprd_gpui::embed::drive(view.clone(), input, delay, window, cx);
+        crate::embed::drive(view.clone(), input, delay, window, cx);
     }
 }
 

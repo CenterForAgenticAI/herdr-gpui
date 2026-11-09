@@ -13,7 +13,7 @@ both, and the table shows the median of the rounds. It opens real windows,
 so it needs an active desktop.
 
     scripts/bench_frames.py --herdr /path/to/herdr \
-        main=target/release/sheprd moonframe=target/release/sheprd-moonframe
+        main=target/release/sheprd moonframe=target/moonframe/release/sheprd
 """
 
 import argparse
