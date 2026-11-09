@@ -11,7 +11,7 @@ fn daemon(fixture: &Fixture) -> (Daemon<'_>, mpsc::Receiver<(String, i64, Result
         store: fixture.store(),
         log: Logbook::new(fixture.paths.log()),
         settings,
-        herdr: fixture.herdr.clone(),
+        drive: fixture.drive.clone(),
         loaded: HashMap::new(),
         live: HashMap::new(),
         slots: Arc::default(),

@@ -274,7 +274,7 @@ fn only_an_absolute_posix_root_is_opened_on_a_host(cx: &mut gpui::TestAppContext
             }]))
             .unwrap();
             view.live.snapshot = Some(Arc::new(shown));
-            view.host_editor_root().map(str::to_owned)
+            view.host_editor_root().map(std::borrow::Cow::into_owned)
         }
     };
     cx.update(|_, cx| {

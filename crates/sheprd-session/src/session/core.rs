@@ -1,16 +1,35 @@
 //! A [`Session`] over herdr-core: the app keeps the workspaces and the tabs
 //! in them, and the core reports each terminal's agent.
 
-use super::{Agent, Keeper, Session, Tab, Workspace, most_pressing};
-use crate::CoreTab;
+use super::{Agent, Keeper, Session, Tab, Workspace, Worktree, most_pressing};
+use crate::{CoreTab, SavedWorkspace};
 use sheprd_backend::{AgentStatus, TerminalId, TerminalInfo};
 
 /// A workspace the app keeps for herdr-core terminals.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CoreWorkspace<'a> {
+    /// The checked-out branch, as Git reports it for `cwd`.
+    pub branch: Option<&'a str>,
     pub cwd: &'a str,
+    /// Whether the user named it, rather than the app after its folder.
+    pub custom_label: bool,
     pub id: &'a str,
     pub label: &'a str,
+    /// The checkout `cwd` is, as Git reports it.
+    pub worktree: Option<Worktree>,
+}
+
+impl<'a> From<&'a SavedWorkspace> for CoreWorkspace<'a> {
+    fn from(saved: &'a SavedWorkspace) -> Self {
+        Self {
+            branch: None,
+            cwd: &saved.cwd,
+            custom_label: saved.custom,
+            id: &saved.id,
+            label: &saved.label,
+            worktree: None,
+        }
+    }
 }
 
 impl Session {
@@ -18,9 +37,9 @@ impl Session {
     /// its tabs among `tabs`, and an agent for every terminal `info` reports
     /// one in. A tab in a workspace not listed, such as a Herdr 1 workspace
     /// a core tab opened in, adds its agents but no workspace.
-    pub fn core<'a, 'i>(
-        workspaces: impl IntoIterator<Item = CoreWorkspace<'a>>,
-        tabs: impl IntoIterator<Item = CoreTab<'a>>,
+    pub fn core<'w, 't, 'i>(
+        workspaces: impl IntoIterator<Item = CoreWorkspace<'w>>,
+        tabs: impl IntoIterator<Item = CoreTab<'t>>,
         focused: Option<&str>,
         info: impl Fn(&TerminalId) -> Option<&'i TerminalInfo>,
     ) -> Self {
@@ -30,15 +49,17 @@ impl Session {
             workspaces: workspaces
                 .into_iter()
                 .map(|workspace| Workspace {
-                    branch: None,
+                    ahead_behind: None,
+                    branch: workspace.branch.map(str::to_owned),
                     cwd: workspace.cwd.to_owned(),
-                    custom_label: true,
+                    custom_label: workspace.custom_label,
                     id: workspace.id.to_owned(),
                     keeper: Keeper::App,
                     label: workspace.label.to_owned(),
                     status: AgentStatus::Unknown,
                     tabs: Vec::new(),
-                    worktree: None,
+                    tokens: Vec::new(),
+                    worktree: workspace.worktree,
                 })
                 .collect(),
         };

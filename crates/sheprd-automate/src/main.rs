@@ -6,10 +6,13 @@
 mod approve;
 mod cli;
 mod daemon;
+mod drive;
 mod error;
 mod fingerprint;
 mod herdr;
+mod herdr_core;
 mod logbook;
+mod notify;
 mod paths;
 mod process;
 mod report;

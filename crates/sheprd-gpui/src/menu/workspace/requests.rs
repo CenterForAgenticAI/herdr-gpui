@@ -359,6 +359,15 @@ impl SheprdWindow {
             self.save_worktree_note(window, cx);
             return;
         }
+        if self
+            .menu
+            .target
+            .as_ref()
+            .is_some_and(|target| target.keeper == sheprd_session::Keeper::App)
+        {
+            self.submit_kept_workspace_dialog(action, window, cx);
+            return;
+        }
         if action == WorkspaceAction::OpenWorktree
             && self
                 .menu

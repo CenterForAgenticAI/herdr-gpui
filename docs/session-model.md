@@ -11,7 +11,7 @@ on Herdr 1's snapshot and a new backend costs an adapter rather than a rewrite.
 | --- | --- | --- |
 | Terminals (`sheprd-backend`) | Not implemented; `sheprd-client` talks to the daemon | `CoreBackend` |
 | Tab and pane layout | The daemon's snapshot | `sheprd_session::panes`, saved with the tab |
-| Workspaces | The daemon's snapshot | One per window (`core_terminals::WORKSPACE`), only with no Herdr 1 installed |
+| Workspaces | The daemon's snapshot | Kept by the app beside its tabs (`browser-tabs.json`'s `workspaces`, read by `SavedTabs::workspaces`), listed after Herdr 1's; with no Herdr 1 installed, the first is `core_terminals::WORKSPACE` |
 | Agents | The daemon's snapshot | `TerminalInfo::agent`, per terminal; which agent by `sheprd_core_client::agent_kind` |
 | Commands | 43 `sheprd_client::Method` variants | Handled per feature in `core_terminals` |
 | `Session` | `session_model::of_snapshot`, cached per snapshot in `LiveState::session` | `Session::core`, rebuilt on the window tick from the app's tabs and the core's terminals |
@@ -29,9 +29,18 @@ it lists Herdr 2 work beside Herdr 1's.
 | Reader | On `Session` |
 | --- | --- |
 | Devices overview: counts, agent lines, search | Yes |
-| Sidebar workspace rows, previous and next workspace | Not yet |
-| Tab strip | Not yet |
-| Palette and jump list | Not yet |
+| Sidebar workspace rows, rail, search, reorder, previous and next workspace | Yes |
+| Window title | Yes |
+| Tab strip | Herdr 1's tabs only while its workspace is in front (`herdr_workspace_in_front`) |
+| Palette Go To and jump list | Kept workspaces added beside Herdr 1's rows |
+| Workspace menu | Kept workspaces: rename, close, and a note once Git names the checkout |
+| Git status, pull request prefetch, worktree rule, notes | Kept workspaces whose folder Git names (`core_terminals::checkouts`) |
+| Agent checkpoints | Yes: `sheprd_vcs::checkpoint::Checkpoints::observe` takes a `Session`; Herdr 2's is watched as its own endpoint |
+| Mods state: workspaces, agents, focus | Yes |
+
+herdr-core reports no Git facts, so the app asks Git for each kept workspace's
+folder on a worker (`sheprd_vcs::git::identity`): its branch, its repository's
+common directory as the worktree key, and whether it is a linked worktree.
 
 The app still reads `ClientShell*` types directly in about 67 files. That is the
 work left.
@@ -54,7 +63,10 @@ as little as possible:
    refuses, so a backend without the capability says so instead of failing late.
 5. Build a `Session` from herdr-core: several workspaces, saved by the app. This
    replaces `core_terminals::WORKSPACE` and is what the default flip in the
-   Herdr 2 rollout waits on.
+   Herdr 2 rollout waits on. Done: a new workspace is the app's with Herdr 2
+   chosen for new terminals or with no Herdr 1 installed. A kept workspace in
+   front (`SheprdWindow::kept_in_front`) is the window's workspace whatever
+   Herdr 1 focuses, and choosing anything of Herdr 1's hands the front back.
 
 ## Decisions
 

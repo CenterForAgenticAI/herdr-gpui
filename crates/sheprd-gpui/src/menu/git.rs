@@ -76,8 +76,14 @@ impl SheprdWindow {
     /// Every listed local checkout, so the sidebar can mark the ones holding
     /// uncommitted work. Empty when the endpoint is not the owned local daemon.
     fn listed_git_inputs(&self) -> Vec<crate::pull_request::Input> {
+        // The workspaces the app keeps for Herdr 2 are this computer's own
+        // folders, whatever Herdr 1 runs.
+        let kept = self
+            .kept_checkout_inputs()
+            .into_iter()
+            .map(|(_, input)| input);
         if !self.local_git_endpoint() {
-            return Vec::new();
+            return kept.collect();
         }
         self.live
             .snapshot
@@ -90,6 +96,7 @@ impl SheprdWindow {
                 )
                 .ok()
             })
+            .chain(kept)
             .collect()
     }
 
@@ -106,7 +113,21 @@ impl SheprdWindow {
     /// to a worktree made through Herdr, so a space merely opened in a
     /// repository is named by its directory, which the worker resolves and
     /// verifies as the pull request lookup does; see `workspace_input`.
+    ///
+    /// A herdr-core tab the active group shows is on this computer: its
+    /// pane's checkout, found by Git rather than reported by a daemon, is
+    /// verified the same way.
     pub(crate) fn git_input(&self) -> Option<crate::pull_request::Input> {
+        if self.shows_core_tab() {
+            return self.core_git_input();
+        }
+        if let Some(front) = self.kept_in_front() {
+            return self
+                .kept_checkout_inputs()
+                .into_iter()
+                .find(|(id, _)| id == front)
+                .map(|(_, input)| input);
+        }
         if !self.local_git_endpoint() {
             return None;
         }

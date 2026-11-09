@@ -9,6 +9,8 @@ use gpui::{prelude::*, *};
 use sheprd_client::protocol::*;
 use std::sync::Arc;
 
+mod core;
+
 impl SheprdWindow {
     /// Where the selected device's checkouts live, if pull requests can be
     /// looked up for them: the verified local daemon, or a saved SSH device.
@@ -40,7 +42,11 @@ impl SheprdWindow {
         };
         match &endpoint.connection.target {
             sheprd_client::ConnectTarget::Ssh { target, .. } => Some(Origin::Ssh(target.clone())),
-            _ if index == 0 && live.local_daemon_peer => Some(Origin::Local),
+            // With no Herdr 1 installed, the window's workspaces are the
+            // app's own, in this computer's folders.
+            _ if index == 0 && (live.local_daemon_peer || live.missing_installation) => {
+                Some(Origin::Local)
+            }
             _ => None,
         }
     }
@@ -98,19 +104,32 @@ impl SheprdWindow {
             self.menu.pr_cache.suspend();
             self.menu.pr_cache_connection = Some(Arc::downgrade(&endpoint.connection.inbox));
         }
-        if let (Some(snapshot), Some(tokens), Some(origin)) =
-            (&self.live.snapshot, self.pr_tokens(), self.pr_origin())
+        if let (Some(boot), Some(tokens), Some(origin)) =
+            (self.pr_boot(), self.pr_tokens(), self.pr_origin())
         {
             let scope = (
                 self.selection_epoch,
                 self.endpoints[self.selected_endpoint].generation,
-                snapshot.boot_id.clone(),
+                boot,
             );
             // Answers belong to the whole account set: adding or signing in
             // an account may change which one reads a repository.
             let key = tokens.key();
             self.menu.pr_cache.scope(scope, tokens, &key, origin);
         }
+    }
+
+    /// The Herdr 1 boot the PR lookups belong to, or none at all while
+    /// only workspaces the app keeps for Herdr 2 are read: their checkouts
+    /// need no daemon to answer. `None` while there is nothing to read.
+    pub(crate) fn pr_boot(&self) -> Option<String> {
+        if let Some(snapshot) = &self.live.snapshot {
+            return Some(snapshot.boot_id.clone());
+        }
+        self.sessions(self.selected_endpoint)
+            .core
+            .is_some_and(|core| !core.workspaces.is_empty())
+            .then(String::new)
     }
 
     fn workspace_pr_target_current(&self) -> bool {
@@ -183,9 +202,18 @@ impl SheprdWindow {
             }
             return changed;
         }
-        let origin = self
-            .pr_origin()
-            .filter(|_| self.live.status.is_connected() && self.live.snapshot.is_some());
+        let kept = self.kept_checkout_inputs();
+        let origin = self.pr_origin().filter(|origin| {
+            (self.live.status.is_connected() && self.live.snapshot.is_some())
+                || (*origin == Origin::Local && !kept.is_empty())
+        });
+        // The checkout of the herdr-core pane the window shows is on this
+        // computer, so it joins only this computer's lookups.
+        let core = self.core_git_input().filter(|_| {
+            origin
+                .as_ref()
+                .is_none_or(|origin| *origin == Origin::Local)
+        });
         if let Some(origin) = origin {
             self.sync_pr_scope();
             self.menu.pr_cache.idle = !self.active;
@@ -200,10 +228,12 @@ impl SheprdWindow {
                 {
                     self.menu.pr_snapshot = Some(Arc::downgrade(snapshot));
                     self.menu.pr_cache.retain(|input| {
-                        snapshot.workspaces.iter().any(|workspace| {
-                            workspace_input(workspace, &origin)
-                                .is_ok_and(|candidate| &candidate == input)
-                        })
+                        core.as_ref() == Some(input)
+                            || kept.iter().any(|(_, kept)| kept == input)
+                            || snapshot.workspaces.iter().any(|workspace| {
+                                workspace_input(workspace, &origin)
+                                    .is_ok_and(|candidate| &candidate == input)
+                            })
                     });
                 }
                 if self.menu.pr_cache.scan_due(now) {
@@ -222,12 +252,33 @@ impl SheprdWindow {
                     {
                         self.menu.pr_cache.expire_viewed(&input, now);
                     }
+                    if let Some(input) = &core {
+                        self.menu.pr_cache.expire_viewed(input, now);
+                    }
                     let inputs =
                         workspace_pr_inputs(snapshot, &origin, priority, self.menu.pr_cache.cursor);
-                    self.menu.pr_cache.schedule(inputs, now);
+                    // The shown herdr-core pane's checkout is asked first, as
+                    // the workspace being looked at is.
+                    let kept = kept.iter().map(|(_, input)| input.clone());
+                    self.menu
+                        .pr_cache
+                        .schedule(core.clone().into_iter().chain(inputs).chain(kept), now);
                 }
+            } else if self.menu.pr_cache.scan_due(now) {
+                // Only the workspaces the app keeps for Herdr 2, and the
+                // checkout of the herdr-core pane the window shows, which is
+                // asked again while it is looked at.
+                if let Some(input) = &core {
+                    self.menu.pr_cache.expire_viewed(input, now);
+                }
+                let kept = kept.into_iter().map(|(_, input)| input);
+                self.menu
+                    .pr_cache
+                    .schedule(core.clone().into_iter().chain(kept), now);
             }
             changed |= self.menu.pr_cache.poll(now);
+        } else if let Some(input) = core {
+            changed |= self.update_core_pr(input);
         } else {
             // A dropped connection keeps the last answers for its return.
             self.menu.pr_cache.suspend();
