@@ -59,7 +59,12 @@ fn place(snapshot: &ClientShellSnapshot, workspace_id: &str, tab_id: &str) -> Op
         .as_ref()
         .is_some_and(|worktree| worktree.is_linked_worktree);
     let mut place = safe_text(
-        crate::sidebar::workspace_label(workspace, linked),
+        crate::sidebar::label_of(
+            &workspace.label,
+            workspace.branch.as_deref(),
+            workspace.custom_label,
+            linked,
+        ),
         PART_LIMIT,
     );
     let tabs = snapshot

@@ -521,17 +521,25 @@ pub fn repository_input(
     worktree: Option<&sheprd_client::protocol::ClientShellWorktree>,
     branch: Option<&str>,
 ) -> crate::Result<Input> {
-    repository_input_on(worktree, branch, &Origin::Local)
+    repository_input_on(
+        worktree.map(|tree| tree.key.as_str()),
+        branch,
+        &Origin::Local,
+    )
+}
+
+/// A local checkout's lookup key from its repository's common Git directory,
+/// as the app reads it for a folder herdr-core reports no metadata for.
+pub fn key_input(key: &str, branch: Option<&str>) -> crate::Result<Input> {
+    repository_input_on(Some(key), branch, &Origin::Local)
 }
 
 fn repository_input_on(
-    worktree: Option<&sheprd_client::protocol::ClientShellWorktree>,
+    key: Option<&str>,
     branch: Option<&str>,
     origin: &Origin,
 ) -> crate::Result<Input> {
-    let key = worktree
-        .map(|tree| tree.key.as_str())
-        .ok_or(super::Error::Metadata)?;
+    let key = key.ok_or(super::Error::Metadata)?;
     let branch = valid_branch(branch)?;
     let absolute = match origin {
         Origin::Local => Path::new(key).is_absolute(),
@@ -566,7 +574,7 @@ pub fn workspace_input(
     });
     let branch = workspace.branch.as_deref();
     if worktree.is_some() || *origin != Origin::Local || workspace.new_workspace_cwd.is_empty() {
-        return repository_input_on(worktree, branch, origin);
+        return repository_input_on(worktree.map(|tree| tree.key.as_str()), branch, origin);
     }
     let branch = valid_branch(branch)?;
     if !Path::new(&workspace.new_workspace_cwd).is_absolute() {

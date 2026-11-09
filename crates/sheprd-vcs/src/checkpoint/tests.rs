@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
+use sheprd_client::protocol::ClientShellSnapshot;
 use sheprd_client::protocol::ClientShellWorktree;
 
 mod wanted;
@@ -57,6 +58,58 @@ fn with(statuses: [AgentStatus; 2]) -> Arc<ClientShellSnapshot> {
     Arc::new(snapshot)
 }
 
+/// What the app reads from a snapshot, for what checkpoints look at:
+/// agents and the checkouts of their workspaces.
+fn session(snapshot: &ClientShellSnapshot) -> Arc<Session> {
+    use sheprd_session::{Agent, Keeper, Workspace, Worktree};
+    Arc::new(Session {
+        agents: snapshot
+            .agents
+            .iter()
+            .map(|agent| Agent {
+                focused: agent.focused,
+                identity: agent.agent.clone(),
+                name: agent.display_agent.clone().unwrap_or_default(),
+                pane: agent.pane_id.clone(),
+                status: agent.agent_status,
+                tab: agent.tab_id.clone(),
+                workspace: agent.workspace_id.clone(),
+            })
+            .collect(),
+        focused: snapshot.focused_workspace_id.clone(),
+        workspaces: snapshot
+            .workspaces
+            .iter()
+            .map(|workspace| Workspace {
+                ahead_behind: None,
+                branch: workspace.branch.clone(),
+                cwd: workspace.new_workspace_cwd.clone(),
+                custom_label: workspace.custom_label,
+                id: workspace.workspace_id.clone(),
+                keeper: Keeper::Herdr1,
+                label: workspace.label.clone(),
+                status: workspace.agent_status,
+                tabs: Vec::new(),
+                tokens: Vec::new(),
+                worktree: workspace.worktree.as_ref().map(|tree| Worktree {
+                    key: tree.key.clone(),
+                    label: tree.label.clone(),
+                    linked: tree.is_linked_worktree,
+                }),
+            })
+            .collect(),
+    })
+}
+
+fn observe(
+    checkpoints: &mut Checkpoints,
+    endpoint: &str,
+    host: &Host,
+    snapshot: &Arc<ClientShellSnapshot>,
+) {
+    checkpoints.observe(endpoint, host, &snapshot.boot_id, &session(snapshot));
+}
+
 fn feature() -> Checkout {
     Checkout::new(Host::Local, KEY, Some("feature")).unwrap()
 }
@@ -76,22 +129,32 @@ fn turns_starting_and_ending_queue_one_checkpoint_per_checkout() {
     use AgentStatus::*;
     let mut checkpoints = Checkpoints::default();
     // The first snapshot only records what agents are doing.
-    checkpoints.observe("local", &Host::Local, &with([Working, Working]));
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &with([Working, Working]),
+    );
     assert!(queued(&checkpoints).is_empty());
 
     // p0 finishes; p1's workspace has no checkout, so nothing for it.
     let done = with([Done, Idle]);
-    checkpoints.observe("local", &Host::Local, &done);
+    observe(&mut checkpoints, "local", &Host::Local, &done);
     assert_eq!(
         queued(&checkpoints),
         [(feature(), capture("Claude Code finished a turn"))]
     );
     // The same snapshot again is not a new transition.
-    checkpoints.observe("local", &Host::Local, &done);
+    observe(&mut checkpoints, "local", &Host::Local, &done);
     assert_eq!(queued(&checkpoints).len(), 1);
 
     // A new turn before the first checkpoint ran merges into it.
-    checkpoints.observe("local", &Host::Local, &with([Working, Idle]));
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &with([Working, Idle]),
+    );
     assert_eq!(
         queued(&checkpoints),
         [(feature(), capture("Before Claude Code's turn"))]
@@ -102,20 +165,45 @@ fn turns_starting_and_ending_queue_one_checkpoint_per_checkout() {
 fn permission_prompts_and_restarts_are_not_turns() {
     use AgentStatus::*;
     let mut checkpoints = Checkpoints::default();
-    checkpoints.observe("local", &Host::Local, &with([Working, Idle]));
-    checkpoints.observe("local", &Host::Local, &with([Blocked, Idle]));
-    checkpoints.observe("local", &Host::Local, &with([Working, Idle]));
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &with([Working, Idle]),
+    );
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &with([Blocked, Idle]),
+    );
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &with([Working, Idle]),
+    );
     assert!(queued(&checkpoints).is_empty(), "still the same turn");
 
     // A restarted daemon reports fresh statuses; no turn spans it.
     let mut restarted = (*with([Idle, Idle])).clone();
     restarted.boot_id = "another boot".into();
-    checkpoints.observe("local", &Host::Local, &Arc::new(restarted));
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &Arc::new(restarted),
+    );
     assert!(queued(&checkpoints).is_empty());
 
     // Blocked, then given up on: the turn ended.
-    checkpoints.observe("local", &Host::Local, &with([Blocked, Idle]));
-    checkpoints.observe("local", &Host::Local, &with([Idle, Idle]));
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &with([Blocked, Idle]),
+    );
+    observe(&mut checkpoints, "local", &Host::Local, &with([Idle, Idle]));
     assert_eq!(queued(&checkpoints).len(), 1);
 }
 
@@ -124,16 +212,21 @@ fn endpoints_and_hosts_are_kept_apart() {
     use AgentStatus::*;
     let remote = Host::Ssh("me@box".into());
     let mut checkpoints = Checkpoints::default();
-    checkpoints.observe("local", &Host::Local, &with([Working, Idle]));
-    checkpoints.observe("ssh:box", &remote, &with([Idle, Idle]));
-    checkpoints.observe("local", &Host::Local, &with([Idle, Idle]));
-    checkpoints.observe("ssh:box", &remote, &with([Idle, Idle]));
+    observe(
+        &mut checkpoints,
+        "local",
+        &Host::Local,
+        &with([Working, Idle]),
+    );
+    observe(&mut checkpoints, "ssh:box", &remote, &with([Idle, Idle]));
+    observe(&mut checkpoints, "local", &Host::Local, &with([Idle, Idle]));
+    observe(&mut checkpoints, "ssh:box", &remote, &with([Idle, Idle]));
     assert_eq!(
         queued(&checkpoints),
         [(feature(), capture("Claude Code finished a turn"))]
     );
 
-    checkpoints.observe("ssh:box", &remote, &with([Working, Idle]));
+    observe(&mut checkpoints, "ssh:box", &remote, &with([Working, Idle]));
     assert_eq!(checkpoints.lanes.len(), 2);
     assert_eq!(checkpoints.lanes[&remote].queue[0].checkout.host, remote);
 }

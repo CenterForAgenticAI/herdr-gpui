@@ -208,6 +208,18 @@ impl SheprdWindow {
             .position(|e| e.id == endpoint && e.enabled)
             .ok_or(Error::HostUnavailable)?;
         let selected = index == self.selected_endpoint;
+        // A workspace the app keeps answers for itself.
+        if let NavigationTarget::Workspace(id) = target
+            && boot.is_empty()
+        {
+            let kept = self
+                .sessions(index)
+                .core
+                .is_some_and(|core| core.workspace(id).is_some());
+            return kept
+                .then_some(selected)
+                .ok_or(Error::WorkspaceRemoved.into());
+        }
         let live = if selected {
             &self.live
         } else {
