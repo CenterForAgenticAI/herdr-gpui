@@ -92,7 +92,7 @@ impl SheprdWindow {
             cwd: target.path.parent().map(std::path::Path::to_owned),
             ..Spawn::default()
         };
-        self.start_core_program(purpose, spawn);
+        self.start_core_program(purpose, spawn, cx);
         true
     }
 }

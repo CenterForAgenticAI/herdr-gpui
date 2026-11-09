@@ -266,6 +266,7 @@ fn a_missing_core_never_opens_a_herdr_tab_in_another_workspace(cx: &mut gpui::Te
                     workspace: "w-left".into(),
                 },
                 sheprd_backend::Spawn::default(),
+                cx,
             );
             settle(view, &Host::Remote(scope()), window, cx);
             let (flash, _) = view.flash.as_ref().unwrap();
