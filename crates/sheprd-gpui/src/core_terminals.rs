@@ -27,6 +27,7 @@ mod hub;
 mod infos;
 pub(crate) mod install;
 pub(crate) mod menu;
+pub(crate) mod moves;
 mod phone;
 mod requests;
 mod screen;
@@ -358,12 +359,6 @@ impl TabPanes {
 /// The most terminals waiting to start at once.
 const MAX_WANTED: usize = 16;
 
-/// The kills every window's herdr-core terminals left unended.
-#[derive(Default)]
-pub(crate) struct Unended(std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>);
-
-impl Global for Unended {}
-
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
@@ -405,9 +400,8 @@ pub(crate) struct CoreTerminals {
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
     /// Terminals a kill did not reach, as when the connection dropped while
-    /// it was sent, put back to end once their core answers again. Shared
-    /// by every window (`Unended`), so one closed before its core answered
-    /// leaves them to another.
+    /// it was sent, put back to end once their core answers again. Every
+    /// window holds the app's one list ([`tabs::Unended`]).
     unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// Terminals to start, one after another, once the hub of each one's
@@ -418,15 +412,6 @@ pub(crate) struct CoreTerminals {
 }
 
 impl CoreTerminals {
-    /// A window's state, whose kills left unended wait with every other
-    /// window's.
-    pub(crate) fn shared(cx: &mut App) -> Self {
-        Self {
-            unended: std::sync::Arc::clone(&cx.default_global::<Unended>().0),
-            ..Self::default()
-        }
-    }
-
     /// Every view on screen: the tabs' panes and the stand-in shell.
     fn shown(&self) -> impl Iterator<Item = &Entity<CoreTerminalView>> {
         let fallback = match &self.fallback {
@@ -555,6 +540,13 @@ impl CoreTerminals {
             .map(|info| info.agent)
             .max_by_key(|status| crate::sidebar::status_priority(*status))
             .unwrap_or(AgentStatus::Unknown)
+    }
+
+    /// Whether the user named `tab`.
+    pub(crate) fn tab_named(&self, tab: TabId) -> bool {
+        self.tabs
+            .get(&tab)
+            .is_some_and(|shown| shown.name.is_some())
     }
 
     /// Whether a tab on this computer's core shows `terminal`, a mirror

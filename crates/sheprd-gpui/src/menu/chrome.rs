@@ -438,52 +438,36 @@ impl SheprdWindow {
                     // Its lists scroll inside; the panel never outgrows the window.
                     .when(page == Page::PrReview, |panel| panel.overflow_hidden())
             })
-            .when(
-                matches!(
+            .when(page.context_sized(), |panel| {
+                let room = (viewport.width - px(24.)).max(px(0.));
+                // A list of actions takes its longest label's width, which
+                // the UI font and size decide, so no fixed width fits all.
+                let forwards = page == Page::Host && self.host_menu_lists_forwards();
+                if matches!(
                     page,
-                    Page::Tab
-                        | Page::RenameTab
-                        | Page::MoveTab
-                        | Page::Group
-                        | Page::Pane
-                        | Page::RenamePane
-                        | Page::MovePane
-                        | Page::CarryPane
-                        | Page::PaneProcesses
-                        | Page::KillProcesses
-                        | Page::Host
-                        | Page::RemoveDevice
-                        | Page::RemoveWsl
-                ),
-                |panel| {
-                    let room = (viewport.width - px(24.)).max(px(0.));
-                    // A list of actions takes its longest label's width, which
-                    // the UI font and size decide, so no fixed width fits all.
-                    let forwards = page == Page::Host && self.host_menu_lists_forwards();
-                    if matches!(page, Page::Tab | Page::Pane | Page::Group | Page::Host)
-                        && !forwards
-                    {
-                        let least = if page == Page::Group { 240. } else { 180. };
-                        return panel
-                            .min_w(px(least).min(room))
-                            .max_w(room)
-                            .max_h((viewport.height - px(24.)).max(px(0.)));
-                    }
-                    panel
-                        .w(room.min(px(if forwards {
-                            // Room for a forward's port, state, and actions.
-                            260.
-                        } else if page == Page::PaneProcesses {
-                            // Name, command, pid, CPU and memory columns.
-                            560.
-                        } else if matches!(page, Page::MovePane | Page::MoveTab) {
-                            240.
-                        } else {
-                            360.
-                        })))
-                        .max_h((viewport.height - px(24.)).max(px(0.)))
-                },
-            )
+                    Page::Tab | Page::Pane | Page::Group | Page::Host | Page::CoreMenu
+                ) && !forwards
+                {
+                    let least = if page == Page::Group { 240. } else { 180. };
+                    return panel
+                        .min_w(px(least).min(room))
+                        .max_w(room)
+                        .max_h((viewport.height - px(24.)).max(px(0.)));
+                }
+                panel
+                    .w(room.min(px(if forwards {
+                        // Room for a forward's port, state, and actions.
+                        260.
+                    } else if page == Page::PaneProcesses {
+                        // Name, command, pid, CPU and memory columns.
+                        560.
+                    } else if matches!(page, Page::MovePane | Page::MoveTab | Page::CoreMove) {
+                        240.
+                    } else {
+                        360.
+                    })))
+                    .max_h((viewport.height - px(24.)).max(px(0.)))
+            })
             .when(
                 !footer_anchored
                     && !matches!(page, Page::Usage(_))

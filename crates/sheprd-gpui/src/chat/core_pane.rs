@@ -46,7 +46,7 @@ pub(super) fn targets<'a>(terminals: impl IntoIterator<Item = &'a TerminalInfo>)
         .into_iter()
         .filter(|info| !info.id.as_str().contains('/'))
         .filter_map(|info| {
-            let endpoint: EndpointId = info.labels.get(TOKEN)?.parse().ok()?;
+            let endpoint = sheprd_core_client::convert::chat_endpoint(info)?;
             Some(Target {
                 endpoint,
                 existing: None,

@@ -95,6 +95,7 @@ impl SheprdWindow {
         let sidebar_invalidation = Self::invalidate_sidebar(cx);
         let host_theme = Self::observe_host_theme(cx);
         let browser = crate::browser::Browser::new(cx);
+        let core_terminals = crate::core_terminals::CoreTerminals::shared(cx);
         // Another window, or an agent, may open or close a tab.
         let browser_tabs = cx.observe_global::<crate::browser::Store>(|_, cx| cx.notify());
         let device_tags = crate::device_tags::DeviceTags::current(cx);
@@ -127,7 +128,6 @@ impl SheprdWindow {
         });
         let window_closed = Self::give_back_torn_tabs(cx);
         let terminal_focus = Self::leave_region_with_terminal(&focus, window, cx);
-        let core_terminals = crate::core_terminals::CoreTerminals::shared(cx);
         let mut this = Self {
             // keep-sorted start
             _activation: activation,

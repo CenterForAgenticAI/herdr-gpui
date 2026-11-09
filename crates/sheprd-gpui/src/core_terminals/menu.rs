@@ -15,6 +15,13 @@ use crate::{
 use gpui::{prelude::*, *};
 use sheprd_backend::TerminalId;
 
+/// A row of the menu's page: an action, or a place the pane can move to.
+#[derive(Clone, Debug)]
+enum Row {
+    Action(Action, String),
+    Move(super::moves::Destination, String),
+}
+
 /// The most characters a name the user gives keeps.
 const MAX_NAME_CHARS: usize = 128;
 
@@ -41,6 +48,7 @@ pub(crate) enum Action {
     SplitDown,
     Zoom,
     Unzoom,
+    MoveTo,
     Mirror,
     Close,
 }
@@ -55,6 +63,7 @@ impl Action {
             (Self::SplitDown, _) => fl!("pane-menu-split-down"),
             (Self::Zoom, _) => fl!("pane-menu-zoom"),
             (Self::Unzoom, _) => fl!("pane-menu-unzoom"),
+            (Self::MoveTo, _) => fl!("pane-menu-move-to"),
             (Self::Mirror, _) => fl!("core-terminals-menu-mirror"),
             (Self::Close, Target::Tab(_)) => fl!("tab-menu-close"),
             (Self::Close, Target::Pane { .. }) => fl!("pane-menu-close"),
@@ -109,7 +118,7 @@ impl SheprdWindow {
                     actions.push(if zoomed { Action::Unzoom } else { Action::Zoom });
                 }
                 if !shown.observe {
-                    actions.push(Action::Mirror);
+                    actions.extend([Action::MoveTo, Action::Mirror]);
                 }
                 actions.push(Action::Close);
                 actions
@@ -165,6 +174,10 @@ impl SheprdWindow {
             return;
         };
         let tab = target.tab();
+        if let (Action::MoveTo, Target::Pane { terminal, .. }) = (action, &target) {
+            self.open_core_move(tab, terminal.clone(), window, cx);
+            return;
+        }
         if action == Action::Rename {
             let current = self.core_name(&target).unwrap_or_default();
             let input = cx.new(SearchInput::new);
@@ -277,6 +290,48 @@ impl SheprdWindow {
         }
     }
 
+    /// Starts the menu's page with nothing selected.
+    pub(super) fn reset_core_selection(&mut self) {
+        if let Some(menu) = &mut self.menu.core {
+            menu.selected = None;
+        }
+    }
+
+    /// The rows the menu's page lists: its actions, or where its pane can
+    /// move.
+    fn core_menu_rows(&self, cx: &App) -> Vec<Row> {
+        let Some(menu) = &self.menu.core else {
+            return Vec::new();
+        };
+        match (&menu.target, self.menu.page) {
+            (Target::Pane { tab, terminal }, Some(Page::CoreMove)) => self
+                .core_moves(*tab, terminal, cx)
+                .into_iter()
+                .map(|row| Row::Move(row.destination, row.place))
+                .collect(),
+            (target, _) => self
+                .core_menu_actions(target)
+                .into_iter()
+                .map(|action| Row::Action(action, action.label(target)))
+                .collect(),
+        }
+    }
+
+    fn activate_core_row(&mut self, row: Row, window: &mut Window, cx: &mut Context<Self>) {
+        match row {
+            Row::Action(action, _) => self.activate_core_menu(action, window, cx),
+            Row::Move(destination, _) => {
+                let Some(Target::Pane { tab, terminal }) =
+                    self.menu.core.as_ref().map(|menu| menu.target.clone())
+                else {
+                    return;
+                };
+                self.dismiss_menu(window, cx);
+                self.move_core_pane(tab, terminal, destination, window, cx);
+            }
+        }
+    }
+
     /// The name the user gave `target`, if any.
     fn core_name(&self, target: &Target) -> Option<String> {
         let shown = self.core_terminals.tabs.get(&target.tab())?;
@@ -353,13 +408,13 @@ impl SheprdWindow {
         }
         cx.stop_propagation();
         window.prevent_default();
-        let actions = self.core_menu_actions(&menu.target);
+        let rows = self.core_menu_rows(cx);
         let selected = menu.selected;
         match key {
             "escape" => self.dismiss_menu(window, cx),
             "enter" if renaming => self.submit_core_rename(window, cx),
-            "up" | "down" if !actions.is_empty() => {
-                let count = actions.len();
+            "up" | "down" if !rows.is_empty() => {
+                let count = rows.len();
                 let next = match (selected, key) {
                     (None, "up") => count - 1,
                     (None, _) => 0,
@@ -372,8 +427,8 @@ impl SheprdWindow {
                 cx.notify();
             }
             "enter" => {
-                if let Some(action) = selected.and_then(|index| actions.get(index).copied()) {
-                    self.activate_core_menu(action, window, cx);
+                if let Some(row) = selected.and_then(|index| rows.into_iter().nth(index)) {
+                    self.activate_core_row(row, window, cx);
                 }
             }
             _ => {}
@@ -434,7 +489,19 @@ impl SheprdWindow {
                 );
         }
         let mut body = div().flex().flex_col();
-        for (index, action) in self.core_menu_actions(&menu.target).into_iter().enumerate() {
+        if self.menu.page == Some(Page::CoreMove) {
+            body = body.child(
+                div()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .text_color(rgb(theme.muted))
+                    .child(fl!("pane-menu-move-heading")),
+            );
+        }
+        for (index, row) in self.core_menu_rows(cx).into_iter().enumerate() {
+            let label = match &row {
+                Row::Action(_, label) | Row::Move(_, label) => label.clone(),
+            };
             body = body.child(
                 div()
                     .id(("core-menu-action", index))
@@ -448,15 +515,20 @@ impl SheprdWindow {
                         row.bg(rgb(theme.active))
                     })
                     .hover(|row| row.bg(rgb(theme.active)))
-                    .child(div().min_w_0().truncate().child(action.label(&menu.target)))
+                    .child(div().min_w_0().truncate().child(label))
                     .on_hover(cx.listener(move |this, hovered, _, cx| {
                         if *hovered && let Some(menu) = &mut this.menu.core {
                             menu.selected = Some(index);
                             cx.notify();
                         }
                     }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.activate_core_menu(action, window, cx)
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        // The picker opens under the pointer; a double-click's
+                        // second click must not pick the row it lands on.
+                        if event.click_count() > 1 {
+                            return;
+                        }
+                        this.activate_core_row(row.clone(), window, cx)
                     })),
             );
         }

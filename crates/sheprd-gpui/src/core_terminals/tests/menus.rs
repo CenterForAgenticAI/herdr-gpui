@@ -7,7 +7,7 @@ use crate::{
     core_terminals::menu::{Action, Target, clean_name},
     menu::Page,
 };
-use gpui::{AppContext as _, TestAppContext, point, px};
+use gpui::{TestAppContext, point, px};
 
 #[gpui::test]
 fn a_tab_menu_offers_a_new_tab_renaming_and_closing(cx: &mut TestAppContext) {
@@ -38,6 +38,7 @@ fn a_pane_menu_offers_what_its_pane_can_do(cx: &mut TestAppContext) {
             Action::SplitRight,
             Action::SplitDown,
             Action::Zoom,
+            Action::MoveTo,
             Action::Mirror,
             Action::Close,
         ]
@@ -172,38 +173,6 @@ fn closing_a_pane_while_disconnected_ends_it_once_the_core_answers(cx: &mut Test
         })
     });
     let unended = cx.update(|_, cx| view.read(cx).core_terminals.unended.lock().unwrap().clone());
-    assert_eq!(unended, [(crate::core_terminals::Host::Local, id("t2"))]);
-}
-
-#[gpui::test]
-fn a_kill_left_unended_waits_for_any_window(cx: &mut TestAppContext) {
-    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
-    let other = cx.update(|window, cx| {
-        let other = cx.new(|cx| crate::palette::fixture_window(window, cx));
-        for view in [&view, &other] {
-            view.update(cx, |view, cx| {
-                view.core_terminals.unended =
-                    crate::core_terminals::CoreTerminals::shared(cx).unended;
-            });
-        }
-        other
-    });
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.close_core_pane(tab, id("t2"), window, cx)
-        })
-    });
-    // The window that closed the pane may close before its core answers;
-    // another window still holds the kill.
-    let unended = cx.update(|_, cx| {
-        other
-            .read(cx)
-            .core_terminals
-            .unended
-            .lock()
-            .unwrap()
-            .clone()
-    });
     assert_eq!(unended, [(crate::core_terminals::Host::Local, id("t2"))]);
 }
 
