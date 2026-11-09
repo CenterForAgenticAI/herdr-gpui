@@ -5,6 +5,7 @@ mod effects;
 mod fallback_bells;
 mod focus;
 mod folders;
+mod images;
 mod kept_checkouts;
 mod kept_workspaces;
 mod keys;

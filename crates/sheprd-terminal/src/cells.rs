@@ -122,7 +122,13 @@ fn cell(cell: &Cell, links: &mut Links) -> Option<CellData> {
         " ".to_owned()
     } else {
         let mut symbol = String::from(cell.c);
-        symbol.extend(cell.zerowidth().into_iter().flatten());
+        // Image placements mark their cell; the mark is never text.
+        symbol.extend(
+            cell.zerowidth()
+                .into_iter()
+                .flatten()
+                .filter(|c| !crate::graphics::is_marker(**c)),
+        );
         symbol
     };
     Some(CellData {
