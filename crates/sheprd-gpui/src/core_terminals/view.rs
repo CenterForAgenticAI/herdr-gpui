@@ -235,6 +235,14 @@ impl CoreTerminalView {
     /// terminal is told its size and focus again.
     pub(crate) fn relink(&mut self, link: Link, cx: &mut Context<Self>) {
         self.link = link;
+        // The old link's answers never arrive: copy mode stops waiting on
+        // its motion or search and drops the keys queued behind it, and a
+        // copy or an editor's read asked of it is dropped.
+        if let Some(state) = &mut self.copy_mode {
+            state.relinked();
+        }
+        self.copying = None;
+        self.editing = None;
         self.stale = false;
         self.screen.failure = None;
         self.sent_focus = None;

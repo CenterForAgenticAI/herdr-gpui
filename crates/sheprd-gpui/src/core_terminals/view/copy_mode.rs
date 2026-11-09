@@ -30,6 +30,11 @@ impl CopyModeState {
     pub(super) fn forget_mark(&mut self) {
         self.mode.forget_mark();
     }
+
+    /// Stops waiting on a request the old link would have answered.
+    pub(super) fn relinked(&mut self) {
+        self.mode.send_failed();
+    }
 }
 
 impl CoreTerminalView {

@@ -7,6 +7,7 @@ mod commands;
 mod context;
 mod control_holder;
 mod copy_mode;
+mod copy_mode_relink;
 mod effects;
 mod fallback_bells;
 mod focus;
