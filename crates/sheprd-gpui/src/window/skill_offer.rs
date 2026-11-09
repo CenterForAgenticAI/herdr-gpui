@@ -1,6 +1,4 @@
-//! The agent skill for browser tabs: the one-time offer, its dialog, and
-//! installing it on request.
-// i18n: migrated
+//! The one-time offer of the agent skill for browser tabs, and its install.
 
 use super::{Flash, SheprdWindow};
 use crate::i18n::{Localize, fl};

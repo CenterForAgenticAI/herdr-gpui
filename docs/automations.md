@@ -196,8 +196,8 @@ Every command takes `--json`; errors are then `{"ok": false, "message": ...}`.
 - `pull` refuses a dirty checkout or one on another branch, and only
   fast-forwards. `run` and `sh` run as child processes with their output
   logged; a timeout or `stop` ends the whole process group. `worktree`,
-  `agent` and `notify` go through the `herdr` CLI; when a step needs Herdr and
-  its server is not running, the daemon starts it.
+  `agent` and `notify` drive the host's Herdr (below); when a step needs it
+  and it is not running, the daemon starts it.
 - Personal scripts have no repository, so they can use only `sh` and
   `notify`.
 - Three failed runs in a row pause a script.
@@ -210,9 +210,31 @@ Besides each script's caps, the host has its own in
 ```toml
 max_agents = 3                # agents automations may run at once
 max_tokens_per_day = 10000000 # every script together
+# terminals = "herdr-core"    # drive Herdr 2 instead of Herdr 1 (below)
 # herdr = "/path/to/herdr"    # when not on PATH
 # herdr_session = "work"      # a Herdr session other than the default
+# herdr_core = "/path/to/herdr-core" # started when no core runs, if not on PATH
 ```
+
+### Herdr 1 or Herdr 2
+
+`terminals` chooses which Herdr runs the agents: `"herdr"` (Herdr 1, through
+the `herdr` command line) or `"herdr-core"` (Herdr 2, through its socket).
+Without it, the daemon drives Herdr 1 when `herdr` is installed and Herdr 2
+otherwise; the daemon's log says which when it starts.
+
+On Herdr 2, which keeps no workspaces, `worktree` and `agent` make the
+checkout where Herdr 1 would (`~/.herdr/worktrees/REPO/BRANCH`), and `agent`
+starts the harness in a herdr-core terminal there, labelled
+`sheprd.automation=SCRIPT-RUN`. The prompt goes in once the agent reports it
+is ready; an agent that does not within 90 seconds, such as one asking
+whether to trust its new folder, fails the step with nothing typed into it,
+and stays open for you to answer. A run's page in Sheprd opens the agent's
+terminal in a tab on this computer. `worktree` opens no shell, as Herdr 2 has
+no workspace for one. `notify` shows a system notification (macOS and
+Linux; Windows needs Herdr 1). The agent counts as done once its terminal
+finishes or is removed; its tokens come from its recent session files, as
+herdr-core reports no session.
 
 A run halts before an agent step that would cross the script's
 `agents_per_run`, the host's `max_agents`, or a daily token budget; a script

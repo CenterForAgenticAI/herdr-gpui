@@ -3,12 +3,14 @@
 
 use super::count;
 use rusqlite::Row;
-use sheprd_automation::report::{Reason, RunState, ScriptCaps, StepState, Tokens, TriggerStatus};
+use sheprd_automation::report::{
+    Reason, RunState, ScriptCaps, StepState, Terminals, Tokens, TriggerStatus,
+};
 
 pub(super) const RUN_COLUMNS: &str = "id, path, name, trigger, trigger_name, reason, scheduled, hash, started_at, finished_at, state, detail, steps";
-pub(super) const STEP_COLUMNS: &str = "run, position, kind, summary, started_at, finished_at, state, exit, log_tail, worktree, pane, cpu_ms, peak_memory";
+pub(super) const STEP_COLUMNS: &str = "run, position, kind, summary, started_at, finished_at, state, exit, log_tail, worktree, pane, cpu_ms, peak_memory, terminals";
 pub(super) const AGENT_COLUMNS: &str = "run, position, path, harness, pane, cwd, started_at, done_at, \
-     input, output, cache_read, cache_write, cpu_ms, peak_memory, sampled_at";
+     input, output, cache_read, cache_write, cpu_ms, peak_memory, sampled_at, terminals";
 
 /// A script as the daemon last loaded it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -132,6 +134,8 @@ pub struct StepRow {
     pub pane: Option<String>,
     pub cpu_ms: Option<u64>,
     pub peak_memory: Option<u64>,
+    /// Which Herdr runs `pane`.
+    pub terminals: Terminals,
 }
 
 impl StepRow {
@@ -150,6 +154,7 @@ impl StepRow {
             pane: row.get(10)?,
             cpu_ms: count(row, 11)?,
             peak_memory: count(row, 12)?,
+            terminals: terminals(row, 13)?,
         })
     }
 }
@@ -160,6 +165,7 @@ pub struct AgentRow {
     pub position: u32,
     pub path: String,
     pub harness: String,
+    /// A Herdr pane ID, or a herdr-core terminal address, as `terminals` says.
     pub pane: String,
     /// The worktree it works in, which finds its session files.
     pub cwd: String,
@@ -170,6 +176,7 @@ pub struct AgentRow {
     pub cpu_ms: Option<u64>,
     pub peak_memory: Option<u64>,
     pub sampled_at: Option<i64>,
+    pub terminals: Terminals,
 }
 
 impl AgentRow {
@@ -196,6 +203,7 @@ impl AgentRow {
             cpu_ms: count(row, 12)?,
             peak_memory: count(row, 13)?,
             sampled_at: row.get(14)?,
+            terminals: terminals(row, 15)?,
         })
     }
 }
@@ -309,4 +317,11 @@ pub(crate) fn step_state_from_name(name: &str) -> StepState {
         "halted" => StepState::Halted,
         _ => StepState::Failed,
     }
+}
+
+/// Which Herdr a row's pane belongs to; a name this daemon does not know
+/// reads as Herdr 1, which every older row is.
+fn terminals(row: &Row<'_>, index: usize) -> rusqlite::Result<Terminals> {
+    let name = row.get::<_, String>(index)?;
+    Ok(Terminals::from_name(&name).unwrap_or_default())
 }
