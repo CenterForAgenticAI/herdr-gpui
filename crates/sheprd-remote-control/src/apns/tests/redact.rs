@@ -36,6 +36,7 @@ fn start() -> Live {
                 computer: "studio".to_owned(),
                 computer_id: "AB".repeat(32),
                 pane: "w1-p3".to_owned(),
+                terminal: false,
                 workspace: "secret-workspace".to_owned(),
             },
         },

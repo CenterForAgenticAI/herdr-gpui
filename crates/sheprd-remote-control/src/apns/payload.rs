@@ -67,6 +67,10 @@ pub(crate) struct Attributes {
     /// never by the name, which any paired computer could also choose.
     pub(crate) computer_id: String,
     pub(crate) pane: String,
+    /// Set for an agent in a plain terminal, whose terminal the activity
+    /// opens; left out for a chat, as an older app expects.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) terminal: bool,
     pub(crate) workspace: String,
 }
 

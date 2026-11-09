@@ -6,7 +6,6 @@ use super::{CoreTerminalView, Host, Start, TabPanes, panes::Axis, worker};
 use crate::{
     SheprdWindow,
     browser::{Location, Store, TabId},
-    i18n::fl,
     window::Flash,
 };
 use gpui::{prelude::*, *};
@@ -199,11 +198,28 @@ impl SheprdWindow {
             .iter()
             .map(|(key, view)| (key.clone(), view.clone()))
             .collect();
+        let in_sight: std::collections::HashSet<TabId> = self
+            .browser_key()
+            .zip(cx.try_global::<Store>())
+            .map(|((scope, workspace), store)| {
+                store
+                    .in_workspace(&scope, &workspace)
+                    .map(|tab| tab.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let polled = views
+            .iter()
+            .map(|((tab, _), view)| {
+                let host = in_sight
+                    .contains(tab)
+                    .then(|| self.core_terminals.host_of(*tab));
+                (view.clone(), host)
+            })
+            .collect::<Vec<_>>();
+        self.poll_core_views(polled, window, cx);
         let mut ended = Vec::new();
-        let mut dropped = false;
         for ((tab, terminal), view) in views {
-            view.update(cx, |view, cx| view.poll(cx));
-            dropped |= view.read(cx).take_dropped();
             let split = self
                 .core_terminals
                 .tabs
@@ -212,9 +228,6 @@ impl SheprdWindow {
             if split && view.read(cx).ended() {
                 ended.push((tab, terminal));
             }
-        }
-        if dropped {
-            self.show_flash(Flash::warning(fl!("core-terminals-input-dropped")), cx);
         }
         for (tab, terminal) in ended {
             self.remove_core_pane(tab, &terminal, window, cx);

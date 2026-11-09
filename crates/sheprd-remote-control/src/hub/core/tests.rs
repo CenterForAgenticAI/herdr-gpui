@@ -127,6 +127,7 @@ mod socket {
     mod recovery;
     mod screens;
     mod spaces;
+    mod wake;
 
     struct Fake {
         _dir: tempfile::TempDir,
@@ -439,7 +440,9 @@ mod socket {
 mod checkouts;
 mod state_context;
 
+mod empty_core;
 mod kept_workspaces;
+mod pane_agents;
 mod poller;
 mod renames;
 mod saved_beside_spaces;
