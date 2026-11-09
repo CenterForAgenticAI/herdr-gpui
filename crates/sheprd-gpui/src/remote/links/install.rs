@@ -17,14 +17,14 @@
 //! the host holds the same bytes there; a source build is skipped when that
 //! snapshot was built there before.
 //!
-//! So the phone's chats work there, `sheprd-acp` goes beside it when this
-//! app's own build is what the host gets (a Mac from a Mac release, or a
-//! host like this computer from a development build), and a source build
-//! builds it too. It is
-//! never linked into `~/.local/bin`, where it would replace one the user
-//! installed; the daemon starts the one beside it first. A release has no
-//! static `sheprd-acp` for Linux yet, so a Linux host from a release keeps
-//! needing its own (as chats from the desktop do).
+//! So the phone's chats work there, `sheprd-acp` goes beside it: this app's
+//! own when that is what the host gets (a Mac from a Mac release, or a host
+//! like this computer from a development build), the release's static one
+//! for a Linux host from a release (`sheprd_updater::download_host_chat`,
+//! checked against the signed manifest packed with it), and a source build
+//! builds it too. It is never linked into `~/.local/bin`, where it would
+//! replace one the user installed; the daemon starts the one beside it
+//! first.
 
 use super::{Error, PROGRAM};
 use crate::{
@@ -116,8 +116,15 @@ pub(super) fn ensure(host: &Host, cancelled: &AtomicBool) -> Result<String, Erro
             Ok(program)
         }
         Some(Choice::Download(target)) => {
-            let path = download(&target, cancelled)?;
-            copy(host, &path, crate::APP_VERSION, cancelled)
+            let path = download(&target, Build::Daemon, cancelled)?;
+            let program = copy(host, &path, crate::APP_VERSION, cancelled)?;
+            // Pairing goes on without it: chats then need one the user installed.
+            let chats = download(&target, Build::Chats, cancelled)
+                .and_then(|chats| copy_chats(host, &chats, crate::APP_VERSION, cancelled));
+            if let Err(error) = chats {
+                tracing::warn!(%error, "Could not put the release's sheprd-acp on a Linux host");
+            }
+            Ok(program)
         }
         Some(Choice::Source) => build_from_source(host, cancelled),
         None => Err(Error::NoBuild {
@@ -266,14 +273,26 @@ fn copy(host: &Host, path: &Path, version: &str, cancelled: &AtomicBool) -> Resu
     Ok(installed_path(version))
 }
 
-/// The release's static build for `target`, downloaded once per version
+/// Which of the release's static builds for another machine.
+#[derive(Clone, Copy, Debug)]
+enum Build {
+    /// `sheprd-acp`, which chats there run.
+    Chats,
+    /// `sheprd-remote-control`.
+    Daemon,
+}
+
+/// The release's static `build` for `target`, downloaded once per version
 /// into this app's private state. Blocks.
-fn download(target: &str, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
+fn download(target: &str, build: Build, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
     let dir = crate::remote::state_dir()
         .map_err(|_| Error::NoStateDir)?
         .join("host-builds")
         .join(crate::APP_VERSION);
-    let path = dir.join(target);
+    let path = match build {
+        Build::Chats => dir.join(format!("{CHAT_PROGRAM}-{target}")),
+        Build::Daemon => dir.join(target),
+    };
     let _one = DOWNLOADS.lock().unwrap_or_else(PoisonError::into_inner);
     if path.is_file() {
         return Ok(path);
@@ -284,13 +303,14 @@ fn download(target: &str, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
     };
     std::fs::create_dir_all(&dir).map_err(failed)?;
     let part = dir.join(format!(".{}.part", unique(target)));
-    let downloaded =
-        sheprd_updater::download_host_build(target, &part, cancelled).map_err(|source| {
-            Error::Download {
-                target: target.to_owned(),
-                source,
-            }
-        });
+    let downloaded = match build {
+        Build::Chats => sheprd_updater::download_host_chat(target, &part, cancelled),
+        Build::Daemon => sheprd_updater::download_host_build(target, &part, cancelled),
+    }
+    .map_err(|source| Error::Download {
+        target: target.to_owned(),
+        source,
+    });
     if let Err(error) = downloaded {
         let _ = std::fs::remove_file(&part);
         return Err(error);

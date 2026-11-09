@@ -14,12 +14,14 @@
 mod checkouts;
 mod commands;
 mod context;
+mod effects;
 mod error;
 mod fallback;
 mod folders;
 mod hosts;
 mod hub;
 mod infos;
+pub(crate) mod install;
 mod phone;
 mod requests;
 mod screen;
@@ -434,9 +436,15 @@ impl SheprdWindow {
         }
         self.poll_core_fallback(cx);
         self.refresh_core_looks(cx);
-        if let Some(view) = self.core_fallback_view() {
-            view.update(cx, |view, cx| view.poll(cx));
-        }
+        // The stand-in shell rings only while its workspace is shown, as a
+        // tab does; its clipboard writes land either way.
+        let fallback_shown = self.default_workspace_shown();
+        self.poll_core_views(
+            self.core_fallback_view()
+                .map(|view| (view, fallback_shown.then_some(Host::Local))),
+            window,
+            cx,
+        );
         self.poll_core_panes(window, cx);
         self.answer_phone_split(cx);
         if self.core_terminals.poll_infos(std::time::Instant::now()) {
