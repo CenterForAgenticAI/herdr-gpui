@@ -20,10 +20,9 @@ pub use script::valid_id;
 
 use crate::Result;
 use sheprd_client::{
-    ConnectTarget, ScriptHost, ScriptLimits, SshLane,
-    protocol::{AgentStatus, ClientShellSnapshot},
-    run_script,
+    ConnectTarget, ScriptHost, ScriptLimits, SshLane, protocol::AgentStatus, run_script,
 };
+use sheprd_session::Session;
 use sheprd_usage::Host;
 use std::{
     collections::{HashMap, VecDeque},
@@ -226,7 +225,7 @@ struct Lane {
 /// What one endpoint's agents were doing in the last snapshot looked at.
 #[derive(Default)]
 struct Watch {
-    snapshot: Weak<ClientShellSnapshot>,
+    session: Weak<Session>,
     boot_id: String,
     statuses: HashMap<String, AgentStatus>,
 }
@@ -296,58 +295,45 @@ pub struct Checkpoints {
     last_stamp: u128,
 }
 
-/// The name an agent goes by in a checkpoint label.
-fn agent_name(agent: &sheprd_client::protocol::ClientShellAgent) -> &str {
-    [&agent.display_agent, &agent.agent, &agent.name]
-        .into_iter()
-        .flatten()
-        .map(|name| name.trim())
-        .find(|name| !name.is_empty())
-        .unwrap_or("Agent")
-}
-
 impl Checkpoints {
-    /// Look at `endpoint`'s latest snapshot and queue a checkpoint of each
-    /// checkout whose agent just started or finished a turn. A snapshot
+    /// Look at `endpoint`'s latest session and queue a checkpoint of each
+    /// checkout whose agent just started or finished a turn. A session
     /// already looked at, the first one, and one from a restarted daemon
-    /// only record statuses: no turn is seen across a gap.
-    pub fn observe(&mut self, endpoint: &str, host: &Host, snapshot: &Arc<ClientShellSnapshot>) {
+    /// (another `boot`) only record statuses: no turn is seen across a gap.
+    /// Herdr 1's and herdr-core's sessions are watched as their own
+    /// endpoints, so a turn is told apart on each.
+    pub fn observe(&mut self, endpoint: &str, host: &Host, boot: &str, session: &Arc<Session>) {
         let watch = self.watches.entry(endpoint.to_owned()).or_default();
-        if std::ptr::eq(watch.snapshot.as_ptr(), Arc::as_ptr(snapshot)) {
+        if std::ptr::eq(watch.session.as_ptr(), Arc::as_ptr(session)) {
             return;
         }
-        watch.snapshot = Arc::downgrade(snapshot);
-        let restarted = watch.boot_id != snapshot.boot_id;
-        watch.boot_id.clone_from(&snapshot.boot_id);
+        watch.session = Arc::downgrade(session);
+        let restarted = watch.boot_id != boot;
+        boot.clone_into(&mut watch.boot_id);
         let previous = std::mem::take(&mut watch.statuses);
         let mut captures = Vec::new();
-        for agent in &snapshot.agents {
-            watch
-                .statuses
-                .insert(agent.pane_id.clone(), agent.agent_status);
-            let Some(before) = previous.get(&agent.pane_id).filter(|_| !restarted) else {
+        for agent in &session.agents {
+            watch.statuses.insert(agent.pane.clone(), agent.status);
+            let Some(before) = previous.get(&agent.pane).filter(|_| !restarted) else {
                 continue;
             };
             use AgentStatus::*;
-            let label = match (before, agent.agent_status) {
+            let name = Some(agent.name.trim())
+                .filter(|name| !name.is_empty())
+                .unwrap_or("Agent");
+            let label = match (before, agent.status) {
                 // A turn resuming after a permission prompt is the same turn.
-                (Idle | Done, Working) => format!("Before {}'s turn", agent_name(agent)),
-                (Working | Blocked, Idle | Done) => {
-                    format!("{} finished a turn", agent_name(agent))
-                }
+                (Idle | Done, Working) => format!("Before {name}'s turn"),
+                (Working | Blocked, Idle | Done) => format!("{name} finished a turn"),
                 _ => continue,
             };
-            let checkout = snapshot
-                .workspaces
-                .iter()
-                .find(|workspace| workspace.workspace_id == agent.workspace_id)
-                .and_then(|workspace| {
-                    Checkout::new(
-                        host.clone(),
-                        &workspace.worktree.as_ref()?.key,
-                        workspace.branch.as_deref(),
-                    )
-                });
+            let checkout = session.workspace(&agent.workspace).and_then(|workspace| {
+                Checkout::new(
+                    host.clone(),
+                    &workspace.worktree.as_ref()?.key,
+                    workspace.branch.as_deref(),
+                )
+            });
             if let Some(checkout) = checkout {
                 captures.push((checkout, label));
             }

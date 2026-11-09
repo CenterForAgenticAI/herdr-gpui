@@ -1,10 +1,13 @@
 mod accessibility;
 mod chats;
 mod focus;
+mod kept_checkouts;
+mod kept_workspaces;
 mod keys;
 mod links;
 mod paste;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod wanted;
 mod worker;
