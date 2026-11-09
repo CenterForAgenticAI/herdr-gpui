@@ -23,7 +23,14 @@ pub(crate) fn of_snapshot(snapshot: &ClientShellSnapshot) -> Session {
                 workspace: agent.workspace_id.clone(),
             })
             .collect(),
-        focused: snapshot.focused_workspace_id.clone(),
+        // The daemon marks its focused workspace both ways; either does.
+        focused: snapshot.focused_workspace_id.clone().or_else(|| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.focused)
+                .map(|workspace| workspace.workspace_id.clone())
+        }),
         workspaces: snapshot
             .workspaces
             .iter()
@@ -34,6 +41,7 @@ pub(crate) fn of_snapshot(snapshot: &ClientShellSnapshot) -> Session {
 
 fn of_workspace(snapshot: &ClientShellSnapshot, workspace: &ClientShellWorkspace) -> Workspace {
     Workspace {
+        ahead_behind: workspace.git_ahead_behind,
         branch: workspace.branch.clone(),
         cwd: workspace.new_workspace_cwd.clone(),
         custom_label: workspace.custom_label,
@@ -52,6 +60,7 @@ fn of_workspace(snapshot: &ClientShellSnapshot, workspace: &ClientShellWorkspace
                 status: tab.agent_status,
             })
             .collect(),
+        tokens: workspace.tokens.clone(),
         worktree: workspace.worktree.as_ref().map(|worktree| Worktree {
             key: worktree.key.clone(),
             label: worktree.label.clone(),
@@ -92,8 +101,26 @@ pub(crate) struct Sessions {
 }
 
 impl Sessions {
-    fn each(&self) -> impl Iterator<Item = &Session> {
+    /// Herdr 1's session, then herdr-core's.
+    pub(crate) fn each(&self) -> impl Iterator<Item = &Session> {
         self.herdr_1.iter().chain(&self.core).map(Arc::as_ref)
+    }
+
+    /// The workspace of `session`, kept by `keeper`, that shows as focused
+    /// while `kept_front` is the kept workspace in front, if any: Herdr 1's
+    /// own focus unless a kept workspace stands in front of it.
+    pub(crate) fn front_of<'a>(
+        keeper: Keeper,
+        session: &'a Session,
+        kept_front: Option<&'a str>,
+    ) -> Option<&'a str> {
+        match keeper {
+            Keeper::Herdr1 => kept_front
+                .is_none()
+                .then_some(session.focused.as_deref())
+                .flatten(),
+            Keeper::App => kept_front,
+        }
     }
 
     /// Each session with who keeps its workspaces.
@@ -119,8 +146,38 @@ impl Sessions {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.herdr_1.is_none() && self.core.is_none()
+        self.herdr_1.is_none()
+            && self
+                .core
+                .as_ref()
+                .is_none_or(|core| core.workspaces.is_empty())
     }
+}
+
+/// The herdr-core session with every workspace its agents work in: a Herdr
+/// 2 tab opened in a Herdr 1 workspace has its agent here and its checkout
+/// in Herdr 1's session, which a reader of agents' checkouts needs too.
+/// The same `Arc` when nothing is missing, so a watcher of it sees no change.
+pub(crate) fn core_with_checkouts(sessions: &Sessions) -> Option<Arc<Session>> {
+    let core = sessions.core.as_ref()?;
+    let missing: Vec<&Workspace> = sessions
+        .herdr_1
+        .iter()
+        .flat_map(|herdr_1| &herdr_1.workspaces)
+        .filter(|workspace| {
+            core.workspace(&workspace.id).is_none()
+                && core
+                    .agents
+                    .iter()
+                    .any(|agent| agent.workspace == workspace.id)
+        })
+        .collect();
+    if missing.is_empty() {
+        return Some(core.clone());
+    }
+    let mut session = Session::clone(core);
+    session.workspaces.extend(missing.into_iter().cloned());
+    Some(Arc::new(session))
 }
 
 #[cfg(test)]

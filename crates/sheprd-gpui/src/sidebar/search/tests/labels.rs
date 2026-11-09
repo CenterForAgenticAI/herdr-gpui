@@ -30,11 +30,12 @@ fn a_standalone_linked_worktree_matches_its_displayed_workspace_label() {
 fn matches_follow_sidebar_group_order_even_when_children_arrive_first() {
     let mut snapshot = snapshot(6);
     snapshot.workspaces.swap(0, 4);
-    let expected: Vec<_> = workspace_entries(&snapshot.workspaces)
+    let session = crate::session_model::of_snapshot(&snapshot);
+    let expected: Vec<_> = workspace_entries(&session.workspaces)
         .into_iter()
         .filter_map(|(index, child)| {
-            let workspace = &snapshot.workspaces[index];
-            find(workspace_label(workspace, child), "a").map(|_| workspace.workspace_id.as_str())
+            let workspace = &session.workspaces[index];
+            find(workspace_label(workspace, child), "a").map(|_| workspace.id.as_str())
         })
         .collect();
     let [local, _] = devices(&snapshot);
