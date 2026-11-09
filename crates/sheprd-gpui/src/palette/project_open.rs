@@ -113,6 +113,34 @@ impl SheprdWindow {
         Ok((index, snapshot.clone()))
     }
 
+    /// Opens a project in a workspace the app keeps for Herdr 2: the one
+    /// already in its folder, or a new one once the folder checks out.
+    fn activate_kept_project(
+        &mut self,
+        project: projects::Project,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let validation = cx.background_executor().spawn(async move {
+            projects::validate(&project)?;
+            Ok::<_, crate::Error>(project)
+        });
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let result = validation.await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(project) => {
+                    this.dismiss_menu(window, cx);
+                    this.open_local_kept_folder(&project.label, project.path, cx);
+                }
+                Err(error) => this.palette_project_error(error, cx),
+            });
+        });
+        if let Some(palette) = &mut self.menu.palette {
+            palette.error = None;
+            palette.project_operation = ProjectOperation::Validating { _task: task };
+        }
+    }
+
     fn palette_project_error(&mut self, error: crate::Error, cx: &mut Context<Self>) {
         if let Some(palette) = &mut self.menu.palette {
             palette.project_operation = ProjectOperation::Idle;
@@ -130,6 +158,11 @@ impl SheprdWindow {
         let Some(palette) = &self.menu.palette else {
             return;
         };
+        // A project is on this computer, whichever host is shown.
+        if self.local_workspaces_use_core() {
+            self.activate_kept_project(project, window, cx);
+            return;
+        }
         let Some(target) = palette.local_target.clone() else {
             self.palette_project_error(Error::HostUnavailable.into(), cx);
             return;
@@ -213,12 +246,15 @@ impl SheprdWindow {
         let Some(palette) = &self.menu.palette else {
             return;
         };
-        let Some(target) = palette.local_target.clone() else {
-            self.palette_project_error(Error::HostUnavailable.into(), cx);
-            return;
-        };
-        if let Err(error) = self.local_project_connection(&target) {
-            return self.palette_project_error(error, cx);
+        // A workspace the app keeps needs no daemon to open the folder in.
+        if !self.local_workspaces_use_core() {
+            let Some(target) = palette.local_target.clone() else {
+                self.palette_project_error(Error::HostUnavailable.into(), cx);
+                return;
+            };
+            if let Err(error) = self.local_project_connection(&target) {
+                return self.palette_project_error(error, cx);
+            }
         }
         let token = palette.search.clone();
         let config = self.config.palette.clone();

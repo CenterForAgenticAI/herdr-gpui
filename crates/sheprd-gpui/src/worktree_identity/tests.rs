@@ -121,16 +121,22 @@ fn surfaces_switch_each_mark_on_its_own() {
     }
 }
 
-fn workspace(id: &str, worktree: Option<bool>) -> ClientShellWorkspace {
-    serde_json::from_value(serde_json::json!({
-        "workspace_id": id, "active_tab_id": "t0", "new_workspace_cwd": "/tmp",
-        "number": 1, "label": id, "custom_label": false, "branch": "main",
-        "worktree": worktree.map(|linked| serde_json::json!({
-            "key": "/repo/.git", "label": "repo", "is_linked_worktree": linked
-        })),
-        "tokens": [], "focused": false, "agent_status": "idle"
-    }))
-    .unwrap()
+fn workspace(id: &str, worktree: Option<bool>) -> sheprd_session::Workspace {
+    let workspace: sheprd_client::protocol::ClientShellWorkspace =
+        serde_json::from_value(serde_json::json!({
+            "workspace_id": id, "active_tab_id": "t0", "new_workspace_cwd": "/tmp",
+            "number": 1, "label": id, "custom_label": false, "branch": "main",
+            "worktree": worktree.map(|linked| serde_json::json!({
+                "key": "/repo/.git", "label": "repo", "is_linked_worktree": linked
+            })),
+            "tokens": [], "focused": false, "agent_status": "idle"
+        }))
+        .unwrap();
+    let mut snapshot = crate::sidebar::layout_tests::snapshot(0);
+    snapshot.workspaces.push(workspace);
+    crate::session_model::of_snapshot(&snapshot)
+        .workspaces
+        .remove(0)
 }
 
 /// Only a linked worktree is marked: not the main checkout, and not a
@@ -144,13 +150,18 @@ fn only_linked_worktrees_are_marked() {
 
 #[test]
 fn the_focused_workspace_decides_the_terminal_rule() {
-    let mut snapshot = crate::sidebar::layout_tests::snapshot(6);
-    for (focused, linked) in [("w0", false), ("w3", false), ("w4", true), ("w5", true)] {
-        snapshot.focused_workspace_id = Some(focused.into());
-        assert_eq!(focused_is_linked(&snapshot), linked, "{focused}");
+    let snapshot = crate::sidebar::layout_tests::snapshot(6);
+    let sessions = crate::session_model::Sessions {
+        herdr_1: Some(std::sync::Arc::new(crate::session_model::of_snapshot(
+            &snapshot,
+        ))),
+        ..Default::default()
+    };
+    for (front, linked) in [("w0", false), ("w3", false), ("w4", true), ("w5", true)] {
+        assert_eq!(front_is_linked(&sessions, Some(front)), linked, "{front}");
     }
-    snapshot.focused_workspace_id = None;
-    assert!(!focused_is_linked(&snapshot));
+    assert!(!front_is_linked(&sessions, None));
+    assert!(!front_is_linked(&sessions, Some("gone")));
 }
 
 fn degrees_apart(first: u32, second: u32) -> f32 {

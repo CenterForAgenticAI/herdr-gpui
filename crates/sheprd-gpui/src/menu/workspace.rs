@@ -4,6 +4,7 @@
 
 // i18n: migrated
 mod dispatch;
+mod kept;
 pub(super) mod popover;
 mod render;
 mod requests;
@@ -36,6 +37,9 @@ pub(crate) struct WorkspaceTarget {
     pub(super) base: Option<String>,
     /// How worktree requests name the repository to the daemon.
     pub(super) source: Source,
+    /// Who carries out what the menu asks: Herdr 1's daemon, or the app for
+    /// a workspace it keeps for Herdr 2 (`kept.rs`).
+    pub(super) keeper: sheprd_session::Keeper,
     /// Whether the user muted the workspace's notifications when the menu
     /// opened, which picks what the toggle in its header does.
     pub(super) muted: bool,
@@ -82,6 +86,7 @@ impl WorkspaceTarget {
             branch: workspace.branch.clone(),
             base: None,
             source: Source::of(workspace),
+            keeper: sheprd_session::Keeper::Herdr1,
             muted: false,
         }
     }
@@ -481,6 +486,10 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.menu.page.is_none() && self.is_kept_workspace(id) {
+            self.open_kept_workspace_menu(id, anchor, window, cx);
+            return;
+        }
         if self.menu.page.is_some() || !self.live.status.is_connected() {
             return;
         }
@@ -539,12 +548,8 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(id) = self
-            .live
-            .snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.focused_workspace_id.clone())
-        else {
+        // The workspace in front, Herdr 1's or one the app keeps.
+        let Some((_, id)) = self.browser_key() else {
             return;
         };
         self.open_workspace_dialog_for(&id, action, Point::default(), window, cx);
@@ -620,6 +625,12 @@ impl SheprdWindow {
         let Some(target) = &self.menu.target else {
             return vec![];
         };
+        if target.keeper == sheprd_session::Keeper::App {
+            return kept::items(
+                self.note_checkout().is_some(),
+                self.checkpoint_checkout().is_some(),
+            );
+        }
         let mut items = vec![if target.muted {
             (WorkspaceMenuAction::Unmute, Label::UNMUTE)
         } else {
@@ -824,6 +835,7 @@ impl SheprdWindow {
             return;
         }
         if action == WorkspaceAction::Close
+            && target.keeper == sheprd_session::Keeper::Herdr1
             && let Some(snapshot) = &self.live.snapshot
         {
             self.menu.close_check = Some(super::workspace_close::CloseCheck::start(

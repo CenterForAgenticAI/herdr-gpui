@@ -1,8 +1,8 @@
 use super::*;
 
 /// The order Herdr leaves after `reorder`, by its own two algorithms.
-fn apply(list: &[ClientShellWorkspace], reorder: &WorkspaceReorder) -> Vec<String> {
-    let mut ids: Vec<String> = list.iter().map(|w| w.workspace_id.clone()).collect();
+fn apply(list: &[Workspace], reorder: &WorkspaceReorder) -> Vec<String> {
+    let mut ids: Vec<String> = list.iter().map(|w| w.id.clone()).collect();
     match reorder {
         WorkspaceReorder::Move(params) => {
             let source = ids
@@ -95,7 +95,7 @@ fn an_anchor_missing_from_the_order_falls_back_to_the_block_move() {
     let list = list();
     let request = Plan::new(&list, "c").unwrap().request(&list, 0).unwrap();
     let mut stale = list.clone();
-    stale.retain(|w| w.workspace_id != "a");
+    stale.retain(|w| w.id != "a");
     assert!(matches!(
         request.reorder(&stale, true),
         WorkspaceReorder::MoveBlock(_)
