@@ -11,7 +11,7 @@
 //! bounded: a chat is remembered only for five seconds after a push, so no
 //! more chats than the hourly caps allow are ever kept.
 
-use super::{Notification, triggers::Kind};
+use super::Notification;
 use std::collections::{HashMap, VecDeque};
 
 /// The shortest gap between two pushes for one chat.
@@ -49,7 +49,7 @@ impl Throttle {
         now_ms: u64,
     ) -> Option<Notification> {
         self.forget(now_ms);
-        let urgent = notification.clear || notification.kind == Kind::Question;
+        let urgent = notification.clear || notification.kind.asks();
         if let Some(recent) = self.chats.get_mut(&notification.tag)
             && !urgent
             && now_ms.saturating_sub(recent.last_ms) < CHAT_INTERVAL_MS

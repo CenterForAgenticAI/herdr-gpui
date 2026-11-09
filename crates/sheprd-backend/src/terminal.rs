@@ -181,4 +181,7 @@ pub enum SurfaceUpdate {
         rows: Vec<PaneSurfacePatchRow>,
     },
     Title(String),
+    /// Whether each visible row's line goes on to the next row because the
+    /// terminal wrapped it, which a frame cannot say; sent when it changes.
+    Wraps(Vec<bool>),
 }

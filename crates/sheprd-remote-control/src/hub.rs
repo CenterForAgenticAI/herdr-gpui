@@ -763,6 +763,7 @@ pub(crate) fn layout_terminal(tab: &str, label: &str) -> Terminal {
         }],
         zoomed: false,
         agent: None,
+        agents: Vec::new(),
         convert: None,
     }
 }

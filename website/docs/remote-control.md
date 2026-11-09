@@ -81,7 +81,7 @@ Workspace headers show their pull request's number and status color, as on the d
 
 ## Notifications
 
-The installed app gets Web Push notifications when an agent asks a question or a permission, when a turn ends, and when an agent stops on an error. On iOS 16.4 and later, push reaches only an installed app (added to the Home Screen); on Android it works installed or not.
+The installed app gets Web Push notifications when an agent asks a question or a permission, when a turn ends, and when an agent stops on an error. An agent in a plain terminal tab, Herdr 1 or Herdr 2, notifies too when it starts waiting for you and when it finishes what it was doing, once that status has held for two seconds; tapping it opens the terminal. On iOS 16.4 and later, push reaches only an installed app (added to the Home Screen); on Android it works installed or not.
 
 By default a notification includes a short excerpt of the message, which can show on your phone's lock screen. To say only which chat needs you, without its text, choose **Generic** under **Notifications** in Settings, or set `notifications = "generic"` under `[remote]`. Notifications are encrypted end to end, so the push services relay them without reading them.
 
@@ -89,7 +89,7 @@ The app icon's badge counts agents that want you: those with a question, those H
 
 ## Your other machines
 
-Allowing a phone can also pair it directly with the SSH and cloud machines Sheprd connects to. The Allow step lists them under "Also pair it with these machines, so it reaches them while this computer sleeps", each ticked. For each machine you keep, Sheprd installs and starts `sheprd-remote-control` there over SSH and adds the phone. The machine needs no internet access for this. When the machine is a Mac and this one is too, Sheprd puts its own `sheprd-acp` beside the daemon, so chats started from the phone work there. A Linux machine paired from a release gets no `sheprd-acp`: install it there yourself (see [Chats on SSH hosts](chat.md#chats-on-ssh-hosts)), which the daemon finds in `~/.herdr/bin`, `~/.cargo/bin`, `~/.local/bin`, or the `PATH`.
+Allowing a phone can also pair it directly with the SSH and cloud machines Sheprd connects to. The Allow step lists them under "Also pair it with these machines, so it reaches them while this computer sleeps", each ticked. For each machine you keep, Sheprd installs and starts `sheprd-remote-control` there over SSH and adds the phone. The machine needs no internet access for this. Sheprd also puts `sheprd-acp` beside the daemon, so chats started from the phone work there: its own on a Mac paired from a Mac, and the release's static build, checked against the release's signature, on a Linux machine. Without one there (another kind of machine, or a development build), install it yourself (see [Chats on SSH hosts](chat.md#chats-on-ssh-hosts)); the daemon finds it in `~/.herdr/bin`, `~/.cargo/bin`, `~/.local/bin`, or the `PATH`.
 
 The phone then reaches each machine's own daemon directly, so it keeps them while this computer sleeps. A machine added later is offered on the phone with a **Pair** button, and Sheprd asks on the desktop first. Revoking the phone here also revokes it on every machine it was paired with from here.
 
