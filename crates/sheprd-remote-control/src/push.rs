@@ -13,6 +13,7 @@ mod encrypt;
 mod presence;
 mod send;
 mod subscription;
+mod terminals;
 mod throttle;
 mod triggers;
 mod vapid;
@@ -28,6 +29,9 @@ pub(crate) use send::{Delivery, Outcome, Sender, Urgency};
 #[cfg(test)]
 pub(crate) use send::{Topic, outcome};
 pub(crate) use subscription::Subscription;
+pub(crate) use terminals::{
+    Agents as TerminalAgents, Moved, Seen as SeenAgent, decide as decide_terminal, is_running,
+};
 pub(crate) use throttle::Throttle;
 pub use triggers::Privacy;
 pub(crate) use triggers::{Chat, Kind, Notification, decide, excerpt};

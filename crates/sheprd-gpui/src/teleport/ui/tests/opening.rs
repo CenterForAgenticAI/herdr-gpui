@@ -35,6 +35,7 @@ fn a_moves_herdr_2_tabs_open_in_the_destination_workspace(cx: &mut TestAppContex
                 Some(Location::CoreTerminal {
                     panes,
                     observe: false,
+                    ..
                 }) => Some(panes.clone()),
                 _ => None,
             })
@@ -52,10 +53,7 @@ fn another_window_finishes_a_move_whose_window_closed(cx: &mut TestAppContext) {
     let moved = Panes::single(id("t1"));
     let source = Scope::endpoint("laptop");
     let source_tab = cx.update(|_, cx| {
-        let location = Location::CoreTerminal {
-            panes: moved.clone(),
-            observe: false,
-        };
+        let location = Location::core_terminal(moved.clone(), false);
         Store::update(cx, |store| store.open(source, "w1", Some(location), None)).unwrap()
     });
     let outcome = || Outcome {

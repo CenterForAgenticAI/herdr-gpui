@@ -77,15 +77,29 @@ pub(super) fn find<'a>(view: &'a SheprdWindow, caller: &Caller) -> Result<Found<
     } else {
         &view.endpoints[index].live
     };
-    let snapshot = live
-        .snapshot
-        .as_deref()
-        .ok_or_else(|| not_found("The window has no state from that host yet"))?;
+    // A herdr-core terminal outside Herdr's workspaces is in one of
+    // herdr-core tabs alone, which has none of Herdr's state that notes,
+    // mutes, scripts, and Teleport keep, whether Herdr runs beside it or not.
+    let unsupported = || {
+        let terminal = caller
+            .terminal_id
+            .as_deref()
+            .filter(|_| caller.workspace_id.is_none())?;
+        Some(Response::error(
+            ErrorCode::Unsupported,
+            format!("herdr-core terminal {terminal} is in no Herdr workspace, which this needs"),
+        ))
+    };
+    let snapshot = live.snapshot.as_deref().ok_or_else(|| {
+        unsupported().unwrap_or_else(|| not_found("The window has no state from that host yet"))
+    })?;
     let workspace = snapshot
         .workspaces
         .iter()
         .find(|workspace| workspace.workspace_id == id)
-        .ok_or_else(|| not_found(format!("No window shows workspace {id}")))?;
+        .ok_or_else(|| {
+            unsupported().unwrap_or_else(|| not_found(format!("No window shows workspace {id}")))
+        })?;
     Ok(Found {
         index,
         snapshot,

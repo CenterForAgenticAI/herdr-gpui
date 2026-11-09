@@ -66,7 +66,7 @@ impl SheprdWindow {
         !unchanged || checkouts_changed
     }
 
-    fn live_at(&self, index: usize) -> &crate::state::LiveState {
+    pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {
         if index == self.selected_endpoint {
             &self.live
         } else {
@@ -101,6 +101,7 @@ impl SheprdWindow {
                 Some(Location::CoreTerminal {
                     panes,
                     observe: false,
+                    ..
                 }) => Some(CoreTab {
                     id: tab.id.number(),
                     panes,

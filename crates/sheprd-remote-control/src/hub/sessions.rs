@@ -370,7 +370,9 @@ pub(super) async fn merge_sources(
 /// `base` followed by each session's workspaces under its prefix. The boot
 /// stays the base's: the desktop's pull request data is keyed on it. Sessions
 /// share what [`MAX_CHATS`] leaves after the base, in order; the chats past
-/// that are left out.
+/// that are left out. A base row a session lists too, as Herdr 2 work a
+/// phone started in that session's workspace is, joins the session's row:
+/// a phone shows the first of two rows with one id.
 pub(super) fn merge(base: &Layout, sessions: &[(String, Arc<Layout>)]) -> Layout {
     let mut merged = base.clone();
     let mut room = MAX_CHATS.saturating_sub(base.chats().count());
@@ -380,6 +382,16 @@ pub(super) fn merge(base: &Layout, sessions: &[(String, Arc<Layout>)]) -> Layout
         for workspace in &mut layout.workspaces {
             workspace.chats.truncate(room);
             room -= workspace.chats.len();
+            // The base's chats were counted already.
+            if let Some(at) = merged
+                .workspaces
+                .iter()
+                .position(|row| row.id == workspace.id)
+            {
+                let shared = merged.workspaces.remove(at);
+                workspace.terminals.extend(shared.terminals);
+                workspace.chats.extend(shared.chats);
+            }
         }
         merged.connected |= layout.connected;
         merged.working += layout.working;
@@ -418,7 +430,7 @@ pub(super) fn prefix_layout(layout: &mut Layout, name: &str) {
             for pane in &mut terminal.panes {
                 pane.pane = tag(name, &pane.pane);
             }
-            if let Some(agent) = &mut terminal.agent {
+            for agent in terminal.agent.iter_mut().chain(&mut terminal.agents) {
                 agent.pane = tag(name, &agent.pane);
             }
             if let Some((pane, _)) = &mut terminal.convert {
@@ -431,6 +443,20 @@ pub(super) fn prefix_layout(layout: &mut Layout, name: &str) {
 /// The session a request's ids name, with the request as that session knows
 /// it; `None` when they name the primary's (or nothing). A request naming two
 /// sessions, or the primary and a session, is refused.
+/// A phone-facing workspace id as its session and its own id: `None` for
+/// the primary's or the app's.
+pub(super) fn split_id(id: &str) -> (Option<&str>, &str) {
+    id.strip_prefix(PREFIX)
+        .and_then(|rest| rest.split_once(':'))
+        .filter(|(name, id)| !name.is_empty() && !id.is_empty())
+        .map_or((None, id), |(name, id)| (Some(name), id))
+}
+
+/// `id` of the session `name`, as a phone sees it.
+pub(super) fn join_id(name: Option<&str>, id: &str) -> String {
+    name.map_or_else(|| id.to_owned(), |name| format!("{PREFIX}{name}:{id}"))
+}
+
 pub(super) fn owner(params: &Value) -> Result<Option<(String, Value)>> {
     let mut owner: Option<&str> = None;
     let mut primary = false;

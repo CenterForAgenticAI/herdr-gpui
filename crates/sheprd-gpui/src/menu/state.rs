@@ -153,6 +153,8 @@ pub(crate) struct MenuState {
     pub(crate) palette_resume: Option<crate::palette::Resume>,
     pub(crate) code_search: Option<crate::code_search::CodeSearch>,
     pub(crate) close: Option<crate::close_modal::CloseConfirmation>,
+    /// A herdr-core tab's or pane's menu.
+    pub(crate) core: Option<crate::core_terminals::menu::CoreMenu>,
     pub(crate) tab: Option<crate::tab_menu::TabMenu>,
     pub(crate) group: Option<crate::group_menu::GroupMenu>,
     pub(crate) host: Option<super::devices::HostMenu>,
@@ -438,6 +440,7 @@ impl MenuState {
             pr_connection: None,
             version_notice: None,
             tab: None,
+            core: None,
             group: None,
             host: None,
             pane: None,
@@ -477,6 +480,7 @@ impl MenuState {
         self.usage_scroll.set_offset(Point::default());
         self.opening_right_click = false;
         self.tab = None;
+        self.core = None;
         self.group = None;
         self.host = None;
         self.pane = None;

@@ -27,6 +27,14 @@ pub(crate) enum Host {
 }
 
 impl Host {
+    /// The device the core runs on, as notification mutes name it.
+    pub(crate) fn endpoint(&self) -> &str {
+        match self {
+            Self::Local => crate::endpoint::LOCAL,
+            Self::Remote(scope) => scope.as_str(),
+        }
+    }
+
     /// The core a workspace in `scope` starts its terminals in.
     pub(crate) fn of(scope: &Scope) -> Self {
         if scope.is_local() {
@@ -124,6 +132,39 @@ impl CoreTerminals {
         );
     }
 
+    /// `host`'s hub, which a test drives directly.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn hub_of_mut_for_test(&mut self, host: &Host) -> Option<&mut Hub> {
+        self.hub_of_mut(host)
+    }
+
+    /// Whether a terminal waits for `host`'s core to connect.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn waits_on_for_test(&self, host: &Host) -> bool {
+        self.waits_on(host)
+    }
+
+    /// Records `info` as what `host`'s core reports, as a finished list
+    /// would.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn record_for_test(&mut self, host: &Host, info: TerminalInfo) {
+        if let Some(infos) = self.infos_of_mut(host) {
+            infos.insert(info);
+        }
+    }
+
+    /// Shows `terminal` of `host`'s core in `tab`, as a restored tab would.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn show_on_host_for_test(&mut self, tab: TabId, host: Host, terminal: TerminalId) {
+        let panes = super::panes::Panes::single(terminal);
+        self.tabs
+            .insert(tab, super::TabPanes::new(host, panes, false));
+    }
+
     /// A terminal for `purpose` on `host` that started as `outcome` says,
     /// waiting to be placed.
     // Only the lifecycle tests, which need Unix sockets, use it.
@@ -151,10 +192,10 @@ impl CoreTerminals {
     pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for host in self.hosts() {
-            // This computer's stand-in shell runs agents too.
-            let listed = self.tabs.values().any(|shown| shown.host == host)
-                || (host == Host::Local
-                    && matches!(self.fallback, super::fallback::Fallback::Shown(_)));
+            // This computer's core is read while it answers, tabs or not:
+            // a phone may start a terminal there for one of its workspaces
+            // (`adopt`), and its stand-in shell runs agents too.
+            let listed = host == Host::Local || self.tabs.values().any(|shown| shown.host == host);
             let backend = listed.then(|| self.backend_of(&host).cloned()).flatten();
             if let Some(infos) = self.infos_of_mut(&host) {
                 changed |= infos.poll(backend.as_ref(), now);
@@ -186,6 +227,22 @@ impl CoreTerminals {
         }
     }
 
+    /// Whether a terminal waits for `host`'s core to connect.
+    pub(super) fn waits_on(&self, host: &Host) -> bool {
+        self.wanted.iter().any(|(_, wanted, _)| wanted == host)
+    }
+
+    /// How many agents `host`'s core last reported working, for ranking
+    /// hosts by how busy they are. The list is only kept current while the
+    /// window has a tab of that core, so without one it counts none rather
+    /// than agents that may have stopped since.
+    pub(crate) fn working(&self, host: &Host) -> u32 {
+        if !self.tabs.values().any(|shown| shown.host == *host) {
+            return 0;
+        }
+        self.infos_of(host).map_or(0, Infos::working)
+    }
+
     /// Whether `host` was found to have no herdr-core installed, so new
     /// tabs there stay with its Herdr.
     pub(crate) fn lacks_core(&self, host: &Host) -> bool {
@@ -198,10 +255,9 @@ impl CoreTerminals {
 
 impl SheprdWindow {
     /// Takes each hub's outcome. A lost connection ended the workers of its
-    /// host's panes: their views go, so the next sync joins that core again
-    /// and attaches each terminal anew; nothing is started or replayed. A
-    /// pane that held the keyboard has its tab take it back once the new
-    /// view is there.
+    /// host's panes: their views stay with their last frame dimmed, and drop
+    /// what is typed until that core answers again and each terminal is
+    /// attached anew; nothing is started or replayed.
     pub(super) fn poll_core_hubs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = self.forget_stale_core_hosts();
         for host in self.core_terminals.hosts() {
@@ -214,16 +270,23 @@ impl SheprdWindow {
             }
             changed = true;
             if connected && self.core_terminals.backend_of(&host).is_none() {
-                if let Some((tab, _)) = self.core_terminals.focused_pane(window, cx)
-                    && self.core_terminals.host_of(tab) == host
-                {
-                    self.core_terminals.focus_wanted = Some(tab);
-                }
-                let terminals = &mut self.core_terminals;
-                let tabs = &terminals.tabs;
-                terminals
+                let terminals = &self.core_terminals;
+                let fallback = (host == Host::Local)
+                    .then(|| match &terminals.fallback {
+                        super::fallback::Fallback::Shown(view) => Some(view.clone()),
+                        _ => None,
+                    })
+                    .flatten();
+                let views: Vec<_> = terminals
                     .views
-                    .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != host));
+                    .iter()
+                    .filter(|((tab, _), _)| terminals.host_of(*tab) == host)
+                    .map(|(_, view)| view.clone())
+                    .chain(fallback)
+                    .collect();
+                for view in views {
+                    view.update(cx, |view, cx| view.set_stale(cx));
+                }
             }
             let failed = match self.core_terminals.hub_of(&host).map(Hub::state) {
                 Some(State::Unavailable(error)) => Some(std::sync::Arc::clone(error)),

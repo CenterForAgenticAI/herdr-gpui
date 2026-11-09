@@ -25,7 +25,11 @@ herdr_2_terminals = true
 
 On this computer, Sheprd joins a herdr-core that is already running, or starts your own `herdr-core` or the bundled one when a Herdr 2 terminal is first needed. `herdr-core ls` lists its terminals.
 
-A Herdr 2 terminal in a workspace on an SSH host, cloud machine, or WSL distribution runs in that host's herdr-core. Sheprd opens the connection itself, the same way it reaches the host's Herdr, and runs `herdr-core connect` there, which starts the host's core when none is running. Sheprd looks for `herdr-core` on the host's `PATH`, then in `~/.local/bin` and the usual Homebrew and Nix locations. A host without herdr-core keeps its new tabs in its Herdr. If Herdr 1 is not installed, the window opens a herdr-core shell instead of asking you to install Herdr.
+A Herdr 2 terminal in a workspace on an SSH host, cloud machine, or WSL distribution runs in that host's herdr-core. Sheprd opens the connection itself, the same way it reaches the host's Herdr, and runs `herdr-core connect` there, which starts the host's core when none is running. Sheprd looks for `herdr-core` on the host's `PATH`, then in `~/.local/bin` and the usual Homebrew and Nix locations. A host without herdr-core keeps its new tabs in its Herdr. To add one, choose **Install Herdr 2** in the host's menu (right-click its header in the sidebar): Sheprd downloads the herdr-core it bundles there, checks it against its pinned checksum, and puts it in `~/.local/bin`, leaving a host's own herdr-core as it is. If Herdr 1 is not installed, the window opens a herdr-core shell instead of asking you to install Herdr.
+
+Herdr's shared `[ui]` settings apply to Herdr 2 panes too: `copy_on_select`, `mouse_scroll_lines`, and `right_click_passthrough_modifier` (a Herdr 2 pane has no pane menu yet, so its other right-clicks also reach a program that reads the mouse).
+
+A Herdr 2 pane keeps 10,000 lines of scrollback. herdr-core itself keeps each terminal's recent output, a few thousand lines, through Sheprd and herdr-core restarts, and a pane shows it again when it opens, so scrolling back after a restart works without a switch. **Restore scrollback after Herdr restarts** and Herdr's `[advanced] scrollback_limit_bytes` apply to Herdr 1 only.
 
 **Mirror Herdr 2 Pane** opens a watch-only view of the focused pane in a new tab. In the sidebar, a Herdr 2 list under the agents shows each pane of the workspace's Herdr 2 tabs with its status.
 
@@ -62,7 +66,7 @@ Drag across the terminal to select. Releasing the button copies the selection an
 
 Programs that read the mouse, such as many agent TUIs, receive your clicks and drags. **Hold Shift** to select text there instead. The first time such a program takes a drag, Sheprd shows a short reminder.
 
-Programs that copy with OSC 52 put their text on your clipboard too, with the same flash. Only bounded UTF-8 text is accepted.
+Programs that copy with OSC 52 put their text on your clipboard too, with the same flash, in Herdr 1 and Herdr 2 panes. Only bounded UTF-8 text (up to 2 MiB) is accepted, and programs can never read the clipboard this way.
 
 **Paste** is Cmd-V on macOS, Ctrl-Shift-V on Linux, and Ctrl-V (while the clipboard holds text) or Ctrl-Shift-V on Windows.
 
@@ -105,6 +109,8 @@ open_files_in = "editor"   # or "system"
 
 Paths are not links in panes on SSH hosts, whose files live on that host. On Windows, files always open in the system's application.
 
+Herdr 2 panes read links from their own screen, the same way, and a web address the terminal wrapped onto the next row opens as one link. A file opens in the editor in a new Herdr 2 pane split to the right, and quitting the editor closes it. Plugin `[[link_handlers]]` belong to Herdr 1 and see no clicks in Herdr 2 panes.
+
 ## Images
 
 Paste an image into an agent with Cmd-V. Sheprd sends it through Herdr's image bridge: the daemon writes a temporary file and pastes its path into the pane, where an agent such as OpenCode can read it as an image. Sheprd never presses Enter for you.
@@ -116,11 +122,13 @@ Paste an image into an agent with Cmd-V. Sheprd sends it through Herdr's image b
 
 On Linux, pasting needs `wl-paste` (from `wl-clipboard`) on Wayland or `xclip` on X11.
 
+Programs that show images with the kitty graphics protocol, such as `kitten icat`, show them in Herdr 1 and Herdr 2 panes alike. In a Herdr 2 pane only images sent in the output itself are shown, never a file or shared memory a program names, and an image scrolls and clears with the text around it. A Herdr 2 pane opened after an image was drawn, such as after restarting Sheprd, shows the text but not the image.
+
 ## File drops
 
 Drop files from your file manager onto a pane or popup to paste their paths there, even if another pane is focused. Paths are pasted with shell characters escaped (`/tmp/Shot\ 1.png`), separated by spaces, and Enter is never pressed. Files copied in the file manager and pasted with Cmd-V work the same way. A drop is limited to 256 paths.
 
-A live macOS screenshot thumbnail, dropped before it saves, goes through the image bridge as a pasted image does. A WSL distribution receives its own paths for the files, with nothing copied.
+Herdr 2 panes take dropped and copied files the same way. A live macOS screenshot thumbnail, dropped before it saves, goes through the image bridge as a pasted image does on a Herdr 1 pane; a Herdr 2 pane, which has no image bridge, gets its path. A WSL distribution receives its own paths for the files, with nothing copied.
 
 ## SSH file copies
 

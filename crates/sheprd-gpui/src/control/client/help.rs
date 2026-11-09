@@ -4,8 +4,9 @@ use crate::cli::control::FAMILIES;
 const COMMON: &str = "\
 Every command accepts --json, printing one JSON document, and --window ID,
 acting in that window (IDs come from `window list`). By default a command
-acts in the window showing the caller's workspace (HERDR_WORKSPACE_ID), and
-exits 5 when no window shows it; outside Herdr, in the frontmost window.
+acts in the window showing the caller's workspace (HERDR_WORKSPACE_ID), or,
+in a herdr-core terminal (HC_TERMINAL_ID), the tab holding it, and exits 5
+when no window shows it; outside both, in the frontmost window.
 Exit status: 0 done, 1 refused, 2 invalid arguments, 3 Sheprd not running,
 4 nothing yet (no notes, no event), 5 not found, 6 busy (a dialog is open),
 7 timed out, 8 unsupported on this platform or by this app version.";
@@ -17,7 +18,8 @@ sheprd browser open URL|FILE [--workspace ID] [--no-focus] [--beside|--tab]
     or the frontmost one outside Herdr. Showing the same page again from the
     same pane reuses and reloads its tab. Bare hosts such as localhost:3000
     are accepted. A file is served with the other files in its folder.
-    A file opened from a Herdr pane goes in a split next to that terminal,
+    A file opened from a Herdr pane or a herdr-core terminal goes in a split
+    next to that terminal,
     which stays in view and keeps the keyboard; a web address takes a tab of
     the group in use. --beside and --tab choose instead.
 sheprd browser reload
@@ -119,7 +121,7 @@ fn family(name: &str) -> &'static str {
             "sheprd ports [list]\n    Ports the caller's workspace's processes listen on, and forwards.\n    Listening ports are known only while show_listening_ports is on.\nsheprd ports forward|unforward PORT\n    Forward a port of the workspace's SSH host to this machine, or stop.\nsheprd ports open PORT\n    Show localhost:PORT in a browser tab, forwarding it first if remote.\nsheprd ports all\n    Every TCP port this computer's user listens on, whoever started it:\n    process, pid, directory, uptime, and the workspace that started it.\n    macOS and Linux only. Exits 4 when nothing listens.\nsheprd ports stop|pause PORT\n    Ask in Sheprd to stop (SIGTERM, then SIGKILL) or pause (SIGSTOP) the\n    processes listening on PORT of this computer. Nothing is signalled\n    until the user confirms there. Exits 6 while a dialog is open.\nsheprd ports resume PORT\n    Resume (SIGCONT) a paused process listening on PORT."
         }
         "processes" => {
-            "sheprd processes [--pane ID]\n    The processes under a pane (default HERDR_PANE_ID), with CPU and\n    memory. Runs here; Sheprd need not run."
+            "sheprd processes [--pane ID | --terminal ID]\n    The processes under a Herdr pane or a herdr-core terminal (default the\n    caller's: HC_TERMINAL_ID, else HERDR_PANE_ID), with CPU and memory.\n    Runs here; Sheprd need not run."
         }
         "usage" => "sheprd usage\n    AI plan usage on the window's selected host.",
         "security" => {

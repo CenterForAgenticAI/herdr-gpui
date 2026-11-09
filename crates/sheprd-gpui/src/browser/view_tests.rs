@@ -63,6 +63,12 @@ mod middle_click;
 /// Pages a control request opens, only in a workspace the window shows.
 mod requests;
 
+/// Pages a caller in a herdr-core terminal opens, in its tab's workspace.
+mod core_requests;
+
+/// The herdr-core shell standing in for Herdr 1 keeps its group when split.
+mod fallback_split;
+
 /// Notes a control request sends, only to a pane the window shows.
 mod requested_notes;
 
