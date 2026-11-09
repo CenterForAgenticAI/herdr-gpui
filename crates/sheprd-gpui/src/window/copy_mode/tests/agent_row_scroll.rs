@@ -31,6 +31,9 @@ fn shown(cx: &mut TestAppContext, peer: &MockPeer) -> Entity<SheprdWindow> {
     let (view, cx) = cx.add_window_view(|window, cx| {
         let mut view = fixture_window(window, cx);
         peer.prepare(&mut view, cx);
+        // `prepare` detaches, which clears the surface request; a coherent
+        // 80x24 surface needs the request flag back.
+        view.endpoints[0].initial_surface = true;
         Arc::make_mut(view.live.snapshot.as_mut().unwrap()).focused_pane_id = Some("w1:p1".into());
         view.live.status = ConnectionStatus::Connected;
         view

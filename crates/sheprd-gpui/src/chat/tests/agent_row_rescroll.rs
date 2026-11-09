@@ -55,6 +55,12 @@ fn a_shown_chat_means_a_local_transcript_rescroll(cx: &mut TestAppContext) {
         snapshot(cursor(1, 0), vec![agent(1, "Ready.")]),
         cx,
     );
+    view.update(cx, |view, _| {
+        // The classifier rescrolls only the pane the snapshot focuses, and
+        // `prepare`'s detach cleared the surface request.
+        Arc::make_mut(view.live.snapshot.as_mut().unwrap()).focused_pane_id = Some("w1:p1".into());
+        view.endpoints[0].initial_surface = true;
+    });
     view.read_with(cx, |view, _| {
         assert_eq!(
             view.agent_row_action("local", "w1:p1"),

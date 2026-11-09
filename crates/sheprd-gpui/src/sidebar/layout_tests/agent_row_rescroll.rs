@@ -77,6 +77,9 @@ fn rescroll_fixture(
         let view = cx.new(|cx| {
             let mut view = fixture_window(window, cx);
             peer.prepare(&mut view, cx);
+            // `prepare` detaches, which clears the surface request; a
+            // coherent 80x24 surface needs the request flag back.
+            view.endpoints[0].initial_surface = true;
             let mut listing = snapshot(1);
             listing.agents[0].focused = true;
             listing.panes = vec![serde_json::from_value(serde_json::json!({
