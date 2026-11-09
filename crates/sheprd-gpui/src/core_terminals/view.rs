@@ -215,10 +215,10 @@ impl CoreTerminalView {
     }
 
     /// Takes what the worker produced; true when there was a new screen.
-    /// The screen is taken before the answers, so an answer arriving
-    /// between the two wakes the next poll.
+    /// The answers come with the screen, never made from a newer one, so
+    /// a copy checks its rows against text at least as new as it read.
     pub(crate) fn poll(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let screen = self.link.mailbox.take();
+        let (screen, answers) = self.link.mailbox.take_with_answers();
         let changed = screen.is_some();
         if let Some(screen) = screen {
             let before = std::mem::replace(&mut self.screen, screen);
@@ -236,7 +236,7 @@ impl CoreTerminalView {
             }
             cx.notify();
         }
-        self.take_answers(cx);
+        self.take_answers(answers, cx);
         if self.find.is_some() {
             self.poll_find();
         }

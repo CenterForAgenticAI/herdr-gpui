@@ -53,8 +53,8 @@ impl CoreTerminalView {
     /// since an exact read's revision, or, since it was asked, output into
     /// a full history, which dropped its oldest lines, or a resize, which
     /// rewrapped them. The worker shows each output's and resize's screen
-    /// before it answers anything after it, and the screen is taken before
-    /// the answers, so the screen here is never older than the read saw.
+    /// before it answers anything after it, and the answers are taken with
+    /// the screen, so the screen here is never older than the read saw.
     fn moved(&self, reading: Reading) -> bool {
         self.screen.revision != reading.revision
             && (reading.exact || self.screen.history.full || self.screen.grid() != reading.grid)
@@ -76,8 +76,8 @@ impl CoreTerminalView {
 
     /// Hands each answer to what asked for it. Scrolls and clears answer
     /// only that they were done.
-    pub(super) fn take_answers(&mut self, cx: &mut Context<Self>) {
-        for (id, answer) in self.link.mailbox.take_answers() {
+    pub(super) fn take_answers(&mut self, answers: Vec<(u64, Answer)>, cx: &mut Context<Self>) {
+        for (id, answer) in answers {
             if self.awaits_find(id) {
                 self.find_answered(id, answer);
                 cx.notify();
