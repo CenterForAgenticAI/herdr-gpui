@@ -6,7 +6,6 @@
 use crate::{
     Core, Result, agent_name,
     backend::info,
-    convert::shell_back,
     wire::{SendText, StatusState, Terminal},
 };
 use sheprd_client::herdr::AgentKind;
@@ -58,8 +57,12 @@ pub fn agent_in_front(record: &Terminal, agent: &str) -> bool {
     if agent_name(&now).as_deref() != Some(agent) {
         return false;
     }
+    let own_program_in_front = record
+        .pid
+        .zip(record.foreground.as_ref())
+        .is_some_and(|(pid, front)| front.pid == pid);
     let program = record.argv.first().map_or("", String::as_str);
-    !shell_back(record) || AgentKind::identify(None, program, &record.argv).is_some()
+    !own_program_in_front || AgentKind::identify(None, program, &record.argv).is_some()
 }
 
 #[cfg(test)]

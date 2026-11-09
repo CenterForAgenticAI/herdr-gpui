@@ -27,6 +27,11 @@ pub enum Error {
         .0.name()
     )]
     NoSession(Agent),
+    #[error(
+        "{} is the terminal's own program, with no shell to start its chat in",
+        .0.display_name()
+    )]
+    NoShell(Agent),
     #[error("{} is not the program running in this pane", .0.display_name())]
     NotRunning(Agent),
     #[error("{} did not stop in time; it is still in its terminal", .0.display_name())]

@@ -94,11 +94,26 @@ fn runs(process: &Process, agent: Agent) -> bool {
 /// front is the terminal's own program. Any other program in front, such as
 /// one the agent's command line runs after it (`claude; less log`), must not
 /// get the chat's line.
-pub fn shell_back(record: &Terminal) -> bool {
+pub fn shell_back(record: &Terminal, agent: Agent) -> bool {
     record
         .pid
         .zip(record.foreground.as_ref())
-        .is_some_and(|(pid, front)| front.pid == pid)
+        .is_some_and(|(pid, front)| front.pid == pid && !front_runs(front, agent))
+}
+
+/// Whether the process in front is `agent`.
+fn front_runs(front: &crate::wire::Foreground, agent: Agent) -> bool {
+    AgentKind::identify(None, &front.name, &front.argv)
+        .is_some_and(|kind| kind.name() == agent.name())
+}
+
+/// Whether `agent` is the program the terminal started, so stopping it
+/// ends the terminal rather than handing it back to a shell.
+fn agent_is_program(record: &Terminal, agent: Agent) -> bool {
+    record
+        .pid
+        .zip(record.foreground.as_ref())
+        .is_some_and(|(pid, front)| front.pid == pid && front_runs(front, agent))
 }
 
 /// What Claude Code writes about one running CLI.
@@ -188,11 +203,6 @@ fn record(core: &Core, terminal: &TerminalId) -> Result<Terminal> {
         .ok_or_else(|| convert::Error::Moved.into())
 }
 
-/// What the core reports of `terminal` now.
-fn current(core: &Core, terminal: &TerminalId) -> Result<TerminalInfo> {
-    info(&record(core, terminal)?)
-}
-
 /// Blocking: moves the agent in `terminal`, which a client last saw as
 /// `agent`, into a chat run by `program`, a path on this machine. `home`
 /// holds the agent's own records. Refusals before the agent stops leave it
@@ -206,16 +216,21 @@ pub fn run(
     home: &Path,
     cancelled: &AtomicBool,
 ) -> Result<EndpointId> {
-    let found = current(core, terminal)?;
+    let raw = record(core, terminal)?;
+    let found = info(&raw)?;
     if check(&found)? != agent {
         return Err(convert::Error::Moved.into());
+    }
+    // Refused before it is touched: stopping it would end the terminal.
+    if agent_is_program(&raw, agent) {
+        return Err(convert::Error::NoShell(agent).into());
     }
     let resume = resume(&found, agent, home, |path| std::fs::read_to_string(path))?;
     let endpoint = EndpointId::random();
     let line = chat_line(&resume, program, &endpoint)?;
     convert::stop(
         agent,
-        || record(core, terminal).map(|now| shell_back(&now)),
+        || record(core, terminal).map(|now| shell_back(&now, agent)),
         || core.keys(terminal.as_str(), &["ctrl+c"]),
         || std::thread::sleep(convert::POLL),
         cancelled,

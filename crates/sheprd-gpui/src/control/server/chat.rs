@@ -122,6 +122,7 @@ fn convert_code(error: &crate::chat::ConvertError) -> ErrorCode {
             convert::Error::Line
             | convert::Error::NoCoreSession(_)
             | convert::Error::NoSession(_)
+            | convert::Error::NoShell(_)
             | convert::Error::Unknown(_)
             | convert::Error::Unsupported(_),
         )

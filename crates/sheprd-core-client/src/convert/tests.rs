@@ -171,19 +171,39 @@ fn other_agents_have_no_session_to_read_yet() {
 
 #[test]
 fn only_the_terminals_own_shell_in_front_takes_the_line() {
-    let record = |front: Option<i32>| -> Terminal {
+    // Terminal pid 100 started `program`; `front` is in front.
+    let record = |program: &str, front: Option<(i32, &str)>| -> Terminal {
         let mut value = crate::tests::terminal("t1");
+        value["argv"] = serde_json::json!([program]);
         value["pid"] = serde_json::json!(100);
-        if let Some(pid) = front {
+        if let Some((pid, name)) = front {
             value["foreground"] =
-                serde_json::json!({"pid": pid, "name": "x", "argv": ["x"], "cwd": ""});
+                serde_json::json!({"pid": pid, "name": name, "argv": [name], "cwd": ""});
         }
         serde_json::from_value(value).unwrap()
     };
     // The shell the terminal started is back.
-    assert!(shell_back(&record(Some(100))));
+    assert!(shell_back(
+        &record("zsh", Some((100, "zsh"))),
+        Agent::Claude
+    ));
     // Claude, or `less` run after it on the same line, is in front.
-    assert!(!shell_back(&record(Some(200))));
+    assert!(!shell_back(
+        &record("zsh", Some((200, "claude"))),
+        Agent::Claude
+    ));
+    assert!(!shell_back(
+        &record("zsh", Some((200, "less"))),
+        Agent::Claude
+    ));
     // Nothing in front tells nothing.
-    assert!(!shell_back(&record(None)));
+    assert!(!shell_back(&record("zsh", None), Agent::Claude));
+    // Claude is the terminal's own program: no shell will come back.
+    let own = record("claude", Some((100, "claude")));
+    assert!(!shell_back(&own, Agent::Claude));
+    assert!(agent_is_program(&own, Agent::Claude));
+    assert!(!agent_is_program(
+        &record("zsh", Some((200, "claude"))),
+        Agent::Claude
+    ));
 }
