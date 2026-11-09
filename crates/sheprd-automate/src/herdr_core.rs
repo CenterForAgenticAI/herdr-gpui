@@ -5,7 +5,10 @@
 //! only when none answers, as it starts Herdr 1's server; it never stops or
 //! upgrades it.
 
-use sheprd_client::herdr::{AgentKind, worktree};
+use sheprd_client::{
+    herdr::{AgentKind, worktree},
+    login_env,
+};
 use sheprd_core_client::{
     Core, Endpoint,
     agent::{self, Until},
@@ -89,12 +92,15 @@ impl HerdrCore {
         if let Some(core) = joined.as_ref().filter(|core| !core.is_lost()) {
             return Ok(core.clone());
         }
-        let endpoint = Endpoint::resolve(|name| std::env::var_os(name))?;
+        // The app reads `HC_SESSION` and `HC_SOCKET` from the login shell, and
+        // a service keeps few of its variables, so the daemon reads them the
+        // same way to join the core whose terminals the app opens.
+        let endpoint = Endpoint::resolve(login_env::var)?;
         let core = match Core::connect(&endpoint) {
             Ok(core) => core,
             Err(sheprd_core_client::Error::Connect { .. }) => {
                 let program = self.program.clone().or_else(find).ok_or(Error::NotFound)?;
-                sheprd_core_client::start(&program, |_| {}, START_TIMEOUT)?;
+                sheprd_core_client::start(&program, login_env::apply, START_TIMEOUT)?;
                 dial(&endpoint)?
             }
             Err(error) => return Err(error.into()),
@@ -188,7 +194,7 @@ fn dial(endpoint: &Endpoint) -> Result<Core> {
 /// this executable, as a release bundles it.
 fn find() -> Option<PathBuf> {
     let name = sheprd_core_client::PROGRAM;
-    let path = std::env::var_os("PATH")
+    let path = login_env::path()
         .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
         .unwrap_or_default();
     let home = sheprd_client::local_path::home_dir();
