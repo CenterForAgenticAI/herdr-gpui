@@ -43,6 +43,13 @@ impl SheprdWindow {
                 self.core_terminals.tabs.entry(tab.id).or_insert_with(|| {
                     TabPanes::new(Host::of(&tab.scope), panes.clone(), *observe)
                 });
+            if shown.workspace.is_none() {
+                shown.workspace = Some((scope.clone(), workspace.clone()));
+            }
+            // Only this computer's folders root a workspace's local views.
+            if shown.host == Host::Local {
+                shown.keep_root(&self.core_terminals.infos);
+            }
             missing.extend(
                 shown
                     .panes
@@ -182,6 +189,14 @@ impl SheprdWindow {
             return;
         }
         self.sync_core_views(cx);
+        // A split asked for from elsewhere, such as an editor opened from a
+        // review, brings its tab forward.
+        if self
+            .shown_core_pane(cx)
+            .is_none_or(|(shown, _)| shown != tab)
+        {
+            self.show_browser_tab(tab, window, cx);
+        }
         self.focus_core_terminal(tab, window, cx);
     }
 

@@ -1,31 +1,30 @@
 use super::*;
-use sheprd_client::protocol::ClientShellWorktree;
+use sheprd_session::{Keeper, Worktree};
 
 mod single_move;
 
-fn workspace(id: &str, tree: Option<(&str, bool)>) -> ClientShellWorkspace {
-    ClientShellWorkspace {
-        workspace_id: id.into(),
-        active_tab_id: String::new(),
-        new_workspace_cwd: String::new(),
-        number: 0,
-        label: id.into(),
-        custom_label: false,
+fn workspace(id: &str, tree: Option<(&str, bool)>) -> Workspace {
+    Workspace {
+        ahead_behind: None,
         branch: None,
-        git_ahead_behind: None,
+        cwd: String::new(),
+        custom_label: false,
+        id: id.into(),
+        keeper: Keeper::Herdr1,
+        label: id.into(),
+        status: sheprd_client::protocol::AgentStatus::Idle,
+        tabs: Vec::new(),
         tokens: Vec::new(),
-        worktree: tree.map(|(key, linked)| ClientShellWorktree {
+        worktree: tree.map(|(key, linked)| Worktree {
             key: key.into(),
             label: key.into(),
-            is_linked_worktree: linked,
+            linked,
         }),
-        focused: false,
-        agent_status: sheprd_client::protocol::AgentStatus::Idle,
     }
 }
 
 /// `a` heads a group whose child `a2` sits after `b` in daemon order.
-fn list() -> Vec<ClientShellWorkspace> {
+fn list() -> Vec<Workspace> {
     vec![
         workspace("a", Some(("repo-a", false))),
         workspace("a1", Some(("repo-a", true))),
@@ -61,7 +60,7 @@ fn a_group_s_parents_move_together_and_plain_checkouts_alone() {
     let plan = Plan::new(&list, "a2").unwrap();
     assert_eq!(plan.units, [vec![1], vec![3]]);
 
-    list.retain(|w| !w.worktree.as_ref().is_some_and(|t| t.is_linked_worktree));
+    list.retain(|w| !w.worktree.as_ref().is_some_and(|t| t.linked));
     let plan = Plan::new(&list, "a3").unwrap();
     assert_eq!(plan.units, [vec![0], vec![1], vec![2], vec![3]]);
     assert_eq!(plan.dragged, 3);

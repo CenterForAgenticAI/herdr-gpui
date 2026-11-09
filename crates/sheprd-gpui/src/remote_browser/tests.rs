@@ -8,6 +8,10 @@ mod line_endings;
 #[cfg(unix)]
 mod shim;
 
+/// The shim in a Herdr 2 terminal, with a fake `herdr-core`.
+#[cfg(unix)]
+mod shim_core;
+
 /// The scripts that put the shim and the skill on a host.
 #[cfg(unix)]
 mod install;

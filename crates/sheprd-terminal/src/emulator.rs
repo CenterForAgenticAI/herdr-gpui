@@ -14,7 +14,8 @@ use crate::{
 use alacritty_terminal::{
     Term,
     grid::{self, Dimensions},
-    term::{Config, Osc52, TermMode},
+    index::{Column, Line},
+    term::{Config, Osc52, TermMode, cell::Flags},
     vte::ansi::{CursorShape, CursorStyle, Processor, Timeout},
 };
 use sheprd_backend::ScrollMetrics;
@@ -233,6 +234,34 @@ impl Emulator {
             rows: self.size.rows(),
             full: grid.history_size() >= history_limit(self.size, self.scrollback_lines),
         }
+    }
+
+    /// How many rows each line takes, from the oldest in history down to
+    /// the screen's last row: a line wrapped over three rows counts 3.
+    /// Comparing it across a resize tells where rewrapped rows went.
+    pub fn line_rows(&self) -> Vec<u16> {
+        let grid = self.term.grid();
+        let Some(last) = grid.columns().checked_sub(1) else {
+            return Vec::new();
+        };
+        let history = i32::try_from(grid.history_size()).unwrap_or(i32::MAX);
+        let rows = i32::try_from(grid.screen_lines()).unwrap_or(i32::MAX);
+        let mut lines = Vec::new();
+        let mut current = 0u16;
+        for line in -history..rows {
+            current = current.saturating_add(1);
+            if !grid[Line(line)][Column(last)]
+                .flags
+                .contains(Flags::WRAPLINE)
+            {
+                lines.push(current);
+                current = 0;
+            }
+        }
+        if current > 0 {
+            lines.push(current);
+        }
+        lines
     }
 
     pub fn take_events(&mut self) -> Vec<Event> {

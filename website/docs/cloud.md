@@ -17,7 +17,7 @@ A cloud machine is a Linux machine running its own Herdr daemon, saved as a devi
 
 Accounts live in **Settings > Cloud devices**. Once a provider is set up, it appears under **Cloud** in **Add Device…**; until then its **Add provider** tile opens its Settings card. API keys and tokens are kept in your system credential store, not the config file, and stay on your computer.
 
-Most providers' forms have an **Install Herdr** switch, on by default. It is the approval to run Herdr's published installer on the new machine; this is the only remote installation Sheprd performs, and reconnecting never installs anything.
+Most providers' forms have an **Install Herdr** switch, on by default. It is the approval to run Herdr's published installer on the new machine and then to add the herdr-core (Herdr 2) every Sheprd release bundles, downloaded there and checked against its pinned checksum, into `~/.local/bin` unless the machine already has a herdr-core. A core that cannot be installed leaves Herdr working, and the machine's new tabs stay Herdr tabs. This is the only remote installation Sheprd performs, and reconnecting never installs anything.
 
 ## Providers
 
@@ -115,7 +115,7 @@ COPY setup.sh /usr/local/bin/project-setup
 
 Without one, a dev container is used: `.devcontainer/devcontainer.json` (or `.devcontainer.json`), and the Dockerfile or `image` it names. Only the image is built; dev container features, lifecycle scripts, and Docker Compose are not.
 
-Sheprd adds a last layer that installs Herdr (the image needs `curl`). Clones and worktrees of one repository share an image, and any change to the Dockerfile or the files it copies builds a new one. A base image tag that moves upstream does not: pin a digest, or use **Reset**.
+Sheprd adds a last layer that installs Herdr and the pinned herdr-core (the image needs `curl`, and `sha256sum` or `shasum` for the core; an image without them still builds, without herdr-core). Clones and worktrees of one repository share an image, and any change to the Dockerfile or the files it copies builds a new one. A base image tag that moves upstream does not: pin a digest, or use **Reset**.
 
 **Build sandbox images** in a workspace's menu builds ahead. The Container and Daytona cards list each project's image with **Log**, **Build now**, and **Reset**. Daytona images cannot `COPY` or `ADD` files from the project yet.
 

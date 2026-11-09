@@ -15,6 +15,7 @@ mod missing;
 mod pause;
 mod rate_indicator;
 mod shared;
+mod undecided_merge;
 
 /// The view a [`Peer`] starts in: this machine, read with the fixture account.
 fn local() -> crate::pull_request::View {

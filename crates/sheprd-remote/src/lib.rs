@@ -20,6 +20,7 @@ pub mod coder;
 pub mod config;
 #[cfg(feature = "container")]
 pub mod container;
+pub mod core_install;
 #[cfg(any(
     feature = "azure",
     feature = "boat",

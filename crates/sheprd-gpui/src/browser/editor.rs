@@ -4,6 +4,7 @@ use super::{GroupId, Location, Pick, Store, Tab, TabId, view::store};
 use crate::i18n::fl;
 use crate::{SheprdWindow, window::Flash};
 use gpui::{prelude::*, *};
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Editor {
@@ -37,27 +38,37 @@ impl Editor {
 impl SheprdWindow {
     /// The starting folder belongs to the selected host, so only a local
     /// workspace may send it to a server on this computer.
-    pub(super) fn local_editor_root(&self) -> Option<&str> {
+    pub(super) fn local_editor_root(&self) -> Option<Cow<'_, str>> {
         let endpoint = self.endpoints.get(self.selected_endpoint)?;
         if endpoint.connection.target.is_remote() {
             return None;
         }
         self.workspace_root()
-            .filter(|root| std::path::Path::new(root).is_absolute())
+            .filter(|root| std::path::Path::new(root.as_ref()).is_absolute())
     }
 
     /// The folder the focused workspace started in on its SSH host, which
     /// runs `/bin/sh`: an absolute POSIX path, whatever this computer's
     /// paths look like.
-    pub(super) fn host_editor_root(&self) -> Option<&str> {
+    pub(super) fn host_editor_root(&self) -> Option<Cow<'_, str>> {
         self.workspace_root().filter(|root| root.starts_with('/'))
     }
 
     /// The folder the focused workspace started in, on its own host, as its
-    /// first tab's first pane reports it.
-    fn workspace_root(&self) -> Option<&str> {
+    /// first tab's first pane reports it: a Herdr tab's, else a herdr-core
+    /// tab's on this computer.
+    fn workspace_root(&self) -> Option<Cow<'_, str>> {
         let (_, workspace) = self.browser_key()?;
-        crate::palette::launch_root(self.live.snapshot.as_deref()?, &workspace)
+        let herdr = self
+            .live
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| crate::palette::launch_root(snapshot, &workspace));
+        match herdr {
+            Some(root) => Some(Cow::Borrowed(root)),
+            None if !self.selected_is_remote() => self.core_launch_root().map(Cow::Owned),
+            None => None,
+        }
     }
 
     pub(super) fn editor_tab_id(&self, editor: Editor, cx: &App) -> Option<TabId> {

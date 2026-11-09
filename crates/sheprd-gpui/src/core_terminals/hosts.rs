@@ -15,7 +15,7 @@ use gpui::{Context, Window};
 use sheprd_backend::{TerminalId, TerminalInfo};
 use sheprd_client::ConnectTarget;
 use sheprd_core_client::CoreBackend;
-use std::time::Instant;
+use std::{collections::VecDeque, time::Instant};
 
 /// The core a tab's terminals run in.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -43,6 +43,11 @@ pub(super) struct Remote {
     pub(super) infos: Infos,
     /// The saved device the hub dials, to tell when it was edited.
     pub(super) target: ConnectTarget,
+    /// Browser request labels, by terminal, this window never serves (again):
+    /// those already there when it first listed the core, those left on a
+    /// terminal it did not show, and those it served and is removing.
+    /// `None` until the first list.
+    pub(super) old_requests: Option<std::collections::HashSet<(TerminalId, String)>>,
 }
 
 impl CoreTerminals {
@@ -101,16 +106,22 @@ impl CoreTerminals {
 
     /// Uses `hub` for the core of the host `scope` names, as the first ask
     /// for it would, so a test never dials a real host.
-    // Only the lifecycle tests, which need Unix sockets, use it.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn set_remote_hub_for_test(
         &mut self,
         scope: Scope,
         target: ConnectTarget,
         hub: Hub,
     ) {
-        let infos = Infos::default();
-        self.remote.insert(scope, Remote { hub, infos, target });
+        self.remote.insert(
+            scope,
+            Remote {
+                hub,
+                infos: Infos::default(),
+                old_requests: None,
+                target,
+            },
+        );
     }
 
     /// A terminal for `purpose` on `host` that started as `outcome` says,
@@ -140,7 +151,10 @@ impl CoreTerminals {
     pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for host in self.hosts() {
-            let listed = self.tabs.values().any(|shown| shown.host == host);
+            // This computer's stand-in shell runs agents too.
+            let listed = self.tabs.values().any(|shown| shown.host == host)
+                || (host == Host::Local
+                    && matches!(self.fallback, super::fallback::Fallback::Shown(_)));
             let backend = listed.then(|| self.backend_of(&host).cloned()).flatten();
             if let Some(infos) = self.infos_of_mut(&host) {
                 changed |= infos.poll(backend.as_ref(), now);
@@ -162,13 +176,7 @@ impl CoreTerminals {
         let tabs = &self.tabs;
         self.views
             .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != *host));
-        if self
-            .wanted
-            .as_ref()
-            .is_some_and(|(_, wanted, _, _)| wanted == host)
-        {
-            self.wanted = None;
-        }
+        self.wanted.retain(|(_, wanted, _, _)| wanted != host);
         if self
             .starting
             .as_ref()
@@ -221,16 +229,17 @@ impl SheprdWindow {
                 Some(State::Unavailable(error)) => Some(std::sync::Arc::clone(error)),
                 _ => None,
             };
-            let wanted_here = self
-                .core_terminals
-                .wanted
-                .as_ref()
-                .is_some_and(|(_, wanted, _, _)| *wanted == host);
-            if let Some(error) = failed
-                && wanted_here
-                && let Some((purpose, ..)) = self.core_terminals.wanted.take()
-            {
-                self.core_unavailable(purpose, &error, window, cx);
+            // Every terminal waiting for a core that cannot start is
+            // dropped, and the user is told once.
+            if let Some(error) = failed {
+                let (here, others) =
+                    std::mem::take(&mut self.core_terminals.wanted)
+                        .into_iter()
+                        .partition::<VecDeque<_>, _>(|(_, wanted, _, _)| *wanted == host);
+                self.core_terminals.wanted = others;
+                if let Some((purpose, ..)) = here.into_iter().next() {
+                    self.core_unavailable(purpose, &error, window, cx);
+                }
             }
         }
         if changed {
@@ -280,6 +289,7 @@ impl SheprdWindow {
                 Remote {
                     hub: Hub::remote(target.clone()),
                     infos: Infos::default(),
+                    old_requests: None,
                     target,
                 },
             );

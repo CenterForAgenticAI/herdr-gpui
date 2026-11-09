@@ -140,6 +140,7 @@ pub fn install(settings: &Settings, ready: &Ready, cancelled: impl Fn() -> bool)
     if !install::installed(ssh(settings, ready)?, &cancelled)? {
         return Err(cloud::Error::Install(install::Failure::Missing).into());
     }
+    install::add_core(ssh(settings, ready), &cancelled)?;
     Ok(())
 }
 
@@ -265,6 +266,8 @@ fn finish(
         }
         report(cloud::Step::InstallingHerdr);
         install(settings, &ready, cancelled)?;
+    } else if request.install {
+        install::add_core(ssh(settings, &ready), &cancelled)?;
     }
     let label = if request.label.is_empty() {
         &ready.name

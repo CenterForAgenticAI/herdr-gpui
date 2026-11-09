@@ -14,7 +14,7 @@ use std::{
     io::{self, Write},
 };
 
-pub(super) use names::Names;
+pub(super) use names::{Names, repository_name};
 const MAX_BYTES: usize = 1024 * 1024;
 const MAX_TABS: usize = 256;
 

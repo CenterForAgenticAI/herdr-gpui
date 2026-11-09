@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn hierarchy_uses_git_metadata_and_emits_each_workspace_once() {
-    let mut workspaces = layout_tests::snapshot(7).workspaces;
+    let mut workspaces = crate::session_model::of_snapshot(&layout_tests::snapshot(7)).workspaces;
     for workspace in &mut workspaces {
         workspace.worktree = None;
         workspace.label = "same label".into();
@@ -16,10 +16,10 @@ fn hierarchy_uses_git_metadata_and_emits_each_workspace_once() {
         (5, "/other/.git", false),
         (6, "/orphan/.git", true),
     ] {
-        workspaces[index].worktree = Some(sheprd_client::protocol::ClientShellWorktree {
+        workspaces[index].worktree = Some(sheprd_session::Worktree {
             key: key.into(),
             label: "same repo name".into(),
-            is_linked_worktree: linked,
+            linked,
         });
     }
     workspaces[2].branch = Some("develop".into());
@@ -43,11 +43,11 @@ fn hierarchy_uses_git_metadata_and_emits_each_workspace_once() {
     assert!(workspace_entries(&[]).is_empty());
 }
 
-fn worktree(key: &str, linked: bool) -> Option<sheprd_client::protocol::ClientShellWorktree> {
-    Some(sheprd_client::protocol::ClientShellWorktree {
+fn worktree(key: &str, linked: bool) -> Option<sheprd_session::Worktree> {
+    Some(sheprd_session::Worktree {
         key: key.into(),
         label: "repo".into(),
-        is_linked_worktree: linked,
+        linked,
     })
 }
 
@@ -56,7 +56,7 @@ fn worktree(key: &str, linked: bool) -> Option<sheprd_client::protocol::ClientSh
 /// worktree turns a repository into a group.
 #[test]
 fn every_plain_checkout_is_a_parent_and_only_linked_worktrees_form_groups() {
-    let mut workspaces = layout_tests::snapshot(6).workspaces;
+    let mut workspaces = crate::session_model::of_snapshot(&layout_tests::snapshot(6)).workspaces;
     for workspace in &mut workspaces {
         workspace.worktree = None;
     }
@@ -107,10 +107,10 @@ fn every_plain_checkout_is_a_parent_and_only_linked_worktrees_form_groups() {
 /// its group, under any parent of its repository.
 #[test]
 fn unavailable_checkouts_keep_their_saved_group() {
-    let mut workspaces = layout_tests::snapshot(7).workspaces;
+    let mut workspaces = crate::session_model::of_snapshot(&layout_tests::snapshot(7)).workspaces;
     for index in [4, 5] {
         workspaces[index].branch = None;
-        workspaces[index].new_workspace_cwd = "/missing/checkout".into();
+        workspaces[index].cwd = "/missing/checkout".into();
     }
     let expected = vec![
         (0, false),
@@ -125,7 +125,7 @@ fn unavailable_checkouts_keep_their_saved_group() {
     assert_eq!(workspace_label(&workspaces[4], true), "agent-launcher");
     // An unavailable parent is still a parent.
     workspaces[3].branch = None;
-    workspaces[3].new_workspace_cwd = "/missing/main".into();
+    workspaces[3].cwd = "/missing/main".into();
     assert_eq!(workspace_entries(&workspaces), expected);
     // Without any parent open, restored linked worktrees stand alone.
     workspaces[3].worktree = None;
@@ -137,8 +137,8 @@ fn unavailable_checkouts_keep_their_saved_group() {
 
 #[test]
 fn collapse_uses_repository_identity_without_mutating_selection() {
-    let mut workspaces = layout_tests::snapshot(7).workspaces;
-    workspaces[4].focused = true;
+    let mut workspaces = crate::session_model::of_snapshot(&layout_tests::snapshot(7)).workspaces;
+    workspaces[4].label = "renamed".into();
     let before = workspaces.clone();
     let collapsed = std::collections::HashSet::from([layout_tests::REPO_KEY.into()]);
     let entries = super::super::visible_workspace_entries(&workspaces, &collapsed);
@@ -169,7 +169,9 @@ fn collapse_uses_repository_identity_without_mutating_selection() {
 
 #[test]
 fn child_labels_follow_upstream_custom_label_and_branch_rules() {
-    let mut workspace = layout_tests::snapshot(1).workspaces.remove(0);
+    let mut workspace = crate::session_model::of_snapshot(&layout_tests::snapshot(1))
+        .workspaces
+        .remove(0);
     workspace.branch = Some("worktree/fix-sidebar".into());
     assert_eq!(workspace_label(&workspace, true), "fix-sidebar");
     assert_eq!(workspace_label(&workspace, false), "herdr");

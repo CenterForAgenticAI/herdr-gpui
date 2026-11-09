@@ -16,6 +16,7 @@
 //! `ports open` does.
 // i18n: migrated
 
+mod core;
 mod install;
 mod window;
 
