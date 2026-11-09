@@ -18,6 +18,7 @@ fn request(
                 daemon: daemon.map(std::path::Path::new),
                 workspace,
                 pane: Some("w0:p1"),
+                terminal: None,
             };
             view.open_requested_browser_tab(
                 &target,
@@ -133,6 +134,7 @@ fn beside_with(
                 daemon: None,
                 workspace: Some(workspace),
                 pane: Some("p0"),
+                terminal: None,
             };
             view.open_requested_browser_tab(
                 &target,
@@ -211,6 +213,7 @@ fn a_page_beside_a_workspace_not_shown_opens_as_a_tab(cx: &mut gpui::TestAppCont
                 daemon: None,
                 workspace: Some("w1"),
                 pane: Some("p1"),
+                terminal: None,
             };
             view.open_requested_browser_tab(
                 &target,

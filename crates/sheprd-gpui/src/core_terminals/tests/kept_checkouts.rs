@@ -42,10 +42,8 @@ fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestCont
                     linked: true,
                 }),
             );
-            let location = Location::CoreTerminal {
-                panes: Panes::single(TerminalId::new("t1").unwrap()),
-                observe: false,
-            };
+            let location =
+                Location::core_terminal(Panes::single(TerminalId::new("t1").unwrap()), false);
             view.open_kept_workspace(None, Path::new(FOLDER), location, window, cx)
         })
     });

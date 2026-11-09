@@ -103,9 +103,8 @@ pub(super) fn list(view: &SheprdWindow, caller: &Caller) -> Response {
         .endpoints
         .get(place.index)
         .and_then(|endpoint| Daemon::of(&endpoint.connection.target));
-    let listening: Vec<PortInfo> = daemon
-        .as_ref()
-        .and_then(|daemon| view.listening_ports.get(daemon, &place.workspace))
+    let listening: Vec<PortInfo> = view
+        .listed_ports(place.index, &place.workspace)
         .map(|listed| {
             listed
                 .ports
@@ -258,11 +257,8 @@ fn start_open(
     // A listed port opens as clicking it in the status bar does, through a
     // tunnel when it is on a remote host.
     let link = view
-        .endpoints
-        .get(place.index)
-        .and_then(|endpoint| Daemon::of(&endpoint.connection.target))
-        .and_then(|daemon| {
-            let listed = view.listening_ports.get(&daemon, &place.workspace)?;
+        .listed_ports(place.index, &place.workspace)
+        .and_then(|listed| {
             let port = listed.ports.iter().find(|listed| listed.number == port)?;
             port.link(listed.origin)
         });

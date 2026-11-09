@@ -1,12 +1,13 @@
 //! `processes`, answered by this process: the tree under a pane with CPU and
 //! memory, sampled here as the app's process list samples it. Herdr's own
-//! `pane process-info` names the pane's processes; this adds their tree and
-//! usage. Only a daemon on this machine is asked.
+//! `pane process-info`, or herdr-core's terminal list, names the pane's
+//! processes; this adds their tree and usage. Only a daemon or core on this
+//! machine is asked.
 use super::Output;
 use crate::control::client::hosts::bytes;
 use crate::{
     control::{ErrorCode, client::env_id},
-    processes::{Daemon, Listing, Update, Watch},
+    processes::{Daemon, Listing, Source, Update, Watch},
 };
 use serde::Serialize;
 use std::{
@@ -139,25 +140,75 @@ fn sample(watch: &Watch, wait: Duration) -> crate::Result<Listing> {
     }
 }
 
-pub(crate) fn processes(pane: Option<&str>) -> crate::Result<Output> {
-    let Some(pane) = pane.map(str::to_owned).or_else(|| env_id("HERDR_PANE_ID")) else {
-        return Err(crate::control::Error::Rejected {
-            code: ErrorCode::InvalidRequest,
-            message: "Name a pane with --pane ID, or run this in a Herdr pane".into(),
-        }
-        .into());
+/// Which pane to list: one named on the command line, else the caller's own.
+#[derive(Debug, PartialEq, Eq)]
+enum Pane {
+    Herdr(String),
+    Core(String),
+}
+
+/// The pane `--pane` or `--terminal` names, else the caller's: a herdr-core
+/// terminal's `HC_TERMINAL_ID` first, since a terminal started from a Herdr
+/// pane inherits that pane's `HERDR_PANE_ID` while running elsewhere.
+fn chosen(
+    pane: Option<&str>,
+    terminal: Option<&str>,
+    var: impl Fn(&str) -> Option<String>,
+) -> crate::Result<Pane> {
+    let refused = |message: &str| crate::control::Error::Rejected {
+        code: ErrorCode::InvalidRequest,
+        message: message.into(),
     };
-    // Herdr's CLI, which this asks, finds the caller's own daemon from the
-    // environment Herdr gave the pane, as it does when an agent runs it.
-    let Some(daemon) = Daemon::for_target(&sheprd_client::ConnectTarget::Local) else {
-        return Err(crate::control::Error::Rejected {
-            code: ErrorCode::Unsupported,
-            message: "Listing a pane's processes needs Linux or macOS".into(),
+    match (pane, terminal) {
+        (Some(_), Some(_)) => Err(refused("Name either --pane or --terminal, not both").into()),
+        (Some(pane), None) => Ok(Pane::Herdr(pane.to_owned())),
+        (None, Some(terminal)) => Ok(Pane::Core(terminal.to_owned())),
+        (None, None) => var("HC_TERMINAL_ID")
+            .map(Pane::Core)
+            .or_else(|| var("HERDR_PANE_ID").map(Pane::Herdr))
+            .ok_or_else(|| {
+                refused(
+                    "Name a pane with --pane ID or a herdr-core terminal with --terminal ID, \
+                     or run this in one",
+                )
+                .into()
+            }),
+    }
+}
+
+/// The core a terminal belongs to: the one a herdr-core terminal names in
+/// `HC_TERMINAL_SOCKET`, else the one `hc` would reach from here.
+fn core_endpoint() -> crate::Result<sheprd_core_client::Endpoint> {
+    let terminal = std::env::var_os("HC_TERMINAL_SOCKET").filter(|socket| !socket.is_empty());
+    sheprd_core_client::Endpoint::resolve(|name| match name {
+        "HC_SOCKET" => terminal.clone().or_else(|| std::env::var_os(name)),
+        _ => std::env::var_os(name),
+    })
+    .map_err(|source| crate::processes::Error::Core(source).into())
+}
+
+pub(crate) fn processes(pane: Option<&str>, terminal: Option<&str>) -> crate::Result<Output> {
+    let source = match chosen(pane, terminal, env_id)? {
+        Pane::Core(terminal) => Source::Core {
+            endpoint: core_endpoint()?,
+            terminal,
+        },
+        // Herdr's CLI, which this asks, finds the caller's own daemon from
+        // the environment Herdr gave the pane, as it does when an agent runs it.
+        Pane::Herdr(pane) => {
+            let Some(daemon) = Daemon::for_target(&sheprd_client::ConnectTarget::Local) else {
+                return Err(crate::control::Error::Rejected {
+                    code: ErrorCode::Unsupported,
+                    message: "Listing a Herdr pane's processes needs Linux or macOS".into(),
+                }
+                .into());
+            };
+            Source::Herdr { daemon, pane }
         }
-        .into());
     };
-    let watch = Watch::start(daemon, pane.clone())?;
-    let tree = Tree::new(&pane, &sample(&watch, WAIT)?);
+    let name = source.name().to_owned();
+    let watch = Watch::start(source)?;
+    let tree = Tree::new(&name, &sample(&watch, WAIT)?);
     Output::data(text(&tree), &tree)
 }
 
