@@ -105,6 +105,12 @@ impl CoreTerminals {
         self.infos_of(&self.tabs.get(&tab)?.host)?.get(terminal)
     }
 
+    /// Whether `tab` types into its terminals, on any host: a tab rather
+    /// than a watch-only mirror.
+    pub(crate) fn types_into(&self, tab: TabId) -> bool {
+        self.tabs.get(&tab).is_some_and(|shown| !shown.observe)
+    }
+
     /// The core of `host`, while it answers.
     pub(crate) fn host_backend(&self, host: &Host) -> Option<&CoreBackend> {
         self.backend_of(host)

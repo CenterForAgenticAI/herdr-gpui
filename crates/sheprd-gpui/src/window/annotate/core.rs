@@ -123,7 +123,8 @@ impl SheprdWindow {
             let terminal = view.read(cx).terminal().clone();
             Some((terminals.tab_of(&terminal)?, terminal))
         })?;
-        if !terminals.drives(tab) {
+        // A mirror types into nothing; a tab on another host's core does.
+        if !terminals.types_into(tab) {
             return None;
         }
         let host = terminals.host_of(tab);
