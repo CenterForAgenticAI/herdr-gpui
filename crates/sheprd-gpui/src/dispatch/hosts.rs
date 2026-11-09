@@ -5,6 +5,7 @@
 use super::{Candidate, History, Load, Picker, Repository, Sandbox, Setup};
 use crate::{
     SheprdWindow,
+    core_terminals::Host,
     i18n::fl,
     menu::Page,
     teleport::{FreshOrigin, HostRepositories, Place, host_for, open_repositories},
@@ -90,7 +91,11 @@ impl SheprdWindow {
                     online: snapshot.is_some(),
                     current: index == self.selected_endpoint,
                     load,
-                    working: snapshot.map_or(0, working),
+                    // Agents in Herdr's panes and in the host's herdr-core.
+                    working: snapshot.map_or(0, working).saturating_add(
+                        self.core_terminals
+                            .working(&Host::of(&crate::browser::scope(endpoint))),
+                    ),
                     repository: repository(snapshot, repo),
                     picks: history.map_or(0, |history| history.picks(repo, &endpoint.id)),
                 }
