@@ -473,7 +473,8 @@ impl Render for SheprdRegion {
 }
 
 /// Sends `SPIKE_DRIVE` to the view, steps apart by `;` a second after each
-/// other: `keys:a b enter`, `drag:x1,y1,x2,y2`, `hover:x,y`, or `scroll:x,y,by`.
+/// other: `keys:a b enter`, `drag:x1,y1,x2,y2`, `hover:x,y`, `rclick:x,y`, or
+/// `scroll:x,y,by`.
 #[cfg(feature = "integration-test")]
 fn drive(view: &AnyView, window: &Window, cx: &mut App) {
     use crate::embed::Drive;
@@ -500,6 +501,9 @@ fn drive(view: &AnyView, window: &Window, cx: &mut App) {
         } else if let Some(at) = step.strip_prefix("hover:") {
             let [x, y] = numbers(at)[..] else { continue };
             Drive::Hover { at: (x, y) }
+        } else if let Some(at) = step.strip_prefix("rclick:") {
+            let [x, y] = numbers(at)[..] else { continue };
+            Drive::RightClick { at: (x, y) }
         } else {
             let [x1, y1, x2, y2] = numbers(step.trim_start_matches("drag:"))[..] else {
                 continue;

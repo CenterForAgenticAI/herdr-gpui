@@ -277,6 +277,8 @@ pub enum Drive {
     Drag { from: (f32, f32), to: (f32, f32) },
     /// Moves the pointer to `at`.
     Hover { at: (f32, f32) },
+    /// Presses and releases the right button at `at`, as a context click.
+    RightClick { at: (f32, f32) },
     /// Scrolls by `y` pixels at `at`; negative goes down the content.
     Scroll { at: (f32, f32), y: f32 },
     /// Types each keystroke in turn, a space between them.
@@ -345,6 +347,36 @@ pub fn drive(view: AnyView, input: Drive, delay: Duration, window: &Window, cx: 
                             "drive: terminal geometry"
                         );
                     }
+                }
+                Drive::RightClick { at } => {
+                    let position = point(px(at.0), px(at.1));
+                    window.dispatch_event(
+                        PlatformInput::MouseMove(MouseMoveEvent {
+                            position,
+                            pressed_button: None,
+                            modifiers: Modifiers::default(),
+                        }),
+                        cx,
+                    );
+                    window.dispatch_event(
+                        PlatformInput::MouseDown(MouseDownEvent {
+                            button: MouseButton::Right,
+                            position,
+                            modifiers: Modifiers::default(),
+                            click_count: 1,
+                            first_mouse: false,
+                        }),
+                        cx,
+                    );
+                    window.dispatch_event(
+                        PlatformInput::MouseUp(MouseUpEvent {
+                            button: MouseButton::Right,
+                            position,
+                            modifiers: Modifiers::default(),
+                            click_count: 1,
+                        }),
+                        cx,
+                    );
                 }
                 Drive::Hover { at } => {
                     window.dispatch_event(
