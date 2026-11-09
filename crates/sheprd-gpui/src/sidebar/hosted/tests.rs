@@ -196,3 +196,21 @@ fn each_row_names_its_device(cx: &mut TestAppContext) {
     assert_eq!(state.main["agents"][0]["endpoint"], crate::endpoint::LOCAL);
     assert!(state.main["build"]["worktree"].is_boolean());
 }
+
+#[gpui::test]
+fn hiding_agents_hides_the_agents_list(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    view.update(cx, |view, cx| {
+        view.config.show_agents = true;
+        view.config.agents_placement = crate::config::AgentsPlacement::Panel;
+        assert_eq!(view.hosted_state(cx).main["agents_list"], true);
+        let before = view.hosted_stamp();
+        view.config.show_agents = false;
+        assert!(view.hosted_stamp() != before);
+        assert_eq!(view.hosted_state(cx).main["agents_list"], false);
+        // Agents under their workspaces leave no list of their own.
+        view.config.show_agents = true;
+        view.config.agents_placement = crate::config::AgentsPlacement::Nested;
+        assert_eq!(view.hosted_state(cx).main["agents_list"], false);
+    });
+}

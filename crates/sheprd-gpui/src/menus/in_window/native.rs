@@ -2,7 +2,6 @@
 //! This exercises native layout/painting, not compositor-delivered input or IME.
 
 use super::*;
-use crate::window::main_window::MainWindow;
 use anyhow::{Context as _, Result, ensure};
 use std::time::Duration;
 
@@ -12,7 +11,7 @@ async fn settle(cx: &mut AsyncApp) {
         .await;
 }
 
-fn key(handle: MainWindow, key: &str, cx: &mut AsyncApp) -> Result<()> {
+fn key(handle: WindowHandle<SheprdWindow>, key: &str, cx: &mut AsyncApp) -> Result<()> {
     AnyWindowHandle::from(handle).update(cx, |_, window, cx| {
         let event = KeyDownEvent {
             keystroke: crate::keymap::parse_keystroke(key)?,
@@ -24,7 +23,7 @@ fn key(handle: MainWindow, key: &str, cx: &mut AsyncApp) -> Result<()> {
     })?
 }
 
-pub(crate) async fn run(handle: MainWindow, cx: &mut AsyncApp) -> Result<()> {
+pub(crate) async fn run(handle: WindowHandle<SheprdWindow>, cx: &mut AsyncApp) -> Result<()> {
     for width in [1200., 360.] {
         handle.update(cx, |view, window, cx| {
             view.dismiss_menu(window, cx);

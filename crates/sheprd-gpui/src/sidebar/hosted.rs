@@ -68,6 +68,7 @@ pub struct Palette {
 #[derive(Clone)]
 pub struct Stamp {
     agent_sort: AgentSort,
+    agents_list: bool,
     connected: bool,
     /// Every device's snapshot and folds; see `hosted_devices_stamp`.
     devices: u64,
@@ -89,6 +90,7 @@ impl PartialEq for Stamp {
         };
         same_snapshot
             && self.agent_sort == other.agent_sort
+            && self.agents_list == other.agents_list
             && self.connected == other.connected
             && self.devices == other.devices
             && self.metrics == other.metrics
@@ -219,6 +221,7 @@ impl SheprdWindow {
     pub(crate) fn hosted_stamp(&self) -> Stamp {
         Stamp {
             agent_sort: self.agent_sort,
+            agents_list: self.hosted_agents_list(),
             connected: self.live.status.is_connected(),
             devices: self.hosted_devices_stamp(),
             panel: self.activity_panel(),
@@ -262,6 +265,13 @@ impl SheprdWindow {
                 Some(agent_state(agent, snapshot, shows, (&endpoint.id, host)))
             })
             .collect()
+    }
+
+    /// Whether the sidebar shows the agents list: agents shown, and listed
+    /// apart rather than under their workspaces.
+    fn hosted_agents_list(&self) -> bool {
+        self.config.show_agents
+            && self.config.agents_placement == crate::config::AgentsPlacement::Panel
     }
 
     /// The window's state for a host's layout.
@@ -311,6 +321,9 @@ impl SheprdWindow {
             },
             main: json!({
                 "agents": self.hosted_agents(),
+                // Whether the sidebar lists agents in a list of their own,
+                // as the window's own sidebar does.
+                "agents_list": self.hosted_agents_list(),
                 "agent_sort": match self.agent_sort {
                     AgentSort::Grouped => "grouped",
                     AgentSort::Priority => "priority",

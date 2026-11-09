@@ -21,12 +21,14 @@ return mod {
 		end
 		local rows = {}
 		for _, agent in sheprd.agents do
-			if agent.workspace == focused.id then
+			-- Agents come from every listed device; the focused worktree is the
+			-- selected device's, and another may use the same workspace id.
+			if agent.workspace == focused.id and agent.endpoint == focused.endpoint then
 				table.insert(rows, ui.row {
 					class = "details-agent",
 					align = "center",
 					gap = "small",
-					msg = { focus_pane = agent.pane },
+					msg = { focus_pane = agent.pane, endpoint = agent.endpoint },
 					to = "provider:sheprd",
 					ui.text { agent.name or "agent", truncate = true },
 					ui.spacer(),

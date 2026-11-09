@@ -2,7 +2,6 @@
 // i18n: migrated
 use super::*;
 use crate::sidebar::native_tests::Target;
-use crate::window::main_window::MainWindow;
 use anyhow::{Context as _, Result, bail, ensure};
 use std::time::{Duration, Instant};
 
@@ -94,7 +93,10 @@ async fn capture_settings(
     Ok(())
 }
 
-pub(crate) async fn verify_native(source: MainWindow, cx: &mut AsyncApp) -> Result<()> {
+pub(crate) async fn verify_native(
+    source: WindowHandle<SheprdWindow>,
+    cx: &mut AsyncApp,
+) -> Result<()> {
     #[cfg(feature = "mockup")]
     let capture = std::env::var_os("HERDR_TEST_SETTINGS_CAPTURE").map(std::path::PathBuf::from);
     let before = source.update(cx, |view, _, _| view.input_probe)?;

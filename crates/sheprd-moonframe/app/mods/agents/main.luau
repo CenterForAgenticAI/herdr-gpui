@@ -122,8 +122,9 @@ return mod {
 		local sheprd = app.sheprd or { workspaces = {}, agents = {} }
 		local theme = app.sheprd_theme or {}
 		local layout = sheprd.layout or {}
-		-- A page in the sidebar's place, or the sidebar collapsed to tiles.
-		if sheprd.section or sheprd.sidebar_visible == false then
+		-- A page in the sidebar's place, the sidebar collapsed to tiles, or
+		-- agents hidden in Sheprd's settings.
+		if sheprd.section or sheprd.sidebar_visible == false or sheprd.agents_list == false then
 			return ui.column { height = 0 }
 		end
 		local rows = {}

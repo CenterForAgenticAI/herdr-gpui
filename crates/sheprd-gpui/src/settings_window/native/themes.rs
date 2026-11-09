@@ -2,12 +2,11 @@
 //! windows without config writes, and persisting the final choice on close.
 use super::super::themes;
 use super::*;
-use crate::window::main_window::MainWindow;
 
 /// Returns the filtered and unfiltered catalog sizes for the pass summary.
 pub(super) async fn verify_themes(
     settings: WindowHandle<SettingsWindow>,
-    source: MainWindow,
+    source: WindowHandle<SheprdWindow>,
     #[cfg(feature = "mockup")] capture: Option<std::path::PathBuf>,
     cx: &mut AsyncApp,
 ) -> Result<(usize, usize)> {
