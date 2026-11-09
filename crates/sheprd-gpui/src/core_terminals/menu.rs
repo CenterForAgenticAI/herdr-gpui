@@ -45,6 +45,8 @@ impl Target {
 pub(crate) enum Action {
     NewTab,
     Rename,
+    /// Opens the list of workspaces the tab can move to.
+    MoveToWorkspace,
     /// Continue the tab's terminal agent in a chat, in the same pane.
     MoveToChat(TerminalId),
     /// Silence the tab's notifications, or what silences it.
@@ -65,6 +67,7 @@ impl Action {
             (Self::NewTab, _) => fl!("tab-menu-new-tab"),
             (Self::Rename, Target::Tab(_)) => fl!("tab-menu-rename"),
             (Self::Rename, Target::Pane { .. }) => fl!("pane-menu-rename"),
+            (Self::MoveToWorkspace, _) => fl!("tab-menu-move-to-workspace"),
             (Self::MoveToChat(_), _) => fl!("tab-menu-move-to-chat"),
             (Self::Mute(MuteRow::Mute), _) => fl!("tab-menu-mute"),
             (Self::Mute(MuteRow::Unmute), _) => fl!("tab-menu-unmute"),
@@ -124,6 +127,9 @@ impl SheprdWindow {
         match target {
             Target::Tab(tab) => {
                 let mut actions = vec![Action::NewTab, Action::Rename];
+                if !self.core_tab_moves(*tab).is_empty() {
+                    actions.push(Action::MoveToWorkspace);
+                }
                 if let Some(terminal) = self.core_convertible_pane(*tab) {
                     actions.push(Action::MoveToChat(terminal));
                 }
@@ -210,6 +216,10 @@ impl SheprdWindow {
         let tab = target.tab();
         if let (Action::MoveTo, Target::Pane { terminal, .. }) = (&action, &target) {
             self.open_core_move(tab, terminal.clone(), window, cx);
+            return;
+        }
+        if action == Action::MoveToWorkspace {
+            self.open_core_tab_move(tab, window, cx);
             return;
         }
         if let (Action::Processes, Target::Pane { terminal, .. }) = (&action, &target) {
@@ -398,6 +408,11 @@ impl SheprdWindow {
                 .into_iter()
                 .map(|row| Row::Move(row.destination, row.place))
                 .collect(),
+            (Target::Tab(tab), Some(Page::CoreMove)) => self
+                .core_tab_moves(*tab)
+                .into_iter()
+                .map(|row| Row::Move(row.destination, row.place))
+                .collect(),
             (target, _) => self
                 .core_menu_actions(target, cx)
                 .into_iter()
@@ -413,13 +428,16 @@ impl SheprdWindow {
         match row {
             Row::Action(action, _) => self.activate_core_menu(action, window, cx),
             Row::Move(destination, _) => {
-                let Some(Target::Pane { tab, terminal }) =
-                    self.menu.core.as_ref().map(|menu| menu.target.clone())
-                else {
+                let Some(target) = self.menu.core.as_ref().map(|menu| menu.target.clone()) else {
                     return;
                 };
                 self.dismiss_menu(window, cx);
-                self.move_core_pane(tab, terminal, destination, window, cx);
+                match target {
+                    Target::Pane { tab, terminal } => {
+                        self.move_core_pane(tab, terminal, destination, window, cx)
+                    }
+                    Target::Tab(tab) => self.move_core_tab(tab, destination, window, cx),
+                }
             }
         }
     }
@@ -587,7 +605,10 @@ impl SheprdWindow {
                     .px(px(8.))
                     .py(px(4.))
                     .text_color(rgb(theme.muted))
-                    .child(fl!("pane-menu-move-heading")),
+                    .child(match menu.target {
+                        Target::Tab(_) => fl!("tab-menu-move-heading"),
+                        Target::Pane { .. } => fl!("pane-menu-move-heading"),
+                    }),
             );
         }
         for (index, row) in self.core_menu_rows(cx).into_iter().enumerate() {

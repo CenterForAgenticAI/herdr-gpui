@@ -8,6 +8,7 @@ mod context;
 mod control_holder;
 mod copy_mode;
 mod copy_mode_relink;
+mod cross_workspace;
 mod effects;
 mod fall_through;
 mod fallback_bells;

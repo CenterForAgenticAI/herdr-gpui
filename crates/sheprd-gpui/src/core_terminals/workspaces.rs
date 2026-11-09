@@ -194,7 +194,7 @@ impl SheprdWindow {
 
     /// Keeps a new workspace and brings it to the front, named for `label`,
     /// else its folder.
-    fn keep_new_workspace(
+    pub(super) fn keep_new_workspace(
         &mut self,
         label: Option<&str>,
         cwd: Option<&Path>,
