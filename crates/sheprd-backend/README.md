@@ -3,8 +3,11 @@
 What Sheprd needs from whatever runs its terminals, as two traits:
 
 - `Backend`: list, watch, attach, start, and end terminals on one host.
-- `Terminal`: one attached terminal: semantic input, size, focus, and the
-  next surface updates.
+- `Terminal`: one attached terminal: semantic input, size, focus, the
+  next surface updates, and its history (`History`): searches, copy-mode
+  motions, text between two points, the whole text, scrolling, and clearing.
+  History rows count from the top of the retained history, as Herdr 1's
+  daemon counts them, so the app's find and copy mode read both alike.
 
 `sheprd-core-client` implements them for Herdr 2 (herdr-core), whose raw bytes
 `sheprd-terminal` emulates in the client. Herdr 1 does not implement them yet:

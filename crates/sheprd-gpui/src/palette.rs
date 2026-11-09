@@ -411,6 +411,10 @@ pub(super) struct Palette {
     supports_edit_scrollback: bool,
     /// What the Herdr 2 rows showed when the entries were prepared.
     core_rows: Vec<go_to::CoreRow>,
+    /// The herdr-core pane that held the keyboard as the palette opened. It
+    /// clears and edits its history itself, whatever Herdr 1 supports, and
+    /// takes the keyboard back to run the command chosen.
+    pub(crate) core_view: Option<Entity<crate::core_terminals::CoreTerminalView>>,
     /// The notes revision the entries were prepared from.
     notes_revision: Option<u64>,
     /// Paints Go To's preview at its own size, apart from the terminal's
@@ -604,6 +608,8 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Read before the menu takes the keyboard.
+        let core_view = self.core_terminals.focused_view(window, cx);
         if !self.open_menu(window, cx) {
             return;
         }
@@ -669,6 +675,7 @@ impl SheprdWindow {
             supports_clear: self.live.supports_pane_clear,
             supports_edit_scrollback: self.live.supports_edit_scrollback,
             core_rows: Vec::new(),
+            core_view,
             notes_revision: None,
             restore: None,
             preview_painter: Default::default(),
@@ -748,8 +755,12 @@ impl SheprdWindow {
                 .iter()
                 .filter(|info| !matches!(info.command, Command::Palette | Command::ResumePalette))
                 .filter(|info| match info.command {
-                    Command::ClearPane => self.live.supports_pane_clear,
-                    Command::EditScrollback => self.live.supports_edit_scrollback,
+                    Command::ClearPane => {
+                        self.live.supports_pane_clear || palette.core_view.is_some()
+                    }
+                    Command::EditScrollback => {
+                        self.live.supports_edit_scrollback || palette.core_view.is_some()
+                    }
                     Command::ToggleMenuBar => crate::menus::IN_WINDOW,
                     _ => true,
                 })

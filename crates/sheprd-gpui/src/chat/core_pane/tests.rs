@@ -9,11 +9,13 @@ fn info(id: &str, endpoint: Option<&str>) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: None,
+        foreground: None,
         id: TerminalId::new(id).unwrap(),
         labels: endpoint
             .map(|endpoint| BTreeMap::from([(TOKEN.to_owned(), endpoint.to_owned())]))
             .unwrap_or_default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }

@@ -103,6 +103,7 @@ fn a_split_is_answered_once_its_pane_is_in_the_tab() {
         },
         Host::Local,
         Spawn::default(),
+        None,
     )]);
     assert!(terminals.settled_phone_split(now).is_none());
     assert!(matches!(
@@ -142,6 +143,7 @@ fn a_split_that_never_lands_is_refused() {
         },
         Host::Local,
         Spawn::default(),
+        None,
     )]);
     assert!(terminals.settled_phone_split(now).is_none());
     assert_eq!(

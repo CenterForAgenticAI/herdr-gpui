@@ -18,7 +18,10 @@ fn resizing_reflows_and_keeps_bounds() {
 #[test]
 fn size_errors_wrap_the_backends() {
     let error = Error::from(Size::new(0, 1).unwrap_err());
-    assert_eq!(error, Error::Backend(sheprd_backend::Error::EmptySize));
+    assert!(matches!(
+        error,
+        Error::Backend(sheprd_backend::Error::EmptySize)
+    ));
     assert_eq!(
         error.to_string(),
         sheprd_backend::Error::EmptySize.to_string()

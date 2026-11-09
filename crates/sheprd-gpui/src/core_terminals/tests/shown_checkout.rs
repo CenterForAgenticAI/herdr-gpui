@@ -21,9 +21,11 @@ fn info(name: &str) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: Some(PathBuf::from(FOLDER)),
+        foreground: None,
         id: TerminalId::new(name).unwrap(),
         labels: Default::default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }

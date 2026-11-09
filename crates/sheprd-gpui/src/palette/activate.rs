@@ -62,7 +62,17 @@ impl SheprdWindow {
             return;
         }
         if let Action::Native(command) = action {
+            let core_view = self
+                .menu
+                .palette
+                .as_mut()
+                .and_then(|palette| palette.core_view.take());
             self.dismiss_menu(window, cx);
+            // The menu hands the keyboard to the window; a herdr-core pane
+            // takes it back so the command is that pane's.
+            if let Some(view) = core_view.filter(|view| self.core_terminals.shows(view)) {
+                window.focus(&view.read(cx).focus_handle().clone(), cx);
+            }
             self.command(command, window, cx);
             return;
         }

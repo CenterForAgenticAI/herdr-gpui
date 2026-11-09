@@ -69,6 +69,8 @@ pub enum Error {
     StartTimeout(std::time::Duration),
     #[error("stopped on request")]
     Stopped,
+    #[error(transparent)]
+    Terminal(#[from] sheprd_terminal::Error),
     #[error("herdr-core did not answer {0} in time")]
     Timeout(Method),
     // keep-sorted end

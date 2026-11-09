@@ -13,6 +13,7 @@
 
 mod adopt;
 mod asks;
+mod attention;
 mod checkouts;
 mod commands;
 mod context;
@@ -20,6 +21,7 @@ mod effects;
 mod error;
 mod fallback;
 mod folders;
+mod history;
 mod hosts;
 mod hub;
 mod infos;
@@ -100,6 +102,10 @@ impl Refreshed {
         *self == Self::default()
     }
 }
+
+/// A terminal to start, what for, and a file its program takes over once
+/// it starts: removed with the request if the start fails or is dropped.
+type Wanted = (Purpose, Host, Spawn, Option<tempfile::TempPath>);
 
 /// One tab's panes as the window holds them. The tab's saved location
 /// follows, written when a change settles rather than on every drag step.
@@ -340,6 +346,14 @@ impl TabPanes {
         let zoomed = self.zoomed.as_ref()?;
         (self.zoom.is_open() || self.zoom.moving(now)).then(|| (zoomed, self.zoom.shown(now)))
     }
+
+    /// The panes drawn at `now`: a zoom that has landed hides the others.
+    fn drawn_at(&self, now: std::time::Instant) -> Vec<&TerminalId> {
+        match self.zoom_at(now) {
+            Some((zoomed, shown)) if shown >= 1. => vec![zoomed],
+            _ => self.panes.terminals(),
+        }
+    }
 }
 
 /// The most terminals waiting to start at once.
@@ -356,6 +370,9 @@ pub(crate) struct CoreTerminals {
     /// The Git checkout of each kept workspace's folder and of the shown
     /// pane's.
     checkouts: checkouts::Checkouts,
+    /// The views the window drew in its last frame: a cached view of a tab
+    /// no group shows is not among them.
+    drawn: Vec<EntityId>,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view
@@ -390,7 +407,7 @@ pub(crate) struct CoreTerminals {
     /// host connects: a shell, or the program its spawn names. Several
     /// workspaces made in a row each wait their turn rather than replace one
     /// another.
-    wanted: VecDeque<(Purpose, Host, Spawn)>,
+    wanted: VecDeque<Wanted>,
 }
 
 impl CoreTerminals {
@@ -593,7 +610,20 @@ impl SheprdWindow {
     /// Starts `spawn` in herdr-core for `purpose`, once the hub of its
     /// host's core connects, in the folder and with the Herdr variables of
     /// where it opens.
-    pub(crate) fn start_core_program(&mut self, purpose: Purpose, mut spawn: Spawn, cx: &App) {
+    pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn, cx: &App) {
+        self.start_core_program_with(purpose, spawn, None, cx);
+    }
+
+    /// Starts `spawn` as [`Self::start_core_program`] does, handing `file`
+    /// to its program once it starts. Until then the file is the window's,
+    /// removed if the start fails or the request is dropped.
+    pub(crate) fn start_core_program_with(
+        &mut self,
+        purpose: Purpose,
+        mut spawn: Spawn,
+        file: Option<tempfile::TempPath>,
+        cx: &App,
+    ) {
         if self.core_terminals.wanted.len() >= MAX_WANTED {
             tracing::warn!("Too many herdr-core terminals waiting to start; dropped one");
             return;
@@ -604,7 +634,9 @@ impl SheprdWindow {
         };
         hub.connect(Start::IfMissing);
         self.give_core_context(&purpose, &host, &mut spawn, cx);
-        self.core_terminals.wanted.push_back((purpose, host, spawn));
+        self.core_terminals
+            .wanted
+            .push_back((purpose, host, spawn, file));
         self.start_core_shell();
     }
 
@@ -624,20 +656,29 @@ impl SheprdWindow {
             return;
         }
         let terminals = &mut self.core_terminals;
-        let Some((_, host, _)) = terminals.wanted.front() else {
+        let Some((_, host, _, _)) = terminals.wanted.front() else {
             return;
         };
         let Some(backend) = terminals.backend_of(host).cloned() else {
             return;
         };
-        let Some((purpose, host, spawn)) = terminals.wanted.pop_front() else {
+        let Some((purpose, host, spawn, file)) = terminals.wanted.pop_front() else {
             return;
         };
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let spawned = std::thread::Builder::new()
             .name("herdr-core-spawn".into())
             .spawn(move || {
-                let _ = send.send(backend.spawn(&spawn));
+                let started = backend.spawn(&spawn);
+                // The program removes its file; a failed start leaves it
+                // here, where dropping it removes it.
+                if started.is_ok()
+                    && let Some(file) = file
+                    && let Err(error) = file.keep()
+                {
+                    tracing::warn!(%error, "Could not hand a file to a herdr-core program");
+                }
+                let _ = send.send(started);
             });
         match spawned {
             Ok(_) => terminals.starting = Some((purpose, host, receive)),
@@ -647,6 +688,28 @@ impl SheprdWindow {
 
     /// Runs every window tick: connects for restored tabs, places a started
     /// terminal, gives each shown pane its view, and takes new screens.
+    /// Syncs the tabs' views, and keeps the keyboard in a tab whose pane
+    /// that held it another window closed: the pane now in use there takes
+    /// it. Only a pane that held it hands it on, so a control the user is
+    /// in elsewhere keeps it.
+    pub(super) fn sync_core_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focused = self.core_terminals.focused_pane(window, cx);
+        self.sync_core_views(cx);
+        let Some((tab, terminal)) = focused else {
+            return;
+        };
+        let gone = (self.core_terminals.tabs.get(&tab))
+            .is_some_and(|shown| !shown.panes.contains(&terminal));
+        if !gone {
+            return;
+        }
+        if self.core_pane_view(tab).is_some() {
+            self.focus_core_terminal(tab, window, cx);
+        } else {
+            self.core_terminals.focus_wanted = Some(tab);
+        }
+    }
+
     pub(crate) fn poll_core_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_core_hubs(window, cx);
         self.place_started_core_terminal(window, cx);
@@ -654,7 +717,7 @@ impl SheprdWindow {
         self.relink_stale_core_views(cx);
         // The next terminal waiting starts once the last one answered.
         self.start_core_shell();
-        self.sync_core_views(cx);
+        self.sync_core_tabs(window, cx);
         if let Some(tab) = self.core_terminals.focus_wanted
             && self.core_pane_view(tab).is_some()
         {
@@ -678,6 +741,7 @@ impl SheprdWindow {
             cx,
         );
         self.poll_core_panes(window, cx);
+        self.poll_core_edits(cx);
         // While a phone may start work here, this computer's core is joined
         // (never started) to see it, with or without a tab of its own.
         if crate::remote::supervisor::Supervisor::enabled(cx) {
@@ -691,6 +755,7 @@ impl SheprdWindow {
         let listed = self.core_terminals.poll_infos(std::time::Instant::now());
         self.adopt_labelled_terminals(listed, cx);
         if listed {
+            self.hear_core_agents(cx);
             cx.notify();
         }
         if let Some(view) = fallback {
@@ -702,6 +767,7 @@ impl SheprdWindow {
             view.update(cx, |view, cx| view.set_cwd(cwd.as_deref(), cx));
         }
         self.core_terminals.shown = self.shown_core_pane(cx);
+        self.tell_core_agents(window, cx);
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
@@ -812,6 +878,10 @@ impl SheprdWindow {
             background: self.fill().base(self.terminal_theme().background),
             cell_height: self.config.terminal.line_height(),
             cell_width: self.cell_width,
+            chrome: std::rc::Rc::new(view::Chrome {
+                theme: self.theme.clone(),
+                ui: self.config.ui.clone(),
+            }),
             copy_on_select: shared.is_none_or(|shared| shared.copy_on_select),
             font: self.config.terminal.font(),
             ground: self.ground(),
@@ -825,6 +895,7 @@ impl SheprdWindow {
                 crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
                 |shared| shared.mouse_scroll_lines,
             ),
+            smooth_scroll: self.config.smooth_scroll,
         }
     }
 

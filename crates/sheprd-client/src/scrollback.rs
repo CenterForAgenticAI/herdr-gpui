@@ -12,34 +12,9 @@ use serde_json::Value;
 
 /// The daemon refuses longer queries with `query_too_large`; checking here
 /// keeps an oversized paste from reaching the wire at all.
-pub const MAX_SEARCH_QUERY_BYTES: usize = 4096;
-
-/// A cell in screen-buffer coordinates. Declared row first so the derived
-/// order is reading order.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-pub struct TextPoint {
-    pub row: u32,
-    pub col: u16,
-}
-
-/// A span of cells. `end` is inclusive: it names the last cell of the match,
-/// which for a wide glyph is its second column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TextRange {
-    pub start: TextPoint,
-    pub end: TextPoint,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchDirection {
-    /// Toward newer output: the first match starting after the origin.
-    Forward,
-    /// Toward older output: the last match ending before the origin.
-    Backward,
-}
+pub use sheprd_backend::MAX_SEARCH_QUERY_BYTES;
+/// The points, ranges, and motions both generations' history shares.
+pub use sheprd_backend::{CopyMotion, SearchDirection, TextPoint, TextRange};
 
 /// `pane.copy_search` parameters. The origin is `previous` when given (its
 /// end searching forward, its start backward), otherwise `cursor`. A search
@@ -80,24 +55,6 @@ impl CopySearchResult {
             .and_then(|index| self.matches.get(usize::try_from(index).ok()?))
             .copied()
     }
-}
-
-/// A copy-mode motion the daemon resolves against the terminal's own text:
-/// word classes, line ends, and paragraphs, which a client cannot know from
-/// the painted cells alone. Spellings match Herdr's `PaneCopyMotion`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CopyMotion {
-    LineEnd,
-    FirstNonBlank,
-    NextWordStart,
-    PreviousWordStart,
-    NextWordEnd,
-    NextBigWordStart,
-    PreviousBigWordStart,
-    NextBigWordEnd,
-    PreviousParagraph,
-    NextParagraph,
 }
 
 /// `pane.copy_motion` parameters.

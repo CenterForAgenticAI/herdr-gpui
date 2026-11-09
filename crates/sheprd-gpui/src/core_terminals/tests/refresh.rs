@@ -229,3 +229,43 @@ fn each_window_closing_the_others_last_pane_empties_the_tab() {
     let left = here.refresh(&Location::core_terminal(panes(&["a"]), false));
     assert!(left.emptied, "b must not come back");
 }
+
+/// Another window closes `t1`, which holds this window's keyboard.
+fn closed_elsewhere(
+    view: &gpui::Entity<crate::SheprdWindow>,
+    cx: &mut gpui::VisualTestContext,
+    tab: crate::browser::TabId,
+) {
+    cx.update(|window, cx| {
+        let location = Location::core_terminal(Panes::single(id("t2")), false);
+        crate::browser::Store::update(cx, |store| store.visited(tab, Some(location), None));
+        view.update(cx, |view, cx| view.sync_core_tabs(window, cx));
+    });
+}
+
+#[gpui::test]
+fn a_pane_closed_elsewhere_hands_the_keyboard_to_the_one_left(cx: &mut gpui::TestAppContext) {
+    let (view, cx, tab) = super::commands::window_with_split(cx, &["t1", "t2"]);
+    closed_elsewhere(&view, cx, tab);
+    let focused = cx.update(|window, cx| {
+        let view = view.read(cx);
+        view.core_terminals.views[&(tab, id("t2"))]
+            .read(cx)
+            .focus_handle()
+            .is_focused(window)
+    });
+    assert!(focused);
+}
+
+#[gpui::test]
+fn a_control_focused_elsewhere_keeps_the_keyboard(cx: &mut gpui::TestAppContext) {
+    let (view, cx, tab) = super::commands::window_with_split(cx, &["t1", "t2"]);
+    let control = cx.update(|window, cx| {
+        let control = cx.focus_handle();
+        window.focus(&control, cx);
+        control
+    });
+    closed_elsewhere(&view, cx, tab);
+    let kept = cx.update(|window, _| control.is_focused(window));
+    assert!(kept);
+}
