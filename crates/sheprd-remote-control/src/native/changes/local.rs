@@ -10,7 +10,7 @@
 
 use crate::control::changes::{
     Answer, ChangedFile, DiffLine, Failure, FileDiff, FileList, FileStatus, LineKind,
-    MAX_DIFF_BYTES, MAX_FILES, MAX_PATH, Scope, Shown, Wanted,
+    MAX_DIFF_BYTES, MAX_PATH, Scope, Shown, Wanted,
 };
 use std::{
     io::Read,
@@ -90,11 +90,21 @@ fn root(cwd: &Path) -> Result<PathBuf, Failure> {
 fn files(cwd: &Path, scope: Scope) -> Result<FileList, Failure> {
     let root = root(cwd)?;
     let compared = compared(&root, scope)?;
-    let mut listed = changed(&root, &compared.rev)?;
-    // Only those sent are read: a checkout may hold many untracked files.
-    for file in listed
+    Ok(bounded(
+        &root,
+        compared.base,
+        changed(&root, &compared.rev)?,
+    ))
+}
+
+/// The list a phone is sent of `files` in the checkout at `root`, with the
+/// untracked ones it holds read. Only those sent are read: a checkout may
+/// hold many untracked files.
+fn bounded(root: &Path, base: Option<String>, files: Vec<ChangedFile>) -> FileList {
+    let mut list = FileList::bounded(base, files);
+    for file in list
+        .files
         .iter_mut()
-        .take(MAX_FILES)
         .filter(|file| file.status == FileStatus::Untracked)
     {
         match read_untracked(&root.join(&file.path)) {
@@ -102,7 +112,7 @@ fn files(cwd: &Path, scope: Scope) -> Result<FileList, Failure> {
             Err(shown) => file.shown = shown,
         }
     }
-    Ok(FileList::bounded(compared.base, listed))
+    list
 }
 
 /// Every file changed since `rev`, in the working tree as it is now.

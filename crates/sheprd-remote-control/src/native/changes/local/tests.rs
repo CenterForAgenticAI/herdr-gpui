@@ -270,3 +270,27 @@ fn colors_and_patterns_in_names_leave_a_diff_as_git_wrote_it() {
     let texts: Vec<&str> = diff.lines.iter().map(|line| line.text.as_str()).collect();
     assert_eq!(texts[1..], ["x", "y"], "{texts:?}");
 }
+
+#[test]
+fn an_untracked_file_listed_after_a_path_too_long_to_send_is_still_read() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("zz.bin"), [0_u8, 1]).unwrap();
+    std::fs::write(dir.path().join("zz.txt"), "a\nb\n").unwrap();
+    let untracked = |path: &str| ChangedFile {
+        path: path.to_owned(),
+        status: FileStatus::Untracked,
+        ..ChangedFile::default()
+    };
+    // The list skips a path past the bound, so later files move up.
+    let mut files = vec![untracked(&"a".repeat(MAX_PATH + 1))];
+    files.extend(
+        (0..crate::control::changes::MAX_FILES - 2).map(|index| ChangedFile {
+            path: format!("m{index}"),
+            ..ChangedFile::default()
+        }),
+    );
+    files.extend([untracked("zz.bin"), untracked("zz.txt")]);
+    let list = bounded(dir.path(), None, files);
+    assert_eq!(file(&list, "zz.bin").shown, Shown::Binary);
+    assert_eq!(file(&list, "zz.txt").added, Some(2));
+}
