@@ -109,6 +109,9 @@ struct TabPanes {
     /// The folder the tab's first pane was first seen in, kept when its
     /// program moves on, as Herdr keeps where a workspace started.
     root: Option<std::path::PathBuf>,
+    /// The tab's location as this window last read or saved it, to tell
+    /// when another window saved a change.
+    saved: Option<Location>,
     unsaved: bool,
     /// The workspace whose tab this is, known once the window has shown it.
     workspace: Option<(Scope, String)>,
@@ -139,6 +142,7 @@ impl TabPanes {
             panes,
             previous: None,
             root: None,
+            saved: None,
             unsaved: false,
             workspace: None,
             zoom: crate::motion::Toggle::default(),
@@ -185,21 +189,92 @@ impl TabPanes {
         Some(shown)
     }
 
-    /// Takes the names saved with the tab, which another window may have
-    /// changed, unless this one has a change of its own still to save.
-    fn refresh_names(&mut self, location: &Location) {
-        let Location::CoreTerminal { name, names, .. } = location else {
-            return;
+    /// Takes `location`, saved by another window since this one last read
+    /// or saved the tab, so that its next save does not undo it.
+    ///
+    /// The layout merges three ways against what this window last read: a
+    /// side that did not change it takes the other's; when both did, this
+    /// window's layout stays, less the panes the other closed and with the
+    /// panes it opened, so a split placed here while another window saved
+    /// is kept. The pane in use is this window's, where the keyboard is;
+    /// a zoom stands only on that pane, so commands never reach a pane
+    /// hidden behind another.
+    ///
+    /// Returns the other window's new panes this tab had no room left for.
+    #[must_use]
+    fn refresh(&mut self, location: &Location) -> Vec<TerminalId> {
+        let Some(mut fresh) = Self::restore(self.host.clone(), location) else {
+            return Vec::new();
         };
-        if self.unsaved {
-            return;
+        let Some(Location::CoreTerminal {
+            panes: base,
+            name: base_name,
+            names: base_names,
+            ..
+        }) = &self.saved
+        else {
+            *self = fresh;
+            return Vec::new();
+        };
+        let mut overflow = Vec::new();
+        if self.panes != *base {
+            fresh.panes = if fresh.panes == *base {
+                self.panes.clone()
+            } else {
+                let (panes, left) = merged(&self.panes, base, &fresh.panes, &self.active);
+                overflow = left;
+                panes
+            };
         }
-        self.name.clone_from(name);
-        self.names = names
-            .iter()
-            .filter(|(terminal, _)| self.panes.contains(terminal))
-            .map(|(terminal, name)| (terminal.clone(), name.clone()))
-            .collect();
+        // Names this window changed since it last read the tab stand too,
+        // pane by pane, so a name given here and one given there both do.
+        if self.name != *base_name {
+            fresh.name = self.name.take();
+        }
+        let touched = (self.names.keys())
+            .chain(base_names.keys())
+            .filter(|terminal| self.names.get(*terminal) != base_names.get(*terminal));
+        for terminal in touched.cloned().collect::<Vec<_>>() {
+            match self.names.get(&terminal) {
+                Some(name) => fresh.names.insert(terminal, name.clone()),
+                None => fresh.names.remove(&terminal),
+            };
+        }
+        fresh
+            .names
+            .retain(|terminal, _| fresh.panes.contains(terminal));
+        if fresh.panes.contains(&self.active) {
+            fresh.active = self.active.clone();
+        } else if !fresh.panes.contains(&fresh.active) {
+            // Both windows closed a pane, and the merge holds neither one
+            // in use: the keyboard goes to a pane that is still there.
+            fresh.active = fresh.panes.first().clone();
+        }
+        let zoomed = if self.unsaved {
+            self.zoomed.clone().filter(|_| self.zoom.is_open())
+        } else {
+            fresh.zoomed.clone().filter(|_| fresh.zoom.is_open())
+        }
+        .filter(|zoomed| *zoomed == fresh.active && fresh.panes.count() > 1);
+        let same = zoomed == self.zoomed.clone().filter(|_| self.zoom.is_open());
+        fresh.zoom = match (&zoomed, same) {
+            // Unchanged: an animation in flight carries on.
+            (_, true) => self.zoom,
+            (Some(_), false) => {
+                let mut zoom = crate::motion::Toggle::default();
+                zoom.set(true, crate::motion::now(), true);
+                zoom
+            }
+            (None, false) => crate::motion::Toggle::default(),
+        };
+        fresh.zoomed = zoomed;
+        fresh.root = self.root.take();
+        fresh.workspace = self.workspace.take();
+        fresh.previous = (self.previous.take()).filter(|previous| fresh.panes.contains(previous));
+        fresh.unsaved = self.unsaved;
+        fresh.saved = Some(location.clone());
+        *self = fresh;
+        overflow
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -301,6 +376,9 @@ pub(crate) struct CoreTerminals {
     /// A shell starting, and what for.
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
+    /// Terminals a kill did not reach, as when the connection dropped while
+    /// it was sent, put back to end once their core answers again.
+    unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// Terminals to start, one after another, once the hub of each one's
     /// host connects: a shell, or the program its spawn names. Several
@@ -580,6 +658,28 @@ impl SheprdWindow {
 
     /// Runs every window tick: connects for restored tabs, places a started
     /// terminal, gives each shown pane its view, and takes new screens.
+    /// Syncs the tabs' views, and keeps the keyboard in a tab whose pane
+    /// that held it another window closed: the pane now in use there takes
+    /// it. Only a pane that held it hands it on, so a control the user is
+    /// in elsewhere keeps it.
+    pub(super) fn sync_core_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focused = self.core_terminals.focused_pane(window, cx);
+        self.sync_core_views(cx);
+        let Some((tab, terminal)) = focused else {
+            return;
+        };
+        let gone = (self.core_terminals.tabs.get(&tab))
+            .is_some_and(|shown| !shown.panes.contains(&terminal));
+        if !gone {
+            return;
+        }
+        if self.core_pane_view(tab).is_some() {
+            self.focus_core_terminal(tab, window, cx);
+        } else {
+            self.core_terminals.focus_wanted = Some(tab);
+        }
+    }
+
     pub(crate) fn poll_core_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_core_hubs(window, cx);
         self.place_started_core_terminal(window, cx);
@@ -587,7 +687,7 @@ impl SheprdWindow {
         self.relink_stale_core_views(cx);
         // The next terminal waiting starts once the last one answered.
         self.start_core_shell();
-        self.sync_core_views(cx);
+        self.sync_core_tabs(window, cx);
         if let Some(tab) = self.core_terminals.focus_wanted
             && self.core_pane_view(tab).is_some()
         {
@@ -783,6 +883,38 @@ impl SheprdWindow {
         }
         self.core_terminals.look = Some(look);
     }
+}
+
+/// `here`, a layout changed since `base`, with the changes `there` made to
+/// `base` too: its closed panes go, and its new ones split off `active`
+/// while there is room. The new ones a full layout cannot take come back
+/// beside it, for the caller to give a tab of their own.
+fn merged(
+    here: &Panes,
+    base: &Panes,
+    there: &Panes,
+    active: &TerminalId,
+) -> (Panes, Vec<TerminalId>) {
+    let mut panes = here.clone();
+    let mut overflow = Vec::new();
+    for gone in base.terminals() {
+        if !there.contains(gone) {
+            panes.remove(gone);
+        }
+    }
+    for new in there.terminals() {
+        if !base.contains(new) && !panes.contains(new) {
+            let at = if panes.contains(active) {
+                active.clone()
+            } else {
+                panes.first().clone()
+            };
+            if panes.split(&at, Axis::Row, new.clone()).is_err() {
+                overflow.push(new.clone());
+            }
+        }
+    }
+    (panes, overflow)
 }
 
 /// Whether a pane waiting for the keyboard may take it: nothing holds it, or

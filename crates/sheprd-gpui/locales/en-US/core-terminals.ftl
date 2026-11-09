@@ -18,6 +18,7 @@ core-terminals-ended = Ended
 # Shown over a terminal's last frame while the app reconnects to herdr-core.
 core-terminals-reconnecting = Reconnecting...
 core-terminals-input-dropped = Not connected to herdr-core: input not sent
+core-terminals-pane-own-tab = Another window split this tab while it was full, so its new pane opened in a tab of its own
 # What an agent in a split pane reports, beside its title.
 core-terminals-state-blocked = blocked
 core-terminals-state-done = done

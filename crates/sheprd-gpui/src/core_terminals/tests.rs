@@ -25,6 +25,7 @@ mod pane_keys;
 mod paste;
 mod phone;
 mod quote;
+mod refresh;
 mod requests;
 mod resize;
 mod restore;
