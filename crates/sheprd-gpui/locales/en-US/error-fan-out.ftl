@@ -5,20 +5,8 @@
 error-fan-out-script =
     { $step ->
         [detect] finding installed agents failed: { $error }
-        [create-worktree] creating the worktree failed: { $error }
         [start-agent] starting the agent failed: { $error }
-        [prompt] sending the prompt failed: { $error }
-        [compare] reading the changes failed: { $error }
-       *[remove] removing the worktree failed: { $error }
-    }
-error-fan-out-decode =
-    { $step ->
-        [detect] finding installed agents failed: unexpected output
-        [create-worktree] creating the worktree failed: unexpected output
-        [start-agent] starting the agent failed: unexpected output
-        [prompt] sending the prompt failed: unexpected output
-        [compare] reading the changes failed: unexpected output
-       *[remove] removing the worktree failed: unexpected output
+       *[compare] reading the changes failed: { $error }
     }
 error-fan-out-no-base = The base commit could not be read
 # $host is a device's name.

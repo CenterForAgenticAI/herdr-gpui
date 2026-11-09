@@ -4,22 +4,16 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Step {
     Detect,
-    CreateWorktree,
     StartAgent,
-    Prompt,
     Compare,
-    Remove,
 }
 
 impl Step {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Detect => "finding installed agents", // i18n: data
-            Self::CreateWorktree => "creating the worktree", // i18n: data
             Self::StartAgent => "starting the agent",   // i18n: data
-            Self::Prompt => "sending the prompt",       // i18n: data
             Self::Compare => "reading the changes",     // i18n: data
-            Self::Remove => "removing the worktree",    // i18n: data
         }
     }
 }
@@ -32,12 +26,6 @@ pub(crate) enum Error {
         #[source]
         source: sheprd_client::Error,
     },
-    #[error("{} failed: unexpected output", step.label())]
-    Decode {
-        step: Step,
-        #[source]
-        source: serde_json::Error,
-    },
     #[error("The base commit could not be read")]
     NoBase,
     #[error(transparent)]
@@ -48,6 +36,9 @@ pub(crate) enum Error {
     AgentMissing { agent: &'static str, host: String },
     #[error("Fan-out cancelled")]
     Cancelled,
+    /// A lane's worktree or agent, on Herdr 1 or Herdr 2.
+    #[error(transparent)]
+    Work(Box<sheprd_remote::work::Error>),
     #[error("The saved fan-outs could not be read")]
     JournalRead(#[source] Box<crate::Error>),
     #[error("The saved fan-outs are not valid JSON")]

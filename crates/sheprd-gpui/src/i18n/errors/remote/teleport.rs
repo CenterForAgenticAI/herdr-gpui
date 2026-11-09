@@ -123,6 +123,7 @@ impl Localize for Error {
             Self::LocalFile(_) => fl!("error-remote-teleport-local-file"),
             Self::InvalidToken => fl!("error-remote-teleport-invalid-token"),
             Self::Cancelled => fl!("error-remote-teleport-cancelled"),
+            Self::Work(error) => error.localize(),
         }
     }
 }

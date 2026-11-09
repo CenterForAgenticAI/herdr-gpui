@@ -93,5 +93,6 @@ fn every_variant_has_a_message() {
         Error::LocalFile(io()),
         Error::InvalidToken,
         Error::Cancelled,
+        Error::Work(sheprd_remote::work::Error::Dirty),
     ]);
 }

@@ -164,6 +164,19 @@ pub enum Error {
     InvalidToken,
     #[error("Teleport cancelled")]
     Cancelled,
+    /// A worktree made through `work`, as smart dispatch makes them.
+    #[error(transparent)]
+    Work(crate::work::Error),
+}
+
+/// A cancelled `work` script is the teleport's own cancellation.
+impl From<crate::work::Error> for Error {
+    fn from(error: crate::work::Error) -> Self {
+        match error {
+            crate::work::Error::Cancelled => Self::Cancelled,
+            error => Self::Work(error),
+        }
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -213,5 +226,16 @@ mod tests {
             script(Step::Tabs)(sheprd_client::Error::ScriptCancelled),
             Error::Cancelled
         ));
+    }
+
+    #[test]
+    fn work_failures_keep_their_cause_and_cancel_as_teleport() {
+        assert!(matches!(
+            Error::from(crate::work::Error::Cancelled),
+            Error::Cancelled
+        ));
+        let error = Error::from(crate::work::Error::Dirty);
+        assert!(matches!(error, Error::Work(crate::work::Error::Dirty)));
+        assert_eq!(error.to_string(), "The worktree has uncommitted changes");
     }
 }

@@ -202,9 +202,55 @@ impl SheprdWindow {
             .map(|workspace| workspace.id.clone())
     }
 
+    /// Keeps a new workspace for a checkout at `cwd` whose first tab shows
+    /// `location`, leaving whatever is in front there, as Herdr 1 opens a
+    /// fan-out lane's workspace without focusing it. Answers its ID, or
+    /// `None`, with a flash, when it could not be kept or its tab not
+    /// opened, which ends the terminals `location` drives.
+    pub(crate) fn open_kept_workspace_behind(
+        &mut self,
+        label: &str,
+        cwd: &Path,
+        location: Location,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let Some(id) = self.keep_workspace(Some(label), Some(cwd), cx) else {
+            self.end_location(&location);
+            return None;
+        };
+        let scope = scope_of(self);
+        let shown = location.clone();
+        let tab = Store::update(cx, |store| {
+            store.open(scope.clone(), &id, Some(shown), None)
+        });
+        if tab.is_none() {
+            Store::update(cx, |store| store.forget_kept(&scope, &id));
+            self.refresh_core_session(cx);
+            self.end_location(&location);
+            self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
+            return None;
+        }
+        self.sync_core_views(cx);
+        cx.notify();
+        Some(id)
+    }
+
     /// Keeps a new workspace and brings it to the front, named for `label`,
     /// else its folder.
     fn keep_new_workspace(
+        &mut self,
+        label: Option<&str>,
+        cwd: Option<&Path>,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let id = self.keep_workspace(label, cwd, cx)?;
+        self.focus_kept_workspace(&id, cx);
+        Some(id)
+    }
+
+    /// Keeps a new workspace on this computer, named for `label`, else its
+    /// folder, without bringing it to the front.
+    fn keep_workspace(
         &mut self,
         label: Option<&str>,
         cwd: Option<&Path>,
@@ -237,7 +283,6 @@ impl SheprdWindow {
             return None;
         };
         self.refresh_core_session(cx);
-        self.focus_kept_workspace(&id, cx);
         Some(id)
     }
 
@@ -394,6 +439,6 @@ impl SheprdWindow {
     }
 }
 
-fn scope_of(window: &SheprdWindow) -> Scope {
+pub(super) fn scope_of(window: &SheprdWindow) -> Scope {
     scope(&window.endpoints[window.selected_endpoint])
 }

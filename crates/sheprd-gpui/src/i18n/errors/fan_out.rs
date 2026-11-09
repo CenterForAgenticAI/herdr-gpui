@@ -10,11 +10,8 @@ use crate::{
 fn step(step: Step) -> &'static str {
     match step {
         Step::Detect => "detect",
-        Step::CreateWorktree => "create-worktree",
         Step::StartAgent => "start-agent",
-        Step::Prompt => "prompt",
         Step::Compare => "compare",
-        Step::Remove => "remove",
     }
 }
 
@@ -28,9 +25,6 @@ impl Localize for Error {
                 host = host.as_str()
             ),
             Self::Cancelled => fl!("error-fan-out-cancelled"),
-            Self::Decode { step: failed, .. } => {
-                fl!("error-fan-out-decode", step = step(*failed))
-            }
             Self::Dispatch(error) => error.localize(),
             Self::HostUnavailable { host } => {
                 fl!("error-fan-out-host-unavailable", host = host.as_str())
@@ -49,6 +43,7 @@ impl Localize for Error {
                 step = step(*failed),
                 error = source.localize()
             ),
+            Self::Work(error) => error.localize(),
             // keep-sorted end
         }
     }

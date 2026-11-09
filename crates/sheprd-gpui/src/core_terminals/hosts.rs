@@ -105,6 +105,12 @@ impl CoreTerminals {
         self.infos_of(&self.tabs.get(&tab)?.host)?.get(terminal)
     }
 
+    /// What this computer's core reports of `terminal`, whichever tab
+    /// shows it.
+    pub(crate) fn local_info(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
+        self.infos_of(&Host::Local)?.get(terminal)
+    }
+
     /// Every host whose core the window knows of, this computer first.
     pub(super) fn hosts(&self) -> Vec<Host> {
         std::iter::once(Host::Local)

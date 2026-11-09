@@ -16,6 +16,14 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .menu
+            .target
+            .as_ref()
+            .is_some_and(|target| target.keeper == sheprd_session::Keeper::App)
+        {
+            return self.run_kept_workspace_script(kind, window, cx);
+        }
         let launch = self.menu.target.as_ref().map(|target| {
             let tree = target.worktree.as_ref();
             crate::worktree_scripts::Launch {
@@ -40,6 +48,27 @@ impl SheprdWindow {
             }
             Some(launch) => self.start_worktree_script(launch, cx),
             None => Err(crate::Error::StaleWorkspace),
+        };
+        self.dismiss_menu(window, cx);
+        if let Err(error) = started {
+            self.show_flash(crate::window::Flash::warning(error.to_string()), cx);
+        }
+    }
+
+    /// Runs one of a kept workspace's scripts in a new herdr-core tab of it:
+    /// its folder is the checkout, so no daemon has to name it.
+    fn run_kept_workspace_script(
+        &mut self,
+        kind: crate::worktree_scripts::ScriptKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let workspace = self.menu.target.as_ref().map(|target| target.id.clone());
+        let launch = workspace
+            .and_then(|workspace| self.kept_script_launch(kind, workspace, self.kept_checkout()));
+        let started = match launch {
+            Some(launch) => self.start_worktree_script(launch, cx),
+            None => Err(crate::worktree_scripts::Error::NotGit.into()),
         };
         self.dismiss_menu(window, cx);
         if let Err(error) = started {

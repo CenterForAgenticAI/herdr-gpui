@@ -298,3 +298,5 @@ fn work_finishing_together_all_lands(cx: &mut TestAppContext) {
         assert!(view.kept_worktree_done.is_empty());
     });
 }
+
+mod workflows;

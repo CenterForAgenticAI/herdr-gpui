@@ -29,6 +29,7 @@ pub(crate) mod install;
 pub(crate) mod menu;
 pub(crate) mod moves;
 mod phone;
+mod programs;
 mod requests;
 mod screen;
 mod selection;
