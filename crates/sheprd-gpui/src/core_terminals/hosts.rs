@@ -140,7 +140,10 @@ impl CoreTerminals {
     pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for host in self.hosts() {
-            let listed = self.tabs.values().any(|shown| shown.host == host);
+            // This computer's stand-in shell runs agents too.
+            let listed = self.tabs.values().any(|shown| shown.host == host)
+                || (host == Host::Local
+                    && matches!(self.fallback, super::fallback::Fallback::Shown(_)));
             let backend = listed.then(|| self.backend_of(&host).cloned()).flatten();
             if let Some(infos) = self.infos_of_mut(&host) {
                 changed |= infos.poll(backend.as_ref(), now);
