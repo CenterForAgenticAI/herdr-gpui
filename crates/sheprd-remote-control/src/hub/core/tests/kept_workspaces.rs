@@ -73,3 +73,74 @@ fn kept_workspaces_lead_the_desktop_documents_spaces_too() {
         .collect();
     assert_eq!(labels, ["api", "desk"]);
 }
+
+#[test]
+fn a_terminal_started_for_a_workspace_is_listed_there_before_it_has_a_tab() {
+    let saved = serde_json::from_value(json!({
+        "workspaces": [
+            {"id": "space-2", "scope": "local:/test.sock", "label": "api", "cwd": "/code/api"}
+        ],
+        "tabs": []
+    }))
+    .unwrap();
+    let mut phone = record("t1");
+    phone["labels"] = json!({sheprd_session::WORKSPACE_LABEL: "space-2"});
+    let mut made_up = record("t2");
+    made_up["labels"] = json!({sheprd_session::WORKSPACE_LABEL: "core:space:x"});
+    let records = [phone, made_up].map(|record| serde_json::from_value(record).unwrap());
+    let layout = projection::project(
+        "fake-core",
+        &records,
+        Some(&saved),
+        Some("local:/test.sock"),
+    );
+    let rows: Vec<(&str, usize)> = layout
+        .workspaces
+        .iter()
+        .map(|row| (row.id.as_str(), row.terminals.len()))
+        .collect();
+    // A label naming the daemon's own groups is not one a tab can be in.
+    assert_eq!(rows, vec![("space-2", 1), (UNLISTED, 1)]);
+}
+
+#[test]
+fn a_terminal_started_for_a_named_sessions_workspace_is_listed_under_its_phone_id() {
+    let mut phone = record("t1");
+    phone["labels"] = json!({
+        sheprd_session::WORKSPACE_LABEL: "w1",
+        sheprd_session::SESSION_LABEL: "dev",
+    });
+    let records = [serde_json::from_value(phone).unwrap()];
+    let layout = projection::project("fake-core", &records, None, None);
+    assert_eq!(layout.workspaces[0].id, "herdr:dev:w1");
+}
+
+#[test]
+fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
+    let mut phone = record("t1");
+    phone["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/api"});
+    let records = [serde_json::from_value(phone).unwrap()];
+    let layout = projection::project("fake-core", &records, None, None);
+    let row = &layout.workspaces[0];
+    assert_eq!(row.id, new_workspace_id("/code/api"));
+    assert_eq!((row.label.as_str(), row.cwd.as_str()), ("api", "/code/api"));
+    assert_eq!(row.terminals.len(), 1);
+}
+
+#[test]
+fn a_phones_new_workspace_keeps_its_id_when_its_first_pane_closes() {
+    let labelled = |address: &str| {
+        let mut record = record(address);
+        record["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/api"});
+        serde_json::from_value(record).unwrap()
+    };
+    let both = [labelled("t1"), labelled("t9")];
+    let before = projection::project("fake-core", &both, None, None);
+    // The first chat closes; the tab added after it stays.
+    let after = projection::project("fake-core", &[labelled("t9")], None, None);
+    assert_eq!(before.workspaces[0].id, after.workspaces[0].id);
+    assert_eq!(after.workspaces[0].terminals.len(), 1);
+    // Another folder is another workspace, and an id fits in a path.
+    assert_ne!(new_workspace_id("/code/api"), new_workspace_id("/code/web"));
+    assert!(!new_workspace_id("/code/api").contains('/'));
+}

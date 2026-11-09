@@ -67,7 +67,8 @@ impl Screen {
             address: terminal.address.clone(),
             attachment,
             driving: false,
-            emulator: Emulator::new(size, HISTORY as usize),
+            // The phone shows no images, but the cursor must move past them.
+            emulator: Emulator::new(size, HISTORY as usize).without_images(),
             holds: Vec::new(),
             hold_listed: false,
             lines: Lines::default(),

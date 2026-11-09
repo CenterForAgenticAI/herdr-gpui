@@ -9,6 +9,7 @@ mod notify_key;
 mod pacer;
 mod payload;
 mod redact;
+mod terminal;
 mod tokens;
 
 const CHAT: Chat<'static> = Chat {

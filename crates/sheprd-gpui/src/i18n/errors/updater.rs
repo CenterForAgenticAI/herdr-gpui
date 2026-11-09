@@ -79,6 +79,8 @@ impl Localize for Error {
             Self::SignedMetadataSize => fl!("error-updater-signed-metadata-size"),
             Self::MissingPlatformAsset => fl!("error-updater-missing-platform-asset"),
             Self::ArchiveMetadata => fl!("error-updater-archive-metadata"),
+            Self::HostChatLayout => fl!("error-updater-host-chat-layout"),
+            Self::HostChatExpanded => fl!("error-updater-host-chat-expanded"),
             Self::ArchiveExceedsSize => fl!("error-updater-archive-exceeds-size"),
             Self::ArchiveDigest => fl!("error-updater-archive-digest"),
             Self::OfferAsset => fl!("error-updater-offer-asset"),

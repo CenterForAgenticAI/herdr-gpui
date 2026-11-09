@@ -32,6 +32,33 @@ impl Infos {
         self.known.get(id)
     }
 
+    /// The terminal herdr-core knows by `name`.
+    pub(super) fn by_name(&self, name: &str) -> Option<&TerminalInfo> {
+        self.known
+            .values()
+            .find(|info| info.name.as_deref() == Some(name))
+    }
+
+    /// The terminal `id` names: its address, or else its name, as a terminal
+    /// found by name is shown under it.
+    pub(super) fn named(&self, id: &TerminalId) -> Option<&TerminalInfo> {
+        self.get(id).or_else(|| {
+            self.known
+                .values()
+                .find(|info| info.name.as_deref() == Some(id.as_str()))
+        })
+    }
+
+    /// How many of the core's terminals run an agent that is working.
+    pub(super) fn working(&self) -> u32 {
+        let working = self
+            .known
+            .values()
+            .filter(|info| info.agent == sheprd_client::protocol::AgentStatus::Working)
+            .count();
+        u32::try_from(working).unwrap_or(u32::MAX)
+    }
+
     /// Every terminal the core last reported.
     pub(super) fn all(&self) -> impl Iterator<Item = &TerminalInfo> {
         self.known.values()

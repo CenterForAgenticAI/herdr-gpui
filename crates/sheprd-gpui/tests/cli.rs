@@ -293,7 +293,7 @@ fn local_pages_and_feedback_need_the_app_and_a_plain_folder() {
     let output = cli_in(&["browser", "feedback"], Some(state.path()));
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("runs in the Herdr pane"),
+        String::from_utf8_lossy(&output.stderr).contains("runs in the pane that should receive"),
         "{output:?}"
     );
     usage_error(
