@@ -213,9 +213,18 @@ pub fn review(source: &Source, destination: &Candidate, cancelled: &AtomicBool) 
         .collect();
     // The app's Herdr 2 tabs in the workspace, read from the host's core.
     let core_terminals = core::terminals(host, &core::ids(&source.core_tabs), cancelled)?;
+    // Sessions that cannot be read leave their agents to hand off.
+    let sessions = match core::sessions(host, &core_terminals, cancelled) {
+        Ok(sessions) => sessions,
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(error) => {
+            tracing::warn!(%error, "Could not read the sessions of Herdr 2 agents");
+            HashMap::new()
+        }
+    };
     works.extend(core::ids(&source.core_tabs).into_iter().map(|id| {
         let terminal = core_terminals.get(&id).cloned().unwrap_or_default();
-        let (work, cwd) = (terminal.work(), terminal.cwd());
+        let (work, cwd) = (core::work(&terminal, sessions.get(&id)), terminal.cwd());
         (id, work, cwd)
     }));
     let mut programs: Vec<&str> = AgentKind::FALLBACKS.iter().map(|k| k.binary()).collect();
