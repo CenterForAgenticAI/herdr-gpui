@@ -131,8 +131,17 @@ impl SheprdWindow {
             Workspace::Known(id) => return Some(id),
             Workspace::New(cwd) => cwd,
         };
-        if let Some(id) = self.kept_workspace_at(std::path::Path::new(&cwd)) {
-            return Some(id);
+        // In `scope`, not the shown host's: the desktop may show another.
+        let kept = cx
+            .global::<Store>()
+            .kept_workspaces(scope)
+            .find(|kept| {
+                !kept.cwd.is_empty()
+                    && std::path::Path::new(&kept.cwd) == std::path::Path::new(&cwd)
+            })
+            .map(|kept| kept.id.clone());
+        if kept.is_some() {
+            return kept;
         }
         let label = std::path::Path::new(&cwd)
             .file_name()

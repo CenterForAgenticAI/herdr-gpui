@@ -131,6 +131,49 @@ fn a_phones_new_workspace_is_kept_in_its_folder_with_the_terminal_in_it(cx: &mut
         view.kept_workspace_at(std::path::Path::new("/code/api"))
     });
     let kept = kept.expect("a workspace kept in the folder");
-    assert_eq!(tabs_of(cx, "t5"), [kept.clone()]);
+    assert_eq!(tabs_of(cx, "t5"), std::slice::from_ref(&kept));
     assert_eq!(tabs_of(cx, "t6"), [kept]);
+}
+
+#[gpui::test]
+fn a_phones_new_terminal_finds_its_workspace_while_another_host_is_shown(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx);
+    let new = |name: &str| {
+        let mut info = listed(name, None);
+        info.labels.insert(
+            sheprd_session::NEW_WORKSPACE_LABEL.to_owned(),
+            "/code/api".to_owned(),
+        );
+        info
+    };
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.core_terminals.infos.insert(new("t5"));
+            view.adopt_labelled_terminals(true, cx);
+            let remote = crate::endpoint::Endpoint::new(
+                "ssh:test".into(),
+                "Remote".into(),
+                sheprd_client::ConnectTarget::Ssh {
+                    target: "unused".into(),
+                    session: "default".into(),
+                },
+                true,
+            );
+            view.endpoints.push(remote);
+            view.endpoints[0].live = std::mem::take(&mut view.live);
+            view.selected_endpoint = 1;
+            view.core_terminals.infos.insert(new("t6"));
+            view.adopt_labelled_terminals(true, cx);
+        })
+    });
+    let kept: Vec<String> = cx.update(|_, cx| {
+        let scope = crate::browser::scope(&view.read(cx).endpoints[0]);
+        cx.global::<Store>()
+            .kept_workspaces(&scope)
+            .map(|kept| kept.id.clone())
+            .collect()
+    });
+    assert_eq!(kept.len(), 1, "one workspace for the folder: {kept:?}");
+    assert_eq!(tabs_of(cx, "t5"), kept);
+    assert_eq!(tabs_of(cx, "t6"), kept);
 }
