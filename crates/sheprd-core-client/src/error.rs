@@ -31,10 +31,10 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
-    #[error("the step ran out of time")]
-    Expired,
     #[error(transparent)]
     Convert(#[from] sheprd_client::herdr::convert::Error),
+    #[error("the step ran out of time")]
+    Expired,
     #[error(transparent)]
     Frame(#[from] frame::Error),
     #[error("herdr-core sent an invalid {0} answer")]
