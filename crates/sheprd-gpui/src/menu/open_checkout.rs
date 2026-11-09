@@ -46,6 +46,10 @@ impl SheprdWindow {
         let label = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned());
+        if self.new_workspaces_use_core() {
+            self.new_kept_workspace(label.as_deref(), Some(path), cx);
+            return;
+        }
         let params = serde_json::json!({
             "cwd": path,
             "label": label,

@@ -181,7 +181,7 @@ impl SheprdWindow {
                 .and_then(|store| store.code_tab(&scope, &workspace))
                 .filter(|tab| self.browser.code_folderless.contains(&tab.id))
                 .and_then(|tab| match &tab.location {
-                    Some(Location::Web { url: page }) => Some((tab.id, with_folder(page, folder))),
+                    Some(Location::Web { url: page }) => Some((tab.id, with_folder(page, &folder))),
                     _ => None,
                 })
         {
@@ -278,7 +278,7 @@ impl SheprdWindow {
             CodeHost::Local => self.local_editor_root(),
             CodeHost::Ssh(_) => self.host_editor_root(),
         }
-        .map_or_else(|| url.clone(), |folder| with_folder(url, folder))
+        .map_or_else(|| url.clone(), |folder| with_folder(url, &folder))
     }
 
     /// Forgets the server once its address is removed, closing the pages

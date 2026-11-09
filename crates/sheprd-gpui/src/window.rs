@@ -47,6 +47,7 @@ mod report_issue;
 mod select_hint;
 mod selection;
 mod server_keys;
+mod skill_offer;
 mod sound;
 mod status_bar;
 pub(crate) mod system_notifications;

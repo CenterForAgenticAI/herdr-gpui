@@ -219,9 +219,40 @@ pub struct StepRecord {
     /// The end of its output, at most a few kilobytes.
     pub log_tail: String,
     pub worktree: Option<String>,
-    /// The Herdr pane an agent runs in.
+    /// The pane an agent runs in: a Herdr pane ID, or a herdr-core terminal
+    /// address, as `terminals` says.
     pub pane: Option<String>,
+    /// Which Herdr runs `pane`. Older daemons only drove Herdr 1.
+    #[serde(default)]
+    pub terminals: Terminals,
     pub usage: Usage,
+}
+
+/// Which Herdr runs the terminals of a host's automations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Terminals {
+    /// Herdr 1, through the `herdr` command line.
+    #[default]
+    Herdr,
+    /// herdr-core (Herdr 2), through its socket.
+    HerdrCore,
+}
+
+impl Terminals {
+    /// The name settings and the database use.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Herdr => "herdr",
+            Self::HerdrCore => "herdr-core",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Herdr, Self::HerdrCore]
+            .into_iter()
+            .find(|terminals| terminals.name() == name)
+    }
 }
 
 /// What a step or run used. `None` means not measured, never zero.

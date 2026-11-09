@@ -14,7 +14,13 @@ pub use rows::{
     AgentRow, DaemonRow, NewRun, Request, RequestKind, RunRow, ScriptRow, StepRow, Switch,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
+/// What each older schema needs to become the next one.
+const MIGRATIONS: &[(i64, &str)] = &[(
+    1,
+    "ALTER TABLE steps ADD COLUMN terminals TEXT NOT NULL DEFAULT 'herdr';
+     ALTER TABLE agents ADD COLUMN terminals TEXT NOT NULL DEFAULT 'herdr';",
+)];
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SCHEMA: &str = "
@@ -42,12 +48,14 @@ CREATE TABLE IF NOT EXISTS steps (
     run INTEGER NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL,
     started_at INTEGER NOT NULL, finished_at INTEGER, state TEXT NOT NULL, exit INTEGER,
     log_tail TEXT NOT NULL DEFAULT '', worktree TEXT, pane TEXT,
-    cpu_ms INTEGER, peak_memory INTEGER, PRIMARY KEY (run, position));
+    cpu_ms INTEGER, peak_memory INTEGER, terminals TEXT NOT NULL DEFAULT 'herdr',
+    PRIMARY KEY (run, position));
 CREATE TABLE IF NOT EXISTS agents (
     run INTEGER NOT NULL, position INTEGER NOT NULL, path TEXT NOT NULL, harness TEXT NOT NULL,
     pane TEXT NOT NULL, cwd TEXT NOT NULL, started_at INTEGER NOT NULL, done_at INTEGER,
     input INTEGER, output INTEGER, cache_read INTEGER, cache_write INTEGER,
-    cpu_ms INTEGER, peak_memory INTEGER, sampled_at INTEGER, PRIMARY KEY (run, position));
+    cpu_ms INTEGER, peak_memory INTEGER, sampled_at INTEGER,
+    terminals TEXT NOT NULL DEFAULT 'herdr', PRIMARY KEY (run, position));
 CREATE TABLE IF NOT EXISTS agent_days (
     run INTEGER NOT NULL, position INTEGER NOT NULL, day INTEGER NOT NULL,
     input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
@@ -62,6 +70,45 @@ CREATE TABLE IF NOT EXISTS daemon (
 
 pub struct Store {
     connection: Connection,
+}
+
+/// Brings a database written by an older daemon up to [`SCHEMA_VERSION`],
+/// all in one transaction, so a failure leaves it as it was. The version is
+/// read again once the write lock is held: the daemon and a command opening
+/// the same old database together must not both run a step.
+fn migrate(connection: &Connection) -> Result<()> {
+    connection.execute_batch("BEGIN IMMEDIATE;")?;
+    let migrated = (|| -> Result<()> {
+        let found = connection
+            .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |row| {
+                row.get::<_, String>(0)
+            })?
+            .parse::<i64>()
+            .map_err(|_| crate::Error::Schema { found: -1 })?;
+        if found > SCHEMA_VERSION {
+            return Err(crate::Error::Schema { found });
+        }
+        for version in found..SCHEMA_VERSION {
+            let (_, step) = MIGRATIONS
+                .iter()
+                .find(|(from, _)| *from == version)
+                .ok_or(crate::Error::Schema { found })?;
+            connection.execute_batch(step)?;
+        }
+        connection.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema'",
+            params![SCHEMA_VERSION.to_string()],
+        )?;
+        Ok(())
+    })();
+    match migrated {
+        Ok(()) => connection.execute_batch("COMMIT;")?,
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK;");
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 impl Store {
@@ -92,6 +139,7 @@ impl Store {
                 )?;
             }
             Some(Ok(SCHEMA_VERSION)) => {}
+            Some(Ok(found)) if found < SCHEMA_VERSION => migrate(&connection)?,
             Some(Ok(found)) => return Err(crate::Error::Schema { found }),
             Some(Err(_)) => return Err(crate::Error::Schema { found: -1 }),
         }
@@ -393,7 +441,7 @@ impl Store {
     pub fn finish_step(&self, run: i64, position: u32, step: &StepRow, now: i64) -> Result<()> {
         self.connection.execute(
             "UPDATE steps SET state = ?3, exit = ?4, log_tail = ?5, worktree = ?6, pane = ?7,
-                 cpu_ms = ?8, peak_memory = ?9, finished_at = ?10
+                 cpu_ms = ?8, peak_memory = ?9, finished_at = ?10, terminals = ?11
              WHERE run = ?1 AND position = ?2",
             params![
                 run,
@@ -405,7 +453,8 @@ impl Store {
                 step.pane,
                 step.cpu_ms.and_then(|value| i64::try_from(value).ok()),
                 step.peak_memory.and_then(|value| i64::try_from(value).ok()),
-                now
+                now,
+                step.terminals.name()
             ],
         )?;
         Ok(())
@@ -424,8 +473,9 @@ impl Store {
 
     pub fn add_agent(&self, agent: &AgentRow) -> Result<()> {
         self.connection.execute(
-            "INSERT OR REPLACE INTO agents (run, position, path, harness, pane, cwd, started_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR REPLACE INTO agents
+                 (run, position, path, harness, pane, cwd, started_at, terminals)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 agent.run,
                 agent.position,
@@ -433,7 +483,8 @@ impl Store {
                 agent.harness,
                 agent.pane,
                 agent.cwd,
-                agent.started_at
+                agent.started_at,
+                agent.terminals.name()
             ],
         )?;
         Ok(())

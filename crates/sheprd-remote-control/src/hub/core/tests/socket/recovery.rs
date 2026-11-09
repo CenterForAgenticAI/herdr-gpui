@@ -7,11 +7,13 @@ fn closed_stream_reattaches_at_the_same_address_and_types_on_the_new_channel() {
     let params = json!({"pane_id": id("t1")});
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let screen = source.call(ApiMethod::PaneRead, &params).unwrap();
-        if screen["read"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("recovered")
+        // The first paint's read sees the close: that read fails, and the
+        // next one attaches again.
+        if let Ok(screen) = source.call(ApiMethod::PaneRead, &params)
+            && screen["read"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("recovered")
         {
             break;
         }
