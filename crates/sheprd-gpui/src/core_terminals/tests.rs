@@ -1,10 +1,14 @@
 mod accessibility;
 mod chats;
+mod context;
 mod effects;
 mod focus;
+mod kept_checkouts;
+mod kept_workspaces;
 mod keys;
 mod paste;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod wanted;
 mod worker;
