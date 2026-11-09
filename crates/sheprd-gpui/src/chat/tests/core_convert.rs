@@ -68,3 +68,23 @@ fn a_busy_core_agent_is_refused_by_the_shared_policy(cx: &mut gpui::TestAppConte
         })
     });
 }
+
+#[test]
+fn a_focused_pane_on_another_hosts_core_is_refused() {
+    use crate::chat::convert::focused_core_key;
+    let t1 = TerminalId::new("t1").unwrap();
+    let (local, remote) = (TabId::test(1), TabId::test(2));
+    let drives = |tab: TabId| tab == local;
+    assert_eq!(
+        focused_core_key(Some((local, t1.clone())), drives)
+            .unwrap()
+            .as_deref(),
+        Some("core:t1")
+    );
+    // Not Herdr's focused pane instead, and not this computer's `t1`.
+    assert!(matches!(
+        focused_core_key(Some((remote, t1)), drives),
+        Err(ConvertError::NotReachable)
+    ));
+    assert_eq!(focused_core_key(None, drives).unwrap(), None);
+}

@@ -176,6 +176,22 @@ fn spawn(request: Request) -> Result<Job, Error> {
     })
 }
 
+/// The chat key of the herdr-core pane with the keyboard, to move into a
+/// chat in place of Herdr's focused pane; none when no herdr-core pane has
+/// it. A pane on another host's core, or a mirror, is refused rather than
+/// passed over: its terminal ID names another terminal on this computer's
+/// core, and Herdr's focused pane is not the one the user is in.
+pub(crate) fn focused_core_key(
+    focused: Option<(crate::browser::TabId, sheprd_backend::TerminalId)>,
+    drives: impl Fn(crate::browser::TabId) -> bool,
+) -> Result<Option<String>, Error> {
+    match focused {
+        None => Ok(None),
+        Some((tab, _)) if !drives(tab) => Err(Error::NotReachable),
+        Some((_, terminal)) => Ok(Some(super::core_pane::key(&terminal))),
+    }
+}
+
 impl SheprdWindow {
     /// Starts moving the agent in `pane`, else the focused pane, into a
     /// chat, and says which pane and agent. It finishes in the background.
@@ -242,11 +258,9 @@ impl SheprdWindow {
     /// [`Self::convert_to_chat`] for the pane with the keyboard, a herdr-core
     /// pane before Herdr's focused one, reporting a failure as a flash.
     pub(crate) fn convert_to_chat_or_flash(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let core = self
-            .core_terminals
-            .focused_pane(window, cx)
-            .map(|(_, terminal)| super::core_pane::key(&terminal));
-        if let Err(error) = self.convert_to_chat(core.as_deref()) {
+        let focused = self.core_terminals.focused_pane(window, cx);
+        let core = focused_core_key(focused, |tab| self.core_terminals.drives(tab));
+        if let Err(error) = core.and_then(|core| self.convert_to_chat(core.as_deref())) {
             self.flash_convert_error(&error, cx);
         }
         cx.notify();
