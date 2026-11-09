@@ -83,6 +83,9 @@ struct TabPanes {
     panes: Panes,
     /// The pane in use before the current one, which Last Pane goes back to.
     previous: Option<TerminalId>,
+    /// The tab's location as this window last read or saved it, to tell
+    /// when another window saved a change.
+    saved: Option<Location>,
     unsaved: bool,
     /// How far the zoomed pane has grown over the tab; it shrinks back to
     /// its place when unzoomed.
@@ -108,6 +111,7 @@ impl TabPanes {
             observe,
             panes,
             previous: None,
+            saved: None,
             unsaved: false,
             zoom: crate::motion::Toggle::default(),
             zoomed: None,
@@ -135,6 +139,48 @@ impl TabPanes {
             shown.zoom.set(true, crate::motion::now(), true);
         }
         shown
+    }
+
+    /// Takes `location`, saved by another window since this one last read
+    /// or saved the tab, so that its next save does not undo it. Focus and
+    /// zoom this window changed and has not saved yet still stand where
+    /// their pane is still there.
+    fn refresh(&mut self, location: &Location) {
+        let Location::CoreTerminal {
+            panes,
+            observe,
+            active,
+            zoomed,
+        } = location
+        else {
+            return;
+        };
+        let mut fresh = Self::restore(
+            self.host.clone(),
+            panes.clone(),
+            *observe,
+            active.as_ref(),
+            zoomed.as_ref(),
+        );
+        if self.unsaved {
+            if fresh.panes.contains(&self.active) {
+                fresh.active = self.active.clone();
+            }
+            let zoomed = (self.zoomed.clone())
+                .filter(|zoomed| self.zoom.is_open() && fresh.panes.contains(zoomed));
+            fresh.zoom = match zoomed {
+                Some(_) => self.zoom,
+                None => crate::motion::Toggle::default(),
+            };
+            fresh.zoomed = zoomed;
+        } else if fresh.zoomed == self.zoomed && fresh.zoom.is_open() == self.zoom.is_open() {
+            // Unchanged: an animation in flight carries on.
+            fresh.zoom = self.zoom;
+        }
+        fresh.previous = (self.previous.take()).filter(|previous| fresh.panes.contains(previous));
+        fresh.unsaved = self.unsaved;
+        fresh.saved = Some(location.clone());
+        *self = fresh;
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -198,6 +244,9 @@ pub(crate) struct CoreTerminals {
     /// A shell starting, and what for.
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
+    /// Terminals a kill did not reach, as when the connection dropped while
+    /// it was sent, put back to end once their core answers again.
+    unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// A terminal to start once the hub connects: a shell, or the program
     /// its spawn names.
