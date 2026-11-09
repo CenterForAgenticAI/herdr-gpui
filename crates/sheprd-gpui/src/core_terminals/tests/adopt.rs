@@ -229,3 +229,22 @@ fn an_adopted_terminal_loses_what_adopts_it_and_keeps_its_chat() {
         "still a chat"
     );
 }
+
+#[test]
+fn an_adopted_terminal_keeps_its_labels_until_its_tab_is_saved() {
+    use crate::core_terminals::adopt::saved_holds;
+    let saved = |scope: &str, panes: &str| {
+        serde_json::to_vec(&serde_json::json!({"tabs": [{
+            "id": 1, "scope": scope, "workspace_id": "w1", "title": "t",
+            "location": {"kind": "core_terminal", "panes": panes},
+        }]}))
+        .unwrap()
+    };
+    assert!(saved_holds(&saved("s", "t1"), "s", &id("t1")));
+    assert!(!saved_holds(&saved("s", "t2"), "s", &id("t1")), "not yet");
+    assert!(
+        !saved_holds(&saved("other", "t1"), "s", &id("t1")),
+        "another host"
+    );
+    assert!(!saved_holds(b"{", "s", &id("t1")), "a damaged file");
+}

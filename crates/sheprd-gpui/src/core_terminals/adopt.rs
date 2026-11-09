@@ -28,6 +28,10 @@ const EVERY: Duration = Duration::from_secs(1);
 /// How many adopted terminals are remembered; past it the list starts over,
 /// and a terminal no tab holds by then may be adopted again.
 const MAX_ADOPTED: usize = 1024;
+/// How often, and how many times, an adopted terminal's saved tab is looked
+/// for on disk before its labels go: the store writes in the background.
+const SAVE_CHECK: Duration = Duration::from_millis(500);
+const SAVE_CHECKS: u32 = 20;
 
 /// Where a labelled terminal goes.
 enum Workspace {
@@ -101,7 +105,7 @@ impl SheprdWindow {
                 observe: false,
             };
             let tab = Store::update(cx, |store| {
-                store.open(scope, &workspace, Some(location), None)
+                store.open(scope.clone(), &workspace, Some(location), None)
             });
             if tab.is_none() {
                 // Tried again once a tab closes to make room.
@@ -114,7 +118,7 @@ impl SheprdWindow {
             if self.core_terminals.adopted.len() >= MAX_ADOPTED {
                 self.core_terminals.adopted.clear();
             }
-            self.release_labels(terminal.clone());
+            self.release_labels(&scope, terminal.clone());
             self.core_terminals.adopted.insert(terminal);
         }
         if opened {
@@ -173,15 +177,33 @@ impl SheprdWindow {
 }
 
 impl SheprdWindow {
-    /// Removes the labels that put `terminal` in a tab, on a worker thread
-    /// so herdr-core's answer is never awaited on the UI thread.
-    fn release_labels(&self, terminal: TerminalId) {
+    /// Removes the labels that put `terminal` in a tab of `scope` once that
+    /// tab is on disk, on a worker thread so neither the file nor
+    /// herdr-core's answer is awaited on the UI thread. Until the tab is
+    /// saved the labels stay, so a failed save leaves it to be adopted
+    /// again after a restart.
+    fn release_labels(&self, scope: &crate::browser::Scope, terminal: TerminalId) {
         let Some(backend) = self.core_terminals.backend_of(&Host::Local).cloned() else {
             return;
         };
+        let Some(path) = Store::path() else {
+            return;
+        };
+        let scope = scope.as_str().to_owned();
         let released = std::thread::Builder::new()
             .name("herdr-core-label".into())
             .spawn(move || {
+                let saved = (0..SAVE_CHECKS).any(|check| {
+                    if check > 0 {
+                        std::thread::sleep(SAVE_CHECK);
+                    }
+                    std::fs::read(&path)
+                        .is_ok_and(|bytes| saved_holds(&bytes, &scope, &terminal))
+                });
+                if !saved {
+                    tracing::warn!(%terminal, "An adopted terminal's tab was not saved; kept its labels");
+                    return;
+                }
                 if let Err(error) = backend.core().label(terminal.as_str(), &released_labels()) {
                     tracing::warn!(%error, %terminal, "Could not release an adopted terminal");
                 }
@@ -207,6 +229,15 @@ impl SheprdWindow {
             })
             .or_else(|| self.endpoints.iter().position(local))
     }
+}
+
+/// Whether the saved tabs in `bytes` hold `terminal` in a tab of `scope`.
+pub(super) fn saved_holds(bytes: &[u8], scope: &str, terminal: &TerminalId) -> bool {
+    sheprd_session::SavedTabs::parse(bytes).is_ok_and(|saved| {
+        saved
+            .core_tabs(scope)
+            .any(|tab| tab.panes.contains(terminal))
+    })
 }
 
 /// What `terminal.label` takes to remove the labels adoption reads: an
