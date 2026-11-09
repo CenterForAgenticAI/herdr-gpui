@@ -22,9 +22,12 @@ pub(super) struct Infos {
     fresh: HashSet<TerminalId>,
     known: HashMap<TerminalId, TerminalInfo>,
     last: Option<Instant>,
+    /// When the list known was asked for.
+    read: Option<Instant>,
     /// Lists read so far.
     lists: u64,
-    pending: Option<Listed>,
+    /// The list on its way, and when it was asked for.
+    pending: Option<(Instant, Listed)>,
 }
 
 impl Infos {
@@ -35,6 +38,11 @@ impl Infos {
     /// Every terminal the core last reported.
     pub(super) fn all(&self) -> impl Iterator<Item = &TerminalInfo> {
         self.known.values()
+    }
+
+    /// When the list known was asked for; none before the first.
+    pub(super) fn read_at(&self) -> Option<Instant> {
+        self.read
     }
 
     /// How many lists have been read; none means nothing is known yet.
@@ -49,6 +57,7 @@ impl Infos {
             .into_iter()
             .map(|info| (info.id.clone(), info))
             .collect();
+        self.read = Some(Instant::now());
         self.lists += 1;
     }
 
@@ -64,7 +73,8 @@ impl Infos {
     /// what is known changed.
     pub(super) fn poll(&mut self, backend: Option<&CoreBackend>, now: Instant) -> bool {
         let mut changed = false;
-        if let Some(pending) = &self.pending {
+        if let Some((asked, pending)) = &self.pending {
+            let asked = *asked;
             match pending.try_recv() {
                 Ok(Ok(list)) => {
                     let mut known: HashMap<TerminalId, TerminalInfo> = list
@@ -81,6 +91,7 @@ impl Infos {
                     }
                     changed = known != self.known;
                     self.known = known;
+                    self.read = Some(asked);
                     self.lists += 1;
                     self.pending = None;
                 }
@@ -105,7 +116,7 @@ impl Infos {
                     let _ = send.send(backend.terminals());
                 });
             match started {
-                Ok(_) => self.pending = Some(receive),
+                Ok(_) => self.pending = Some((now, receive)),
                 Err(error) => tracing::warn!(%error, "Could not start a herdr-core list worker"),
             }
         }
