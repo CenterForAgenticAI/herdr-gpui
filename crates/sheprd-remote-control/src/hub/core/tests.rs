@@ -136,6 +136,24 @@ mod socket {
         server: thread::JoinHandle<()>,
     }
 
+    /// A client that has gone away resets the socket rather than closing it
+    /// when it still held unread replies, which ends the fake as EOF would.
+    fn gone(error: &std::io::Error) -> bool {
+        matches!(
+            error.kind(),
+            std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+        )
+    }
+
+    /// Writes a reply, or says the client has gone.
+    fn reply(socket: &mut UnixStream, bytes: &[u8]) -> bool {
+        match socket.write_all(bytes) {
+            Ok(()) => true,
+            Err(error) if gone(&error) => false,
+            Err(error) => panic!("{error}"),
+        }
+    }
+
     fn receive(socket: &mut UnixStream, decoder: &mut Decoder) -> Option<Frame> {
         let mut bytes = [0; 4096];
         loop {
@@ -144,6 +162,7 @@ mod socket {
             }
             match socket.read(&mut bytes) {
                 Ok(0) => return None,
+                Err(error) if gone(&error) => return None,
                 Ok(count) => decoder.push(&bytes[..count]),
                 Err(error)
                     if matches!(
@@ -202,11 +221,10 @@ mod socket {
                     if close {
                         assert!(frame.channel > 7, "typed on the closed channel");
                     }
-                    socket
-                        .write_all(
-                            &encode(frame.channel, Kind::Data, b"\r\x1b[2Kreceived").unwrap(),
-                        )
-                        .unwrap();
+                    let echo = encode(frame.channel, Kind::Data, b"\r\x1b[2Kreceived").unwrap();
+                    if !reply(&mut socket, &echo) {
+                        return;
+                    }
                     continue;
                 }
                 let request: Value = serde_json::from_slice(&frame.payload).unwrap();
@@ -243,39 +261,40 @@ mod socket {
                 } else {
                     json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
                 };
-                socket
-                    .write_all(
-                        &encode(0, Kind::Data, &serde_json::to_vec(&response).unwrap()).unwrap(),
-                    )
-                    .unwrap();
+                if !reply(
+                    &mut socket,
+                    &encode(0, Kind::Data, &serde_json::to_vec(&response).unwrap()).unwrap(),
+                ) {
+                    return;
+                }
                 if request["method"] == "events.subscribe" {
                     let event = json!({"jsonrpc": "2.0", "method": "event", "params":
                         {"seq": 1, "type": "title", "terminal": "t1", "data": {"title": "new"}}});
                     let line = format!("{event}\n");
-                    socket
-                        .write_all(&encode(channel, Kind::Data, line.as_bytes()).unwrap())
-                        .unwrap();
+                    if !reply(
+                        &mut socket,
+                        &encode(channel, Kind::Data, line.as_bytes()).unwrap(),
+                    ) {
+                        return;
+                    }
                 }
-                if request["method"] == "terminal.attach" && !refused {
-                    socket
-                        .write_all(
-                            &encode(
-                                channel,
-                                Kind::Data,
-                                if channel == 7 {
-                                    b"\x1b[31mhello\x1b[0m\x1b[?2004h"
-                                } else {
-                                    b"recovered"
-                                },
-                            )
-                            .unwrap(),
-                        )
-                        .unwrap();
+                let screen = if channel == 7 {
+                    &b"\x1b[31mhello\x1b[0m\x1b[?2004h"[..]
+                } else {
+                    b"recovered"
+                };
+                if request["method"] == "terminal.attach"
+                    && !refused
+                    && !reply(&mut socket, &encode(channel, Kind::Data, screen).unwrap())
+                {
+                    return;
                 }
-                if close && request["method"] == "terminal.attach" && channel == 7 {
-                    socket
-                        .write_all(&encode(7, Kind::Close, b"").unwrap())
-                        .unwrap();
+                if close
+                    && request["method"] == "terminal.attach"
+                    && channel == 7
+                    && !reply(&mut socket, &encode(7, Kind::Close, b"").unwrap())
+                {
+                    return;
                 }
             }
         });

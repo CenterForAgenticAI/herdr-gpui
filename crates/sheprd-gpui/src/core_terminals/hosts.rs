@@ -15,7 +15,7 @@ use gpui::{Context, Window};
 use sheprd_backend::{TerminalId, TerminalInfo};
 use sheprd_client::ConnectTarget;
 use sheprd_core_client::CoreBackend;
-use std::time::Instant;
+use std::{collections::VecDeque, time::Instant};
 
 /// The core a tab's terminals run in.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -140,7 +140,10 @@ impl CoreTerminals {
     pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for host in self.hosts() {
-            let listed = self.tabs.values().any(|shown| shown.host == host);
+            // This computer's stand-in shell runs agents too.
+            let listed = self.tabs.values().any(|shown| shown.host == host)
+                || (host == Host::Local
+                    && matches!(self.fallback, super::fallback::Fallback::Shown(_)));
             let backend = listed.then(|| self.backend_of(&host).cloned()).flatten();
             if let Some(infos) = self.infos_of_mut(&host) {
                 changed |= infos.poll(backend.as_ref(), now);
@@ -162,13 +165,7 @@ impl CoreTerminals {
         let tabs = &self.tabs;
         self.views
             .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != *host));
-        if self
-            .wanted
-            .as_ref()
-            .is_some_and(|(_, wanted, _)| wanted == host)
-        {
-            self.wanted = None;
-        }
+        self.wanted.retain(|(_, wanted, _)| wanted != host);
         if self
             .starting
             .as_ref()
@@ -221,16 +218,16 @@ impl SheprdWindow {
                 Some(State::Unavailable(error)) => Some(std::sync::Arc::clone(error)),
                 _ => None,
             };
-            let wanted_here = self
-                .core_terminals
-                .wanted
-                .as_ref()
-                .is_some_and(|(_, wanted, _)| *wanted == host);
-            if let Some(error) = failed
-                && wanted_here
-                && let Some((purpose, _, _)) = self.core_terminals.wanted.take()
-            {
-                self.core_unavailable(purpose, &error, window, cx);
+            // Every terminal waiting for a core that cannot start is
+            // dropped, and the user is told once.
+            if let Some(error) = failed {
+                let (here, others) = std::mem::take(&mut self.core_terminals.wanted)
+                    .into_iter()
+                    .partition::<VecDeque<_>, _>(|(_, wanted, _)| *wanted == host);
+                self.core_terminals.wanted = others;
+                if let Some((purpose, _, _)) = here.into_iter().next() {
+                    self.core_unavailable(purpose, &error, window, cx);
+                }
             }
         }
         if changed {
