@@ -27,6 +27,7 @@ mod hub;
 mod infos;
 pub(crate) mod install;
 pub(crate) mod menu;
+pub(crate) mod moves;
 mod phone;
 mod requests;
 mod screen;
@@ -83,6 +84,23 @@ pub(crate) enum Purpose {
         at: TerminalId,
         axis: Axis,
     },
+}
+
+/// What refreshing a tab another window saved leaves for the window to do.
+#[derive(Debug, Default, PartialEq)]
+struct Refreshed {
+    /// Panes the other window opened that the tab had no room left for.
+    overflow: Vec<TerminalId>,
+    /// Each window closed the other's last pane, so none is left.
+    emptied: bool,
+}
+
+impl Refreshed {
+    /// Whether nothing is left to do.
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A terminal to start, what for, and a file its program takes over once
@@ -201,11 +219,12 @@ impl TabPanes {
     /// a zoom stands only on that pane, so commands never reach a pane
     /// hidden behind another.
     ///
-    /// Returns the other window's new panes this tab had no room left for.
+    /// Returns what is left for the window to do: panes the other window
+    /// opened that this tab had no room left for, or that it emptied.
     #[must_use]
-    fn refresh(&mut self, location: &Location) -> Vec<TerminalId> {
+    fn refresh(&mut self, location: &Location) -> Refreshed {
         let Some(mut fresh) = Self::restore(self.host.clone(), location) else {
-            return Vec::new();
+            return Refreshed::default();
         };
         let Some(Location::CoreTerminal {
             panes: base,
@@ -215,23 +234,26 @@ impl TabPanes {
         }) = &self.saved
         else {
             *self = fresh;
-            return Vec::new();
+            return Refreshed::default();
         };
-        let mut overflow = Vec::new();
+        let mut left = Refreshed::default();
         if self.panes != *base {
-            fresh.panes = if fresh.panes == *base {
-                self.panes.clone()
+            if fresh.panes == *base {
+                fresh.panes = self.panes.clone();
             } else {
-                let (panes, left) = merged(&self.panes, base, &fresh.panes, &self.active);
-                overflow = left;
-                panes
-            };
+                let (panes, overflow) = merged(&self.panes, base, &fresh.panes, &self.active);
+                left.overflow = overflow;
+                match panes {
+                    Some(panes) => fresh.panes = panes,
+                    None => left.emptied = true,
+                }
+            }
         }
-        // Names this window changed since it last read the tab stand too,
-        // pane by pane, so a name given here and one given there both do.
+        // Names this window changed since it last read the tab stand too:
         if self.name != *base_name {
             fresh.name = self.name.take();
         }
+        // Pane by pane, so a name given here and one given there both stand.
         let touched = (self.names.keys())
             .chain(base_names.keys())
             .filter(|terminal| self.names.get(*terminal) != base_names.get(*terminal));
@@ -275,7 +297,7 @@ impl TabPanes {
         fresh.unsaved = self.unsaved;
         fresh.saved = Some(location.clone());
         *self = fresh;
-        overflow
+        left
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -378,7 +400,8 @@ pub(crate) struct CoreTerminals {
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
     /// Terminals a kill did not reach, as when the connection dropped while
-    /// it was sent, put back to end once their core answers again.
+    /// it was sent, put back to end once their core answers again. Every
+    /// window holds the app's one list ([`tabs::Unended`]).
     unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// Terminals to start, one after another, once the hub of each one's
@@ -517,6 +540,13 @@ impl CoreTerminals {
             .map(|info| info.agent)
             .max_by_key(|status| crate::sidebar::status_priority(*status))
             .unwrap_or(AgentStatus::Unknown)
+    }
+
+    /// Whether the user named `tab`.
+    pub(crate) fn tab_named(&self, tab: TabId) -> bool {
+        self.tabs
+            .get(&tab)
+            .is_some_and(|shown| shown.name.is_some())
     }
 
     /// Whether a tab on this computer's core shows `terminal`, a mirror
@@ -891,19 +921,21 @@ impl SheprdWindow {
 /// `here`, a layout changed since `base`, with the changes `there` made to
 /// `base` too: its closed panes go, and its new ones split off `active`
 /// while there is room. The new ones a full layout cannot take come back
-/// beside it, for the caller to give a tab of their own.
+/// beside it, for the caller to give a tab of their own. `None` when every
+/// pane went, each window having closed the other's last.
 fn merged(
     here: &Panes,
     base: &Panes,
     there: &Panes,
     active: &TerminalId,
-) -> (Panes, Vec<TerminalId>) {
+) -> (Option<Panes>, Vec<TerminalId>) {
     let mut panes = here.clone();
     let mut overflow = Vec::new();
-    for gone in base.terminals() {
-        if !there.contains(gone) {
-            panes.remove(gone);
-        }
+    let gone: Vec<&TerminalId> = (base.terminals().into_iter())
+        .filter(|terminal| !there.contains(terminal))
+        .collect();
+    for terminal in &gone {
+        panes.remove(terminal);
     }
     for new in there.terminals() {
         if !base.contains(new) && !panes.contains(new) {
@@ -917,7 +949,15 @@ fn merged(
             }
         }
     }
-    (panes, overflow)
+    // The last pane cannot go while it is alone; with the other side's new
+    // panes in, it can, and if it still cannot, nothing is left.
+    for terminal in &gone {
+        panes.remove(terminal);
+    }
+    if gone.iter().any(|terminal| panes.contains(terminal)) {
+        return (None, overflow);
+    }
+    (Some(panes), overflow)
 }
 
 /// Whether a pane waiting for the keyboard may take it: nothing holds it, or

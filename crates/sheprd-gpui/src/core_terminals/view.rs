@@ -740,6 +740,9 @@ impl Render for CoreTerminalView {
                     this.paste_clipboard(window, cx);
                 }
             }))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.drop_files(paths, window, cx);
+            }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))

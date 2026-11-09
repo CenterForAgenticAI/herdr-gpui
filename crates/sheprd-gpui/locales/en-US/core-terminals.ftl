@@ -29,6 +29,8 @@ core-terminals-mirror-needs-pane = Click a Herdr 2 pane to mirror first
 core-terminals-menu-mirror = Mirror in New Tab
 # A pane or tab command a Herdr 2 pane cannot run.
 core-terminals-unsupported = Herdr 2 panes cannot do this yet
+# Move Pane on a Herdr 2 pane that is its tab's only one, with no other tab.
+core-terminals-nowhere-to-move = No other tab to move this pane to
 # Shown on a watch-only view of a terminal another view types into.
 core-terminals-watching = Watching
 # The sidebar's list of herdr-core panes, under the agents.
