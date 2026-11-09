@@ -2,6 +2,7 @@
 //! opening a phone never starts another user's terminal runtime.
 
 mod chats;
+mod checkouts;
 mod create;
 mod error;
 mod poller;
