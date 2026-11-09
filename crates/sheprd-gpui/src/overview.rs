@@ -480,7 +480,7 @@ impl SheprdWindow {
             Open::Core { tab, terminal } => {
                 self.show_activity_panel(ActivityPanel::Workspaces, window, cx);
                 self.activity.return_to = Some(ActivityPanel::Overview);
-                self.show_core_pane(*tab, terminal, window, cx);
+                self.open_core_overview_row(*tab, terminal, window, cx);
             }
         }
         cx.notify();

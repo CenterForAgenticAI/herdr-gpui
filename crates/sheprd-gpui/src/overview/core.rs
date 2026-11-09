@@ -10,7 +10,7 @@ use super::{
     replies::{BLOCKED, Presence, Reply, Target},
 };
 use crate::SheprdWindow;
-use gpui::Context;
+use gpui::{Context, Window};
 use sheprd_backend::TerminalId;
 use std::time::{Instant, SystemTime};
 
@@ -29,6 +29,30 @@ impl SheprdWindow {
             .find(|endpoint| !endpoint.connection.target.is_remote())
             .map(|endpoint| (endpoint.id.clone(), endpoint.label.clone()))
             .unwrap_or_else(|| (ENDPOINT.to_owned(), crate::i18n::fl!("overview-core-host")))
+    }
+
+    /// Shows the pane of a core agent's row: its host and workspace first,
+    /// which may be another than the window's, then its tab and pane.
+    pub(super) fn open_core_overview_row(
+        &mut self,
+        tab: crate::browser::TabId,
+        terminal: &TerminalId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let workspace = cx
+            .try_global::<crate::browser::Store>()
+            .and_then(|store| store.get(tab))
+            .map(|shown| shown.workspace_id.clone());
+        if let Some(workspace) = workspace {
+            let (endpoint, _) = self.core_overview_host();
+            self.navigate_endpoint(
+                &endpoint,
+                crate::NavigationTarget::Workspace(workspace.as_str()),
+                cx,
+            );
+        }
+        self.show_core_pane(tab, terminal, window, cx);
     }
 
     /// Whether `id` is the endpoint the core's rows are listed with.
