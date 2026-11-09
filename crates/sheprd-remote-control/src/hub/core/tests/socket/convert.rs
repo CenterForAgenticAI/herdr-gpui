@@ -78,7 +78,8 @@ fn stand(status: &'static str) -> Stand {
                     json!({})
                 }
                 "terminal.send" => json!({"turn": 1}),
-                "terminal.label" => json!({}),
+                // The labelled terminal, as herdr-core answers.
+                "terminal.label" => agent_record(stopped, status),
                 method => panic!("unexpected method {method}"),
             };
             if method != "terminal.list" {
@@ -98,6 +99,7 @@ fn stand(status: &'static str) -> Stand {
     let source = Arc::new(Source {
         connected: AtomicBool::new(true),
         endpoint: Default::default(),
+        holds: AtomicU64::new(0),
         poller: Mutex::default(),
         scope: None,
         state: Mutex::new(State {

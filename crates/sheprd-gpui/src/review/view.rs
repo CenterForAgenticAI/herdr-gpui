@@ -68,6 +68,21 @@ pub(crate) struct Agent {
     pub label: Option<String>,
 }
 
+/// Who a review opened now sends its notes to. While the active group
+/// shows a herdr-core pane, the review is of that pane's checkout and Herdr
+/// knows nothing of its agent, so nobody: Send copies the notes rather than
+/// typing them into the hidden Herdr workspace's agent, which may be at work
+/// in another repository.
+pub(crate) fn review_recipient(
+    snapshot: Option<&ClientShellSnapshot>,
+    shows_core_pane: bool,
+) -> Option<Agent> {
+    if shows_core_pane {
+        return None;
+    }
+    snapshot.and_then(pick_agent)
+}
+
 /// The agent whose changes these are: the one in the focused pane, or else
 /// the first in the focused workspace.
 pub(crate) fn pick_agent(snapshot: &ClientShellSnapshot) -> Option<Agent> {
@@ -131,6 +146,9 @@ pub(crate) struct Review {
     /// The share of a side-by-side row the old side takes.
     split_ratio: f32,
     agent: Option<Agent>,
+    /// The herdr-core tab and pane the review was opened from, whose split
+    /// its files open in, as `agent`'s pane is for a Herdr workspace.
+    core: Option<(TabId, sheprd_backend::TerminalId)>,
     /// The endpoint the agent's daemon was on when the review opened.
     origin: Option<crate::agent_notes::Origin>,
     state: State,

@@ -43,10 +43,10 @@ impl SheprdWindow {
         let hover = theme.active;
         let rows = panes.into_iter().map(|(tab, terminal)| {
             let (title, status) = self.core_pane_label(tab, &terminal, cx);
+            // The tab's host's record: IDs repeat across machines.
             let agent = self
                 .core_terminals
-                .infos
-                .get(&terminal)
+                .info(tab, &terminal)
                 .and_then(sheprd_core_client::agent_kind);
             let id = SharedString::from(format!("core-sidebar-{}-{terminal}", u64::from(tab)));
             let clicked = terminal.clone();
@@ -104,6 +104,40 @@ impl SheprdWindow {
                 .children(rows)
                 .into_any_element(),
         )
+    }
+
+    /// Shows a Herdr 2 agent the overview lists: its workspace, then its tab
+    /// with its terminal in use, or the shell shown in place of Herdr 1.
+    /// `tab` and `terminal` are as a `Session` names them.
+    pub(crate) fn show_core_agent(
+        &mut self,
+        endpoint: &str,
+        workspace: &str,
+        tab: &str,
+        terminal: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let in_front = self.endpoints[self.selected_endpoint].id == endpoint
+            && self
+                .browser_key()
+                .is_some_and(|(_, shown)| shown == workspace);
+        if !in_front {
+            self.navigate_endpoint(endpoint, crate::NavigationTarget::Workspace(workspace), cx);
+        }
+        let Ok(tab) = tab.parse::<u64>() else {
+            return;
+        };
+        if tab == super::SHELL_TAB {
+            if let Some(view) = self.core_fallback_view() {
+                window.focus(&view.read(cx).focus_handle().clone(), cx);
+            }
+            return;
+        }
+        let Ok(terminal) = TerminalId::new(terminal) else {
+            return;
+        };
+        self.show_core_pane(TabId::from(tab), &terminal, window, cx);
     }
 
     /// Shows `tab` with `terminal` as its pane in use, unzoomed if another

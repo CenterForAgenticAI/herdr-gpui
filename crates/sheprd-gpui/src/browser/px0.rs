@@ -20,7 +20,7 @@ pub(super) struct Pages {
 impl SheprdWindow {
     pub(crate) fn px0_root(&self) -> Option<String> {
         let root = self.local_editor_root()?;
-        (root.len() <= 4096 && !root.chars().any(char::is_control)).then(|| root.to_owned())
+        (root.len() <= 4096 && !root.chars().any(char::is_control)).then(|| root.into_owned())
     }
 
     pub(crate) fn open_px0(

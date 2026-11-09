@@ -213,8 +213,15 @@ pub fn run(
         || std::thread::sleep(convert::POLL),
         cancelled,
     )?;
-    core.send(terminal.as_str(), &line)?;
-    core.label(terminal.as_str(), &[(TOKEN, endpoint.as_str())])?;
+    core.send(&crate::wire::SendText {
+        terminal: terminal.as_str(),
+        text: &line,
+        ..Default::default()
+    })?;
+    core.label(
+        terminal.as_str(),
+        &std::collections::BTreeMap::from([(TOKEN, endpoint.as_str())]),
+    )?;
     Ok(endpoint)
 }
 

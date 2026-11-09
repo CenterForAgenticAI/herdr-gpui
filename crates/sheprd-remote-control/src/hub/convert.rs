@@ -107,10 +107,7 @@ impl Hub {
         if agent != expected {
             return Err(convert::Error::Moved.into());
         }
-        let program = self
-            .program()
-            .ok_or(super::Error::ProgramMissing)?
-            .to_owned();
+        let program = self.program().ok_or(super::Error::ProgramMissing)?;
         let claim = self.moving.claim(pane)?;
         if core::owns(&params) {
             let core = self

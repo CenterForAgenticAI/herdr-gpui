@@ -15,6 +15,7 @@ mod recency;
 mod sessions;
 
 pub(crate) use api::ApiMethod;
+pub(crate) use attach::TermHold;
 pub(crate) use chat::{Chat, Event, Summary, View};
 pub(crate) use convert::Error as ConvertError;
 #[cfg(test)]
@@ -99,6 +100,10 @@ pub(crate) struct Hub {
     /// The primary session's own layout, to tell whether it answers.
     primary: watch::Receiver<Arc<Layout>>,
     program: Option<PathBuf>,
+    /// Whether a missing program is looked for again as a chat starts: one
+    /// installed after the daemon started (pairing again copies one) works
+    /// without restarting it. Tests leave it off.
+    search_program: bool,
     sessions: Arc<sessions::Sessions>,
     /// Where new checkouts go for work on a core.
     worktrees: Option<PathBuf>,
@@ -155,6 +160,7 @@ impl Hub {
             moving: convert::Moving::default(),
             primary: daemon_layout,
             program: locate_program(),
+            search_program: true,
             sessions,
             worktrees: core::worktree::root(),
         });
@@ -169,9 +175,11 @@ impl Hub {
         Ok(hub)
     }
 
-    /// The `sheprd-acp` chats start with, when one was found.
-    pub(crate) fn program(&self) -> Option<&Path> {
-        self.program.as_deref()
+    /// The `sheprd-acp` chats start with, when one is found.
+    pub(crate) fn program(&self) -> Option<PathBuf> {
+        self.program
+            .clone()
+            .or_else(|| self.search_program.then(locate_program).flatten())
     }
 
     /// A hub showing `layout` that never connects to a daemon or a chat,
@@ -240,6 +248,7 @@ impl Hub {
             primary: receiver.clone(),
             layout: receiver,
             program: None,
+            search_program: false,
             sessions: sessions::Sessions::offline(),
             worktrees: None,
         }
@@ -285,7 +294,8 @@ impl Hub {
         if sessions::in_wsl(workspace) {
             return Err(Error::WslChat);
         }
-        let program = self.program.as_deref().ok_or(Error::ProgramMissing)?;
+        let program = self.program().ok_or(Error::ProgramMissing)?;
+        let program = program.as_path();
         let layout = self.layout();
         let folder = layout
             .workspace(workspace)
@@ -336,7 +346,8 @@ impl Hub {
         if session.is_some_and(sessions::is_wsl) {
             return Err(Error::WslChat);
         }
-        let program = self.program.as_deref().ok_or(Error::ProgramMissing)?;
+        let program = self.program().ok_or(Error::ProgramMissing)?;
+        let program = program.as_path();
         if let Some(core) = self.active_core() {
             let (cwd, program) = (cwd.to_owned(), program.to_owned());
             let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
@@ -578,27 +589,57 @@ const PROGRAM: &str = if cfg!(windows) {
     "herdr-acp"
 };
 
-/// The `herdr-acp` beside this executable (the app bundle ships both),
-/// else the first on `PATH`.
+/// The `herdr-acp` beside this executable (the app bundle ships both, and
+/// pairing puts one beside the daemon on a host), else where Sheprd looks
+/// for one on an SSH host (`~/.herdr/bin`, `~/.cargo/bin`, `~/.local/bin`:
+/// a service's `PATH` often lacks them), else the first on `PATH`.
 fn locate_program() -> Option<PathBuf> {
     let renamed = PROGRAM.replacen("herdr-", "sheprd-", 1);
-    locate_named_program(&renamed).or_else(|| locate_named_program(PROGRAM))
+    let exe = std::env::current_exe().ok();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let path = std::env::var_os("PATH");
+    let dirs = program_dirs(exe.as_deref(), home.as_deref(), path.as_deref());
+    [renamed.as_str(), PROGRAM].into_iter().find_map(|program| {
+        dirs.iter()
+            .map(|dir| dir.join(program))
+            .find(|candidate| runnable(candidate))
+    })
 }
 
-fn locate_named_program(program: &str) -> Option<PathBuf> {
-    let beside = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(program)));
-    beside
+/// Whether `path` is a file this user may run: one left without the
+/// execute bit must not hide a working copy further on.
+fn runnable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
+}
+
+/// Where a chat program is looked for, in order. Only absolute folders: a
+/// relative one would depend on where the daemon was started.
+fn program_dirs(
+    exe: Option<&Path>,
+    home: Option<&Path>,
+    path: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    let beside = exe.and_then(Path::parent).map(Path::to_path_buf);
+    let home = home
+        .filter(|home| home.is_absolute())
         .into_iter()
-        .chain(
-            std::env::var_os("PATH")
-                .into_iter()
-                .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-                .filter(|dir| dir.is_absolute())
-                .map(|dir| dir.join(program)),
-        )
-        .find(|candidate| candidate.is_file())
+        .flat_map(|home| [".herdr/bin", ".cargo/bin", ".local/bin"].map(|dir| home.join(dir)));
+    let path = path
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .filter(|dir| dir.is_absolute());
+    beside.into_iter().chain(home).chain(path).collect()
 }
 
 /// Runs blocking core work off the runtime.

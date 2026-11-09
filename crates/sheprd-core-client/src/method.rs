@@ -40,6 +40,7 @@ methods! {
     TerminalList => "terminal.list", true;
     TerminalRun => "terminal.run", true;
     TerminalSend => "terminal.send", false;
+    TerminalWait => "terminal.wait", false;
     // keep-sorted end
 }
 

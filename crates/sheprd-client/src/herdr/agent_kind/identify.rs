@@ -6,7 +6,7 @@
 use super::AgentKind;
 
 /// Runtimes that run an agent's script rather than being one.
-const RUNTIMES: &[&str] = &["bun", "deno", "node"];
+const RUNTIMES: &[&str] = &["bun", "deno", "node", "nodejs"];
 /// Runtime options whose value is the next argument, not the script.
 const VALUED: &[&str] = &[
     "-r",
@@ -75,20 +75,29 @@ impl AgentKind {
         if let Some(kind) = Self::lookup(program).or_else(|| Self::lookup(name)) {
             return Some(kind);
         }
-        if !RUNTIMES.contains(&base(program).to_ascii_lowercase().as_str()) {
+        let runtime = base(program).to_ascii_lowercase();
+        if !RUNTIMES.contains(&runtime.as_str()) {
             return None;
         }
-        let script = script(argv)?;
+        // `bun run x.js` and `deno run x.js`; to Node, `run` is a script.
+        let subcommand = !matches!(runtime.as_str(), "node" | "nodejs");
+        let script = script(argv, subcommand)?;
         package(script).or_else(|| Self::lookup(script))
     }
 }
 
 /// The script a runtime's command line runs: the first argument that is
-/// neither an option nor an option's value.
-fn script(argv: &[String]) -> Option<&str> {
+/// neither an option nor an option's value, past a leading `run` when the
+/// runtime takes `subcommand`s.
+fn script(argv: &[String], subcommand: bool) -> Option<&str> {
     let mut args = argv.iter().skip(1);
+    let mut first = true;
     while let Some(arg) = args.next() {
         if !arg.starts_with('-') {
+            if subcommand && first && arg == "run" {
+                first = false;
+                continue;
+            }
             return Some(arg);
         }
         if INLINE.contains(&arg.as_str()) {

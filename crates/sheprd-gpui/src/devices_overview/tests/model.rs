@@ -73,6 +73,14 @@ fn the_chart_axis_always_spans_two_hours() {
 #[test]
 fn only_a_reachable_device_is_counted() {
     use crate::{devices_overview::online_tally, state::ConnectionStatus};
+    let tally = |endpoint: &crate::endpoint::Endpoint, live: &crate::state::LiveState| {
+        let sessions = crate::session_model::Sessions {
+            core: None,
+            core_answers: false,
+            herdr_1: live.session(),
+        };
+        online_tally(endpoint, live, &sessions)
+    };
     let endpoint = |enabled| {
         crate::endpoint::Endpoint::new(
             "ssh:box".into(),
@@ -88,17 +96,16 @@ fn only_a_reachable_device_is_counted() {
     live.snapshot = Some(std::sync::Arc::new(crate::sidebar::layout_tests::snapshot(
         1,
     )));
-    assert_eq!(online_tally(&endpoint(true), &live), None, "not connected");
+    assert_eq!(tally(&endpoint(true), &live), None, "not connected");
     live.status = ConnectionStatus::Connected;
-    let tally = online_tally(&endpoint(true), &live).unwrap();
-    assert_eq!(tally.total(), live.snapshot.as_ref().unwrap().agents.len());
-    assert_eq!(online_tally(&endpoint(false), &live), None, "disabled");
-    live.snapshot = None;
+    let counted = tally(&endpoint(true), &live).unwrap();
     assert_eq!(
-        online_tally(&endpoint(true), &live),
-        None,
-        "no snapshot yet"
+        counted.total(),
+        live.snapshot.as_ref().unwrap().agents.len()
     );
+    assert_eq!(tally(&endpoint(false), &live), None, "disabled");
+    live.snapshot = None;
+    assert_eq!(tally(&endpoint(true), &live), None, "no snapshot yet");
 }
 
 #[test]
@@ -106,4 +113,69 @@ fn every_column_names_an_english_message() {
     for (id, _) in crate::devices_overview::table::COLUMNS {
         assert!(id.is_empty() || crate::i18n::takes(id) == Some(&[]), "{id}");
     }
+}
+
+#[test]
+fn herdr_2_agents_count_on_a_computer_without_herdr_1() {
+    use crate::devices_overview::online_tally;
+    use sheprd_backend::{RunState, TerminalId, TerminalInfo};
+    use sheprd_session::{CoreTab, CoreWorkspace, Session, panes::Panes};
+    let endpoint = crate::endpoint::Endpoint::new(
+        "local".into(),
+        "This Mac".into(),
+        sheprd_client::ConnectTarget::Local,
+        true,
+    );
+    let mut live = crate::state::LiveState::default();
+    live.missing_installation = true;
+    let terminal = TerminalId::new("t1").unwrap();
+    let info = TerminalInfo {
+        agent: Blocked,
+        cwd: None,
+        foreground: None,
+        id: terminal.clone(),
+        labels: Default::default(),
+        name: Some("claude".into()),
+        reporter: None,
+        state: RunState::Running,
+        title: None,
+    };
+    let panes = Panes::single(terminal);
+    let core = Session::core(
+        [CoreWorkspace {
+            branch: None,
+            custom_label: false,
+            worktree: None,
+            cwd: "",
+            id: "herdr-2",
+            label: "Herdr 2",
+        }],
+        [CoreTab {
+            id: 1,
+            panes: &panes,
+            title: "",
+            workspace_id: "herdr-2",
+        }],
+        None,
+        |_| Some(&info),
+    );
+    let sessions = crate::session_model::Sessions {
+        core: Some(std::sync::Arc::new(core)),
+        core_answers: true,
+        herdr_1: None,
+    };
+    assert_eq!(
+        online_tally(&endpoint, &live, &sessions).unwrap().blocked,
+        1
+    );
+    let device = Device::new(0, &endpoint, &live, &sessions);
+    assert_eq!(device.link, Link::Online);
+    assert_eq!(device.agents[0].workspace, "Herdr 2");
+    // A click shows it through the app's tab, not Herdr 1's pane focus.
+    assert_eq!(device.agents[0].keeper, sheprd_session::Keeper::App);
+    assert_eq!(device.agents[0].tab_id, "1");
+    assert!(device.matches("claude"));
+    let offline = Device::new(0, &endpoint, &live, &Default::default());
+    assert_ne!(offline.link, Link::Online);
+    assert!(offline.agents.is_empty());
 }

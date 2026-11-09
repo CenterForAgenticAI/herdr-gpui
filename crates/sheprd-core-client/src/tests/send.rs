@@ -1,14 +1,24 @@
 //! Typing a message into a terminal through the core.
 
 use super::connected;
-use crate::{Error, Method, frame::Kind, wire::BLOCKED};
+use crate::{
+    Error, Method,
+    frame::Kind,
+    wire::{BLOCKED, SendText},
+};
 use serde_json::json;
 use std::thread;
 
 #[test]
 fn a_send_carries_the_terminal_and_text() {
     let (client, mut core) = connected();
-    let call = thread::spawn(move || client.send("t3", "go on"));
+    let call = thread::spawn(move || {
+        client.send(&SendText {
+            terminal: "t3",
+            text: "go on",
+            ..SendText::default()
+        })
+    });
     let request = core.request();
     assert_eq!(request["method"], "terminal.send");
     assert_eq!(
@@ -26,7 +36,13 @@ fn a_send_carries_the_terminal_and_text() {
 #[test]
 fn a_blocked_program_is_refused_by_kind() {
     let (client, mut core) = connected();
-    let call = thread::spawn(move || client.send("t3", "yes"));
+    let call = thread::spawn(move || {
+        client.send(&SendText {
+            terminal: "t3",
+            text: "yes",
+            ..SendText::default()
+        })
+    });
     let request = core.request();
     let message = json!({"jsonrpc": "2.0", "id": request["id"],
         "error": {"code": -32000, "message": "t3 is blocked", "data": {"kind": "blocked"}}});

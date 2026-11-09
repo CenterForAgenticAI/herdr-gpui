@@ -29,6 +29,24 @@ pub(super) fn project(
         working: working(records),
         workspaces: Vec::new(),
     };
+    // The app's own Herdr 2 workspaces come first, in the user's order,
+    // with their names and folders, even before they hold a tab.
+    for kept in saved
+        .zip(scope)
+        .into_iter()
+        .flat_map(|(saved, scope)| saved.workspaces(scope))
+    {
+        layout.workspaces.push(Workspace {
+            branch: None,
+            chats: Vec::new(),
+            cwd: kept.cwd.clone(),
+            id: kept.id.clone(),
+            label: kept.label.clone(),
+            session: None,
+            terminals: Vec::new(),
+            worktree: None,
+        });
+    }
     let mut assigned = HashSet::new();
     let tabs = saved
         .zip(scope)
@@ -44,7 +62,7 @@ pub(super) fn project(
             .collect();
         if let Some(terminal) = terminal(
             boot,
-            &format!("core:tab:{}", tab.id),
+            &format!("{}{}", super::saved::SAVED_TAB, tab.id),
             tab.title,
             &members,
             urgency,
@@ -62,6 +80,22 @@ pub(super) fn project(
         }
     }
     layout
+}
+
+/// Puts the workspaces the app keeps first, in the user's order, ahead of
+/// a document's spaces too; the others keep their order.
+pub(super) fn lead_kept(layout: &mut Layout, saved: Option<&SavedTabs>, scope: Option<&str>) {
+    let kept: Vec<&str> = saved
+        .zip(scope)
+        .into_iter()
+        .flat_map(|(saved, scope)| saved.workspaces(scope))
+        .map(|workspace| workspace.id.as_str())
+        .collect();
+    layout.workspaces.sort_by_key(|workspace| {
+        kept.iter()
+            .position(|id| *id == workspace.id)
+            .unwrap_or(kept.len())
+    });
 }
 
 fn add(layout: &mut Layout, workspace: &str, terminal: Terminal) {
