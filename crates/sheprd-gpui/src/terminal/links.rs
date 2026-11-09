@@ -388,10 +388,11 @@ fn wrapped_frame_link(
     // Most rows end their line before the right edge and are read alone;
     // text under the point that a neighbouring row may continue is read with
     // the rows it may span, as one line.
+    let right = columns.end;
     let area = wrap::Area::new(frame, columns, rows);
     let lines = area.around(row, source);
     let first = *lines.start();
-    let run = area.read(lines)?;
+    let run = area.read(lines, wraps)?;
     let found = Plain::read(&run.text, run.start_of(row, source)?)?;
     // Text past either end of what was read may go on with the link, off
     // screen or beyond the rows read: a destination is never guessed.
@@ -405,12 +406,17 @@ fn wrapped_frame_link(
     // confirms it: a file, which is one only once it is found. A web address
     // the terminal wrapped is the daemon's to read (`pane.link.resolve`),
     // from the terminal's own wrap flags; a herdr-core pane has those flags
-    // here, and reads it when every row it crosses wrapped.
+    // here, and reads it when every row it crosses wrapped and the address
+    // runs on through each break with nothing dropped: to the right edge of
+    // one row and from the left edge of the next, so a blank the wrap put
+    // first on a row (read as indent) never joins the next word to it.
     let wrapped = |wraps: &[bool]| {
-        segments
-            .iter()
-            .take(segments.len().saturating_sub(1))
-            .all(|(row, _)| wraps.get(usize::from(*row)).copied().unwrap_or(false))
+        let last = segments.len().saturating_sub(1);
+        segments.iter().enumerate().all(|(index, (row, columns))| {
+            let runs_on = index == last
+                || (columns.end == right && wraps.get(usize::from(*row)).copied().unwrap_or(false));
+            runs_on && (index == 0 || columns.start == left)
+        })
     };
     if segments.len() > 1
         && !matches!(target, RowTarget::Path { .. })

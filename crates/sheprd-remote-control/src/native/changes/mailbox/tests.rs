@@ -55,7 +55,7 @@ fn questions_are_bounded_and_a_withdrawn_one_frees_its_place() {
 fn a_question_withdrawn_before_it_was_taken_is_never_asked() {
     let (mailbox, now) = open();
     drop(ask(&mailbox, now).unwrap());
-    assert!(mailbox.take(NOW_WAIT).is_empty());
+    assert!(mailbox.take(NOW_WAIT).0.is_empty());
 }
 
 #[tokio::test]
@@ -63,7 +63,7 @@ async fn an_answer_reaches_the_phone_that_asked() {
     let (mailbox, now) = open();
     let mut first = ask(&mailbox, now).unwrap();
     let mut second = ask(&mailbox, now).unwrap();
-    let asks = mailbox.take(NOW_WAIT);
+    let (asks, _) = mailbox.take(NOW_WAIT);
     assert_eq!(asks.len(), 2);
     assert_ne!(asks[0].id, asks[1].id);
     let list = FileList::bounded(None, []);
@@ -77,7 +77,7 @@ async fn an_answer_reaches_the_phone_that_asked() {
 async fn an_answer_past_the_bounds_reads_as_a_failure() {
     let (mailbox, now) = open();
     let mut pending = ask(&mailbox, now).unwrap();
-    let id = mailbox.take(NOW_WAIT)[0].id;
+    let id = mailbox.take(NOW_WAIT).0[0].id;
     let excerpt = "x".repeat(MAX_EXCERPT + 1);
     mailbox.answer(id, Answer::CheckLog(CheckLog { excerpt }));
     assert_eq!(
@@ -104,13 +104,58 @@ fn taking_returns_at_once_when_a_question_arrives_during_the_wait() {
         thread::spawn(move || mailbox.take(Duration::from_secs(30)))
     };
     let pending = ask(&mailbox, now).unwrap();
-    assert_eq!(taker.join().unwrap().len(), 1);
+    assert_eq!(taker.join().unwrap().0.len(), 1);
     drop(pending);
 }
 
 #[test]
 fn taking_counts_as_being_heard_from() {
     let mailbox = Mailbox::default();
-    assert!(mailbox.take(NOW_WAIT).is_empty());
+    assert!(mailbox.take(NOW_WAIT).0.is_empty());
     assert!(ask(&mailbox, Instant::now()).is_ok());
+}
+
+#[tokio::test]
+async fn a_layout_change_waits_beside_questions_and_gets_its_own_answer() {
+    let (mailbox, now) = open();
+    let mut change = mailbox
+        .ask_layout(4, "t1".into(), layout::Op::SplitRight, now)
+        .unwrap();
+    let question = ask(&mailbox, now).unwrap();
+    let (asks, changes) = mailbox.take(NOW_WAIT);
+    assert_eq!(asks.len(), 1);
+    assert_eq!(
+        changes,
+        [layout::Ask {
+            id: changes[0].id,
+            tab: 4,
+            terminal: "t1".into(),
+            op: layout::Op::SplitRight,
+        }]
+    );
+    // A workspace answer never reaches a layout change, nor the reverse.
+    mailbox.answer(changes[0].id, Answer::Failed(Failure::Gone));
+    mailbox.answer_layout(asks[0].id, layout::Answer::Done);
+    mailbox.answer_layout(changes[0].id, layout::Answer::Done);
+    assert_eq!(change.answer().await, Some(layout::Answer::Done));
+    drop(question);
+}
+
+#[test]
+fn a_withdrawn_layout_change_leaves_the_queue() {
+    let (mailbox, now) = open();
+    let change = mailbox
+        .ask_layout(4, "t1".into(), layout::Op::Zoom, now)
+        .unwrap();
+    drop(change);
+    assert!(mailbox.take(NOW_WAIT).1.is_empty());
+}
+
+#[test]
+fn a_layout_change_does_not_wait_for_a_sheprd_never_heard_from() {
+    let mailbox = Mailbox::default();
+    assert!(matches!(
+        mailbox.ask_layout(4, "t1".into(), layout::Op::Zoom, Instant::now()),
+        Err(Error::NoDesktop)
+    ));
 }

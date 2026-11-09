@@ -431,3 +431,13 @@ fn a_wrapped_address_opens_once_the_terminal_says_it_wrapped(cx: &mut TestAppCon
         [RowTarget::Web(URL.into())]
     );
 }
+
+#[test]
+fn a_blank_the_terminal_wrapped_still_ends_the_address() {
+    // "https://example.com/" fills 20 columns; the space wraps to the next
+    // row, where it reads as indent before "trailing".
+    let shown = frame(20, &["https://example.com/", " trailing"]);
+    let link = frame_link_at(&shown, 4, 0, &[true, false]).unwrap();
+    assert_eq!(link.target, RowTarget::Web("https://example.com/".into()));
+    assert_eq!(link.rows().collect::<Vec<_>>(), [(0, 0..20)]);
+}

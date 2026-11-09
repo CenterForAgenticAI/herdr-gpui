@@ -14,6 +14,8 @@ pub enum Error {
     #[error(transparent)]
     Config(crate::config::LoadError),
     #[error(transparent)]
+    CoreInstall(#[from] crate::core_install::Error),
+    #[error(transparent)]
     Credentials(#[from] sheprd_credentials::Error),
     #[error("{0}")]
     Io(#[from] std::io::Error),

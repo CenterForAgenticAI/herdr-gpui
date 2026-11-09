@@ -99,6 +99,9 @@ fn prepare(
             return Err(cloud::Error::Install(install::Failure::Missing).into());
         }
     }
+    if approved {
+        install::add_core(relay_command(settings, id), &cancelled)?;
+    }
     // Commands such as Teleport's need the server the entrypoint starts.
     let deadline = Instant::now() + SERVER_TIMEOUT;
     while !succeeds(relay_command(settings, id)?, SERVER_UP, cancelled) {

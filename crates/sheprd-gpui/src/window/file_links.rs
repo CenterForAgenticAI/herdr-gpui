@@ -285,9 +285,6 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         let pane = link.pane_id.clone();
-        // A Herdr 2 editor takes the path as an argument, so only a Herdr
-        // pane's command line limits which paths it opens.
-        let core = self.is_core_pane(&pane, cx);
         let selection_epoch = self.selection_epoch;
         let found = cx.background_executor().spawn(async move {
             let home = crate::config::home().ok();
@@ -307,7 +304,7 @@ impl SheprdWindow {
                     path: path.clone(),
                     line: link.line,
                 };
-                if crate::editor::opens(&target, core) {
+                if crate::editor::command_line(&target, None, None).is_ok() {
                     return Some(Opened::Editor(target));
                 }
             }
@@ -328,7 +325,7 @@ impl SheprdWindow {
                 }
                 match opened {
                     Opened::Editor(target) => {
-                        if !this.open_in_core_editor(&target, &pane, cx) {
+                        if !this.open_link_in_core_editor(&target, &pane, cx) {
                             this.open_in_editor(&target, Some(&pane), cx);
                         }
                     }

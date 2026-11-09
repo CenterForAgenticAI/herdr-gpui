@@ -16,7 +16,7 @@ use super::{
     Input, Lookup, Origin, PullRequest, State,
     batch::{BATCH_LIMIT, Batch},
     lookup::{Finished, Prefetch},
-    model::Outcome,
+    model::{MergeState, Outcome},
     store::{Entry, Store, View},
 };
 use chrono::{DateTime, DurationRound as _, Local, TimeDelta};
@@ -86,14 +86,18 @@ fn due(entry: &Entry, idle: bool) -> Instant {
 }
 
 /// How long an answer stays fresh: the less a pull request can still change,
-/// the less often it is asked about.
+/// the less often it is asked about. GitHub works out whether an open pull
+/// request can merge only once asked, answering UNKNOWN until then, and again
+/// after every push to its base; it is reread as soon as running checks are,
+/// so merge conflicts show on the next read rather than a quiet wait later.
 fn freshness(value: Option<&PullRequest>) -> Duration {
     match value {
         Some(pr) if matches!(pr.state, State::Merged | State::Closed) => SETTLED_REFRESH,
         Some(pr)
-            if pr
-                .check_list()
-                .any(|(_, outcome)| outcome == Outcome::Pending) =>
+            if pr.merge_state_status == MergeState::Unknown
+                || pr
+                    .check_list()
+                    .any(|(_, outcome)| outcome == Outcome::Pending) =>
         {
             REFRESH
         }
