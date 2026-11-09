@@ -69,11 +69,13 @@ fn agents(layout: &Layout, chat: impl Fn(&str) -> ChatFacts) -> HashMap<&str, Ag
         let status = row.status;
         (row.pane.as_str(), Agent { finish, status })
     });
+    // Every pane's agent: one finished in a split counts while another
+    // still works.
     let terminals = layout
         .workspaces
         .iter()
         .flat_map(|workspace| workspace.terminals.iter())
-        .filter_map(|terminal| terminal.agent.as_ref())
+        .flat_map(|terminal| terminal.agent.iter().chain(&terminal.agents))
         .map(|agent| {
             let finish = agent.changed_ms;
             let status = agent.status;

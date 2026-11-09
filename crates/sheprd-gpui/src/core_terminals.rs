@@ -11,16 +11,21 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod adopt;
+mod asks;
 mod attention;
 mod checkouts;
 mod commands;
 mod context;
+mod effects;
 mod error;
 mod fallback;
 mod folders;
 mod hosts;
 mod hub;
 mod infos;
+pub(crate) mod install;
+pub(crate) mod menu;
 mod phone;
 mod requests;
 mod screen;
@@ -38,10 +43,11 @@ mod workspaces;
 mod tests;
 
 pub(crate) use error::Error;
+pub(crate) use fallback::Holder;
 pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
-pub(crate) use view::{CoreTerminalView, Look};
+pub(crate) use view::{CoreTerminalView, LinkClick, Look};
 
 use crate::{
     SheprdWindow,
@@ -52,6 +58,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use panes::{Axis, Panes};
 use sheprd_backend::{Backend as _, Spawn, TerminalId, TerminalInfo};
+use sheprd_client::protocol::AgentStatus;
 use std::collections::{HashMap, VecDeque};
 
 /// The workspace of a window with no Herdr 1 installed. herdr-core has no
@@ -88,6 +95,13 @@ struct TabPanes {
     /// A mirror tab only watches: it neither types nor splits.
     observe: bool,
     panes: Panes,
+    /// The name the user gave the tab, which its program's title does not
+    /// replace.
+    name: Option<String>,
+    /// Names the user gave panes.
+    names: std::collections::BTreeMap<TerminalId, String>,
+    /// The pane in use before the current one, which Last Pane goes back to.
+    previous: Option<TerminalId>,
     /// The folder the tab's first pane was first seen in, kept when its
     /// program moves on, as Herdr keeps where a workspace started.
     root: Option<std::path::PathBuf>,
@@ -114,15 +128,103 @@ impl TabPanes {
     fn new(host: Host, panes: Panes, observe: bool) -> Self {
         Self {
             active: panes.first().clone(),
+            name: None,
+            names: Default::default(),
             host,
             observe,
             panes,
+            previous: None,
             root: None,
             unsaved: false,
             workspace: None,
             zoom: crate::motion::Toggle::default(),
             zoomed: None,
         }
+    }
+
+    /// The tab as it was saved: its pane in use, the pane filling it
+    /// already zoomed rather than growing as the window opens, and the names
+    /// the user gave. A pane the layout no longer holds is ignored.
+    fn restore(host: Host, location: &Location) -> Option<Self> {
+        let Location::CoreTerminal {
+            panes,
+            observe,
+            active,
+            zoomed,
+            name,
+            names,
+        } = location
+        else {
+            return None;
+        };
+        let mut shown = Self::new(host, panes.clone(), *observe);
+        shown.name.clone_from(name);
+        shown.names = names
+            .iter()
+            .filter(|(terminal, _)| shown.panes.contains(terminal))
+            .map(|(terminal, name)| (terminal.clone(), name.clone()))
+            .collect();
+        if let Some(active) = active
+            .as_ref()
+            .filter(|active| shown.panes.contains(active))
+        {
+            shown.active = active.clone();
+        }
+        if let Some(zoomed) = zoomed
+            .as_ref()
+            .filter(|zoomed| shown.panes.contains(zoomed))
+            && shown.panes.count() > 1
+        {
+            shown.zoomed = Some(zoomed.clone());
+            shown.zoom.set(true, crate::motion::now(), true);
+        }
+        Some(shown)
+    }
+
+    /// Takes the names saved with the tab, which another window may have
+    /// changed, unless this one has a change of its own still to save.
+    fn refresh_names(&mut self, location: &Location) {
+        let Location::CoreTerminal { name, names, .. } = location else {
+            return;
+        };
+        if self.unsaved {
+            return;
+        }
+        self.name.clone_from(name);
+        self.names = names
+            .iter()
+            .filter(|(terminal, _)| self.panes.contains(terminal))
+            .map(|(terminal, name)| (terminal.clone(), name.clone()))
+            .collect();
+    }
+
+    /// The tab's location as it saves: the layout, the pane in use, and the
+    /// zoomed pane while the zoom is on.
+    fn location(&self) -> Location {
+        Location::CoreTerminal {
+            panes: self.panes.clone(),
+            observe: self.observe,
+            active: Some(self.active.clone()),
+            zoomed: self.zoomed.clone().filter(|_| self.zoom.is_open()),
+            name: self.name.clone(),
+            names: self
+                .names
+                .iter()
+                .filter(|(terminal, _)| self.panes.contains(terminal))
+                .map(|(terminal, name)| (terminal.clone(), name.clone()))
+                .collect(),
+        }
+    }
+
+    /// Makes `terminal` the pane in use, remembering the one it replaces;
+    /// whether that changed.
+    fn activate(&mut self, terminal: TerminalId) -> bool {
+        if self.active == terminal || !self.panes.contains(&terminal) {
+            return false;
+        }
+        self.previous = Some(std::mem::replace(&mut self.active, terminal));
+        self.unsaved = true;
+        true
     }
 
     /// Zooms `terminal`, or unzooms, animating from where the zoom is now.
@@ -150,6 +252,11 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// When terminals labelled for a workspace were last looked at.
+    adopt_checked: Option<std::time::Instant>,
+    /// Terminals labelled for a workspace that were put in a tab, so each
+    /// is put in one only once.
+    adopted: std::collections::HashSet<TerminalId>,
     /// The Git checkout of each kept workspace's folder and of the shown
     /// pane's.
     checkouts: checkouts::Checkouts,
@@ -254,6 +361,14 @@ impl CoreTerminals {
         self.tabs.insert(tab, shown);
     }
 
+    /// Places `tab` in `workspace` of `scope`, as showing the workspace does.
+    #[cfg(test)]
+    pub(crate) fn place_for_test(&mut self, tab: TabId, scope: Scope, workspace: &str) {
+        if let Some(shown) = self.tabs.get_mut(&tab) {
+            shown.workspace = Some((scope, workspace.to_owned()));
+        }
+    }
+
     /// Whether `tab` is a herdr-core tab that holds chats: it drives its
     /// terminals, rather than a mirror that only watches, on this computer.
     pub(crate) fn drives(&self, tab: TabId) -> bool {
@@ -280,14 +395,9 @@ impl CoreTerminals {
 
     /// Makes `terminal` the pane in use in `tab`; whether that changed.
     pub(crate) fn set_active(&mut self, tab: TabId, terminal: TerminalId) -> bool {
-        let Some(shown) = self.tabs.get_mut(&tab) else {
-            return false;
-        };
-        if shown.active == terminal || !shown.panes.contains(&terminal) {
-            return false;
-        }
-        shown.active = terminal;
-        true
+        self.tabs
+            .get_mut(&tab)
+            .is_some_and(|shown| shown.activate(terminal))
     }
 
     /// The tab whose panes hold `terminal` of this computer's core, among
@@ -297,6 +407,30 @@ impl CoreTerminals {
             .iter()
             .find(|(_, shown)| shown.holds_chats() && shown.panes.contains(terminal))
             .map(|(id, _)| *id)
+    }
+
+    /// How the agents in `panes` on `host` are doing, as their tab's mark
+    /// shows it: the status that most wants attention, or unknown with no
+    /// agent. Terminal ids are only unique within a host.
+    pub(crate) fn tab_status(&self, host: &Host, panes: &Panes) -> AgentStatus {
+        let Some(infos) = self.infos_of(host) else {
+            return AgentStatus::Unknown;
+        };
+        panes
+            .terminals()
+            .into_iter()
+            .filter_map(|terminal| infos.get(terminal))
+            .map(|info| info.agent)
+            .max_by_key(|status| crate::sidebar::status_priority(*status))
+            .unwrap_or(AgentStatus::Unknown)
+    }
+
+    /// Whether a tab on this computer's core shows `terminal`, a mirror
+    /// included, which [`Self::tab_of`] leaves out.
+    pub(crate) fn mirrors(&self, terminal: &TerminalId) -> bool {
+        self.tabs
+            .values()
+            .any(|shown| shown.host == Host::Local && shown.panes.contains(terminal))
     }
 
     /// The tab and pane whose view holds the keyboard.
@@ -410,6 +544,8 @@ impl SheprdWindow {
     pub(crate) fn poll_core_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_core_hubs(window, cx);
         self.place_started_core_terminal(window, cx);
+        self.end_closed_core_terminals(cx);
+        self.relink_stale_core_views(cx);
         // The next terminal waiting starts once the last one answered.
         self.start_core_shell();
         self.sync_core_views(cx);
@@ -426,14 +562,39 @@ impl SheprdWindow {
         }
         self.poll_core_fallback(cx);
         self.refresh_core_looks(cx);
-        if let Some(view) = self.core_fallback_view() {
-            view.update(cx, |view, cx| view.poll(cx));
-        }
+        // The stand-in shell rings only while its workspace is shown, as a
+        // tab does; its clipboard writes land either way.
+        let fallback_shown = self.default_workspace_shown();
+        self.poll_core_views(
+            self.core_fallback_view()
+                .map(|view| (view, fallback_shown.then_some(Host::Local))),
+            window,
+            cx,
+        );
         self.poll_core_panes(window, cx);
+        // While a phone may start work here, this computer's core is joined
+        // (never started) to see it, with or without a tab of its own.
+        if crate::remote::supervisor::Supervisor::enabled(cx) {
+            self.core_terminals.hub.connect(Start::Join);
+        }
+        // Split chrome and the sidebar's rows name panes from what herdr-core
+        // reports, and the shell shown in place of Herdr 1 reads its links
+        // against its folder, which this computer's core reports.
+        let fallback = self.core_fallback_view();
         self.answer_phone_split(cx);
-        if self.core_terminals.poll_infos(std::time::Instant::now()) {
+        let listed = self.core_terminals.poll_infos(std::time::Instant::now());
+        self.adopt_labelled_terminals(listed, cx);
+        if listed {
             self.hear_core_agents(cx);
             cx.notify();
+        }
+        if let Some(view) = fallback {
+            let cwd = self
+                .core_terminals
+                .infos_of(&Host::Local)
+                .and_then(|infos| infos.named(view.read(cx).terminal()))
+                .and_then(|info| info.cwd.clone());
+            view.update(cx, |view, cx| view.set_cwd(cwd.as_deref(), cx));
         }
         self.core_terminals.shown = self.shown_core_pane(cx);
         self.tell_core_agents(window, cx);
@@ -496,10 +657,7 @@ impl SheprdWindow {
                 self.end_core_terminal(&host, info.id);
             }
             Purpose::Tab { scope, workspace } => {
-                let location = Location::CoreTerminal {
-                    panes: Panes::single(info.id),
-                    observe: false,
-                };
+                let location = Location::core_terminal(Panes::single(info.id), false);
                 let Some(id) = Store::update(cx, |store| {
                     store.open(scope, &workspace, Some(location), None)
                 }) else {
@@ -545,14 +703,24 @@ impl SheprdWindow {
 
     /// How the window draws terminals, for its herdr-core views.
     pub(crate) fn core_look(&self) -> Look {
+        let shared = self.settings.shared.as_ref();
         Look {
             background: self.fill().base(self.terminal_theme().background),
             cell_height: self.config.terminal.line_height(),
             cell_width: self.cell_width,
+            copy_on_select: shared.is_none_or(|shared| shared.copy_on_select),
             font: self.config.terminal.font(),
             ground: self.ground(),
+            keep_selection: self.config.keep_selection_after_copy,
             option_as_alt: self.config.option_as_alt,
             padding: self.config.terminal_padding,
+            right_click_passthrough: shared
+                .map(|shared| shared.right_click_passthrough)
+                .unwrap_or_default(),
+            scroll_lines: shared.map_or(
+                crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
+                |shared| shared.mouse_scroll_lines,
+            ),
         }
     }
 

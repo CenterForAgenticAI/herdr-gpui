@@ -61,9 +61,18 @@ pub(crate) struct Target<'a> {
     pub daemon: Option<&'a Path>,
     pub workspace: Option<&'a str>,
     pub pane: Option<&'a str>,
+    /// The herdr-core terminal the caller runs in, by its address.
+    pub terminal: Option<&'a str>,
 }
 
 impl Target<'_> {
+    /// Who the caller is, as a page it opens remembers it and its notes go
+    /// back to: its Herdr pane, or its herdr-core terminal by the key chats
+    /// use for one.
+    pub(crate) fn origin(&self) -> Option<std::borrow::Cow<'_, str>> {
+        origin(self.pane, self.terminal)
+    }
+
     /// How strictly a request's workspace is matched, strict first. A caller
     /// that names its daemon is matched on that daemon only: another
     /// session's workspace of the same ID must never be changed for it.
@@ -113,7 +122,34 @@ fn valid_caller(caller: &Caller) -> bool {
         .as_deref()
         .is_none_or(|id| plain(id, 256))
         && caller.pane_id.as_deref().is_none_or(|id| plain(id, 256))
+        && caller
+            .terminal_id
+            .as_deref()
+            .is_none_or(|id| sheprd_backend::TerminalId::new(id).is_ok() && plain(id, 256))
         && caller.daemon_socket.as_deref().is_none_or(plain_path)
+}
+
+#[cfg(test)]
+pub(crate) fn valid_caller_for_test(caller: &Caller) -> bool {
+    valid_caller(caller)
+}
+
+/// A caller's pane, or its herdr-core terminal as `core:t7`, the key a chat
+/// in that terminal has; Herdr pane IDs never take that form.
+pub(crate) fn origin<'a>(
+    pane: Option<&'a str>,
+    terminal: Option<&str>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    match (pane, terminal) {
+        (Some(pane), _) => Some(std::borrow::Cow::Borrowed(pane)),
+        (None, Some(terminal)) => {
+            let terminal = sheprd_backend::TerminalId::new(terminal).ok()?;
+            Some(std::borrow::Cow::Owned(crate::chat::core_pane::key(
+                &terminal,
+            )))
+        }
+        (None, None) => None,
+    }
 }
 
 fn main_windows(cx: &App) -> Vec<gpui::WindowHandle<SheprdWindow>> {

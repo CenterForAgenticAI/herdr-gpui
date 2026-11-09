@@ -34,6 +34,7 @@ fn a_named_session_prefixes_every_id_it_lists() {
     assert_eq!(terminal.tab, "herdr:work:t2");
     assert_eq!(terminal.panes[0].pane, "herdr:work:p2");
     assert_eq!(terminal.agent.as_ref().unwrap().pane, "herdr:work:p2");
+    assert_eq!(terminal.agents[0].pane, "herdr:work:p2");
     assert_eq!(terminal.convert.as_ref().unwrap().0, "herdr:work:p2");
     // What a pane is, as against where it is, stays as Herdr says.
     assert_eq!(workspace.chats[0].endpoint.as_str(), ENDPOINT);
@@ -209,6 +210,31 @@ fn each_workspace_names_its_session_through_the_merge() {
             ("herdr:coding:w1", Some("coding")),
         ]
     );
+}
+
+#[test]
+fn herdr_2_work_in_a_named_sessions_workspace_joins_its_row() {
+    let mut base = listed();
+    // A phone started a Herdr 2 terminal in `coding`'s `w1`.
+    let mut core = listed().workspaces[0].clone();
+    core.id = "herdr:coding:w1".into();
+    core.chats.clear();
+    core.terminals.truncate(1);
+    core.terminals[0].tab = "core:pane:t9".into();
+    base.workspaces.push(core);
+    let mut coding = listed();
+    coding.name_session("coding");
+    let herdr_1 = coding.workspaces[0].terminals.len();
+    let merged = merge(&base, &[("coding".to_owned(), Arc::new(coding))]);
+    let rows: Vec<_> = merged
+        .workspaces
+        .iter()
+        .filter(|row| row.id == "herdr:coding:w1")
+        .collect();
+    assert_eq!(rows.len(), 1, "one row per id");
+    assert_eq!(rows[0].session.as_deref(), Some("coding"));
+    assert_eq!(rows[0].terminals.len(), herdr_1 + 1);
+    assert!(rows[0].terminals.iter().any(|t| t.tab == "core:pane:t9"));
 }
 
 #[cfg(unix)]

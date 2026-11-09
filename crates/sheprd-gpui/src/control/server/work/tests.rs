@@ -2,6 +2,7 @@
 use super::*;
 use crate::sidebar::layout_tests::{REPO_KEY, fixture_window, snapshot};
 
+mod core_only;
 mod dialogs;
 mod identity;
 mod list_budget;
@@ -15,6 +16,7 @@ fn caller(workspace: Option<&str>) -> Caller {
         // No daemon: one the window does not show would refuse the request.
         daemon_socket: None,
         window: None,
+        terminal_id: None,
     }
 }
 

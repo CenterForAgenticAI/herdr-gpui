@@ -25,6 +25,10 @@ pub(super) fn lift(layout: &mut Layout, boot: &str, records: &[Terminal]) {
             {
                 terminal.agent = None;
             }
+            // A chat alerts as a chat, never as a terminal's agent too.
+            terminal
+                .agents
+                .retain(|agent| panes.iter().any(|pane| pane.pane == agent.pane));
             !terminal.panes.is_empty()
         });
         workspace.chats.extend(chats);

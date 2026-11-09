@@ -93,6 +93,9 @@ impl Localize for sheprd_client::herdr::convert::Error {
                     command = agent.name()
                 )
             }
+            Self::NoShell(agent) => {
+                fl!("error-chat-convert-no-shell", agent = agent.display_name())
+            }
             Self::NotRunning(agent) => {
                 fl!(
                     "error-chat-convert-not-running",

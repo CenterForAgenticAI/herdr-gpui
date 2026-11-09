@@ -5,6 +5,7 @@ mod chats;
 mod checkouts;
 mod convert;
 mod create;
+pub(super) use create::Place;
 mod error;
 mod hold;
 mod lines;
@@ -13,9 +14,10 @@ mod projection;
 mod saved;
 mod screen;
 mod spaces;
+mod wake;
 
 use super::Error as HubError;
-use super::{ApiMethod, Layout};
+use super::{ApiMethod, Layout, Workspace};
 pub use error::Error;
 pub(super) use hold::Hold;
 use serde_json::Value;
@@ -42,9 +44,29 @@ const IDLE_SCREEN: Duration = Duration::from_secs(5);
 /// Bounds emulators and attachments even when a phone visits many panes.
 const MAX_SCREENS: usize = 16;
 const RETRY: Duration = Duration::from_secs(3);
+const NEW_WORKSPACE: &str = "core:new:";
 const PREFIX: &str = "core:";
 /// Where terminals nothing else lists go, new ones from a phone included.
 pub(super) const UNLISTED: &str = "core:terminals";
+
+/// The workspace a phone's new workspace in `cwd` is listed as until
+/// Sheprd keeps one for it: named for its folder, so it keeps its id
+/// whichever of its panes close, and safe in a path.
+pub(super) fn new_workspace_id(cwd: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(cwd.as_bytes());
+    let mut id = String::from(NEW_WORKSPACE);
+    for byte in &digest[..8] {
+        use std::fmt::Write as _;
+        let _ = write!(id, "{byte:02x}");
+    }
+    id
+}
+
+/// Whether `workspace` is one [`new_workspace_id`] names.
+pub(super) fn is_new_workspace(workspace: &str) -> bool {
+    workspace.starts_with(NEW_WORKSPACE)
+}
 
 type Result<T> = std::result::Result<T, HubError>;
 
@@ -367,6 +389,25 @@ fn merge(daemon: &Layout, core: &Layout) -> Layout {
         } else {
             merged.workspaces.push(workspace.clone());
         }
+    }
+    // A core with nothing in it, as one just started after a reboot, still
+    // gives a phone a workspace to start a chat in, and a folder to offer
+    // for new ones: the home folder.
+    if !daemon.connected
+        && core.connected
+        && merged.workspaces.is_empty()
+        && let Some(home) = sheprd_client::local_path::home_dir()
+    {
+        merged.workspaces.push(Workspace {
+            branch: None,
+            chats: Vec::new(),
+            cwd: home.to_string_lossy().into_owned(),
+            id: UNLISTED.to_owned(),
+            label: "Herdr 2".to_owned(),
+            session: None,
+            terminals: Vec::new(),
+            worktree: None,
+        });
     }
     merged
 }

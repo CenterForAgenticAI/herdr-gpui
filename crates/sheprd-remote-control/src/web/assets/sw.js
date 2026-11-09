@@ -20,6 +20,7 @@ const FILES = [
 // longer trusts its certificate, a cached page would hide Safari's warning
 // and leave pairing failing with nothing to accept.
 const ROUTES = ["/", "/board", "/computers", "/new", "/new-chat", "/settings"];
+const SHELL_PREFIXES = ["/chat/", "/term/"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));
@@ -39,7 +40,8 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
-  const isShell = ROUTES.includes(url.pathname) || url.pathname.startsWith("/chat/");
+  // A chat or terminal opened from a notification, as well as the pages.
+  const isShell = ROUTES.includes(url.pathname) || SHELL_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
   const isFile = FILES.includes(url.pathname);
   if (!isShell && !isFile) return;
   const key = isShell ? "/" : url.pathname;
@@ -85,7 +87,7 @@ self.addEventListener("push", (event) => {
       await self.registration.showNotification(message.title, {
         body: message.body,
         tag: message.tag,
-        renotify: message.kind === "question",
+        renotify: message.kind === "question" || message.kind === "terminal_asking",
         data: { url: message.url },
         icon: "/assets/icon-192.png",
         badge: "/assets/icon-192.png",

@@ -49,6 +49,7 @@ fn deliver(
                 daemon: daemon.map(std::path::Path::new),
                 workspace: None,
                 pane: Some(pane),
+                terminal: None,
             };
             view.deliver_requested_notes(&target, "Picked: B\n", cx)
         })

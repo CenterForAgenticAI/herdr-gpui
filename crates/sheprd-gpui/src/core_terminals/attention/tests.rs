@@ -1,6 +1,7 @@
-use super::{Heard, News};
+use super::{Heard, News, in_front};
 use gpui::WindowId;
 use sheprd_backend::{AgentStatus, TerminalId};
+use sheprd_client::herdr::AgentKind;
 use std::{
     collections::HashSet,
     time::{Duration, Instant},
@@ -16,7 +17,11 @@ fn after(start: Instant, millis: u64) -> Instant {
     start + Duration::from_millis(millis)
 }
 
-fn names(news: &[(TerminalId, News)]) -> Vec<(&str, News)> {
+fn names<T>(news: &[(TerminalId, News, T)]) -> Vec<(&str, News)> {
+    news.iter().map(|(t, n, _)| (t.as_str(), *n)).collect()
+}
+
+fn heard_names(news: &[(TerminalId, News)]) -> Vec<(&str, News)> {
     news.iter().map(|(t, n)| (t.as_str(), *n)).collect()
 }
 
@@ -25,8 +30,8 @@ fn names(news: &[(TerminalId, News)]) -> Vec<(&str, News)> {
 fn heard_change(start: Instant, before: AgentStatus, now: AgentStatus) -> Heard {
     let mut heard = Heard::default();
     let t1 = id("t1");
-    heard.hear(start, [(&t1, before)], |_| true);
-    for (terminal, news) in heard.hear(after(start, 10), [(&t1, now)], |_| true) {
+    heard.hear(start, [(&t1, before, None)], |_| true);
+    for (terminal, news) in heard.hear(after(start, 10), [(&t1, now, None)], |_| true) {
         heard.push(start, terminal, news);
     }
     heard
@@ -62,17 +67,17 @@ fn a_change_is_news_once_across_windows() {
     let known = |_: &TerminalId| true;
     assert!(
         heard
-            .hear(start, [(&t1, AgentStatus::Working)], known)
+            .hear(start, [(&t1, AgentStatus::Working, None)], known)
             .is_empty()
     );
     assert_eq!(
-        names(&heard.hear(after(start, 10), [(&t1, AgentStatus::Blocked)], known)),
+        heard_names(&heard.hear(after(start, 10), [(&t1, AgentStatus::Blocked, None)], known)),
         [("t1", News::NeedsYou)]
     );
     // A second window lists the same core a moment later.
     assert!(
         heard
-            .hear(after(start, 20), [(&t1, AgentStatus::Blocked)], known)
+            .hear(after(start, 20), [(&t1, AgentStatus::Blocked, None)], known)
             .is_empty()
     );
 }
@@ -83,18 +88,18 @@ fn a_list_older_than_one_taken_is_not_news() {
     let mut heard = Heard::default();
     let t1 = id("t1");
     let known = |_: &TerminalId| true;
-    heard.hear(start, [(&t1, AgentStatus::Working)], known);
-    heard.hear(after(start, 20), [(&t1, AgentStatus::Blocked)], known);
+    heard.hear(start, [(&t1, AgentStatus::Working, None)], known);
+    heard.hear(after(start, 20), [(&t1, AgentStatus::Blocked, None)], known);
     // Another window's slower read, asked for before the newest, arrives
     // late: it neither undoes the block nor makes the next one news again.
     assert!(
         heard
-            .hear(after(start, 10), [(&t1, AgentStatus::Working)], known)
+            .hear(after(start, 10), [(&t1, AgentStatus::Working, None)], known)
             .is_empty()
     );
     assert!(
         heard
-            .hear(after(start, 30), [(&t1, AgentStatus::Blocked)], known)
+            .hear(after(start, 30), [(&t1, AgentStatus::Blocked, None)], known)
             .is_empty()
     );
 }
@@ -104,12 +109,16 @@ fn terminals_the_core_dropped_are_forgotten() {
     let start = Instant::now();
     let mut heard = Heard::default();
     let t1 = id("t1");
-    heard.hear(start, [(&t1, AgentStatus::Working)], |_| true);
+    heard.hear(start, [(&t1, AgentStatus::Working, None)], |_| true);
     heard.hear(after(start, 10), [], |_| false);
     // Heard of afresh, so a blocked agent reusing the address is quiet.
     assert!(
         heard
-            .hear(after(start, 20), [(&t1, AgentStatus::Blocked)], |_| true)
+            .hear(
+                after(start, 20),
+                [(&t1, AgentStatus::Blocked, None)],
+                |_| true
+            )
             .is_empty()
     );
 }
@@ -142,7 +151,7 @@ fn news_waits_out_the_delay_and_must_still_hold() {
     let mut heard = heard_change(start, AgentStatus::Working, AgentStatus::Blocked);
     heard.hear(
         after(start, 500),
-        [(&id("t1"), AgentStatus::Working)],
+        [(&id("t1"), AgentStatus::Working, None)],
         |_| true,
     );
     assert!(heard.take_due(after(start, 1_000), DELAY).is_empty());
@@ -186,4 +195,86 @@ fn a_finished_turn_shown_in_the_active_window_is_quiet() {
         window != WindowId::from(1)
     });
     assert_eq!(heard.take_due(after(start, 1_000), DELAY).len(), 1);
+}
+
+#[test]
+fn another_windows_newer_list_does_not_hide_this_ones_terminals() {
+    // Two windows show different tabs: each lists only its own terminals.
+    let start = Instant::now();
+    let mut heard = Heard::default();
+    let (t1, t2) = (id("t1"), id("t2"));
+    let known = |_: &TerminalId| true;
+    heard.hear(start, [(&t1, AgentStatus::Working, None)], known);
+    heard.hear(after(start, 30), [(&t2, AgentStatus::Working, None)], known);
+    // The first window's list, asked for before the second's, still says
+    // what happened to its own terminal.
+    assert_eq!(
+        heard_names(&heard.hear(after(start, 20), [(&t1, AgentStatus::Blocked, None)], known)),
+        [("t1", News::NeedsYou)]
+    );
+    // But not against what a newer list said of the same terminal.
+    heard.hear(after(start, 40), [(&t1, AgentStatus::Working, None)], known);
+    assert!(
+        heard
+            .hear(after(start, 35), [(&t1, AgentStatus::Blocked, None)], known)
+            .is_empty()
+    );
+}
+
+#[test]
+fn news_keeps_the_agent_it_was_heard_from() {
+    // Whichever window plays it, the agent's own sound setting applies.
+    let start = Instant::now();
+    let mut heard = Heard::default();
+    let t1 = id("t1");
+    let droid = Some(AgentKind::Droid);
+    heard.hear(start, [(&t1, AgentStatus::Working, droid)], |_| true);
+    for (terminal, news) in heard.hear(
+        after(start, 10),
+        [(&t1, AgentStatus::Blocked, droid)],
+        |_| true,
+    ) {
+        heard.push(start, terminal, news);
+    }
+    let due = heard.take_due(after(start, 1_000), DELAY);
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].2, droid);
+}
+
+#[test]
+fn the_stand_in_shell_is_in_front_only_while_its_terminal_is_shown() {
+    let shell = id("t1");
+    let tab = HashSet::from([id("t2"), id("t3")]);
+    // The terminal is shown: its shell is in front.
+    assert_eq!(
+        in_front(true, None, Some(shell.clone())),
+        HashSet::from([shell.clone()])
+    );
+    // A herdr-core tab is shown: its panes are.
+    assert_eq!(in_front(true, Some(tab.clone()), None), tab);
+    // A browser or code page is shown: nothing is, the shell included.
+    assert!(in_front(true, None, None).is_empty());
+    // An inactive window shows the user nothing.
+    assert!(in_front(false, Some(tab), Some(shell)).is_empty());
+}
+
+#[test]
+fn a_shell_hidden_behind_a_page_still_sounds_when_it_finishes() {
+    let start = Instant::now();
+    let mut heard = heard_change(start, AgentStatus::Working, AgentStatus::Done);
+    // With Herdr 1 missing, a browser tab covers the stand-in shell `t1`:
+    // the active group shows the page, so the shell is not passed in front.
+    heard.show(WindowId::from(1), in_front(true, None, None), |_| true);
+    assert_eq!(
+        names(&heard.take_due(after(start, 1_000), DELAY)),
+        [("t1", News::Finished)]
+    );
+    // Shown, it stays quiet.
+    let mut heard = heard_change(start, AgentStatus::Working, AgentStatus::Done);
+    heard.show(
+        WindowId::from(1),
+        in_front(true, None, Some(id("t1"))),
+        |_| true,
+    );
+    assert!(heard.take_due(after(start, 1_000), DELAY).is_empty());
 }

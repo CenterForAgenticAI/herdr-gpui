@@ -87,3 +87,18 @@ fn a_one_letter_word_or_line_is_still_selected() {
     let narrow = frame(1, &["z"]);
     assert_eq!(Selection::line(&narrow, at(0, 0)).text(&narrow), "z");
 }
+
+#[test]
+fn concealed_text_is_copied_as_the_blanks_it_shows() {
+    let mut shown = frame(12, &["pw: secret o"]);
+    for cell in &mut shown.cells[4..10] {
+        cell.modifier |= crate::terminal::HIDDEN;
+    }
+    let mut selection = Selection::at(at(0, 0));
+    selection.extend(at(0, 11));
+    assert_eq!(selection.text(&shown), "pw:        o");
+    // A selection of hidden cells alone copies nothing.
+    let mut hidden = Selection::at(at(0, 4));
+    hidden.extend(at(0, 9));
+    assert_eq!(hidden.text(&shown), "");
+}

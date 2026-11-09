@@ -69,6 +69,8 @@ pub enum Error {
     ReplyRefused { code: String, message: String },
     #[error("Cannot reach herdr-core: {0}")]
     ReplyCore(#[source] sheprd_core_client::Error),
+    #[error("The agent left its terminal before the reply was typed")]
+    ReplyGone,
     #[error("Cannot run the host's herdr command: {0}")]
     ReplyScript(#[source] sheprd_client::Error),
 }
@@ -480,7 +482,7 @@ impl SheprdWindow {
             Open::Core { tab, terminal } => {
                 self.show_activity_panel(ActivityPanel::Workspaces, window, cx);
                 self.activity.return_to = Some(ActivityPanel::Overview);
-                self.show_core_pane(*tab, terminal, window, cx);
+                self.open_core_overview_row(*tab, terminal, window, cx);
             }
         }
         cx.notify();

@@ -29,10 +29,7 @@ fn a_split_in_a_hidden_tab_shows_that_tab(cx: &mut TestAppContext) {
         ["t1", "t2"]
             .into_iter()
             .map(|name| {
-                let location = Location::CoreTerminal {
-                    panes: Panes::single(id(name)),
-                    observe: false,
-                };
+                let location = Location::core_terminal(Panes::single(id(name)), false);
                 let tab = Store::update(cx, |store| {
                     store.open(scope.clone(), WORKSPACE, Some(location), None)
                 })

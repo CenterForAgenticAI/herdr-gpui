@@ -129,6 +129,7 @@ impl SheprdWindow {
         if let Location::CoreTerminal {
             panes,
             observe: false,
+            ..
         } = location
         {
             for terminal in panes.terminals() {
@@ -343,6 +344,13 @@ impl SheprdWindow {
     pub(super) fn default_workspace_kept(&self, cx: &App) -> bool {
         cx.try_global::<Store>()
             .is_none_or(|store| store.kept_workspace(&scope_of(self), WORKSPACE).is_some())
+    }
+
+    /// Whether the workspace the stand-in shell belongs to is the one the
+    /// window shows, which a window with no workspace to show always is.
+    pub(super) fn default_workspace_shown(&self) -> bool {
+        self.browser_key()
+            .is_none_or(|(scope, workspace)| scope == scope_of(self) && workspace == WORKSPACE)
     }
 
     /// Keeps the workspace a window with no Herdr 1 installed gathers its

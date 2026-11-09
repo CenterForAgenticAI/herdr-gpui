@@ -60,7 +60,14 @@ impl SheprdWindow {
             return self.listening_ports.poll(Vec::new());
         }
         let hosts = self.watched_hosts();
-        let changed = self.listening_ports.poll(hosts);
+        let mut changed = self.listening_ports.poll(hosts);
+        // The shell shown in place of Herdr 1 is in the shown host's
+        // stand-in workspace, when that host is this computer.
+        let fallback = (!self.selected_is_remote())
+            .then(|| crate::browser::scope(&self.endpoints[self.selected_endpoint]));
+        changed |= self
+            .listening_ports
+            .place_terminals(self.core_terminals.terminal_workspaces(fallback));
         // A tunnel lives as long as its remote port is listed at the address
         // it dials and its SSH child runs; either ending removes its close
         // button.

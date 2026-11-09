@@ -168,7 +168,11 @@ impl SheprdWindow {
         let Some(daemon) = pane.daemon.clone() else {
             return;
         };
-        match Watch::start(daemon, pane.target.pane.clone()) {
+        let source = crate::processes::Source::Herdr {
+            daemon,
+            pane: pane.target.pane.clone(),
+        };
+        match Watch::start(source) {
             Ok(watch) => self.show_pane_processes(watch, cx),
             Err(error) => {
                 pane.error = Some(describe(&error));
