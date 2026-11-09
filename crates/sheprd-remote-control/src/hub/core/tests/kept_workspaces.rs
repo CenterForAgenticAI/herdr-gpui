@@ -117,13 +117,15 @@ fn a_terminal_started_for_a_named_sessions_workspace_is_listed_under_its_phone_i
 
 #[test]
 fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
+    // Only an absolute folder asks for a workspace, as each system reads it.
+    let folder = if cfg!(windows) { r"C:\code\api" } else { "/code/api" };
     let mut phone = record("t1");
-    phone["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/api"});
+    phone["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: folder});
     let records = [serde_json::from_value(phone).unwrap()];
     let layout = projection::project("fake-core", &records, None, None);
     let row = &layout.workspaces[0];
-    assert_eq!(row.id, new_workspace_id("/code/api"));
-    assert_eq!((row.label.as_str(), row.cwd.as_str()), ("api", "/code/api"));
+    assert_eq!(row.id, new_workspace_id(folder));
+    assert_eq!((row.label.as_str(), row.cwd.as_str()), ("api", folder));
     assert_eq!(row.terminals.len(), 1);
 }
 
