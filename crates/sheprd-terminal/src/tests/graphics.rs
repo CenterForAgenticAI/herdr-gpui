@@ -284,3 +284,54 @@ fn a_size_from_one_side_rounds_the_other_up_whole() {
     let wide = placements(&mut emulator);
     assert_eq!((wide[0].cols, wide[0].rows), (5, 1));
 }
+
+/// A 2x30 image over 2 rows of 20 px cells, `offset` px down its first
+/// cell, with its first row scrolled above a 4-row screen.
+fn scrolled_with_offset(offset: u32) -> SurfaceGraphicsPlacement {
+    let mut emulator = emulator(10, 4);
+    emulator.set_cell_pixels(10, 20);
+    let control = format!("a=T,f=100,c=1,r=2,Y={offset},C=1");
+    emulator.feed(&command(&control, &png(2, 30)));
+    emulator.feed(&b"\r\n".repeat(4));
+    let [placement] = &placements(&mut emulator)[..] else {
+        panic!("one placement")
+    };
+    placement.clone()
+}
+
+#[test]
+fn an_offset_image_keeps_its_shape_as_it_scrolls_off_the_top() {
+    // 30 source px drawn over the 30 px below a 10 px offset: the hidden
+    // 20 px row takes the offset and 10 px of the image.
+    let cut = scrolled_with_offset(10);
+    assert_eq!((cut.y, cut.rows, cut.y_offset), (0, 1, 0));
+    assert_eq!((cut.source_y, cut.source_height), (10, 20));
+    // An offset past the hidden row only shrinks: the image is whole.
+    let moved = scrolled_with_offset(30);
+    assert_eq!((moved.rows, moved.y_offset), (1, 10));
+    assert_eq!((moved.source_y, moved.source_height), (0, 30));
+}
+
+#[test]
+fn an_image_redrawn_in_place_leaves_one_marker_in_its_cell() {
+    let mut emulator = emulator(10, 4);
+    // A preview redrawing its named placement where the cursor stays.
+    for _ in 0..50 {
+        emulator.feed(&command("a=T,f=100,i=7,p=1,C=1", &png(2, 2)));
+    }
+    assert_eq!(emulator.zerowidth_at(0, 0).len(), 2);
+    assert_eq!(placements(&mut emulator).len(), 1);
+}
+
+#[test]
+fn a_deleted_image_leaves_no_marker_behind() {
+    let mut emulator = emulator(10, 4);
+    emulator.feed(&command("a=T,f=100,i=7,C=1", &png(2, 2)));
+    // A second image in the same cell: two markers.
+    emulator.feed(&command("a=T,f=100,i=8", &png(2, 2)));
+    assert_eq!(emulator.zerowidth_at(0, 0).len(), 4);
+    emulator.feed(b"\x1b_Ga=d,d=I,i=7\x1b\\");
+    // The next scene sweeps the gone placement's marker out of its cell.
+    assert_eq!(placements(&mut emulator).len(), 1);
+    assert_eq!(emulator.zerowidth_at(0, 0).len(), 2);
+}

@@ -63,7 +63,7 @@ pub(crate) fn is_marker(c: char) -> bool {
         || (MARKER_LOW..MARKER_LOW + MARKER_SPAN).contains(&c)
 }
 
-fn marker_chars(marker: u32) -> Option<[char; 2]> {
+pub(crate) fn marker_chars(marker: u32) -> Option<[char; 2]> {
     Some([
         char::from_u32(MARKER_HIGH + marker / MARKER_SPAN)?,
         char::from_u32(MARKER_LOW + marker % MARKER_SPAN)?,
@@ -252,6 +252,12 @@ impl Graphics {
 
     /// The most rows any placement covers, which bounds how far above the
     /// screen a marker can still show part of its image.
+    /// Whether `marker` names a placement still kept; any other marker in
+    /// a cell is left from one replaced or deleted.
+    pub(crate) fn placed(&self, marker: u32) -> bool {
+        self.placements.contains_key(&marker)
+    }
+
     pub(crate) fn tallest(&self) -> usize {
         let rows = self.placements.values().map(|placement| placement.rows);
         usize::try_from(rows.max().unwrap_or(0))
@@ -533,7 +539,13 @@ impl Graphics {
                 let marker = found.marker;
                 let placement = self.placements.get(&marker)?;
                 let image = self.images.get(&placement.image)?;
-                visible(marker, placement, &image.key, found.row, found.column)
+                visible(
+                    marker,
+                    placement,
+                    &image.key,
+                    (found.row, found.column),
+                    self.cell.1,
+                )
             })
             .collect();
         if placements == self.shown {
@@ -571,12 +583,15 @@ impl Graphics {
 
 /// The part of a placement whose top-left cell is `row` rows from the top
 /// of the screen; an image starting above the screen loses its top rows.
+/// The painter draws the image over its rows below its vertical offset, so
+/// a hidden row first takes up the offset and only then cuts the image, by
+/// as much of the source as it covered: the rest keeps its shape.
 fn visible(
     marker: u32,
     placement: &Placement,
     key: &SurfaceGraphicsAssetKey,
-    row: i64,
-    column: u16,
+    (row, column): (i64, u16),
+    cell_height: u32,
 ) -> Option<SurfaceGraphicsPlacement> {
     let hidden = u32::try_from((-row).max(0)).ok()?;
     if hidden >= placement.rows {
@@ -586,11 +601,21 @@ fn visible(
     let [source_x, mut source_y, source_width, mut source_height] = placement.source;
     let mut y_offset = placement.offset[1];
     if hidden > 0 {
-        let cut = u64::from(source_height) * u64::from(hidden) / u64::from(placement.rows);
-        let cut = u32::try_from(cut).ok()?.min(source_height);
-        source_y = source_y.saturating_add(cut);
-        source_height -= cut;
-        y_offset = 0;
+        let cell = u64::from(cell_height.max(1));
+        let cells = u64::from(placement.rows) * cell;
+        // As the painter holds it: inside the cells, leaving a pixel.
+        let offset = u64::from(placement.offset[1]).min(cells - 1);
+        let drawn = cells - offset;
+        let hidden = u64::from(hidden) * cell;
+        if hidden <= offset {
+            y_offset = u32::try_from(offset - hidden).ok()?;
+        } else {
+            let cut = (hidden - offset).saturating_mul(u64::from(source_height)) / drawn;
+            let cut = u32::try_from(cut).ok()?.min(source_height);
+            source_y = source_y.saturating_add(cut);
+            source_height -= cut;
+            y_offset = 0;
+        }
     }
     Some(SurfaceGraphicsPlacement {
         asset: key.clone(),

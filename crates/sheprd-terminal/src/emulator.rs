@@ -15,7 +15,10 @@ use alacritty_terminal::{
     Term,
     grid::{self, Dimensions},
     index::{Column, Line},
-    term::{Config, Osc52, TermMode, cell::Flags},
+    term::{
+        Config, Osc52, TermMode,
+        cell::{Cell, Flags},
+    },
     vte::ansi::{CursorShape, CursorStyle, Processor, Timeout},
 };
 use sheprd_protocol::{ClientPaneInputEvent, FrameData, SurfaceGraphicsScene};
@@ -175,7 +178,7 @@ impl Emulator {
                     processor.stop_sync(term);
                 }
                 if let Some(placed) = graphics.command(command) {
-                    place(term, processor, placed);
+                    place(term, processor, graphics, placed);
                 }
             }
         });
@@ -279,10 +282,22 @@ impl Emulator {
         self.graphics.scene(&found)
     }
 
+    /// The zero-width characters of the cell at `column`, `row` on screen.
+    #[cfg(test)]
+    pub(crate) fn zerowidth_at(&self, column: usize, row: i32) -> Vec<char> {
+        self.term.grid()[Line(row)][Column(column)]
+            .zerowidth()
+            .map(<[char]>::to_vec)
+            .unwrap_or_default()
+    }
+
     /// The placement markers on screen and in the rows above it that a
-    /// placement could still reach down from.
-    fn markers(&self) -> Vec<Found> {
-        let grid = self.term.grid();
+    /// placement could still reach down from. Markers of placements that
+    /// were replaced or deleted are swept out of their cells on the way, so
+    /// what a program redraws in place never piles up.
+    fn markers(&mut self) -> Vec<Found> {
+        let graphics = &self.graphics;
+        let grid = self.term.grid_mut();
         let offset = i64::try_from(grid.display_offset()).unwrap_or(0);
         let history = i64::try_from(grid.history_size()).unwrap_or(0);
         let above = i64::try_from(self.graphics.tallest()).unwrap_or(0);
@@ -293,12 +308,10 @@ impl Emulator {
             let Ok(line) = i32::try_from(row - offset) else {
                 continue;
             };
-            let cells = &grid[Line(line)];
-            for column in 0..grid.columns() {
-                let Some(marks) = cells[Column(column)].zerowidth() else {
-                    continue;
-                };
-                for marker in crate::graphics::markers_in(marks) {
+            let columns = grid.columns();
+            let cells = &mut grid[Line(line)];
+            for column in 0..columns {
+                for marker in sweep(&mut cells[Column(column)], |marker| graphics.placed(marker)) {
                     found.push(Found {
                         marker,
                         row,
@@ -371,10 +384,18 @@ impl Emulator {
 /// scrolling as a line feed would, and to the column after it. The rows
 /// below the cursor are walked and the rest scrolled a screen at a time, so
 /// a tall image costs a few steps rather than one per row.
-fn place(term: &mut Term<Listener>, processor: &mut Processor<SyncPending>, placed: Placed) {
+fn place(
+    term: &mut Term<Listener>,
+    processor: &mut Processor<SyncPending>,
+    graphics: &Graphics,
+    placed: Placed,
+) {
     let point = term.grid().cursor.point;
+    let cell = &mut term.grid_mut()[point];
+    // A placement redrawn in place replaces the one it was: its marker goes.
+    sweep(cell, |marker| graphics.placed(marker));
     for c in placed.marker {
-        term.grid_mut()[point].push_zerowidth(c);
+        cell.push_zerowidth(c);
     }
     if !placed.moves_cursor {
         return;
@@ -403,6 +424,46 @@ fn place(term: &mut Term<Listener>, processor: &mut Processor<SyncPending>, plac
         .saturating_add(u64::from(placed.cols))
         .saturating_add(1);
     processor.advance(term, format!("\x1b[{column}G").as_bytes());
+}
+
+/// Drops the markers in `cell` whose placement is gone, keeping its other
+/// zero-width characters, and returns the markers kept.
+fn sweep(cell: &mut Cell, live: impl Fn(u32) -> bool) -> Vec<u32> {
+    let Some(chars) = cell.zerowidth() else {
+        return Vec::new();
+    };
+    let markers: Vec<u32> = crate::graphics::markers_in(chars).collect();
+    let kept: Vec<u32> = markers
+        .iter()
+        .copied()
+        .filter(|&marker| live(marker))
+        .collect();
+    if kept.len() == markers.len() {
+        return kept;
+    }
+    let others: Vec<char> = chars
+        .iter()
+        .copied()
+        .filter(|&c| !crate::graphics::is_marker(c))
+        .collect();
+    // alacritty empties a cell's zero-width characters only with its wide
+    // flag; the flag goes back and the characters that stay are pushed anew.
+    let wide = cell.flags.contains(Flags::WIDE_CHAR);
+    cell.clear_wide();
+    if wide {
+        cell.flags.insert(Flags::WIDE_CHAR);
+    }
+    for c in others {
+        cell.push_zerowidth(c);
+    }
+    for c in kept
+        .iter()
+        .filter_map(|&marker| crate::graphics::marker_chars(marker))
+        .flatten()
+    {
+        cell.push_zerowidth(c);
+    }
+    kept
 }
 
 fn config(size: Size, scrollback_lines: usize) -> Config {
