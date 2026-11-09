@@ -409,6 +409,8 @@ pub(super) struct Palette {
     keymap: crate::keymap::Keymap,
     supports_clear: bool,
     supports_edit_scrollback: bool,
+    /// What the Herdr 2 rows showed when the entries were prepared.
+    core_rows: Vec<go_to::CoreRow>,
     /// The notes revision the entries were prepared from.
     notes_revision: Option<u64>,
     /// Paints Go To's preview at its own size, apart from the terminal's
@@ -666,6 +668,7 @@ impl SheprdWindow {
             keymap: self.keymap().clone(),
             supports_clear: self.live.supports_pane_clear,
             supports_edit_scrollback: self.live.supports_edit_scrollback,
+            core_rows: Vec::new(),
             notes_revision: None,
             restore: None,
             preview_painter: Default::default(),
@@ -724,7 +727,14 @@ impl SheprdWindow {
                 .map(|endpoint| endpoint.label.as_str());
             go_to_entries(&source.endpoint, host, snapshot, &mut entries);
         }
-        entries.extend(self.core_palette_entries(cx));
+        // Their rows nest under rows of their own: counted from here.
+        let core = self.core_palette_entries(cx);
+        let core_rows = go_to::core_rows(&core);
+        let base = entries.len();
+        entries.extend(core.into_iter().map(|mut entry| {
+            entry.parent = entry.parent.map(|parent| parent + base);
+            entry
+        }));
         entries.extend(
             COMMANDS
                 .iter()
@@ -829,6 +839,7 @@ impl SheprdWindow {
         palette.keymap = self.keymap().clone();
         palette.supports_clear = self.live.supports_pane_clear;
         palette.supports_edit_scrollback = self.live.supports_edit_scrollback;
+        palette.core_rows = core_rows;
         palette.notes_revision = notes.map(crate::worktree_notes::Notes::revision);
     }
 
@@ -868,6 +879,7 @@ impl SheprdWindow {
             || palette.keymap != *self.keymap()
             || palette.supports_clear != self.live.supports_pane_clear
             || palette.supports_edit_scrollback != self.live.supports_edit_scrollback
+            || go_to::core_rows(&self.core_palette_entries(cx)) != palette.core_rows
             || sources.len() != palette.sources.len()
             || sources.iter().zip(&palette.sources).any(|(a, b)| {
                 a.endpoint != b.endpoint

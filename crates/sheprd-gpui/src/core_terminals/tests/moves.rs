@@ -103,3 +103,47 @@ fn move_pane_opens_the_picker(cx: &mut TestAppContext) {
     let page = cx.update(|_, cx| view.read(cx).menu.page);
     assert_eq!(page, Some(crate::menu::Page::CoreMove));
 }
+
+#[gpui::test]
+fn a_move_with_no_room_for_a_tab_keeps_the_panes_name(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    let pane = Target::Pane {
+        tab,
+        terminal: id("t2"),
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&pane, Some("api".into()), cx);
+            let (scope, workspace) = view.browser_key().unwrap();
+            // Fill the store, so the new tab cannot open.
+            while Store::update(cx, |store| {
+                store.open(scope.clone(), &workspace, None, None)
+            })
+            .is_some()
+            {}
+            view.move_core_pane(tab, id("t2"), Destination::NewTab, window, cx);
+        })
+    });
+    let name = cx.update(|_, cx| {
+        view.read(cx).core_terminals.tabs[&tab]
+            .names
+            .get(&id("t2"))
+            .cloned()
+    });
+    assert_eq!(name.as_deref(), Some("api"));
+    assert_eq!(panes_of(cx, tab), Some(vec!["t1".into(), "t2".into()]));
+}
+
+#[gpui::test]
+fn the_move_picker_opens_where_asked_without_dimming(cx: &mut TestAppContext) {
+    let (view, cx, _) = window_with_split(cx, &["t1", "t2"]);
+    run(&view, cx, Command::MovePane);
+    let (dims, anchored) = cx.update(|_, cx| {
+        let view = view.read(cx);
+        (
+            view.menu_dims(),
+            view.menu.page.is_some_and(|page| page.pointer_anchored()),
+        )
+    });
+    assert!(!dims && anchored);
+}

@@ -119,7 +119,8 @@ impl SheprdWindow {
         let Some(shown) = self.core_terminals.tabs.get_mut(&tab) else {
             return;
         };
-        let name = shown.names.remove(&terminal);
+        // The name goes with the pane once it has somewhere to go.
+        let name = shown.names.get(&terminal).cloned();
         let alone = shown.panes.count() == 1;
         let to = match destination {
             Destination::NewTab => {
@@ -161,6 +162,9 @@ impl SheprdWindow {
         if alone {
             self.forget_core_tab(tab, window, cx);
         } else {
+            if let Some(shown) = self.core_terminals.tabs.get_mut(&tab) {
+                shown.names.remove(&terminal);
+            }
             self.remove_core_pane(tab, &terminal, window, cx);
             self.save_core_panes(cx);
         }

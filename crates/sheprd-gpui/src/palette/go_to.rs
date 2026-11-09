@@ -280,6 +280,24 @@ impl crate::SheprdWindow {
     }
 }
 
+/// What the Herdr 2 rows show, to tell an open palette when a name,
+/// layout, or agent's status changed under it.
+pub(super) type CoreRow = (
+    SharedString,
+    SharedString,
+    SharedString,
+    Option<AgentStatus>,
+);
+
+pub(super) fn core_rows(entries: &[Entry]) -> Vec<CoreRow> {
+    (entries.iter())
+        .map(|entry| {
+            let (label, detail, badge) = (&entry.label, &entry.detail, &entry.badge);
+            (label.clone(), detail.clone(), badge.clone(), entry.status)
+        })
+        .collect()
+}
+
 /// Whether the panes listed lie in more than one tab, so a tab is a choice.
 fn tabs_choice(panes: &[(crate::browser::TabId, sheprd_backend::TerminalId)]) -> bool {
     panes.windows(2).any(|pair| pair[0].0 != pair[1].0)

@@ -103,3 +103,73 @@ fn with_a_choice_of_tabs_each_heads_its_panes(cx: &mut TestAppContext) {
         ]
     );
 }
+
+#[gpui::test]
+fn herdr_2_panes_nest_under_their_tab_after_herdr_rows(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(fixture_window);
+    let entries = cx.update(|window, cx| {
+        Store::default().install(cx);
+        view.update(cx, |view, cx| {
+            open(view, &Panes::single(id("t1")), false, cx);
+            open(view, &Panes::single(id("t2")), false, cx);
+            view.open_palette(Filter::All, window, cx);
+            view.menu.palette.as_ref().unwrap().base.to_vec()
+        })
+    });
+    let first = entries
+        .iter()
+        .position(|entry| matches!(entry.action, Action::Core { .. }))
+        .unwrap();
+    assert!(first > 0, "the fixture's Herdr rows come first");
+    for (index, entry) in entries.iter().enumerate() {
+        if let Action::Core {
+            tab,
+            terminal: Some(_),
+        } = entry.action
+        {
+            let parent = &entries[entry.parent.unwrap()];
+            assert!(
+                matches!(parent.action, Action::Core { tab: of, terminal: None } if of == tab),
+                "row {index} nests under its own tab"
+            );
+        }
+    }
+}
+
+#[gpui::test]
+fn an_open_go_to_follows_a_herdr_2_agents_status(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(fixture_window);
+    let status = |view: &Entity<SheprdWindow>, cx: &mut App| {
+        let palette = view.read(cx).menu.palette.as_ref().unwrap();
+        (palette.base.iter())
+            .find(|entry| {
+                matches!(
+                    entry.action,
+                    Action::Core {
+                        terminal: Some(_),
+                        ..
+                    }
+                )
+            })
+            .and_then(|entry| entry.status)
+    };
+    cx.update(|window, cx| {
+        Store::default().install(cx);
+        view.update(cx, |view, cx| {
+            let panes = Panes::single(id("t1"));
+            let tab = open(view, &panes, false, cx);
+            let infos = vec![info("t1", AgentStatus::Working)];
+            view.core_terminals.show_for_test(tab, panes, false, infos);
+            view.open_palette(Filter::All, window, cx);
+        });
+        assert_eq!(status(&view, cx), Some(AgentStatus::Working));
+        view.update(cx, |view, cx| {
+            let tab = view.listed_core_panes(cx)[0].0;
+            let panes = Panes::single(id("t1"));
+            let infos = vec![info("t1", AgentStatus::Blocked)];
+            view.core_terminals.show_for_test(tab, panes, false, infos);
+            view.refresh_palette(window, cx);
+        });
+        assert_eq!(status(&view, cx), Some(AgentStatus::Blocked));
+    });
+}
