@@ -12,9 +12,11 @@ fn waiting(name: &str) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Blocked,
         cwd: None,
+        foreground: None,
         id: TerminalId::new(name).unwrap(),
         labels: Default::default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }

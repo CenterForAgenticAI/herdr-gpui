@@ -343,9 +343,11 @@ fn a_terminal_found_by_name_has_its_details() {
     let mut shell = sheprd_backend::TerminalInfo {
         agent: sheprd_client::protocol::AgentStatus::Unknown,
         cwd: Some("/w".into()),
+        foreground: None,
         id: TerminalId::new("t4").unwrap(),
         labels: Default::default(),
         name: Some("herdr-ui".into()),
+        reporter: None,
         state: sheprd_backend::RunState::Running,
         title: None,
     };
