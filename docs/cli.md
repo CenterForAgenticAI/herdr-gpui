@@ -35,10 +35,16 @@ Every command accepts:
   `{"error": {"code", "message"}}` on standard output.
 - `--window ID`: act in that window (IDs come from `window list`). By default
   a command acts in the window showing the caller's workspace
-  (`HERDR_WORKSPACE_ID`, which Herdr sets in every pane). When no window shows
-  it, as for a session the app does not show, the command exits 5 rather than
-  act on another session's window. Outside Herdr, it acts in the frontmost
-  window.
+  (`HERDR_WORKSPACE_ID`, which Herdr sets in every pane). In a Herdr 2
+  (herdr-core) terminal the caller is that terminal (`HC_TERMINAL_ID`, which
+  herdr-core sets in every terminal): the command acts in the window and
+  workspace of the tab holding it, and pages it opens and their notes belong
+  to it as they would to a Herdr pane. When no window shows it, as for a
+  session the app does not show, the command exits 5 rather than act on
+  another session's window. Outside both, it acts in the frontmost window.
+  Commands that keep Herdr's workspace state (`work` notes, mutes, restore,
+  scripts, Teleport, fan-out) exit 8 from a herdr-core terminal in no Herdr
+  workspace.
 
 | Exit | Meaning |
 | --- | --- |

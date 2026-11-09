@@ -63,10 +63,16 @@ impl SheprdWindow {
             return Some((endpoint.id.as_str(), workspace, listed));
         };
         let workspace = snapshot.focused_workspace_id.as_deref()?;
-        let daemon = super::Daemon::of(&endpoint.connection.target)?;
-        // Falls back to the workspace's herdr-core terminals on this computer.
-        let listed = self.listening_ports.get(&daemon, workspace)?;
+        let listed = self.listed_ports(self.selected_endpoint, workspace)?;
         Some((endpoint.id.as_str(), workspace, listed))
+    }
+
+    /// The ports `workspace` of endpoint `index` listens on: its Herdr
+    /// panes', else, on this computer, its herdr-core terminals'.
+    pub(crate) fn listed_ports(&self, index: usize, workspace: &str) -> Option<super::Listed<'_>> {
+        let target = &self.endpoints.get(index)?.connection.target;
+        let daemon = super::Daemon::of(target)?;
+        self.listening_ports.get(&daemon, workspace)
     }
 
     /// The workspace a window with no Herdr state shows, when it is one of

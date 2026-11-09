@@ -40,6 +40,11 @@ impl super::TabPanes {
 }
 
 impl CoreTerminals {
+    /// The scope and workspace of `tab`, once the window has shown it.
+    pub(crate) fn tab_workspace(&self, tab: crate::browser::TabId) -> Option<&(Scope, String)> {
+        self.tabs.get(&tab)?.workspace.as_ref()
+    }
+
     /// Each terminal of this computer's core the window shows and the
     /// workspace it is in, by address, for what names a terminal but not
     /// its workspace: the terminals of its tabs, and the shell shown in

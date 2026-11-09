@@ -4,8 +4,9 @@ use crate::cli::control::FAMILIES;
 const COMMON: &str = "\
 Every command accepts --json, printing one JSON document, and --window ID,
 acting in that window (IDs come from `window list`). By default a command
-acts in the window showing the caller's workspace (HERDR_WORKSPACE_ID), and
-exits 5 when no window shows it; outside Herdr, in the frontmost window.
+acts in the window showing the caller's workspace (HERDR_WORKSPACE_ID), or,
+in a herdr-core terminal (HC_TERMINAL_ID), the tab holding it, and exits 5
+when no window shows it; outside both, in the frontmost window.
 Exit status: 0 done, 1 refused, 2 invalid arguments, 3 Sheprd not running,
 4 nothing yet (no notes, no event), 5 not found, 6 busy (a dialog is open),
 7 timed out, 8 unsupported on this platform or by this app version.";
@@ -17,7 +18,8 @@ sheprd browser open URL|FILE [--workspace ID] [--no-focus] [--beside|--tab]
     or the frontmost one outside Herdr. Showing the same page again from the
     same pane reuses and reloads its tab. Bare hosts such as localhost:3000
     are accepted. A file is served with the other files in its folder.
-    A file opened from a Herdr pane goes in a split next to that terminal,
+    A file opened from a Herdr pane or a herdr-core terminal goes in a split
+    next to that terminal,
     which stays in view and keeps the keyboard; a web address takes a tab of
     the group in use. --beside and --tab choose instead.
 sheprd browser reload
