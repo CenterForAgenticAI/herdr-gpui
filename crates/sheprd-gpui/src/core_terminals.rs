@@ -11,6 +11,7 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod adopt;
 mod asks;
 mod checkouts;
 mod commands;
@@ -153,6 +154,11 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// When terminals labelled for a workspace were last looked at.
+    adopt_checked: Option<std::time::Instant>,
+    /// Terminals labelled for a workspace that were put in a tab, so each
+    /// is put in one only once.
+    adopted: std::collections::HashSet<TerminalId>,
     /// The Git checkout of each kept workspace's folder and of the shown
     /// pane's.
     checkouts: checkouts::Checkouts,
@@ -455,12 +461,19 @@ impl SheprdWindow {
             cx,
         );
         self.poll_core_panes(window, cx);
+        // While a phone may start work here, this computer's core is joined
+        // (never started) to see it, with or without a tab of its own.
+        if crate::remote::supervisor::Supervisor::enabled(cx) {
+            self.core_terminals.hub.connect(Start::Join);
+        }
         // Split chrome and the sidebar's rows name panes from what herdr-core
         // reports, and the shell shown in place of Herdr 1 reads its links
         // against its folder, which this computer's core reports.
         let fallback = self.core_fallback_view();
         self.answer_phone_split(cx);
-        if self.core_terminals.poll_infos(std::time::Instant::now()) {
+        let listed = self.core_terminals.poll_infos(std::time::Instant::now());
+        self.adopt_labelled_terminals(listed, cx);
+        if listed {
             cx.notify();
         }
         if let Some(view) = fallback {

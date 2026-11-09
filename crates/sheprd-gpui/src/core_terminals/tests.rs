@@ -1,4 +1,5 @@
 mod accessibility;
+mod adopt;
 mod chats;
 mod context;
 mod control_holder;
