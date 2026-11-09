@@ -57,12 +57,12 @@ pub(crate) struct Mailbox {
 }
 
 impl Mailbox {
-    fn update(&self, change: impl FnOnce(&mut Screen)) {
+    pub(super) fn update(&self, change: impl FnOnce(&mut Screen)) {
         change(&mut self.screen.lock().unwrap_or_else(PoisonError::into_inner));
         self.changed.store(true, Ordering::Release);
     }
 
-    fn answer(&self, id: u64, answer: Answer) {
+    pub(super) fn answer(&self, id: u64, answer: Answer) {
         let mut answers = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
         if answers.len() == MAX_ANSWERS {
             answers.pop_front();
@@ -72,7 +72,28 @@ impl Mailbox {
         self.changed.store(true, Ordering::Release);
     }
 
+    /// The screen, when it changed since the last take, its bells and
+    /// clipboard write handed over once, and the history answers that
+    /// arrived since, oldest first. The answers are drained
+    /// while the screen is held: the worker shows each screen before it
+    /// answers anything after it, so none was made from a newer screen
+    /// than the one taken with it.
+    pub(crate) fn take_with_answers(&self) -> (Option<Screen>, Vec<(u64, Answer)>) {
+        if !self.changed.swap(false, Ordering::AcqRel) {
+            return (None, Vec::new());
+        }
+        let mut screen = self.screen.lock().unwrap_or_else(PoisonError::into_inner);
+        let answers = self
+            .answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect();
+        (Some(screen.take()), answers)
+    }
+
     /// The history answers that arrived since the last take, oldest first.
+    #[cfg(test)]
     pub(crate) fn take_answers(&self) -> Vec<(u64, Answer)> {
         self.answers
             .lock()
@@ -85,13 +106,15 @@ impl Mailbox {
         self.changed.load(Ordering::Acquire)
     }
 
-    /// The screen, when it changed since the last take.
+    /// The screen, when it changed since the last take. Its bells and
+    /// clipboard write are handed over once.
+    #[cfg(test)]
     pub(crate) fn take(&self) -> Option<Screen> {
         self.changed.swap(false, Ordering::AcqRel).then(|| {
             self.screen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .clone()
+                .take()
         })
     }
 }

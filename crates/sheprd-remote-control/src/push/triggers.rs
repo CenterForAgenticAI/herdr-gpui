@@ -39,8 +39,24 @@ pub(crate) enum Kind {
     // keep-sorted start
     Error,
     Question,
+    /// An agent in a plain terminal waits for the user.
+    TerminalAsking,
+    /// An agent in a plain terminal finished what it was doing.
+    TerminalDone,
     TurnEnded,
     // keep-sorted end
+}
+
+impl Kind {
+    /// Whether it asks the user something, so it may not wait.
+    pub(crate) fn asks(self) -> bool {
+        matches!(self, Self::Question | Self::TerminalAsking)
+    }
+
+    /// Whether it is about a terminal tab rather than a chat.
+    pub(crate) fn is_terminal(self) -> bool {
+        matches!(self, Self::TerminalAsking | Self::TerminalDone)
+    }
 }
 
 /// A push to send for one chat.
@@ -62,7 +78,7 @@ pub(crate) struct Notification {
 }
 
 impl Notification {
-    fn new(chat: &Chat<'_>, kind: Kind, title: String, body: String) -> Self {
+    pub(super) fn new(chat: &Chat<'_>, kind: Kind, title: String, body: String) -> Self {
         Self {
             body,
             clear: false,
@@ -71,7 +87,7 @@ impl Notification {
             permission: None,
             tag: tag(chat.pane),
             title,
-            urgency: if kind == Kind::Question {
+            urgency: if kind.asks() {
                 Urgency::High
             } else {
                 Urgency::Normal
@@ -112,7 +128,15 @@ impl Notification {
             kind: self.kind,
             tag: self.tag.clone(),
             title: self.title.clone(),
-            url: format!("/chat/{}", path_segment(&self.pane)),
+            url: format!(
+                "/{}/{}",
+                if self.kind.is_terminal() {
+                    "term"
+                } else {
+                    "chat"
+                },
+                path_segment(&self.pane)
+            ),
         }
     }
 }
@@ -240,7 +264,7 @@ fn last_answer(transcript: &Transcript) -> Option<&str> {
 }
 
 /// `excerpt` (when allowed) above `workspace · title`, then any `facts`.
-fn body(chat: &Chat<'_>, excerpt: Option<String>, facts: Option<&str>) -> String {
+pub(super) fn body(chat: &Chat<'_>, excerpt: Option<String>, facts: Option<&str>) -> String {
     let place = if chat.title.is_empty() {
         chat.workspace.to_owned()
     } else {

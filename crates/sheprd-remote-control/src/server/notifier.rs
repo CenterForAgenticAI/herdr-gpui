@@ -1,6 +1,8 @@
 //! Turns chat changes into push notifications for every device that asked
 //! for them. It keeps its own copy of each transcript, stepped with the
-//! shared reducer, so a trigger sees the state before each change. A
+//! shared reducer, so a trigger sees the state before each change. Agents
+//! in plain terminals have no transcript: their settled status changes,
+//! read from the layout every tick, alert instead. A
 //! device the native app registered for alerts gets them sealed through
 //! APNs; any other gets Web Push, which is blocking HTTPS on the blocking
 //! pool. A push service that says a token or subscription is gone drops it
@@ -11,7 +13,11 @@ use crate::{
     apns::{self, Registration, alert::Sealed},
     control::DeviceId,
     hub::Event,
-    push::{Chat, Delivery, Hold, Notification, Outcome, Subscription, Throttle, decide},
+    hub::Layout,
+    push::{
+        Chat, Delivery, Hold, Notification, Outcome, SeenAgent, Subscription, TerminalAgents,
+        Throttle, decide, decide_terminal,
+    },
     web::{State, now_ms},
 };
 use sheprd_chat_protocol::{Cursor, Transcript};
@@ -36,6 +42,7 @@ pub(super) async fn run(state: Arc<State>) {
     let mut outbox = Outbox::default();
     let mut holds: HashMap<DeviceId, Hold> = HashMap::new();
     let mut needing = BTreeSet::new();
+    let mut terminals = TerminalAgents::default();
     let mut ticker = tokio::time::interval(TICK);
     loop {
         tokio::select! {
@@ -81,6 +88,9 @@ pub(super) async fn run(state: Arc<State>) {
             _ = ticker.tick() => {
                 live.tick(&state);
                 let now = now_ms();
+                for notification in terminal_changes(&state, &mut terminals, &mut live, now) {
+                    offer(&state, &mut throttles, &mut holds, &mut outbox, notification);
+                }
                 let due: Vec<(DeviceId, Notification)> = throttles
                     .iter_mut()
                     .flat_map(|(device, throttle)| {
@@ -142,6 +152,94 @@ fn notification(
         change,
         state.privacy,
     )
+}
+
+/// Steps every terminal agent's status, starting, updating, or ending its
+/// Live Activity, and returns the alerts the settled changes call for.
+fn terminal_changes(
+    state: &Arc<State>,
+    agents: &mut TerminalAgents,
+    live: &mut super::live::LiveActivities,
+    now: u64,
+) -> Vec<Notification> {
+    let layout = state.hub.layout();
+    let names = agent_names(&layout);
+    let seen = terminal_agents(&layout, &names);
+    let moves = agents.step(seen.iter().copied(), now);
+    if moves.is_empty() {
+        return Vec::new();
+    }
+    let wanting = state.attention();
+    let mut alerts = Vec::new();
+    for moved in moves {
+        let agent = seen.iter().find(|agent| agent.chat.pane == moved.pane);
+        live.terminal(state, &moved, agent, now);
+        // A finish a phone opened while it settled was seen: its clear
+        // went out already, and nothing would close a later alert.
+        if !wanting.contains(&moved.pane) {
+            continue;
+        }
+        if let Some(alert) = agent.and_then(|agent| decide_terminal(agent, &moved, state.privacy)) {
+            alerts.push(alert);
+        }
+    }
+    alerts
+}
+
+/// Each terminal agent's display name, as `claude` shows as `Claude`.
+fn agent_names(layout: &Layout) -> HashMap<&str, String> {
+    layout
+        .workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.terminals)
+        .flat_map(|terminal| &terminal.agents)
+        .map(|agent| {
+            let name = agent.name.as_deref().map_or_else(
+                || "The agent".to_owned(),
+                |name| {
+                    let mut chars = name.chars();
+                    chars.next().map_or_else(String::new, |first| {
+                        first.to_uppercase().chain(chars).collect()
+                    })
+                },
+            );
+            (agent.pane.as_str(), name)
+        })
+        .collect()
+}
+
+/// The agents in `layout`'s terminal tabs, one per pane: a split's panes
+/// each finish or ask on their own.
+pub(super) fn terminal_agents<'a>(
+    layout: &'a Layout,
+    names: &'a HashMap<&str, String>,
+) -> Vec<SeenAgent<'a>> {
+    layout
+        .workspaces
+        .iter()
+        .flat_map(|workspace| {
+            workspace.terminals.iter().flat_map(move |terminal| {
+                terminal.agents.iter().map(move |agent| SeenAgent {
+                    chat: Chat {
+                        agent: names
+                            .get(agent.pane.as_str())
+                            .map_or("The agent", String::as_str),
+                        pane: &agent.pane,
+                        title: &terminal.label,
+                        workspace: &workspace.label,
+                    },
+                    status: agent.status,
+                    task: agent.title.as_deref().map(task),
+                })
+            })
+        })
+        .collect()
+}
+
+/// What a terminal's title says the agent works on, without the spinner
+/// or status mark an agent puts before it, which changes as it works.
+fn task(title: &str) -> &str {
+    title.trim_start_matches(|c: char| !c.is_alphanumeric())
 }
 
 /// Offers `notification` to every subscribed device's throttle and sends

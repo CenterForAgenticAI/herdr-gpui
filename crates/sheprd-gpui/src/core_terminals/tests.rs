@@ -2,6 +2,8 @@ mod accessibility;
 mod chats;
 mod context;
 mod copy_mode;
+mod effects;
+mod fallback_bells;
 mod focus;
 mod folders;
 mod history;

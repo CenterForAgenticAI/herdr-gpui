@@ -1,9 +1,13 @@
 //! What the emulator keeps from alacritty's events. `Term` reports through a
 //! shared `&self` listener, so the inbox sits behind a mutex the emulator
-//! drains after every feed; it holds at most one title and a bell count, so
-//! nothing in it grows with input.
+//! drains after every feed; it holds at most one title, one clipboard write,
+//! and a bell count, so nothing in it grows with input.
 
-use alacritty_terminal::event::{Event, EventListener};
+use crate::MAX_CLIPBOARD_BYTES;
+use alacritty_terminal::{
+    event::{Event, EventListener},
+    term::ClipboardType,
+};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 #[derive(Debug, Default)]
@@ -11,6 +15,8 @@ pub(crate) struct Inbox {
     /// The latest title change: `Some(None)` is a reset to the default.
     pub(crate) title: Option<Option<String>>,
     pub(crate) bells: u32,
+    /// The latest OSC 52 write to the clipboard, decoded UTF-8 text.
+    pub(crate) clipboard: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -36,10 +42,18 @@ impl EventListener for Listener {
             }
             Event::Title(title) => self.lock().title = Some(Some(title)),
             Event::ResetTitle => self.lock().title = Some(None),
+            // alacritty decodes the base64 and drops what is not UTF-8. Each
+            // write replaces the whole clipboard, so only the latest is kept.
+            Event::ClipboardStore(ClipboardType::Clipboard, text) => {
+                if text.len() <= MAX_CLIPBOARD_BYTES {
+                    self.lock().clipboard = Some(text);
+                }
+            }
             // herdr-core answers terminal queries itself, and the emulator
-            // never touches the clipboard or reports sizes and colors.
+            // never reads the clipboard, sets the X selection, or reports
+            // sizes and colors.
             Event::ClipboardLoad(..)
-            | Event::ClipboardStore(..)
+            | Event::ClipboardStore(ClipboardType::Selection, _)
             | Event::ColorRequest(..)
             | Event::PtyWrite(_)
             | Event::TextAreaSizeRequest(_)

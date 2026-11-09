@@ -8,7 +8,11 @@ use std::sync::Arc;
 /// lets the worker patch rows without disturbing a frame being painted.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Screen {
+    /// Bells rung since the window last took the screen.
     pub(crate) bells: u32,
+    /// The latest OSC 52 clipboard write since the window last took the
+    /// screen: bounded UTF-8 text the emulator decoded.
+    pub(crate) clipboard: Option<String>,
     pub(crate) ended: Option<Exit>,
     /// Why the terminal could not be shown, for its tab to say.
     pub(crate) failure: Option<String>,
@@ -30,9 +34,22 @@ impl Screen {
         self.frame.as_ref().map(|frame| (frame.width, frame.height))
     }
 
+    /// A copy for the window, moving out what happens once (bells and the
+    /// clipboard write) so the next take does not repeat them.
+    pub(crate) fn take(&mut self) -> Self {
+        let bells = std::mem::take(&mut self.bells);
+        let clipboard = self.clipboard.take();
+        Self {
+            bells,
+            clipboard,
+            ..self.clone()
+        }
+    }
+
     pub(crate) fn apply(&mut self, update: SurfaceUpdate) {
         match update {
             SurfaceUpdate::Bell => self.bells = self.bells.saturating_add(1),
+            SurfaceUpdate::Clipboard(text) => self.clipboard = Some(text),
             SurfaceUpdate::Ended(exit) => self.ended = Some(exit),
             SurfaceUpdate::Frame(frame) => self.frame = Some(Arc::new(frame)),
             SurfaceUpdate::KeyReporting(keys) => self.keys = keys,

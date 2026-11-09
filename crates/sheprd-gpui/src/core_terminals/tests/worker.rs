@@ -34,7 +34,7 @@ pub(super) struct Scripted {
 }
 
 impl Scripted {
-    /// Hands `batch` to the terminal's next `next`.
+    /// Hands `batch` out after the batches already queued.
     pub(super) fn push(&self, batch: Vec<SurfaceUpdate>) {
         self.updates.lock().unwrap().insert(0, batch);
     }
@@ -277,3 +277,4 @@ fn an_ended_terminal_keeps_its_screen_and_history_until_its_view_goes() {
 }
 
 mod history;
+mod mailbox;
