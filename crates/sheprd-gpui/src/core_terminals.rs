@@ -91,6 +91,9 @@ struct TabPanes {
     names: std::collections::BTreeMap<TerminalId, String>,
     /// The pane in use before the current one, which Last Pane goes back to.
     previous: Option<TerminalId>,
+    /// The tab's location as this window last read or saved it, to tell
+    /// when another window saved a change.
+    saved: Option<Location>,
     unsaved: bool,
     /// How far the zoomed pane has grown over the tab; it shrinks back to
     /// its place when unzoomed.
@@ -118,6 +121,7 @@ impl TabPanes {
             observe,
             panes,
             previous: None,
+            saved: None,
             unsaved: false,
             zoom: crate::motion::Toggle::default(),
             zoomed: None,
@@ -161,6 +165,35 @@ impl TabPanes {
             shown.zoom.set(true, crate::motion::now(), true);
         }
         Some(shown)
+    }
+
+    /// Takes `location`, saved by another window since this one last read
+    /// or saved the tab, so that its next save does not undo it. Focus and
+    /// zoom this window changed and has not saved yet still stand where
+    /// their pane is still there.
+    fn refresh(&mut self, location: &Location) {
+        let Some(mut fresh) = Self::restore(self.host.clone(), location) else {
+            return;
+        };
+        if self.unsaved {
+            if fresh.panes.contains(&self.active) {
+                fresh.active = self.active.clone();
+            }
+            let zoomed = (self.zoomed.clone())
+                .filter(|zoomed| self.zoom.is_open() && fresh.panes.contains(zoomed));
+            fresh.zoom = match zoomed {
+                Some(_) => self.zoom,
+                None => crate::motion::Toggle::default(),
+            };
+            fresh.zoomed = zoomed;
+        } else if fresh.zoomed == self.zoomed && fresh.zoom.is_open() == self.zoom.is_open() {
+            // Unchanged: an animation in flight carries on.
+            fresh.zoom = self.zoom;
+        }
+        fresh.previous = (self.previous.take()).filter(|previous| fresh.panes.contains(previous));
+        fresh.unsaved = self.unsaved;
+        fresh.saved = Some(location.clone());
+        *self = fresh;
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -231,6 +264,9 @@ pub(crate) struct CoreTerminals {
     /// A shell starting, and what for.
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
+    /// Terminals a kill did not reach, as when the connection dropped while
+    /// it was sent, put back to end once their core answers again.
+    unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// A terminal to start once the hub connects: a shell, or the program
     /// its spawn names.
@@ -343,13 +379,21 @@ impl CoreTerminals {
             .map(|(id, _)| *id)
     }
 
-    /// How the agents in `panes` are doing, as their tab's mark shows it:
-    /// the status that most wants attention, or unknown with no agent.
-    pub(crate) fn tab_status(&self, panes: &Panes) -> AgentStatus {
+    /// How the agents in `panes`, terminals of `host`'s core, are doing, as
+    /// their tab's mark shows it: the status that most wants attention, or
+    /// unknown with no agent. A core that does not answer reports none, as
+    /// its last list may name agents that have since stopped.
+    pub(crate) fn tab_status(&self, host: &Host, panes: &Panes) -> AgentStatus {
+        let Some(infos) = self
+            .infos_of(host)
+            .filter(|_| self.backend_of(host).is_some())
+        else {
+            return AgentStatus::Unknown;
+        };
         panes
             .terminals()
             .into_iter()
-            .filter_map(|terminal| self.infos.get(terminal))
+            .filter_map(|terminal| infos.get(terminal))
             .map(|info| info.agent)
             .max_by_key(|status| crate::sidebar::status_priority(*status))
             .unwrap_or(AgentStatus::Unknown)

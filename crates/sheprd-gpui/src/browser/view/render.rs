@@ -59,9 +59,9 @@ impl SheprdWindow {
                 // A terminal tab running an agent shows how it is doing, as a
                 // Herdr tab does; a page's own icon stands in for the globe.
                 let status = match &tab.location {
-                    Some(Location::CoreTerminal { panes, .. }) => {
-                        self.core_terminals.tab_status(panes)
-                    }
+                    Some(Location::CoreTerminal { panes, .. }) => self
+                        .core_terminals
+                        .tab_status(&crate::core_terminals::Host::of(&tab.scope), panes),
                     _ => sheprd_client::protocol::AgentStatus::Unknown,
                 };
                 let mark = match self.tab_favicon(id).filter(|_| icon == GLOBE) {

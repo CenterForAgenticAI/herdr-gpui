@@ -8,6 +8,7 @@ mod menus;
 mod moves;
 mod pane_keys;
 mod paste;
+mod refresh;
 mod restore;
 mod saved_tabs;
 mod screen;
