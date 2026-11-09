@@ -127,7 +127,7 @@ pub(crate) fn push(
     loop {
         let body = outer(&sealed, &seal)?;
         if body.len() <= MAX_PAYLOAD {
-            let question = sealed.kind == Kind::Question && !sealed.clear;
+            let question = sealed.kind.asks() && !sealed.clear;
             return Ok(Push {
                 body,
                 collapse_id: Some(collapse_id(tag)),
@@ -174,7 +174,7 @@ fn outer(sealed: &Sealed, seal: &impl Fn(&[u8]) -> Result<Vec<u8>>) -> Result<Ve
             mutable_content: Some(1),
             content_available: None,
             thread_id: Some(&sealed.pane),
-            interruption_level: Some(if sealed.kind == Kind::Question {
+            interruption_level: Some(if sealed.kind.asks() {
                 "time-sensitive"
             } else {
                 "active"

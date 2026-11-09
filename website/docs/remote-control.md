@@ -81,7 +81,7 @@ Workspace headers show their pull request's number and status color, as on the d
 
 ## Notifications
 
-The installed app gets Web Push notifications when an agent asks a question or a permission, when a turn ends, and when an agent stops on an error. On iOS 16.4 and later, push reaches only an installed app (added to the Home Screen); on Android it works installed or not.
+The installed app gets Web Push notifications when an agent asks a question or a permission, when a turn ends, and when an agent stops on an error. An agent in a plain terminal tab, Herdr 1 or Herdr 2, notifies too when it starts waiting for you and when it finishes what it was doing, once that status has held for two seconds; tapping it opens the terminal. On iOS 16.4 and later, push reaches only an installed app (added to the Home Screen); on Android it works installed or not.
 
 By default a notification includes a short excerpt of the message, which can show on your phone's lock screen. To say only which chat needs you, without its text, choose **Generic** under **Notifications** in Settings, or set `notifications = "generic"` under `[remote]`. Notifications are encrypted end to end, so the push services relay them without reading them.
 

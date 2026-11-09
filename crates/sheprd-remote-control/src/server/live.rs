@@ -7,9 +7,9 @@
 
 use super::notifier::waiting;
 use crate::{
-    apns::{DeviceToken, Event, Live, Outcome, Pacer, Registration, decide},
+    apns::{DeviceToken, Event, Live, Outcome, Pacer, Registration, decide, decide_terminal},
     control::DeviceId,
-    push::Chat,
+    push::{Chat, Moved, SeenAgent},
     web::{State, now_ms},
 };
 use sheprd_chat_protocol::{Change, Status, Transcript};
@@ -70,6 +70,27 @@ impl LiveActivities {
             change,
             now,
         ) else {
+            return;
+        };
+        if let Some(live) = self.pacer.offer(live, now) {
+            self.dispatch(state, live);
+        }
+    }
+
+    /// Considers a settled status change of a terminal agent; `agent` is it
+    /// as the layout shows it now, `None` once its pane left.
+    pub(super) fn terminal(
+        &mut self,
+        state: &Arc<State>,
+        moved: &Moved,
+        agent: Option<&SeenAgent<'_>>,
+        now: u64,
+    ) {
+        if state.apns.is_none() {
+            return;
+        }
+        let Some(live) = decide_terminal(moved, agent, &state.computer, &state.fingerprint, now)
+        else {
             return;
         };
         if let Some(live) = self.pacer.offer(live, now) {
@@ -186,15 +207,23 @@ fn route<'a>(live: &Live, registration: &'a Registration) -> Route<'a> {
     }
 }
 
-/// Chats with a turn running now, for the Dynamic Island's count.
+/// Chats with a turn running now, and terminal agents working, for the
+/// Dynamic Island's count.
 fn working(state: &State) -> u32 {
     let layout = state.hub.layout();
-    let count = layout
+    let chats = layout
         .chats()
         .filter_map(|chat| state.hub.chat(&chat.pane))
         .filter(|link| link.summary().status == Status::Working)
         .count();
-    u32::try_from(count).unwrap_or(u32::MAX)
+    let terminals = layout
+        .workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.terminals)
+        .flat_map(|terminal| &terminal.agents)
+        .filter(|agent| agent.status == sheprd_client::protocol::AgentStatus::Working)
+        .count();
+    u32::try_from(chats + terminals).unwrap_or(u32::MAX)
 }
 
 /// Every device's non-empty APNs registration, read under one lock: the

@@ -1,7 +1,8 @@
 import Foundation
 
-/// The link a Live Activity opens:
-/// `herdr-remote://chat?id=FINGERPRINT&computer=NAME&pane=PANE`.
+/// The link a Live Activity or notification opens:
+/// `herdr-remote://chat?id=FINGERPRINT&computer=NAME&pane=PANE`, with
+/// `&kind=term` for an agent in a plain terminal, whose terminal it opens.
 /// The app finds the paired computer whose CA fingerprint is `id` (never by
 /// `computer`, a display name any computer can choose), and opens the chat in
 /// the web app, where it lives.
@@ -13,11 +14,14 @@ public struct ChatLink: Equatable, Sendable {
     /// The computer's CA fingerprint, as `ChatActivityFacts.computerId`.
     public let computerId: String
     public let pane: String
+    /// Whether the pane is a terminal's rather than a chat's.
+    public let terminal: Bool
 
-    public init(computer: String, computerId: String, pane: String) {
+    public init(computer: String, computerId: String, pane: String, terminal: Bool = false) {
         self.computer = computer
         self.computerId = computerId
         self.pane = pane
+        self.terminal = terminal
     }
 
     /// Reads a link the app was opened with; `nil` for any other URL.
@@ -31,6 +35,7 @@ public struct ChatLink: Equatable, Sendable {
         self.computer = items.first(where: { $0.name == "computer" })?.value ?? ""
         self.computerId = computerId
         self.pane = pane
+        self.terminal = items.first(where: { $0.name == "kind" })?.value == "term"
     }
 
     /// The computer the link names, when its id is a fingerprint.
@@ -47,14 +52,18 @@ public struct ChatLink: Equatable, Sendable {
             URLQueryItem(name: "computer", value: computer),
             URLQueryItem(name: "pane", value: pane),
         ]
+        if terminal {
+            components.queryItems?.append(URLQueryItem(name: "kind", value: "term"))
+        }
         // Every value is set above, so this cannot fail.
         return components.url ?? URL(fileURLWithPath: "/")
     }
 
-    /// The web app's page for this chat at `origin`: `ORIGIN/chat/PANE`, the
-    /// pane escaped as one path segment the way the daemon escapes it.
+    /// The web app's page for this chat at `origin`: `ORIGIN/chat/PANE`
+    /// (`/term/` for a terminal), the pane escaped as one path segment the
+    /// way the daemon escapes it.
     public func page(origin: String) -> URL? {
-        URL(string: "\(origin)/chat/\(Self.pathSegment(pane))")
+        URL(string: "\(origin)/\(terminal ? "term" : "chat")/\(Self.pathSegment(pane))")
     }
 
     /// Only unreserved characters stay as they are, as in the daemon's

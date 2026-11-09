@@ -442,6 +442,7 @@ mod state_context;
 
 mod empty_core;
 mod kept_workspaces;
+mod pane_agents;
 mod poller;
 mod saved_beside_spaces;
 mod screen_history;
