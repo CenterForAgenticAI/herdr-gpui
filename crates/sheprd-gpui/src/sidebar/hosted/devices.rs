@@ -9,8 +9,8 @@ use crate::{
     endpoint::Endpoint,
     session_model::Sessions,
     sidebar::workspaces::{
-        visible_workspace_entries, workspace_badge, workspace_entries, workspace_label,
-        workspace_note,
+        displayed_workspace_status, visible_workspace_entries, workspace_badge, workspace_entries,
+        workspace_label, workspace_note,
     },
     window::SheprdWindow,
 };
@@ -32,6 +32,9 @@ struct Place<'a> {
     muted: bool,
     focused: bool,
     number: usize,
+    /// The status its dot shows: a folded group's most urgent, when the
+    /// config shows statuses inline, as the window's own row does.
+    status: sheprd_client::protocol::AgentStatus,
 }
 
 impl SheprdWindow {
@@ -148,6 +151,7 @@ impl SheprdWindow {
                     muted: silenced.contains(&workspace.id),
                     focused: front == Some(workspace.id.as_str()),
                     number,
+                    status: workspace.status,
                 };
                 rows.push(self.hosted_row(workspace, child, &place, cx));
             }
@@ -210,6 +214,11 @@ impl SheprdWindow {
                     muted: silenced.contains(&workspace.id),
                     focused: front == Some(workspace.id.as_str()),
                     number,
+                    status: if self.config.usage.inline {
+                        displayed_workspace_status(&session.workspaces, workspace, collapsed)
+                    } else {
+                        workspace.status
+                    },
                 };
                 rows.push(self.hosted_row(workspace, child, &place, cx));
             }
@@ -228,7 +237,12 @@ impl SheprdWindow {
         let badge = workspace_badge(
             workspace,
             pr_view.as_ref().map(|view| (&self.menu.pr_cache, view)),
-            (Some(&self.git), self.config.sidebar_style.change_counts),
+            // Only this computer's checkouts are probed; a remote one with
+            // the same repository and branch is another checkout.
+            (
+                (place.index == 0).then_some(&self.git),
+                self.config.sidebar_style.change_counts,
+            ),
             (&self.teleport_marks, &place.endpoint.id),
             (note, place.muted),
             &self.theme,
@@ -239,7 +253,7 @@ impl SheprdWindow {
         let pr = badge.as_ref().and_then(|badge| badge.pr.as_ref());
         json!({
             "added": counts.map(|counts| counts.additions.clone()),
-            "agent_status": status_name(workspace.status),
+            "agent_status": status_name(place.status),
             "ahead": ahead,
             "behind": behind,
             "branch": workspace.branch,

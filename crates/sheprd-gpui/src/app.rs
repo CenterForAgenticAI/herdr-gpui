@@ -315,6 +315,11 @@ pub(crate) fn run() -> std::process::ExitCode {
     // launch; everything else stays the app's own.
     #[cfg(feature = "moonframe")]
     if crate::luau_window::wanted(&args) {
+        // Windows reopens it after an update or a restart, as the app's
+        // own window; a `--check` of the layout is no launch.
+        if args.is_empty() {
+            crate::restart_manager::register();
+        }
         return crate::luau_window::run();
     }
     // A control command asked for JSON gets its usage errors as JSON too.

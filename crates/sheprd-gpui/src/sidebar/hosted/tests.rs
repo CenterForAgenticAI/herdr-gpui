@@ -214,3 +214,29 @@ fn hiding_agents_hides_the_agents_list(cx: &mut TestAppContext) {
         assert_eq!(view.hosted_state(cx).main["agents_list"], false);
     });
 }
+
+#[gpui::test]
+fn a_folded_group_shows_its_most_urgent_status_when_statuses_are_inline(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    view.update_in(cx, |view, window, cx| {
+        let mut snapshot = crate::sidebar::layout_tests::snapshot(3);
+        let tree = |linked| sheprd_client::protocol::ClientShellWorktree {
+            is_linked_worktree: linked,
+            key: "repo".into(),
+            label: "repo".into(),
+        };
+        snapshot.workspaces[0].worktree = Some(tree(false));
+        snapshot.workspaces[0].agent_status = AgentStatus::Idle;
+        snapshot.workspaces[1].worktree = Some(tree(true));
+        snapshot.workspaces[1].agent_status = AgentStatus::Blocked;
+        view.live.snapshot = Some(Arc::new(snapshot));
+        view.hosted_action(Action::FoldAll(true), window, cx);
+        let status = |view: &mut SheprdWindow, cx: &mut gpui::Context<SheprdWindow>| {
+            view.hosted_state(cx).main["devices"][0]["workspaces"][0]["agent_status"].clone()
+        };
+        view.config.usage.inline = true;
+        assert_eq!(status(view, cx), "blocked");
+        view.config.usage.inline = false;
+        assert_eq!(status(view, cx), "idle");
+    });
+}
