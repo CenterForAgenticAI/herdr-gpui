@@ -16,7 +16,7 @@ fn input(branch: &str) -> crate::pull_request::Input {
 
 /// The row's counts as drawn, or `None` when it shows none.
 fn counts(
-    workspace: &ClientShellWorkspace,
+    workspace: &sheprd_session::Workspace,
     cache: &crate::pull_request::Cache,
     git: &Git,
     mode: ChangeCounts,
@@ -36,7 +36,7 @@ fn counts(
 
 #[test]
 fn a_row_shows_only_the_change_counts_the_setting_picks() {
-    let snapshot = layout_tests::snapshot(6);
+    let snapshot = crate::session_model::of_snapshot(&layout_tests::snapshot(6));
     let (child, head) = (&snapshot.workspaces[4], &snapshot.workspaces[3]);
     let now = Instant::now();
     let mut cache = crate::pull_request::Cache::default();
@@ -95,7 +95,7 @@ fn a_row_shows_only_the_change_counts_the_setting_picks() {
 
 /// The row's pull request slot as drawn, or `None` when it is empty.
 fn pr_slot(
-    workspace: &ClientShellWorkspace,
+    workspace: &sheprd_session::Workspace,
     cache: &crate::pull_request::Cache,
     git: &Git,
 ) -> Option<String> {
@@ -121,7 +121,7 @@ fn ahead(head: &str) -> Ahead {
 
 #[test]
 fn commits_without_a_pull_request_take_the_number_slot_once_a_lookup_finished() {
-    let snapshot = layout_tests::snapshot(6);
+    let snapshot = crate::session_model::of_snapshot(&layout_tests::snapshot(6));
     let child = &snapshot.workspaces[4];
     let branch = input("worktree/sidebar-child");
     let now = Instant::now();
@@ -137,7 +137,7 @@ fn commits_without_a_pull_request_take_the_number_slot_once_a_lookup_finished() 
 
 #[test]
 fn a_merged_pull_request_keeps_its_number_until_the_branch_moves_past_it() {
-    let snapshot = layout_tests::snapshot(6);
+    let snapshot = crate::session_model::of_snapshot(&layout_tests::snapshot(6));
     let child = &snapshot.workspaces[4];
     let branch = input("worktree/sidebar-child");
     let now = Instant::now();

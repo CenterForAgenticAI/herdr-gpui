@@ -32,3 +32,21 @@ fn a_failed_restore_keeps_the_cause_its_git_commands_or_worker_gave() {
         format!("Checkpoint not restored: {}", checkpoint::Error::Busy)
     );
 }
+
+#[test]
+fn only_a_daemon_proven_local_names_checkouts_git_reads_here() {
+    use sheprd_client::ConnectTarget;
+    let mut live = crate::state::LiveState::default();
+    live.local_daemon_peer = true;
+    let socket = ConnectTarget::Socket("/tmp/forwarded.sock".into());
+    assert!(
+        !names_local_checkouts(&socket, &live),
+        "a socket may forward another machine's daemon"
+    );
+    assert_eq!(
+        names_local_checkouts(&ConnectTarget::Local, &live),
+        cfg!(any(target_os = "linux", target_os = "macos"))
+    );
+    live.local_daemon_peer = false;
+    assert!(!names_local_checkouts(&ConnectTarget::Local, &live));
+}

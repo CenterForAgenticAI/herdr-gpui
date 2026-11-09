@@ -1,6 +1,8 @@
 # Terminals that herdr-core (Herdr 2) runs, drawn by the app in tabs.
 
 core-terminals-open-workspace = Open a workspace first
+# The app keeps Herdr 2 workspaces for this computer only.
+core-terminals-workspaces-local-only = Herdr 2 workspaces are only on this computer
 # A new tab on an SSH host, cloud machine, or WSL distribution without
 # herdr-core runs in the host's Herdr instead.
 core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr

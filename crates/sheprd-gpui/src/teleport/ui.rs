@@ -6,6 +6,9 @@
 //! its outcome as a flash, because stopping halfway would strand work.
 
 use super::text;
+use unclaimed::Unclaimed;
+
+mod unclaimed;
 use crate::teleport::{
     error::{Error, Step},
     job::{
@@ -16,12 +19,14 @@ use crate::teleport::{
 };
 use crate::{
     NavigationTarget, SheprdWindow,
+    browser::{Location, Scope, Store},
     i18n::{errors::Localize, fl},
     menu::Page,
     progress::{self, Progress},
     window::Flash,
 };
 use gpui::{prelude::*, *};
+use sheprd_backend::Generation;
 use std::{
     sync::{
         Arc,
@@ -90,6 +95,11 @@ pub(crate) struct Teleport {
     selected: Option<usize>,
     cancelled: Arc<AtomicBool>,
     events: mpsc::Receiver<Event>,
+    /// The app's Herdr 2 tabs moving with the workspace, and the panes
+    /// that move, closed here once the move has stopped their terminals.
+    closing: Vec<(crate::browser::TabId, sheprd_session::panes::Panes)>,
+    /// The move got past stopping the source's programs.
+    retired: bool,
 }
 
 impl Drop for Teleport {
@@ -141,7 +151,34 @@ impl Teleport {
             selected: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             events,
+            closing: Vec::new(),
+            retired: false,
         }
+    }
+
+    /// Closes `tabs` once a move has stopped their terminals.
+    pub(crate) fn closing(
+        mut self,
+        tabs: Vec<(crate::browser::TabId, sheprd_session::panes::Panes)>,
+    ) -> Self {
+        self.closing = tabs;
+        self
+    }
+
+    /// The Herdr 2 tabs to close now that the move is over: those it
+    /// stopped every terminal of, else none. `now` gives a tab's panes
+    /// today. The window drops ended panes by itself, so a tab with fewer
+    /// panes still closes; one split during the move holds a terminal that
+    /// did not move and stays open with it.
+    fn closed_tabs(
+        &mut self,
+        finished: bool,
+        now: impl Fn(crate::browser::TabId) -> Option<sheprd_session::panes::Panes>,
+    ) -> Vec<crate::browser::TabId> {
+        if !finished && !self.retired {
+            return Vec::new();
+        }
+        unclaimed::moved_tabs(std::mem::take(&mut self.closing), now)
     }
 
     #[cfg(test)]
@@ -217,13 +254,17 @@ impl Teleport {
         self.stage = Stage::Reviewing(place);
     }
 
-    fn teleport(&mut self) {
+    /// Starts the move. Should its window close first, `unclaimed` takes
+    /// what the app still has to do once it finishes, with the `scope` the
+    /// destination's tabs belong in.
+    fn teleport(&mut self, unclaimed: Unclaimed, scope: Scope) {
         let Stage::Ready(candidate, review) = &self.stage else {
             return;
         };
         let (candidate, review) = (candidate.clone(), review.clone());
         let source = self.source.clone();
         let target = candidate.clone();
+        let leftover = (scope, self.closing.clone());
         self.restart(move |sender, cancelled| {
             let result = job::run(
                 &source,
@@ -234,7 +275,7 @@ impl Teleport {
                 },
                 cancelled,
             );
-            let _ = sender.send(Event::Moved(result));
+            unclaimed::deliver(sender, result, leftover, &unclaimed);
         });
         self.stage = Stage::Moving(candidate, None);
     }
@@ -252,6 +293,9 @@ impl Teleport {
                     }
                 }
                 Event::Step(step) => {
+                    // Steps after `Retire` start once the source's programs
+                    // stopped.
+                    self.retired |= step.progress() > Step::Retire.progress();
                     if let Stage::Moving(_, current) = &mut self.stage {
                         *current = Some(step);
                     }
@@ -281,6 +325,7 @@ impl Teleport {
 
 impl SheprdWindow {
     pub(crate) fn poll_teleport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.claim_teleports(window, cx);
         if self.teleport_marks.poll() {
             cx.notify();
         }
@@ -303,6 +348,15 @@ impl SheprdWindow {
         };
         let destination = teleport.destination_label().unwrap_or_default().to_owned();
         let source = teleport.source.clone();
+        let store = cx.try_global::<Store>();
+        let panes = |tab| match store?.get(tab)?.location.as_ref()? {
+            Location::CoreTerminal { panes, .. } => Some(panes.clone()),
+            _ => None,
+        };
+        let closed = teleport.closed_tabs(result.is_ok(), panes);
+        for tab in closed {
+            self.close_browser_tab(tab, window, cx);
+        }
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) if !open => {
@@ -347,6 +401,8 @@ impl SheprdWindow {
             )),
         };
         self.show_flash(flash, cx);
+        let scope = self.endpoint_scope(&outcome.endpoint_id);
+        self.open_teleported_core_tabs(&outcome, &scope, cx);
         self.teleport_follow = Some(Follow::new(outcome.endpoint_id, outcome.workspace_id));
         self.follow_teleport(cx);
     }
@@ -438,12 +494,38 @@ impl SheprdWindow {
     }
 
     fn submit_teleport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let room = cx.try_global::<Store>().map_or(usize::MAX, Store::room);
+        let unclaimed = cx.default_global::<Unclaimed>().clone();
+        let destination = match self.teleport.as_ref().map(|teleport| &teleport.stage) {
+            Some(Stage::Ready(candidate, _)) => {
+                Some(self.endpoint_scope(&candidate.place.endpoint_id))
+            }
+            _ => None,
+        };
         let Some(teleport) = &mut self.teleport else {
             return;
         };
-        match teleport.stage {
+        match &teleport.stage {
             Stage::Choosing => teleport.review(),
-            Stage::Ready(..) => teleport.teleport(),
+            Stage::Ready(_, review) => {
+                let Some(destination) = destination else {
+                    return;
+                };
+                // The tabs rebuilt in Herdr 2 must all open once the move
+                // ends, when the source's own Herdr 2 tabs have closed: a
+                // program without a tab would run unseen.
+                let opening = review
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.into == Generation::Herdr2)
+                    .count();
+                if opening > room.saturating_add(teleport.closing.len()) {
+                    let flash = fl!("teleport-too-many-tabs", count = opening);
+                    self.show_flash(Flash::warning(flash), cx);
+                    return;
+                }
+                teleport.teleport(unclaimed, destination);
+            }
             Stage::Failed(_) => {
                 self.teleport = None;
                 self.dismiss_menu(window, cx);
@@ -578,7 +660,7 @@ impl SheprdWindow {
                 }
                 for (index, tab) in review.tabs.iter().enumerate() {
                     let number = index + 1;
-                    let title = match &tab.label {
+                    let mut title = match &tab.label {
                         None => fl!("teleport-tab", number = number),
                         Some(label) => {
                             fl!(
@@ -588,6 +670,9 @@ impl SheprdWindow {
                             )
                         }
                     };
+                    if tab.into == Generation::Herdr2 {
+                        title = fl!("teleport-tab-herdr-2", tab = title);
+                    }
                     body = body.child(
                         div()
                             .pt(px(4.))
