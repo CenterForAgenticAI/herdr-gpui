@@ -19,6 +19,25 @@ use sheprd_backend::{Backend as _, Role, Size, TerminalId};
 /// The size a terminal starts at, before its pane is laid out.
 const FIRST_SIZE: (u16, u16) = (80, 24);
 
+/// Kills that did not reach their core, kept for the whole app rather than
+/// one window: a pane closed while disconnected leaves its window's saved
+/// layout and the shared ending queue, so if its window closes before the
+/// core answers, only another window holding the same list can end it.
+#[derive(Clone, Default)]
+struct Unended(std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>);
+
+impl Global for Unended {}
+
+impl super::CoreTerminals {
+    /// A window's herdr-core state, sharing the app's unended kills.
+    pub(crate) fn shared(cx: &mut App) -> Self {
+        Self {
+            unended: std::sync::Arc::clone(&cx.default_global::<Unended>().0),
+            ..Self::default()
+        }
+    }
+}
+
 impl SheprdWindow {
     /// Gives every pane of the focused workspace's herdr-core tabs a view,
     /// once the hub is connected, and drops the views of closed tabs and

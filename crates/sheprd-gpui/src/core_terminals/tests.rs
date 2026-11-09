@@ -40,6 +40,7 @@ mod slide;
 mod split_shown;
 mod stale;
 mod tab_status;
+mod unended;
 mod wanted;
 mod worker;
 mod zoom_drawn;

@@ -400,7 +400,8 @@ pub(crate) struct CoreTerminals {
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
     /// Terminals a kill did not reach, as when the connection dropped while
-    /// it was sent, put back to end once their core answers again.
+    /// it was sent, put back to end once their core answers again. Every
+    /// window holds the app's one list ([`tabs::Unended`]).
     unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// Terminals to start, one after another, once the hub of each one's
