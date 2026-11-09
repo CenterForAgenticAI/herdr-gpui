@@ -34,6 +34,7 @@ impl Origin {
             // A fresh worktree never reclaims a checkout work once left.
             branch: None,
             tab_labels: HashMap::new(),
+            core_tabs: Vec::new(),
         }
     }
 }

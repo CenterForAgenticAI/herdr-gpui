@@ -2,7 +2,7 @@
 //! decide what each pane becomes.
 use super::{Candidate, Destination, Source};
 use crate::teleport::{
-    credentials,
+    core, credentials,
     error::{Error, Result, Step},
     git,
     host::Host,
@@ -12,6 +12,7 @@ use crate::teleport::{
     remote::MatchReason,
     snapshot::{HostSnapshot, ProcessInfo, ProcessInfoResult, SnapshotResult},
 };
+use sheprd_backend::Generation;
 use sheprd_client::shell_quote;
 use std::{collections::HashMap, sync::atomic::AtomicBool};
 
@@ -43,6 +44,9 @@ pub struct PanePlan {
 
 #[derive(Debug, Clone)]
 pub struct TabPlan {
+    /// Which Herdr runs the source tab's terminals, and so how its agents
+    /// are asked for notes and its programs stopped.
+    pub generation: Generation,
     pub label: Option<String>,
     pub tree: Node,
     pub panes: Vec<PanePlan>,
@@ -181,7 +185,7 @@ pub fn review(source: &Source, destination: &Candidate, cancelled: &AtomicBool) 
         .map(|pane| pane.pane_id.clone())
         .collect();
     let processes = process_infos(host, &pane_ids, cancelled)?;
-    let works: Vec<(String, Work, Option<String>)> = pane_ids
+    let mut works: Vec<(String, Work, Option<String>)> = pane_ids
         .iter()
         .filter_map(|id| {
             let pane = snapshot.pane(id)?;
@@ -194,6 +198,13 @@ pub fn review(source: &Source, destination: &Candidate, cancelled: &AtomicBool) 
             Some((id.clone(), Work::classify(pane, &process), cwd))
         })
         .collect();
+    // The app's Herdr 2 tabs in the workspace, read from the host's core.
+    let core_terminals = core::terminals(host, &core::ids(&source.core_tabs), cancelled)?;
+    works.extend(core::ids(&source.core_tabs).into_iter().map(|id| {
+        let terminal = core_terminals.get(&id).cloned().unwrap_or_default();
+        let (work, cwd) = (terminal.work(), terminal.cwd());
+        (id, work, cwd)
+    }));
     let mut programs: Vec<&str> = AgentKind::FALLBACKS.iter().map(|k| k.binary()).collect();
     programs.extend(works.iter().filter_map(|(_, work, _)| work.program()));
     programs.sort_unstable();
@@ -219,15 +230,25 @@ pub fn review(source: &Source, destination: &Candidate, cancelled: &AtomicBool) 
     };
 
     let mut notes = 0;
-    let tabs = tabs
+    let mut planned: Vec<TabPlan> = tabs
         .iter()
         .map(|tab| plan_tab(&snapshot, tab, source, &works, &installed, &mut notes))
         .collect();
+    planned.extend(source.core_tabs.iter().map(|panes| {
+        plan_tree(
+            Generation::Herdr2,
+            None,
+            core::tree(panes),
+            &works,
+            &installed,
+            &mut notes,
+        )
+    }));
     Ok(Review {
         checkout: worktree.checkout_path,
         branch,
         state,
-        tabs,
+        tabs: planned,
         reason: match &destination.destination {
             Destination::Open { reason, .. } => Some(*reason),
             Destination::Arrive(_) | Destination::Reclaim { .. } => None,
@@ -255,6 +276,25 @@ fn plan_tab(
         .and_then(tree)
         .or_else(|| Node::row(&members))
         .unwrap_or_else(|| Node::Pane(String::new()));
+    plan_tree(
+        Generation::Herdr1,
+        source.tab_labels.get(&tab.tab_id).cloned(),
+        node,
+        works,
+        installed,
+        notes,
+    )
+}
+
+/// What each pane of one source tab, laid out as `node`, becomes.
+fn plan_tree(
+    generation: Generation,
+    label: Option<String>,
+    node: Node,
+    works: &[(String, Work, Option<String>)],
+    installed: &[String],
+    notes: &mut usize,
+) -> TabPlan {
     let panes = node
         .plan()
         .slots
@@ -275,7 +315,8 @@ fn plan_tab(
         })
         .collect();
     TabPlan {
-        label: source.tab_labels.get(&tab.tab_id).cloned(),
+        generation,
+        label,
         tree: node,
         panes,
     }

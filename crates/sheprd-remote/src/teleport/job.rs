@@ -2,7 +2,7 @@
 //! find destinations, review what will move, and move it.
 
 use super::{
-    credentials,
+    core, credentials,
     error::{Error, Result, Step},
     git,
     host::Host,
@@ -15,7 +15,9 @@ use super::{
     },
     warning::Warning,
 };
+use sheprd_backend::Generation;
 use sheprd_client::{protocol::ClientShellSnapshot, shell_quote};
+use sheprd_session::panes::Panes;
 use std::{collections::HashMap, io::Seek, sync::atomic::AtomicBool, time::Duration};
 
 mod discover;
@@ -51,6 +53,10 @@ pub struct Source {
     pub branch: Option<String>,
     /// Tab labels the user chose, by source tab id.
     pub tab_labels: HashMap<String, String>,
+    /// The workspace's Herdr 2 tabs, which the app lays out itself: their
+    /// terminals run in the source host's herdr-core, and each moves as one
+    /// more tab after the Herdr 1 ones.
+    pub core_tabs: Vec<Panes>,
 }
 
 /// A repository open on some host, found through one of its workspaces.
@@ -166,30 +172,38 @@ pub fn run(
 
     // Notes are written into the source checkout first, so they travel with
     // the uncommitted changes.
-    let handoffs: Vec<&PanePlan> = review
-        .panes()
-        .filter(|pane| matches!(pane.action, Action::Handoff { .. }))
+    let handoffs: Vec<(Generation, &PanePlan)> = review
+        .tabs
+        .iter()
+        .flat_map(|tab| tab.panes.iter().map(|pane| (tab.generation, pane)))
+        .filter(|(_, pane)| matches!(pane.action, Action::Handoff { .. }))
         .collect();
     if !handoffs.is_empty() {
         report(Step::Handoff);
         let timeout = HANDOFF_TIMEOUT.as_millis().to_string();
-        for pane in handoffs {
+        for (generation, pane) in handoffs {
             let Action::Handoff { note, .. } = &pane.action else {
                 continue;
             };
-            let asked = from.herdr_ok(
-                Step::Handoff,
-                &[
-                    "agent",
-                    "prompt",
-                    &pane.pane_id,
-                    &handoff_prompt(&format!("{}/{note}", review.checkout)),
-                    "--wait",
-                    "--timeout",
-                    &timeout,
-                ],
-                cancelled,
-            );
+            let prompt = handoff_prompt(&format!("{}/{note}", review.checkout));
+            let asked = match generation {
+                Generation::Herdr1 => from.herdr_ok(
+                    Step::Handoff,
+                    &[
+                        "agent",
+                        "prompt",
+                        &pane.pane_id,
+                        &prompt,
+                        "--wait",
+                        "--timeout",
+                        &timeout,
+                    ],
+                    cancelled,
+                ),
+                Generation::Herdr2 => {
+                    core::prompt(from, &pane.pane_id, &prompt, HANDOFF_TIMEOUT, cancelled)
+                }
+            };
             match asked {
                 Err(Error::Cancelled) => return Err(Error::Cancelled),
                 Err(error) => warnings.push(Warning::NoHandoffNote {
@@ -252,6 +266,7 @@ pub fn run(
     // workspace itself stays, for this client to mark as teleported.
     report(Step::Retire);
     retire(from, &source.workspace_id, &review.checkout, cancelled)?;
+    core::stop(from, &core::ids(&source.core_tabs), cancelled)?;
 
     report(Step::Sessions);
     let mut launches = Vec::new();
