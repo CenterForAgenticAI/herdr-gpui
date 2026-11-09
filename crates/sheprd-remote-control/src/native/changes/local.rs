@@ -127,7 +127,7 @@ fn bounded(root: &Path, base: Option<String>, files: Vec<ChangedFile>) -> FileLi
 
 /// Every file changed since `rev`, in the working tree as it is now.
 fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
-    let statuses = git(
+    let statuses = git_bytes(
         cwd,
         &[
             "diff",
@@ -154,8 +154,22 @@ fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
         ],
     )
     .map_err(|_| Failure::Unreadable)?;
+    let untracked = git_bytes(cwd, &["ls-files", "--others", "--exclude-standard", "-z"])
+        .map_err(|_| Failure::Unreadable)?;
+    // Names that are not UTF-8, as they read with their bytes replaced:
+    // such a name would name no file back to Git.
+    let undecodable: std::collections::HashSet<String> = [&statuses, &untracked]
+        .into_iter()
+        .flat_map(|listed| listed.split(|byte| *byte == 0))
+        .filter(|name| std::str::from_utf8(name).is_err())
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect();
+    let (statuses, untracked) = (
+        String::from_utf8_lossy(&statuses),
+        String::from_utf8_lossy(&untracked),
+    );
     let mut files = parse_name_status(&statuses);
-    let named = |file: &ChangedFile| !file.path.contains(char::REPLACEMENT_CHARACTER);
+    let named = |file: &ChangedFile| !undecodable.contains(&file.path);
     for (path, added, removed) in parse_numstat(&counts) {
         if let Some(file) = files.iter_mut().find(|file| file.path == path) {
             file.added = added;
@@ -165,8 +179,6 @@ fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
             }
         }
     }
-    let untracked = git(cwd, &["ls-files", "--others", "--exclude-standard", "-z"])
-        .map_err(|_| Failure::Unreadable)?;
     // Listed, not read: their counts are filled in only for those sent.
     files.extend(
         untracked
@@ -178,8 +190,7 @@ fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
                 ..ChangedFile::default()
             }),
     );
-    // A name that is not UTF-8 reached here with its bytes replaced, and
-    // would name no file back to Git: listed, but not read.
+    // Listed, but not read.
     for file in files.iter_mut().filter(|file| !named(file)) {
         file.shown = Shown::Unreadable;
         (file.added, file.removed) = (None, None);
@@ -235,7 +246,7 @@ fn diff(cwd: &Path, scope: Scope, path: &str) -> Result<FileDiff, Failure> {
     args.push(path);
     let (text, cut) =
         git_bounded(cwd, &args, MAX_DIFF_BYTES as u64 * 2).map_err(|_| Failure::Unreadable)?;
-    let mut diff = FileDiff::bounded(path, parse_diff(&text));
+    let mut diff = FileDiff::bounded(path, parse_diff(&String::from_utf8_lossy(&text)));
     diff.truncated |= cut;
     Ok(diff)
 }
@@ -391,16 +402,21 @@ fn command(cwd: &Path, args: &[&str]) -> Command {
 
 /// Git's output for `args` in `cwd`, when it succeeded.
 fn git(cwd: &Path, args: &[&str]) -> std::io::Result<String> {
-    let (text, cut) = git_bounded(cwd, args, MAX_LISTING)?;
+    Ok(String::from_utf8_lossy(&git_bytes(cwd, args)?).into_owned())
+}
+
+/// Git's output for `args` in `cwd` as it wrote it, when it succeeded.
+fn git_bytes(cwd: &Path, args: &[&str]) -> std::io::Result<Vec<u8>> {
+    let (bytes, cut) = git_bounded(cwd, args, MAX_LISTING)?;
     if cut {
         return Err(std::io::Error::other("Git's answer is too long"));
     }
-    Ok(text)
+    Ok(bytes)
 }
 
 /// At most `limit` bytes of Git's output for `args`, and whether it was
 /// cut there; Git stops once nothing reads the rest.
-fn git_bounded(cwd: &Path, args: &[&str], limit: u64) -> std::io::Result<(String, bool)> {
+fn git_bounded(cwd: &Path, args: &[&str], limit: u64) -> std::io::Result<(Vec<u8>, bool)> {
     let mut child = command(cwd, args).spawn()?;
     let stdout = child.stdout.take();
     // Read beside the wait, so a Git that never ends is ended at the limit.
@@ -431,7 +447,7 @@ fn git_bounded(cwd: &Path, args: &[&str], limit: u64) -> std::io::Result<(String
     if !cut && !status.success() {
         return Err(std::io::Error::other("Git failed"));
     }
-    Ok((String::from_utf8_lossy(&bytes).into_owned(), cut))
+    Ok((bytes, cut))
 }
 
 #[cfg(test)]

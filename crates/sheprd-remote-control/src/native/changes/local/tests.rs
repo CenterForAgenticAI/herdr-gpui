@@ -347,3 +347,19 @@ fn a_name_that_is_not_utf8_is_listed_but_not_read() {
     let diff = diff_of(&repository, &bad.path.clone());
     assert_eq!(diff.shown, Shown::Unreadable);
 }
+
+#[test]
+fn a_name_with_a_replacement_character_in_it_is_still_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository = repository(dir.path());
+    std::fs::write(repository.join("odd\u{FFFD}.txt"), "x\n").unwrap();
+    let list = listed(answer(
+        &repository,
+        &Wanted::Files {
+            scope: Scope::Uncommitted,
+        },
+    ));
+    let odd = file(&list, "odd\u{FFFD}.txt");
+    assert_eq!((odd.shown, odd.added), (Shown::Text, Some(1)));
+    assert_eq!(diff_of(&repository, "odd\u{FFFD}.txt").lines[1].text, "x");
+}
