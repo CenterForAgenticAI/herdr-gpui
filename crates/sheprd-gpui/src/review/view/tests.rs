@@ -251,6 +251,7 @@ mod loading;
 mod origin;
 mod panel_editing;
 mod pending_send;
+mod recipient;
 mod remembered;
 mod resend;
 mod resize;
