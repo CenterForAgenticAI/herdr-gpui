@@ -174,6 +174,21 @@ impl Heard {
     }
 }
 
+/// The terminals in front of the user in a window: none unless it is the
+/// active one, connected; else the panes of the herdr-core tab its active
+/// group shows (`page`), or the stand-in shell when that group shows the
+/// terminal (`fallback`). A browser or code page in front hides both.
+fn in_front(
+    active: bool,
+    page: Option<HashSet<TerminalId>>,
+    fallback: Option<TerminalId>,
+) -> HashSet<TerminalId> {
+    if !active {
+        return HashSet::new();
+    }
+    page.unwrap_or_else(|| fallback.into_iter().collect())
+}
+
 impl SheprdWindow {
     /// This computer's terminals the window shows, with what the core last
     /// said of each: its local tabs' panes, and the shell shown in place of
@@ -233,25 +248,27 @@ impl SheprdWindow {
             crate::app_badge::sync_core(id, attention, cx);
         }
         // What the active window shows: the tab of its active group, a
-        // chat's included, whatever holds the keyboard, or with no tab
-        // shown, the stand-in shell.
-        let shown: HashSet<TerminalId> = if connected && window.is_window_active() {
-            match &self.core_terminals.shown {
-                Some((tab, _)) => self
-                    .core_terminals
-                    .tabs
-                    .get(tab)
-                    .filter(|shown| shown.holds_chats())
-                    .map(|shown| shown.panes.terminals().into_iter().cloned().collect())
-                    .unwrap_or_default(),
-                None => self
-                    .core_fallback_view()
-                    .map(|view| HashSet::from([view.read(cx).terminal().clone()]))
-                    .unwrap_or_default(),
-            }
-        } else {
-            HashSet::new()
-        };
+        // chat's included, whatever holds the keyboard, or the stand-in
+        // shell while that group shows the terminal rather than a page.
+        let page = self.core_terminals.shown.as_ref().map(|(tab, _)| {
+            self.core_terminals
+                .tabs
+                .get(tab)
+                .filter(|shown| shown.holds_chats())
+                .map(|shown| shown.panes.terminals().into_iter().cloned().collect())
+                .unwrap_or_default()
+        });
+        let terminal_shown = self.active_group().is_some_and(|group| {
+            matches!(self.group_shown(group, cx), crate::browser::Shown::Terminal)
+        });
+        let fallback = self
+            .core_fallback_view()
+            .map(|view| view.read(cx).terminal().clone());
+        let shown = in_front(
+            connected && window.is_window_active(),
+            page,
+            terminal_shown.then_some(fallback).flatten(),
+        );
         let open: HashSet<WindowId> = cx
             .windows()
             .iter()
