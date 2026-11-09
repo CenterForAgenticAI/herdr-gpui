@@ -1,4 +1,5 @@
 use super::*;
+mod chats;
 mod parallel;
 
 fn platform(os: &'static str, arch: &'static str) -> Platform {

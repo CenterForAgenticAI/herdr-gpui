@@ -180,4 +180,70 @@ impl SheprdWindow {
         self.sync_core_views(cx);
         self.show_browser_tab(id, window, cx);
     }
+
+    /// Shows `terminal`, a terminal of this computer's core that something
+    /// outside the window started, such as an automation's agent: the
+    /// focused workspace's tab holding it, with it as the pane in use, else
+    /// a new tab. A terminal a tab elsewhere drives opens watch-only here,
+    /// so two tabs never type into it. Refused while another host is shown,
+    /// whose workspaces cannot hold this computer's terminals.
+    pub(crate) fn open_core_terminal(
+        &mut self,
+        terminal: TerminalId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_is_remote() {
+            self.show_flash(Flash::warning(fl!("core-terminals-this-computer")), cx);
+            return;
+        }
+        let Some((scope, workspace)) = self.browser_key() else {
+            self.show_flash(Flash::warning(fl!("core-terminals-open-workspace")), cx);
+            return;
+        };
+        let (shown, driven) = cx
+            .try_global::<Store>()
+            .map(|store| holding(store, &terminal, &scope, &workspace))
+            .unwrap_or_default();
+        if let Some(tab) = shown {
+            self.sync_core_views(cx);
+            self.show_core_pane(tab, &terminal, window, cx);
+            return;
+        }
+        let location = Location::core_terminal(Panes::single(terminal), driven);
+        let Some(id) = Store::update(cx, |store| {
+            store.open(scope, &workspace, Some(location), None)
+        }) else {
+            self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
+            return;
+        };
+        self.sync_core_views(cx);
+        self.show_browser_tab(id, window, cx);
+    }
+}
+
+/// The focused workspace's tab already showing `terminal`, driving or
+/// watching, and whether any tab of this computer drives it. Every local
+/// scope's tabs attach to the same core.
+fn holding(
+    store: &Store,
+    terminal: &TerminalId,
+    scope: &crate::browser::Scope,
+    workspace: &str,
+) -> (Option<TabId>, bool) {
+    let mut shown = None;
+    let mut driven = false;
+    for tab in store.tabs().filter(|tab| tab.scope.is_local()) {
+        let Some(Location::CoreTerminal { panes, observe, .. }) = &tab.location else {
+            continue;
+        };
+        if !panes.contains(terminal) {
+            continue;
+        }
+        driven |= !observe;
+        if shown.is_none() && tab.scope == *scope && tab.workspace_id == workspace {
+            shown = Some(tab.id);
+        }
+    }
+    (shown, driven)
 }

@@ -45,7 +45,12 @@ fn the_last_stages_user_is_restored_after_the_layer() {
     assert!(composed.trim_end().ends_with("USER dev"));
     // A new stage resets the user it inherits.
     assert_eq!(uses("FROM a\nUSER dev\nFROM b\n").user, None);
-    assert!(compose("FROM b\n").trim_end().ends_with("sh"));
+    // With no user to restore, the layer ends on the core's install.
+    assert!(
+        compose("FROM b\n")
+            .trim_end()
+            .ends_with("Sheprd could not add herdr-core to the image' >&2")
+    );
 }
 
 #[test]
@@ -123,5 +128,32 @@ fn comments_inside_strings_survive() {
     assert_eq!(
         strip_jsonc(r#"{"url": "https://x//y", "s": "a,}" /* c */, }"#),
         r#"{"url": "https://x//y", "s": "a,}"  }"#
+    );
+}
+
+// The check runs the layer's `printf` with `/bin/sh`.
+#[cfg(unix)]
+#[test]
+fn the_layer_adds_the_pinned_herdr_core_beside_herdr() {
+    let layer = layer(Some("me"));
+    let run = layer
+        .lines()
+        .find(|line| line.starts_with("RUN printf"))
+        .unwrap();
+    assert!(layer.ends_with("USER me\n"));
+    // What the `RUN` line pipes to `sh` is the installer, line for line.
+    let printed = run
+        .strip_prefix("RUN ")
+        .and_then(|run| run.split(" | sh").next())
+        .unwrap();
+    #[allow(clippy::disallowed_methods)]
+    let output = std::process::Command::new("/bin/sh")
+        .args(["-c", printed])
+        .output()
+        .unwrap();
+    let script = crate::core_install::script(crate::core_install::Dir::At(INSTALL_DIR)).unwrap();
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("{script}\n")
     );
 }

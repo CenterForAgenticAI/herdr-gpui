@@ -140,12 +140,15 @@ impl SheprdWindow {
             input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);
             window.focus(&input.focus, cx);
         });
-        let snapshot = self.live.snapshot.clone();
+        // A herdr-core pane the active group shows is where the user works;
+        // the editor then splits it rather than a Herdr pane.
+        let core = self.shown_core_pane(cx).is_some();
+        let snapshot = self.live.snapshot.clone().filter(|_| !core);
         let focused = snapshot.as_deref().and_then(|snapshot| {
             let id = snapshot.focused_pane_id.as_deref()?;
             snapshot.panes.iter().find(|pane| pane.pane_id == id)
         });
-        let cwd = focused.and_then(|pane| pane.foreground_cwd.clone().or_else(|| pane.cwd.clone()));
+        let cwd = self.focused_folder(cx);
         let mut code = CodeSearch {
             search,
             mode,

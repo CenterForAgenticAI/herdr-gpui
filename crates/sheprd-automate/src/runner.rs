@@ -5,8 +5,8 @@
 
 use crate::{
     Result,
+    drive::Drive,
     fingerprint::WorktreeScripts,
-    herdr::Herdr,
     paths::Paths,
     settings::Settings,
     steps::{self, StepContext},
@@ -95,7 +95,7 @@ pub struct Ended {
 pub fn execute(
     paths: &Paths,
     settings: &Settings,
-    herdr: &Herdr,
+    drive: &Drive,
     slots: &Arc<Slots>,
     job: &Job,
 ) -> Result<Ended> {
@@ -113,7 +113,7 @@ pub fn execute(
     let context = StepContext {
         paths,
         store: &store,
-        herdr,
+        drive,
         run: job.run,
         script_path: &job.path,
         script_name: &job.source.name,
@@ -182,6 +182,7 @@ pub fn execute(
                 pane: result.pane.clone(),
                 cpu_ms: result.cpu_ms,
                 peak_memory: result.peak_memory,
+                terminals: drive.terminals(),
             };
             let _ = store.finish_step(job.run, position, &row, now());
             if !result.ok && call.check {

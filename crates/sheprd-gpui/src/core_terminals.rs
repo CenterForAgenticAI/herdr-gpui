@@ -16,11 +16,13 @@ mod commands;
 mod context;
 mod error;
 mod fallback;
+mod folders;
 mod hosts;
 mod hub;
 mod infos;
 pub(crate) mod menu;
 mod phone;
+mod requests;
 mod screen;
 mod selection;
 mod session;
@@ -94,7 +96,12 @@ struct TabPanes {
     names: std::collections::BTreeMap<TerminalId, String>,
     /// The pane in use before the current one, which Last Pane goes back to.
     previous: Option<TerminalId>,
+    /// The folder the tab's first pane was first seen in, kept when its
+    /// program moves on, as Herdr keeps where a workspace started.
+    root: Option<std::path::PathBuf>,
     unsaved: bool,
+    /// The workspace whose tab this is, known once the window has shown it.
+    workspace: Option<(Scope, String)>,
     /// How far the zoomed pane has grown over the tab; it shrinks back to
     /// its place when unzoomed.
     zoom: crate::motion::Toggle,
@@ -121,7 +128,9 @@ impl TabPanes {
             observe,
             panes,
             previous: None,
+            root: None,
             unsaved: false,
+            workspace: None,
             zoom: crate::motion::Toggle::default(),
             zoomed: None,
         }
@@ -220,7 +229,8 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
-    /// The Git checkout of each kept workspace's folder.
+    /// The Git checkout of each kept workspace's folder and of the shown
+    /// pane's.
     checkouts: checkouts::Checkouts,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
@@ -240,6 +250,9 @@ pub(crate) struct CoreTerminals {
     session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
     /// A phone's split on its way, answered once it lands or fails.
     phone_split: Option<phone::Pending>,
+    /// The tab the active group shows and its pane in use, as of the last
+    /// tick, for work that runs without the app's state at hand.
+    shown: Option<(TabId, TerminalId)>,
     /// Other hosts' cores, by the scope of their workspaces.
     remote: HashMap<Scope, hosts::Remote>,
     /// A shell starting, and what for.
@@ -312,11 +325,12 @@ impl CoreTerminals {
         observe: bool,
         infos: Vec<TerminalInfo>,
     ) {
-        self.tabs
-            .insert(tab, TabPanes::new(Host::Local, panes, observe));
+        let mut shown = TabPanes::new(Host::Local, panes, observe);
         for info in infos {
             self.infos.insert(info);
         }
+        shown.keep_root(&self.infos);
+        self.tabs.insert(tab, shown);
     }
 
     /// Whether `tab` is a herdr-core tab that holds chats: it drives its
@@ -511,6 +525,7 @@ impl SheprdWindow {
         if self.core_terminals.poll_infos(std::time::Instant::now()) {
             cx.notify();
         }
+        self.core_terminals.shown = self.shown_core_pane(cx);
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }

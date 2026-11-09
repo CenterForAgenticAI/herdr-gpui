@@ -1,7 +1,28 @@
 use super::*;
 use crate::hub::{Error as HubError, Workspace};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// A repository with one commit, named `project`, in `parent`.
+fn committed_repository(parent: &Path) -> PathBuf {
+    let repository = parent.join("project");
+    std::fs::create_dir(&repository).unwrap();
+    for args in [
+        &["init", "--quiet"][..],
+        &["commit", "--quiet", "--allow-empty", "-m", "start"],
+    ] {
+        let status = sheprd_client::new_command("git")
+            .current_dir(&repository)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    repository
+}
 
 fn chat_record(address: &str, endpoint: &EndpointId) -> Value {
     let mut record = record(address);
@@ -122,7 +143,7 @@ async fn a_core_failure_is_reported_and_not_retried_on_herdr_one() {
 #[tokio::test]
 async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
     let dir = tempfile::tempdir().unwrap();
-    let repository = worktree::tests::committed_repository(dir.path());
+    let repository = committed_repository(dir.path());
     let root = dir.path().join("worktrees");
     let (source, fake) = fake_with_chat(&EndpointId::random());
     source.poll().unwrap();
@@ -148,7 +169,7 @@ async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
 #[tokio::test]
 async fn a_worktree_whose_chat_fails_leaves_the_branch_free_to_retry() {
     let dir = tempfile::tempdir().unwrap();
-    let repository = worktree::tests::committed_repository(dir.path());
+    let repository = committed_repository(dir.path());
     let root = dir.path().join("worktrees");
     let (source, fake) = fake();
     source.poll().unwrap();

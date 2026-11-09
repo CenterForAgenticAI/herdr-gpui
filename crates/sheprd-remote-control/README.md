@@ -95,9 +95,14 @@ output and sends complete ANSI screens through the existing stream.
 Keys and pastes use the terminal's current modes, including bracketed paste.
 The pane opens as an observer at its current dimensions, so watching changes
 nothing on the desktop. The first key or paste takes the driver's role at the
-terminal's current size. Phone-specific sizing, scrolling, and
-renaming remain Herdr 1 actions. A phone closes a Herdr 2 pane, or a tab with
-every pane in it, chats included, as closing a Herdr 1 tab does.
+terminal's current size. A view sized to the phone holds the terminal at the
+phone's size by taking the driver's role at it; when the view closes the pane
+observes again, and the core sizes the terminal back to its previous driver,
+as Herdr 1 does when a direct attach drops. The latest phone's size wins.
+Each screen keeps 1,000 lines of history, painted by the core when the pane is
+first opened, which the web app reads back and the native app scrolls through.
+A phone closes a Herdr 2 pane, or a tab with every pane in it, chats
+included, as closing a Herdr 1 tab does.
 
 Sheprd keeps a Herdr 2 tab's layout with the tab, so a phone's split, zoom, or
 close of one of Sheprd's Herdr 2 tabs waits in the daemon with the phones'
@@ -109,8 +114,9 @@ use; a close ends the tab's terminals, then Sheprd drops the tab. With Sheprd
 closed the phone is told it is not open (a close still ends the terminals); a
 pane of the Herdr desktop app's spaces, or one no tab holds, cannot be split.
 The daemon keeps at most 16 shared core attachments and releases each after
-30 seconds without a screen read or input request. When all 16 are held, the
-one idle longest gives way to a new pane if it has been idle for 5 seconds.
+30 seconds without a screen read or input request, unless a phone holds it at
+its size. When all 16 are held, the one idle longest gives way to a new pane if
+it has been idle for 5 seconds.
 
 While a core answers, new work from a phone starts there, even from a Herdr 1
 pane or workspace: new tabs, chats, and workspaces. Herdr 1 terminals stay listed

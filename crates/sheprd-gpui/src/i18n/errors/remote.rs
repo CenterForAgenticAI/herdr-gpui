@@ -14,6 +14,7 @@ mod cloud;
 mod coder;
 #[cfg(feature = "container")]
 mod container;
+mod core_install;
 #[cfg(feature = "daytona")]
 mod daytona;
 #[cfg(feature = "opensandbox")]
@@ -56,6 +57,7 @@ impl Localize for Error {
             Self::Config(error) => error
                 .downcast_ref::<crate::Error>()
                 .map_or_else(|| error.to_string(), Localize::localize),
+            Self::CoreInstall(error) => error.localize(),
             Self::Credentials(error) => error.localize(),
             // The system's own words, as `Json` is its parser's.
             Self::Io(error) => error.to_string(),

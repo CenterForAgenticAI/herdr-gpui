@@ -39,7 +39,7 @@ pub(crate) struct Changes {
     retry_at: Option<Instant>,
     /// Answers being worked out now, at most `RUNNING`.
     pub(super) running: usize,
-    sources: Arc<Sources>,
+    pub(super) sources: Arc<Sources>,
 }
 
 impl Supervisor {

@@ -19,6 +19,7 @@ fn only_a_workspace_sheprd_keeps_here_is_sheprds_to_rename() {
     let source = Source {
         connected: AtomicBool::new(false),
         endpoint: Default::default(),
+        holds: AtomicU64::new(0),
         poller: Mutex::default(),
         scope: Some("local:/test.sock".into()),
         state: Mutex::default(),
