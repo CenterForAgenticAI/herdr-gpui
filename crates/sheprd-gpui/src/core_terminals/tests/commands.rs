@@ -42,12 +42,14 @@ pub(super) fn window_with_split<'a>(
             let (scope, workspace) = view.browser_key().unwrap();
             let location = Location::core_terminal(panes.clone(), false);
             let tab = Store::update(cx, |store| {
-                store.open(scope, &workspace, Some(location), None)
+                store.open(scope, &workspace, Some(location.clone()), None)
             })
             .unwrap();
-            view.core_terminals
-                .tabs
-                .insert(tab, TabPanes::new(Host::Local, panes, false));
+            // Saved as a restored tab is, so syncing keeps what the test
+            // changes rather than reading the tab again.
+            let mut shown = TabPanes::new(Host::Local, panes, false);
+            shown.saved = Some(location);
+            view.core_terminals.tabs.insert(tab, shown);
             for name in names {
                 let link = worker::spawn(Scripted::default(), id(name), size(80, 24), Role::Active)
                     .unwrap();
