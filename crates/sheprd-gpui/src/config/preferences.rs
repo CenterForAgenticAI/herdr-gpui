@@ -38,6 +38,8 @@ pub(crate) enum Preference {
     TabAgentTitle(bool),
     /// `tab_layout`: how tab strips draw their tabs.
     TabLayout(TabLayoutMode),
+    /// `[undo_close_tab] enabled`: closed tabs wait before Herdr closes them.
+    UndoCloseTab(bool),
     /// `edge_rail`: the bar on busy and finished rows.
     EdgeRail(bool),
     ShowDeviceIcons(bool),
@@ -194,6 +196,9 @@ impl Config {
                     (Some("tab_labels"), "agent_title", Some(value.into()))
                 }
                 Preference::TabLayout(mode) => (None, "tab_layout", Some(mode.name().into())),
+                Preference::UndoCloseTab(value) => {
+                    (Some("undo_close_tab"), "enabled", Some(value.into()))
+                }
                 Preference::FocusFollowsMouse(value) => {
                     (None, "focus_follows_mouse", Some(value.into()))
                 }

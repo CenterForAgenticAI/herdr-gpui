@@ -22,6 +22,7 @@ mod cjk_fonts;
 mod cloud;
 mod coder;
 mod container;
+pub(crate) mod corners;
 mod daemon;
 mod daytona;
 mod devices;
@@ -63,6 +64,7 @@ pub(crate) mod tab_layout;
 mod table;
 pub(crate) use sidebar_style::parse_hex;
 mod theme;
+mod undo_close;
 mod updates;
 pub(crate) mod watch;
 mod worktrees;
@@ -149,6 +151,7 @@ pub use tab_layout::TabLayoutMode;
 pub use theme::Theme;
 pub(crate) use theme::ThemeName;
 pub(crate) use theme::mix;
+pub use undo_close::UndoCloseTab;
 pub use updates::{UpdateChannel, UpdatesConfig};
 pub use zen::{Zen, ZenWidth};
 
@@ -156,14 +159,6 @@ const DEFAULT_CONFIG: &str = include_str!("../config-gpui.example.toml");
 const MANAGED_HEADER: &str = sheprd_client::settings_files::MANAGED_HEADER;
 /// Seeds the overrides file on first launch only.
 const LOCAL_CONFIG: &str = sheprd_client::settings_files::OVERRIDES_SEED;
-
-/// Shared logical-pixel radii for native-style chrome, independent of the
-/// terminal grid. Small badges/keycaps retain a tighter curve than controls.
-pub(crate) mod corners {
-    pub(crate) const PANEL: f32 = 12.;
-    pub(crate) const CONTROL: f32 = 8.;
-    pub(crate) const SMALL: f32 = 4.;
-}
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -320,6 +315,7 @@ pub struct Config {
     pub terminal_padding: Padding,
     pub theme: String,
     pub ui: FontConfig,
+    pub undo_close_tab: UndoCloseTab,
     /// Keys the file names that this build does not know, sorted. They are
     /// ignored, as Herdr ignores its own, so a config written by a newer
     /// build or with a typo still loads; `diagnostic` reports them.
@@ -496,6 +492,7 @@ impl Default for Config {
             terminal_padding: Padding::default(),
             theme: "Default".into(), // i18n: data
             ui: font(ui, 12.0),
+            undo_close_tab: UndoCloseTab::default(),
             unknown_keys: Vec::new(),
             updates: UpdatesConfig::default(),
             usage: crate::usage::UsageConfig::default(),
@@ -580,6 +577,7 @@ struct Settings {
     terminal: FontSettings,
     theme: Option<String>,
     ui: FontSettings,
+    undo_close_tab: undo_close::UndoCloseTabSettings,
     updates: UpdatesConfig,
     usage: crate::usage::UsageConfig,
     worktrees: worktrees::WorktreeSettings,
@@ -965,6 +963,7 @@ impl Config {
         config.status_icons = status_icons;
         config.edge_rail = settings.edge_rail.unwrap_or(legacy_rail);
         config.zen = settings.zen.try_into()?;
+        config.undo_close_tab = settings.undo_close_tab.try_into()?;
         config.worktrees = settings.worktrees.resolve()?;
         settings.backdrop.validate()?;
         config.backdrop = settings.backdrop;

@@ -423,6 +423,12 @@ pub(super) const CATALOG: &[Entry] = &[
     ),
     entry(
         Section::Tabs,
+        "tabs-undo-close",
+        "settings-tabs-undo-close",
+        "settings-tabs-undo-close-description",
+    ),
+    entry(
+        Section::Tabs,
         "tabs-focus-follows-mouse",
         "settings-tabs-focus-follows-mouse",
         "settings-tabs-focus-follows-mouse-description",

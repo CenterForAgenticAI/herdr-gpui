@@ -1,0 +1,118 @@
+#![allow(clippy::unwrap_used)]
+use super::*;
+use crate::{config::UndoCloseTab, window::MockPeer};
+use gpui::{TestAppContext, VisualTestContext};
+use sheprd_client::protocol::ClientShellSnapshot;
+use std::sync::Arc;
+
+const FIRST: &str = "w1:t1";
+const SECOND: &str = "w1:t2";
+
+/// A window over `peer` whose workspace has `tabs` tabs, with tab close
+/// asking nothing and undo set to `undo`.
+fn window(
+    cx: &mut TestAppContext,
+    tabs: usize,
+    undo: UndoCloseTab,
+) -> (gpui::Entity<SheprdWindow>, &mut VisualTestContext, MockPeer) {
+    let peer = MockPeer::new();
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = crate::sidebar::layout_tests::fixture_window(window, cx);
+        peer.prepare(&mut view, cx);
+        let mut snapshot: ClientShellSnapshot = (**view.live.snapshot.as_ref().unwrap()).clone();
+        for number in 2..=tabs {
+            let mut tab = snapshot.tabs[0].clone();
+            tab.tab_id = format!("w1:t{number}");
+            tab.number = number;
+            tab.focused = false;
+            let mut pane = snapshot.panes[0].clone();
+            pane.pane_id = format!("w1:p{number}");
+            pane.tab_id = tab.tab_id.clone();
+            pane.focused = false;
+            snapshot.tabs.push(tab);
+            snapshot.panes.push(pane);
+        }
+        view.live.snapshot = Some(Arc::new(snapshot));
+        view.config.confirm_close_tab = false;
+        view.config.undo_close_tab = undo;
+        view
+    });
+    (view, cx, peer)
+}
+
+fn on(window: Duration) -> UndoCloseTab {
+    UndoCloseTab {
+        enabled: true,
+        window,
+    }
+}
+
+/// Closes `tab` as an accepted close does; whether it waits.
+fn close(view: &gpui::Entity<SheprdWindow>, cx: &mut VisualTestContext, tab: &str) -> bool {
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            let snapshot = view.live.snapshot.clone().unwrap();
+            let closed = ClosedHerdrTab::capture(&snapshot, tab).unwrap();
+            view.defer_tab_close(&closed, cx)
+        })
+    })
+}
+
+fn hidden(view: &gpui::Entity<SheprdWindow>, cx: &mut VisualTestContext, tab: &str) -> bool {
+    view.read_with(cx, |view, _| {
+        let key = view.browser_key().unwrap();
+        view.browser.hidden.hides(&key, &Pick::Herdr(tab.into()))
+    })
+}
+
+#[gpui::test]
+fn a_closed_tab_hides_and_reopen_brings_the_same_tab_back(cx: &mut TestAppContext) {
+    let (view, cx, _peer) = window(cx, 2, on(Duration::from_secs(10)));
+    assert!(close(&view, cx, FIRST));
+    assert!(view.read_with(cx, |view, _| view.browser.undo.waits(FIRST)));
+    assert!(hidden(&view, cx, FIRST));
+    cx.update(|window, cx| view.update(cx, |view, cx| view.reopen_closed_tab(window, cx)));
+    assert!(!view.read_with(cx, |view, _| view.browser.undo.waits(FIRST)));
+    assert!(!hidden(&view, cx, FIRST));
+}
+
+#[gpui::test]
+fn the_last_tab_and_undo_off_leave_the_close_to_the_caller(cx: &mut TestAppContext) {
+    let (view, cx, _peer) = window(cx, 1, on(Duration::from_secs(10)));
+    assert!(
+        !close(&view, cx, FIRST),
+        "Herdr closes its workspace with it"
+    );
+    assert!(!hidden(&view, cx, FIRST));
+    let (view, cx, _peer) = window(cx, 2, UndoCloseTab::default());
+    assert!(!close(&view, cx, SECOND));
+    assert!(!hidden(&view, cx, SECOND));
+    // A workspace whose other tabs all wait has no tab left to show either.
+    let (view, cx, _peer) = window(cx, 2, on(Duration::from_secs(10)));
+    assert!(close(&view, cx, FIRST));
+    assert!(!close(&view, cx, SECOND));
+}
+
+#[gpui::test]
+fn a_hidden_tab_focused_again_is_listed_and_kept(cx: &mut TestAppContext) {
+    let (view, cx, _peer) = window(cx, 2, on(Duration::ZERO));
+    assert!(close(&view, cx, SECOND));
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            // A poll sees the window moved off it, then the user goes back.
+            view.browser.undo.pending[0].due = Instant::now() + Duration::from_secs(60);
+            view.poll_undo_close(cx);
+            view.browser.undo.pending[0].left = true;
+            let pick = Pick::Herdr(SECOND.into());
+            let group = view
+                .ensure_layout()
+                .map(|layout| layout.owner(&pick))
+                .unwrap();
+            view.ensure_layout().unwrap().show(group, pick);
+            view.browser.undo.pending[0].due = Instant::now();
+            view.poll_undo_close(cx);
+        })
+    });
+    assert!(!hidden(&view, cx, SECOND));
+    assert!(!view.read_with(cx, |view, _| view.browser.undo.waits(SECOND)));
+}
