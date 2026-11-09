@@ -71,7 +71,7 @@ fn sort_label(sort: AgentSort) -> String {
 }
 
 /// Attention first, then the most recent change, as upstream orders it.
-pub(super) fn status_priority(status: AgentStatus) -> u8 {
+pub(crate) fn status_priority(status: AgentStatus) -> u8 {
     match status {
         AgentStatus::Blocked => 4,
         AgentStatus::Done => 3,

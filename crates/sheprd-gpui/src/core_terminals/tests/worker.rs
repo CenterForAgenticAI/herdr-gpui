@@ -25,6 +25,11 @@ pub(super) struct Scripted {
 }
 
 impl Scripted {
+    /// Hands `batch` out after the batches already queued.
+    pub(super) fn push(&self, batch: Vec<SurfaceUpdate>) {
+        self.updates.lock().unwrap().insert(0, batch);
+    }
+
     /// A backend whose terminals never attach.
     pub(super) fn failing_attach() -> Self {
         Self {
@@ -94,6 +99,15 @@ impl Terminal for ScriptedTerminal {
 
     fn resize(&mut self, size: Size) -> Result<(), Failure> {
         self.0.received.lock().unwrap().push(Command::Resize(size));
+        Ok(())
+    }
+
+    fn cell_pixels(&mut self, width: u16, height: u16) -> Result<(), Failure> {
+        self.0
+            .received
+            .lock()
+            .unwrap()
+            .push(Command::CellPixels(width, height));
         Ok(())
     }
 

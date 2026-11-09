@@ -18,6 +18,8 @@ pub(super) enum Action {
     /// Opens Settings > Cloud devices on the device's provider.
     #[cfg(feature = "cloud")]
     ProviderSettings,
+    /// Installs the pinned herdr-core on the device unless it has one.
+    InstallCore,
     /// Runs the configured setup script on the cloud device again.
     #[cfg(feature = "cloud")]
     RunSetup,
@@ -35,6 +37,7 @@ pub(super) const SSH_ACTIONS: &[(Action, &str)] = &[
     #[cfg(unix)]
     (Action::ForwardPort, "host-menu-forward-port"),
     (Action::Theme, "host-menu-theme"),
+    (Action::InstallCore, "host-menu-install-core"),
     (Action::Remove, "host-menu-remove"),
 ];
 
@@ -48,6 +51,7 @@ pub(super) const CLOUD_ACTIONS: &[(Action, &str)] = &[
     (Action::Mute, "host-menu-mute"),
     (Action::ProviderSettings, "host-menu-cloud-settings"),
     (Action::RunSetup, "host-menu-run-setup"),
+    (Action::InstallCore, "host-menu-install-core"),
     (Action::Remove, "host-menu-remove"),
 ];
 

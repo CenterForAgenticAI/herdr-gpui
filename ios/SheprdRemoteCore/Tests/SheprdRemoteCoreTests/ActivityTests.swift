@@ -115,4 +115,23 @@ final class ActivityTests: XCTestCase {
         // The name alone never names a computer.
         XCTAssertNil(ChatLink(url: try XCTUnwrap(URL(string: "herdr-remote://chat?computer=y&pane=p"))))
     }
+
+    func testATerminalLinkOpensTheTerminal() throws {
+        let id = String(repeating: "0F", count: 32)
+        let link = ChatLink(computer: "Mac", computerId: id, pane: "t1-p1", terminal: true)
+        let read = try XCTUnwrap(ChatLink(url: link.url))
+        XCTAssertTrue(read.terminal)
+        XCTAssertEqual(read, link)
+        XCTAssertEqual(link.page(origin: "https://mac:7443")?.absoluteString, "https://mac:7443/term/t1-p1")
+        XCTAssertFalse(try XCTUnwrap(ChatLink(url: ChatLink(computer: "Mac", computerId: id, pane: "p").url)).terminal)
+    }
+
+    func testATerminalActivitySaysSoAndAChatNeedNot() throws {
+        let id = String(repeating: "0F", count: 32)
+        let chat = #"{"computer":"Mac","computerId":"\#(id)","workspace":"w","chatTitle":"c","agent":"Claude","pane":"p"}"#
+        let facts = try JSONDecoder().decode(ChatActivityFacts.self, from: Data(chat.utf8))
+        XCTAssertFalse(facts.link.terminal)
+        let terminal = chat.replacingOccurrences(of: #""pane":"p""#, with: #""pane":"p","terminal":true"#)
+        XCTAssertTrue(try JSONDecoder().decode(ChatActivityFacts.self, from: Data(terminal.utf8)).link.terminal)
+    }
 }

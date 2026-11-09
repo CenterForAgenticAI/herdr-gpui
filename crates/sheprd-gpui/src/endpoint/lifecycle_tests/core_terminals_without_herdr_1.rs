@@ -16,10 +16,7 @@ fn without_herdr_1(view: &mut SheprdWindow) {
 fn open_core_tab(view: &SheprdWindow, cx: &mut gpui::App) -> TabId {
     let (scope, workspace) = view.browser_key().unwrap();
     let terminal = sheprd_backend::TerminalId::new("t1").unwrap();
-    let location = Location::CoreTerminal {
-        observe: false,
-        panes: Panes::single(terminal),
-    };
+    let location = Location::core_terminal(Panes::single(terminal), false);
     Store::update(cx, |store| {
         store.open(scope, &workspace, Some(location), None)
     })

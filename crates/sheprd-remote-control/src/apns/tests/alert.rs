@@ -148,6 +148,37 @@ fn a_finished_turn_is_active_and_low_priority_without_buttons() {
 }
 
 #[test]
+fn a_terminal_agent_asks_as_urgently_as_a_chat_without_buttons() {
+    for (kind, wire, priority, level) in [
+        (
+            Kind::TerminalAsking,
+            "terminal_asking",
+            Priority::High,
+            "time-sensitive",
+        ),
+        (Kind::TerminalDone, "terminal_done", Priority::Low, "active"),
+    ] {
+        let notification = Notification {
+            kind,
+            permission: None,
+            ..question()
+        };
+        let push = push(
+            Sealed::new(&notification, COMPUTER.to_owned(), 1),
+            &notification.tag,
+            fixed_seal,
+        )
+        .unwrap();
+        assert_eq!(push.priority, priority);
+        let payload = json(&push.body);
+        assert_eq!(payload["aps"]["interruption-level"], level);
+        let opened = json(&open(payload["sealed"].as_str().unwrap()));
+        assert_eq!(opened["kind"], wire);
+        assert!(opened.get("permission").is_none());
+    }
+}
+
+#[test]
 fn a_clear_is_a_silent_background_push() {
     let notification = Notification {
         body: String::new(),

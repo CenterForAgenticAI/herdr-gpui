@@ -36,6 +36,7 @@ final class NotificationService: UNNotificationServiceExtension {
         info[AlertKeys.computer] = opened.computer.hex
         info[AlertKeys.pane] = alert.pane
         if let permission = alert.permission { info[AlertKeys.permission] = NSNumber(value: permission.id.value) }
+        if alert.kind.isTerminal { info[AlertKeys.terminal] = true }
         content.userInfo = info
         let presentation = alert.presentation
         guard let category = presentation.category else {

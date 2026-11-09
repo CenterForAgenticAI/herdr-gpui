@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 
@@ -43,6 +44,68 @@ class HostManifest(unittest.TestCase):
                 (root / f"sheprd-remote-control-20261017.1-{target}").touch()
             with self.assertRaises(ValueError):
                 updater.create(root, "20261017.1", hosts=True)
+
+
+class HostChats(unittest.TestCase):
+    def write_builds(self, root):
+        for target in updater.HOST_TARGETS:
+            name = updater.host_chat_name("20261017.1", target)
+            (root / name).write_bytes(name.encode())
+
+    def test_both_builds_are_listed_in_their_own_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(ValueError):
+                updater.create(root, "20261017.1", host_chats=True)
+            self.write_builds(root)
+            listed = json.loads(updater.create(root, "20261017.1", host_chats=True))
+            self.assertEqual(listed["schema"], 5)
+            self.assertEqual([asset["target"] for asset in listed["assets"]], list(updater.HOST_TARGETS))
+            self.assertFalse((root / "host-manifest.json").exists())
+            with self.assertRaises(ValueError):
+                updater.create(root, "20261017.1", hosts=True, host_chats=True)
+
+    def test_the_archive_leads_with_the_signed_manifest_and_holds_each_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_builds(root)
+            manifest = updater.create(root, "20261017.1", host_chats=True)
+            (root / "host-chat-manifest.sig").write_bytes(bytes(64))
+            output = updater.pack_host_chats(root, "20261017.1")
+            self.assertEqual(output.name, "sheprd-acp-20261017.1-linux-musl.tar.gz")
+            with tarfile.open(output) as archive:
+                names = archive.getnames()
+                self.assertEqual(names[:2], ["host-chat-manifest.json", "host-chat-manifest.sig"])
+                self.assertEqual(sorted(names[2:]), sorted(f"{target}/sheprd-acp" for target in updater.HOST_TARGETS))
+                self.assertEqual(archive.extractfile(names[0]).read(), manifest)
+                self.assertEqual(archive.getmember(names[2]).mode, 0o755)
+            # Only the archive is left to publish.
+            self.assertEqual([path.name for path in root.iterdir()], [output.name])
+
+    def test_a_build_changed_to_the_same_length_is_refused_and_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_builds(root)
+            updater.create(root, "20261017.1", host_chats=True)
+            (root / "host-chat-manifest.sig").write_bytes(bytes(64))
+            build = root / updater.host_chat_name("20261017.1", updater.HOST_TARGETS[0])
+            original = build.read_bytes()
+            build.write_bytes(bytes(len(original)))
+            with self.assertRaises(ValueError):
+                updater.pack_host_chats(root, "20261017.1")
+            self.assertTrue(build.exists(), "nothing is deleted")
+            self.assertFalse((root / "sheprd-acp-20261017.1-linux-musl.tar.gz").exists())
+
+    def test_a_build_that_differs_from_its_manifest_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_builds(root)
+            updater.create(root, "20261017.1", host_chats=True)
+            (root / "host-chat-manifest.sig").write_bytes(bytes(64))
+            (root / updater.host_chat_name("20261017.1", updater.HOST_TARGETS[0])).write_bytes(b"other bytes")
+            with self.assertRaises(ValueError):
+                updater.pack_host_chats(root, "20261017.1")
+            self.assertFalse((root / "sheprd-acp-20261017.1-linux-musl.tar.gz").exists())
 
 
 if __name__ == "__main__":

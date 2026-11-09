@@ -39,6 +39,59 @@ impl super::TabPanes {
     }
 }
 
+impl CoreTerminals {
+    /// The scope and workspace of `tab`, once the window has shown it.
+    pub(crate) fn tab_workspace(&self, tab: crate::browser::TabId) -> Option<&(Scope, String)> {
+        self.tabs.get(&tab)?.workspace.as_ref()
+    }
+
+    /// Each terminal of this computer's core the window shows and the
+    /// workspace it is in, by address, for what names a terminal but not
+    /// its workspace: the terminals of its tabs, and the shell shown in
+    /// place of Herdr 1, in the workspace that stands in for Herdr's. A
+    /// saved host's terminals run elsewhere, and their addresses mean
+    /// nothing here.
+    ///
+    /// Each workspace is named with the daemon whose tabs hold it, and the
+    /// shell's with `fallback`, the daemon of the host the window shows.
+    pub(crate) fn terminal_workspaces(
+        &self,
+        fallback: Option<Scope>,
+    ) -> Vec<(String, crate::listening_ports::Place)> {
+        let fallback = self
+            .fallback_terminal()
+            .zip(fallback)
+            .map(|(terminal, scope)| {
+                (
+                    terminal.as_str().to_owned(),
+                    (scope, super::WORKSPACE.to_owned()),
+                )
+            });
+        // A terminal opened to watch in another workspace stays in the one
+        // whose tab drives it: driving tabs come first, oldest first, and the
+        // port lookups keep a terminal's first workspace.
+        let mut tabs: Vec<_> = self
+            .tabs
+            .iter()
+            .filter(|(_, shown)| shown.host == super::Host::Local)
+            .filter_map(|(id, shown)| Some((shown.observe, *id, shown, shown.workspace.as_ref()?)))
+            .collect();
+        tabs.sort_unstable_by_key(|(observe, id, ..)| (*observe, *id));
+        let mut places = Vec::new();
+        let mut fallback = fallback;
+        for (observe, _, shown, place) in tabs {
+            if observe && let Some(shell) = fallback.take() {
+                places.push(shell);
+            }
+            for terminal in shown.panes.terminals() {
+                places.push((terminal.as_str().to_owned(), place.clone()));
+            }
+        }
+        places.extend(fallback);
+        places
+    }
+}
+
 impl SheprdWindow {
     /// The folder of the pane the user works in: the herdr-core pane the
     /// active group shows, else Herdr's focused pane, where its program is

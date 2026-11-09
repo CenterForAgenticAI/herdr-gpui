@@ -43,6 +43,12 @@ pub(crate) struct Changes {
 }
 
 impl Supervisor {
+    /// Whether remote control is on, so phones may start work here.
+    pub(crate) fn enabled(cx: &App) -> bool {
+        cx.try_global::<Self>()
+            .is_some_and(|supervisor| supervisor.config.enabled)
+    }
+
     /// The workspaces phones may ask about, as a window last saw them.
     pub(super) fn set_change_sources(&mut self, sources: Sources) {
         self.changes.sources = Arc::new(sources);
