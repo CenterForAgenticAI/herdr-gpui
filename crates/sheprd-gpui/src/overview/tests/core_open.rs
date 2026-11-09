@@ -31,10 +31,7 @@ fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestCont
 fn an_agent_in_another_workspace_brings_it_to_the_front(cx: &mut TestAppContext) {
     let (view, cx) = window(cx);
     let terminal = TerminalId::new("t1").unwrap();
-    let location = Location::CoreTerminal {
-        panes: Panes::single(terminal.clone()),
-        observe: false,
-    };
+    let location = Location::core_terminal(Panes::single(terminal.clone()), false);
     let workspace = cx
         .update(|window, cx| {
             view.update(cx, |view, cx| {
