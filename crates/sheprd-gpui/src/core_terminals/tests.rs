@@ -5,6 +5,7 @@ mod commands;
 mod focus;
 mod keys;
 mod paste;
+mod refresh;
 mod restore;
 mod saved_tabs;
 mod screen;
