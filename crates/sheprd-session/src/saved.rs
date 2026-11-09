@@ -148,11 +148,27 @@ struct SavedTab {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CoreLocation {
     CoreTerminal {
+        /// Names the user gave panes, by terminal, shown over their titles.
+        #[serde(default, deserialize_with = "pane_names")]
+        names: BTreeMap<String, String>,
         #[serde(default)]
         observe: bool,
         #[serde(alias = "terminal")]
         panes: Panes,
     },
+}
+
+/// At most one name per pane a tab can hold, each bounded; a tab with more
+/// keeps none rather than fail to read.
+fn pane_names<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, String>, D::Error> {
+    let names = BTreeMap::<String, String>::deserialize(deserializer)?;
+    let bounded = names.len() <= MAX_SAVED_TABS
+        && names.iter().all(|(terminal, name)| {
+            terminal.len() <= MAX_ID_BYTES && name.len() <= MAX_ID_BYTES * 4
+        });
+    Ok(if bounded { names } else { BTreeMap::new() })
 }
 
 fn core_location<'de, D: Deserializer<'de>>(
@@ -191,6 +207,17 @@ impl SavedTabs {
             .filter(move |workspace| workspace.scope == scope && workspace.valid())
     }
 
+    /// Names the user gave the panes of `scope`'s tab `id`, by terminal
+    /// address, shown over their programs' titles.
+    pub fn pane_names(&self, scope: &str, id: u64) -> Option<&BTreeMap<String, String>> {
+        self.tabs
+            .iter()
+            .find(|tab| tab.scope == scope && tab.id == id)
+            .and_then(|tab| match tab.location.as_ref()? {
+                CoreLocation::CoreTerminal { names, .. } => Some(names),
+            })
+    }
+
     /// `scope`'s tabs in a workspace, in saved order. Mirrors are left out:
     /// the terminal they watch is listed where it types.
     pub fn core_tabs<'a>(&'a self, scope: &'a str) -> impl Iterator<Item = CoreTab<'a>> {
@@ -198,7 +225,7 @@ impl SavedTabs {
             .iter()
             .filter(move |tab| tab.scope == scope && !tab.workspace_id.is_empty())
             .filter_map(|tab| {
-                let CoreLocation::CoreTerminal { observe, panes } = tab.location.as_ref()?;
+                let CoreLocation::CoreTerminal { observe, panes, .. } = tab.location.as_ref()?;
                 (!observe).then_some(CoreTab {
                     id: tab.id,
                     panes,

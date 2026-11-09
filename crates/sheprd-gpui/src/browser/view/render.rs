@@ -56,14 +56,27 @@ impl SheprdWindow {
                     (_, Some(Location::CoreTerminal { .. })) => "icons/terminal.svg",
                     _ => GLOBE,
                 };
-                // A page's own icon stands in for the globe.
+                // A terminal tab running an agent shows how it is doing, as a
+                // Herdr tab does; a page's own icon stands in for the globe.
+                let status = match &tab.location {
+                    Some(Location::CoreTerminal { panes, .. }) => {
+                        let host = crate::core_terminals::Host::of(&tab.scope);
+                        self.core_terminals.tab_status(&host, panes)
+                    }
+                    _ => sheprd_client::protocol::AgentStatus::Unknown,
+                };
                 let mark = match self.tab_favicon(id).filter(|_| icon == GLOBE) {
+                    _ if status != sheprd_client::protocol::AgentStatus::Unknown => Mark::Herdr {
+                        status,
+                        agent: None,
+                    },
                     Some(favicon) => Mark::Favicon(favicon),
                     None => Mark::Icon(icon),
                 };
                 let base = div()
                     .id(SharedString::from(format!("browser-tab-{id}")))
                     .debug_selector(move || slot.selector(&format!("browser-tab-{id}")));
+                let core = matches!(tab.location, Some(Location::CoreTerminal { .. }));
                 let face = TabFace {
                     label: tab_label(&tab.label()),
                     mark,
@@ -83,6 +96,23 @@ impl SheprdWindow {
                         faces,
                     )
                     .map(|tab| self.grow_tab(tab, slot.id, &Pick::Page(id)))
+                    // A Herdr 2 terminal tab has a menu as a Herdr tab does.
+                    .when(core, |tab| {
+                        tab.on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                cx.stop_propagation();
+                                this.open_core_menu(
+                                    crate::core_terminals::menu::Target::Tab(id),
+                                    event.position,
+                                    window,
+                                    cx,
+                                );
+                                this.menu.opening_right_click =
+                                    this.menu.page == Some(crate::menu::Page::CoreMenu);
+                            }),
+                        )
+                    })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.show_browser_tab_in(Some(slot.id), id, window, cx);
                     }));

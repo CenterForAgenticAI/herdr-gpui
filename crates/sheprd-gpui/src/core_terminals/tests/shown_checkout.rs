@@ -40,10 +40,7 @@ fn the_shown_panes_branch_comes_from_the_shared_checkout_reader(cx: &mut TestApp
     let tab: TabId = view.update(cx, |view, cx| {
         let scope = crate::browser::scope(&view.endpoints[0]);
         let id = TerminalId::new("t1").unwrap();
-        let location = Location::CoreTerminal {
-            panes: Panes::single(id.clone()),
-            observe: false,
-        };
+        let location = Location::core_terminal(Panes::single(id.clone()), false);
         let tab = Store::update(cx, |store| {
             store.open(scope, WORKSPACE, Some(location), None)
         })

@@ -101,6 +101,7 @@ impl SheprdWindow {
                 Some(Location::CoreTerminal {
                     panes,
                     observe: false,
+                    ..
                 }) => Some(CoreTab {
                     id: tab.id.number(),
                     panes,

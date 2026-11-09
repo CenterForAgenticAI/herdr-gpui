@@ -487,16 +487,38 @@ pub(super) async fn rename(
     Path(pane): Path<String>,
     Json(request): Json<RenameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let (method, params) = {
+    let (chat, tab) = {
         let layout = state.hub.layout();
-        let target = if layout.chat(&pane).is_some() {
-            RenameTarget::Chat { pane: &pane }
-        } else {
-            let (_, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
-            RenameTarget::Tab { tab: &terminal.tab }
-        };
-        rename_call(target, &request.label)?
+        match layout.chat(&pane) {
+            Some((_, chat)) => (true, chat.tab.clone()),
+            None => {
+                let (_, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
+                (false, terminal.tab.clone())
+            }
+        }
     };
+    let label = request.label.trim();
+    if label.chars().count() > MAX_LABEL {
+        return Err(ApiError::Invalid("that name is too long"));
+    }
+    // Sheprd keeps a Herdr 2 tab's names: it renames it. A blank name gives
+    // a tab its program's title back, as Sheprd's menu does.
+    if let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)? {
+        let name = Some(label.to_owned()).filter(|name| !name.is_empty());
+        let op = if chat {
+            crate::control::layout::Op::RenamePane(name)
+        } else {
+            crate::control::layout::Op::RenameTab(name)
+        };
+        crate::native::changes::change_layout(&state, saved, terminal, op).await?;
+        return Ok(Json(json!({})));
+    }
+    let target = if chat {
+        RenameTarget::Chat { pane: &pane }
+    } else {
+        RenameTarget::Tab { tab: &tab }
+    };
+    let (method, params) = rename_call(target, label)?;
     state.hub.call(method, params).await?;
     Ok(Json(json!({})))
 }
@@ -515,6 +537,15 @@ pub(super) async fn rename_workspace(
         workspace: &workspace,
     };
     let (method, params) = rename_call(target, &request.label)?;
+    // A workspace Sheprd keeps for Herdr 2 is Sheprd's to rename.
+    if state.hub.kept_workspace(&workspace) {
+        let op = crate::control::layout::Op::RenameWorkspace {
+            workspace,
+            name: request.label.trim().to_owned(),
+        };
+        crate::native::changes::change_layout(&state, 0, String::new(), op).await?;
+        return Ok(Json(json!({})));
+    }
     state.hub.call(method, params).await?;
     Ok(Json(json!({})))
 }
