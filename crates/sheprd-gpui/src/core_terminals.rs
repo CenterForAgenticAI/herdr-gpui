@@ -195,6 +195,10 @@ impl TabPanes {
         }
         if fresh.panes.contains(&self.active) {
             fresh.active = self.active.clone();
+        } else if !fresh.panes.contains(&fresh.active) {
+            // Both windows closed a pane, and the merge holds neither one
+            // in use: the keyboard goes to a pane that is still there.
+            fresh.active = fresh.panes.first().clone();
         }
         let zoomed = if self.unsaved {
             self.zoomed.clone().filter(|_| self.zoom.is_open())
