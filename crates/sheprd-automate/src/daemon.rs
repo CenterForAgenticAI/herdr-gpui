@@ -5,8 +5,8 @@
 
 use crate::{
     Error, Result,
+    drive::Drive,
     fingerprint::Fingerprint,
-    herdr::Herdr,
     logbook::Logbook,
     paths::{Paths, private_dir, private_file},
     runner::{self, Ended, Job, Slots},
@@ -108,7 +108,7 @@ struct Daemon<'a> {
     store: Store,
     log: Logbook,
     settings: Settings,
-    herdr: Herdr,
+    drive: Drive,
     loaded: HashMap<String, Loaded>,
     live: HashMap<String, Live>,
     slots: Arc<Slots>,
@@ -132,16 +132,17 @@ pub fn serve(paths: &Paths) -> Result<()> {
         ));
     }
     let settings = Settings::read(&paths.settings())?;
-    let herdr = Herdr::new(settings.herdr.clone(), settings.herdr_session.clone());
+    let drive = Drive::new(&settings);
+    log.info(format!("driving {}", drive.terminals().name()));
     let stop_sampler = Arc::new(AtomicBool::new(false));
     let sampler = {
-        let (paths, herdr, log, stop) = (
+        let (paths, drive, log, stop) = (
             paths.clone(),
-            herdr.clone(),
+            drive.clone(),
             log.clone(),
             stop_sampler.clone(),
         );
-        thread::spawn(move || sampler::run(&paths, &herdr, &log, &stop))
+        thread::spawn(move || sampler::run(&paths, &drive, &log, &stop))
     };
     let (done, finished) = mpsc::channel();
     let mut daemon = Daemon {
@@ -149,7 +150,7 @@ pub fn serve(paths: &Paths) -> Result<()> {
         store,
         log,
         settings,
-        herdr,
+        drive,
         loaded: HashMap::new(),
         live: HashMap::new(),
         slots: Arc::default(),
@@ -467,15 +468,15 @@ impl Daemon<'_> {
             stop: stop.clone(),
         };
         self.live.insert(path.to_owned(), Live { run, stop });
-        let (paths, settings, herdr, slots, done) = (
+        let (paths, settings, drive, slots, done) = (
             self.paths.clone(),
             self.settings.clone(),
-            self.herdr.clone(),
+            self.drive.clone(),
             self.slots.clone(),
             self.done.clone(),
         );
         thread::spawn(move || {
-            let ended = runner::execute(&paths, &settings, &herdr, &slots, &job);
+            let ended = runner::execute(&paths, &settings, &drive, &slots, &job);
             let _ = done.send((job.path.clone(), job.run, ended));
         });
     }

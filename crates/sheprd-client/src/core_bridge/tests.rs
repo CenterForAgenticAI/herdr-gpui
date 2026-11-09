@@ -97,3 +97,18 @@ fn the_windows_bridge_starts_the_core_as_connect_after_the_banner() {
     assert!(ready < script.find("Start-Process").unwrap());
     assert!(script.contains("exit 127"));
 }
+
+#[test]
+fn scripts_find_the_core_the_bridge_runs_even_with_unset_variables() {
+    let root = home("locate");
+    let core = root.join(".local/bin/herdr-core");
+    crate::test_executable::write(&core, "#!/bin/sh\n", 0o700).unwrap();
+    let script = format!("set +u\n{}\nprintf '%s' \"$herdr_core\"", locate_script());
+    let found = local(&root).arg(&script).output().unwrap();
+    assert!(found.status.success(), "{found:?}");
+    assert_eq!(found.stdout, core.to_string_lossy().as_bytes());
+    std::fs::remove_file(&core).unwrap();
+    let missing = local(&root).arg(&script).output().unwrap();
+    assert!(missing.stdout.is_empty(), "{missing:?}");
+    std::fs::remove_dir_all(root).unwrap();
+}

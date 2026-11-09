@@ -19,10 +19,11 @@ fn orchestrator_tabs_saved_by_earlier_builds_are_dropped_on_load() {
         .unwrap();
     let bytes = serde_json::to_vec(&Saved {
         tabs: store.tabs.clone(),
+        workspaces: Vec::new(),
     })
     .unwrap();
     // The file still reads, so the user's other tabs come back.
-    let restored = Store::with_tabs(parse(&bytes).unwrap(), None);
+    let restored = Store::with_tabs(parse(&bytes).unwrap().tabs, None);
     assert!(restored.get(page).is_some());
     assert!(restored.get(orchestrator).is_none());
 }

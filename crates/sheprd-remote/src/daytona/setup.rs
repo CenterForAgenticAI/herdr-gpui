@@ -97,6 +97,11 @@ fn finish(
             return Err(cloud::Error::Install(install::Failure::Missing).into());
         }
     }
+    if install {
+        over_gateway(connect::gateway(request, &sandbox), &cancelled, |command| {
+            install::add_core(Ok::<_, std::convert::Infallible>(command), &cancelled)
+        })?;
+    }
     let device = SavedDevice {
         provider: CloudProvider::Daytona,
         id: sandbox.id,
@@ -108,6 +113,20 @@ fn finish(
     };
     cloud::save(device.clone())?;
     Ok(device)
+}
+
+/// Runs `add` with `gateway`'s command while the gateway, and the SSH
+/// config its command reads, is alive. A gateway that could not be made
+/// skips the optional step, unless the user cancelled.
+fn over_gateway(
+    gateway: Result<gateway::Gateway>,
+    cancelled: &dyn Fn() -> bool,
+    add: impl FnOnce(std::process::Command) -> cloud::Result<()>,
+) -> cloud::Result<()> {
+    match gateway {
+        Ok(gateway) => gateway.with_command(add),
+        Err(error) => install::core_unprepared(error, &cancelled),
+    }
 }
 
 /// Where the API key in use comes from.
@@ -165,3 +184,7 @@ pub fn save_key(store: Store, key: Option<&SecretString>) -> Result<()> {
 pub fn forget_device(id: &str) -> Result<()> {
     Ok(cloud::remove(CloudProvider::Daytona, id)?)
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

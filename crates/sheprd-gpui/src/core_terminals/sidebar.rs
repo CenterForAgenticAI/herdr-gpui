@@ -96,9 +96,43 @@ impl SheprdWindow {
         )
     }
 
+    /// Shows a Herdr 2 agent the overview lists: its workspace, then its tab
+    /// with its terminal in use, or the shell shown in place of Herdr 1.
+    /// `tab` and `terminal` are as a `Session` names them.
+    pub(crate) fn show_core_agent(
+        &mut self,
+        endpoint: &str,
+        workspace: &str,
+        tab: &str,
+        terminal: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let in_front = self.endpoints[self.selected_endpoint].id == endpoint
+            && self
+                .browser_key()
+                .is_some_and(|(_, shown)| shown == workspace);
+        if !in_front {
+            self.navigate_endpoint(endpoint, crate::NavigationTarget::Workspace(workspace), cx);
+        }
+        let Ok(tab) = tab.parse::<u64>() else {
+            return;
+        };
+        if tab == super::SHELL_TAB {
+            if let Some(view) = self.core_fallback_view() {
+                window.focus(&view.read(cx).focus_handle().clone(), cx);
+            }
+            return;
+        }
+        let Ok(terminal) = TerminalId::new(terminal) else {
+            return;
+        };
+        self.show_core_pane(TabId::from(tab), &terminal, window, cx);
+    }
+
     /// Shows `tab` with `terminal` as its pane in use, unzoomed if another
     /// pane filled it, and gives that pane the keyboard.
-    fn show_core_pane(
+    pub(super) fn show_core_pane(
         &mut self,
         tab: TabId,
         terminal: &TerminalId,

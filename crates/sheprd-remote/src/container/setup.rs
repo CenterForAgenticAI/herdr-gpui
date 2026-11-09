@@ -129,21 +129,23 @@ fn install_herdr(
     report: &dyn Fn(cloud::Step),
 ) -> crate::Result<()> {
     report(cloud::Step::CheckingHerdr);
-    if install::installed(machine::exec(engine, id)?, &cancelled)? {
-        return Ok(());
-    }
-    if !approved {
-        return Err(cloud::Error::Install(install::Failure::NotInstalled {
-            machine: Some(id.to_string()),
-            retry: install::Retry::Allow,
-        })
-        .into());
-    }
-    report(cloud::Step::InstallingHerdr);
-    install::install(machine::exec(engine, id)?, &cancelled)?;
-    // The installer's own success is not proof the bridge will find it.
     if !install::installed(machine::exec(engine, id)?, &cancelled)? {
-        return Err(cloud::Error::Install(install::Failure::Missing).into());
+        if !approved {
+            return Err(cloud::Error::Install(install::Failure::NotInstalled {
+                machine: Some(id.to_string()),
+                retry: install::Retry::Allow,
+            })
+            .into());
+        }
+        report(cloud::Step::InstallingHerdr);
+        install::install(machine::exec(engine, id)?, &cancelled)?;
+        // The installer's own success is not proof the bridge will find it.
+        if !install::installed(machine::exec(engine, id)?, &cancelled)? {
+            return Err(cloud::Error::Install(install::Failure::Missing).into());
+        }
+    }
+    if approved {
+        install::add_core(machine::exec(engine, id), &cancelled)?;
     }
     Ok(())
 }

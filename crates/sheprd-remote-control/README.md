@@ -36,6 +36,13 @@ tab lists a computer's repositories under each session's name when more than
 one session has workspaces, and as before otherwise. A new worktree started
 from a repository there names its session, and opens in it.
 
+herdr-core reports no branch or repository, so the core's worker reads each
+Herdr 2 workspace's from its folder with Git (cached for five seconds), as
+Herdr does: the repository is keyed by its common Git folder, which its linked
+worktrees share, and named after it. The phone then lists Herdr 2 workspaces
+under their repository and branch beside Herdr 1's. The group of terminals no
+tab holds has no one folder, and stays apart.
+
 Pairing a phone gives it this computer, not one session: a paired phone can
 read and type into every session the daemon follows, including one started
 after it was paired.
@@ -70,7 +77,9 @@ their workspace and split membership. The file is read beside the explicit
 remote `--state-dir`
 (for example, `gpui/browser-tabs.json` beside `gpui/remote`), using the
 desktop state context instead of the service environment. Only tabs for the
-selected local Herdr 1 endpoint are used.
+selected local Herdr 1 endpoint are used. The workspaces Sheprd keeps for
+Herdr 2 terminals in the same file come first, in the user's order, with
+their names and folders, even before they hold a tab.
 Other core terminals appear in a **Herdr 2** workspace, including terminals
 created by `hc` and the desktop's shell when Herdr 1 is absent. Status comes
 from the core's terminal records. The phone reports **Herdr not running**
@@ -82,12 +91,18 @@ output and sends complete ANSI screens through the existing stream.
 Keys and pastes use the terminal's current modes, including bracketed paste.
 The pane opens as an observer at its current dimensions, so watching changes
 nothing on the desktop. The first key or paste takes the driver's role at the
-terminal's current size. Phone-specific sizing, scrolling,
-renaming, splitting, and zooming remain Herdr 1 actions. A phone closes a Herdr 2
+terminal's current size. A view sized to the phone holds the terminal at the
+phone's size by taking the driver's role at it; when the view closes the pane
+observes again, and the core sizes the terminal back to its previous driver,
+as Herdr 1 does when a direct attach drops. The latest phone's size wins.
+Each screen keeps 1,000 lines of history, painted by the core when the pane is
+first opened, which the web app reads back and the native app scrolls through.
+Renaming, splitting, and zooming remain Herdr 1 actions. A phone closes a Herdr 2
 pane, or a tab of one pane; a tab of several panes stays open.
 The daemon keeps at most 16 shared core attachments and releases each after
-30 seconds without a screen read or input request. When all 16 are held, the
-one idle longest gives way to a new pane if it has been idle for 5 seconds.
+30 seconds without a screen read or input request, unless a phone holds it at
+its size. When all 16 are held, the one idle longest gives way to a new pane if
+it has been idle for 5 seconds.
 
 While a core answers, new work from a phone starts there, even from a Herdr 1
 pane or workspace: new tabs, chats, and workspaces. Herdr 1 terminals stay listed
