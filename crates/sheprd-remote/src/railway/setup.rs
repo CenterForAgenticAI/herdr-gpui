@@ -191,7 +191,7 @@ fn ensure_herdr(
         }
     }
     if install {
-        hidden(install::add_core(session()?, &cancelled))?;
+        hidden(install::add_core(session(), &cancelled))?;
     }
     Ok(())
 }

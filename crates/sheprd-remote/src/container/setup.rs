@@ -145,7 +145,7 @@ fn install_herdr(
         }
     }
     if approved {
-        install::add_core(machine::exec(engine, id)?, &cancelled)?;
+        install::add_core(machine::exec(engine, id), &cancelled)?;
     }
     Ok(())
 }

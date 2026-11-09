@@ -98,7 +98,10 @@ fn finish(
         }
     }
     if install {
-        install::add_core(connect::gateway(request, &sandbox)?.command, &cancelled)?;
+        install::add_core(
+            connect::gateway(request, &sandbox).map(|gateway| gateway.command),
+            &cancelled,
+        )?;
     }
     let device = SavedDevice {
         provider: CloudProvider::Daytona,

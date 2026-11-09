@@ -108,7 +108,7 @@ fn prepare(
         }
     }
     if approved {
-        install::add_core(relay_command(settings, id)?, &cancelled)?;
+        install::add_core(relay_command(settings, id), &cancelled)?;
     }
     Ok(())
 }

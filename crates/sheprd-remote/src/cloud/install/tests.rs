@@ -126,7 +126,7 @@ fn a_core_that_cannot_be_installed_leaves_herdr_installed() {
     let home = machine_without_core_downloads();
     install(on(home.path()), &|| false).unwrap();
     // The core's download fails; the step still succeeds.
-    add_core(on(home.path()), &|| false).unwrap();
+    add_core(Ok::<_, Error>(on(home.path())), &|| false).unwrap();
     assert!(home.path().join(".local/bin/herdr").exists());
     assert!(!home.path().join(".local/bin/herdr-core").exists());
     assert!(installed(local(home.path()), &|| false).unwrap());
@@ -136,7 +136,17 @@ fn a_core_that_cannot_be_installed_leaves_herdr_installed() {
 fn adding_the_core_stops_when_cancelled() {
     let home = machine_without_core_downloads();
     assert!(matches!(
-        add_core(on(home.path()), &|| true),
+        add_core(Ok::<_, Error>(on(home.path())), &|| true),
+        Err(Error::Cancelled)
+    ));
+}
+
+#[test]
+fn a_core_command_that_cannot_be_made_leaves_setup_going() {
+    let unmade = || Err::<Command, _>(Error::Cancelled);
+    add_core(unmade(), &|| false).unwrap();
+    assert!(matches!(
+        add_core(unmade(), &|| true),
         Err(Error::Cancelled)
     ));
 }
