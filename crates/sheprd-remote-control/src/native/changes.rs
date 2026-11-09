@@ -55,6 +55,8 @@ async fn ask(state: &Shared, workspace: String, wanted: Wanted) -> Result<Answer
         match ask_sheprd(state, boot, workspace, wanted.clone()).await {
             // Closed meanwhile, or a workspace it does not keep.
             Err(Error::NoDesktop | Error::Failed(Failure::Gone)) => {}
+            // It quit while the question waited.
+            Err(Error::TimedOut) if !state.changes.open() => {}
             answered => return answered.map_err(ApiError::from),
         }
     }

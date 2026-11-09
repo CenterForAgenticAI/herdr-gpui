@@ -10,11 +10,11 @@
 
 use crate::control::changes::{
     Answer, ChangedFile, DiffLine, Failure, FileDiff, FileList, FileStatus, LineKind,
-    MAX_DIFF_BYTES, MAX_PATH, Scope, Shown, Wanted,
+    MAX_DIFF_BYTES, MAX_FILES, MAX_PATH, Scope, Shown, Wanted,
 };
 use std::{
     io::Read,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -75,19 +75,65 @@ fn compared(cwd: &Path, scope: Scope) -> Result<Compared, Failure> {
     })
 }
 
+/// The checkout `cwd` is in, by its top folder: every path below is
+/// relative to it, as `git diff` gives them, whatever folder in it the
+/// workspace names.
+fn root(cwd: &Path) -> Result<PathBuf, Failure> {
+    let top = git(cwd, &["rev-parse", "--show-toplevel"]).map_err(|_| Failure::NoRepository)?;
+    let top = top.trim_end_matches(['\n', '\r']);
+    if top.is_empty() {
+        return Err(Failure::NoRepository);
+    }
+    Ok(PathBuf::from(top))
+}
+
 fn files(cwd: &Path, scope: Scope) -> Result<FileList, Failure> {
-    git(cwd, &["rev-parse", "--is-inside-work-tree"]).map_err(|_| Failure::NoRepository)?;
-    let compared = compared(cwd, scope)?;
-    let listed = changed(cwd, &compared.rev)?;
+    let root = root(cwd)?;
+    let compared = compared(&root, scope)?;
+    let mut listed = changed(&root, &compared.rev)?;
+    // Only those sent are read: a checkout may hold many untracked files.
+    for file in listed
+        .iter_mut()
+        .take(MAX_FILES)
+        .filter(|file| file.status == FileStatus::Untracked)
+    {
+        match read_untracked(&root.join(&file.path)) {
+            Ok(text) => file.added = u32::try_from(text.lines().count()).ok(),
+            Err(shown) => file.shown = shown,
+        }
+    }
     Ok(FileList::bounded(compared.base, listed))
 }
 
 /// Every file changed since `rev`, in the working tree as it is now.
 fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
-    let statuses = git(cwd, &["diff", "--name-status", "-z", "-M", rev, "--"])
-        .map_err(|_| Failure::Unreadable)?;
-    let counts =
-        git(cwd, &["diff", "--numstat", "-z", "-M", rev, "--"]).map_err(|_| Failure::Unreadable)?;
+    let statuses = git(
+        cwd,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--name-status",
+            "-z",
+            "-M",
+            rev,
+            "--",
+        ],
+    )
+    .map_err(|_| Failure::Unreadable)?;
+    let counts = git(
+        cwd,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--numstat",
+            "-z",
+            "-M",
+            rev,
+            "--",
+        ],
+    )
+    .map_err(|_| Failure::Unreadable)?;
     let mut files = parse_name_status(&statuses);
     for (path, added, removed) in parse_numstat(&counts) {
         if let Some(file) = files.iter_mut().find(|file| file.path == path) {
@@ -100,19 +146,17 @@ fn changed(cwd: &Path, rev: &str) -> Result<Vec<ChangedFile>, Failure> {
     }
     let untracked = git(cwd, &["ls-files", "--others", "--exclude-standard", "-z"])
         .map_err(|_| Failure::Unreadable)?;
-    for path in untracked.split('\0').filter(|path| !path.is_empty()) {
-        let (added, shown) = match read_untracked(&cwd.join(path)) {
-            Ok(text) => (u32::try_from(text.lines().count()).ok(), Shown::Text),
-            Err(shown) => (None, shown),
-        };
-        files.push(ChangedFile {
-            path: path.to_owned(),
-            status: FileStatus::Untracked,
-            added,
-            shown,
-            ..ChangedFile::default()
-        });
-    }
+    // Listed, not read: their counts are filled in only for those sent.
+    files.extend(
+        untracked
+            .split('\0')
+            .filter(|path| !path.is_empty())
+            .map(|path| ChangedFile {
+                path: path.to_owned(),
+                status: FileStatus::Untracked,
+                ..ChangedFile::default()
+            }),
+    );
     Ok(files)
 }
 
@@ -120,7 +164,8 @@ fn diff(cwd: &Path, scope: Scope, path: &str) -> Result<FileDiff, Failure> {
     if path.is_empty() || path.len() > MAX_PATH {
         return Err(Failure::NoFile);
     }
-    git(cwd, &["rev-parse", "--is-inside-work-tree"]).map_err(|_| Failure::NoRepository)?;
+    let root = root(cwd)?;
+    let cwd = root.as_path();
     let compared = compared(cwd, scope)?;
     // Only a file the list gives: a phone does not get to read any path.
     let file = changed(cwd, &compared.rev)?
@@ -131,7 +176,10 @@ fn diff(cwd: &Path, scope: Scope, path: &str) -> Result<FileDiff, Failure> {
         return Ok(FileDiff::note(path, file.shown));
     }
     if file.status == FileStatus::Untracked {
-        let text = read_untracked(&cwd.join(path)).map_err(|_| Failure::Unreadable)?;
+        let text = match read_untracked(&cwd.join(path)) {
+            Ok(text) => text,
+            Err(shown) => return Ok(FileDiff::note(path, shown)),
+        };
         let count = text.lines().count();
         let hunk = DiffLine {
             kind: LineKind::Hunk,
@@ -147,7 +195,15 @@ fn diff(cwd: &Path, scope: Scope, path: &str) -> Result<FileDiff, Failure> {
         });
         return Ok(FileDiff::bounded(path, std::iter::once(hunk).chain(added)));
     }
-    let mut args = vec!["diff", "-M", compared.rev.as_str(), "--"];
+    let mut args = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "-M",
+        compared.rev.as_str(),
+        "--",
+    ];
     args.extend(file.old_path.as_deref());
     args.push(path);
     let (text, cut) =
@@ -157,8 +213,13 @@ fn diff(cwd: &Path, scope: Scope, path: &str) -> Result<FileDiff, Failure> {
     Ok(diff)
 }
 
-/// An untracked file's text, or why it is not shown.
+/// An untracked file's text, or why it is not shown. Only a regular file
+/// is read: a link could lead anywhere outside the checkout.
 fn read_untracked(path: &Path) -> Result<String, Shown> {
+    let kind = std::fs::symlink_metadata(path).map_err(|_| Shown::Unreadable)?;
+    if !kind.file_type().is_file() {
+        return Err(Shown::Unreadable);
+    }
     let file = std::fs::File::open(path).map_err(|_| Shown::Unreadable)?;
     let mut bytes = Vec::new();
     file.take(MAX_UNTRACKED + 1)
@@ -289,7 +350,10 @@ fn command(cwd: &Path, args: &[&str]) -> Command {
     command
         .arg("-C")
         .arg(cwd)
-        .args(["-c", "core.quotepath=off", "--no-optional-locks"])
+        // Paths are literal, never patterns, and the user's colors, diff
+        // tools, and conversions stay out of what is parsed.
+        .args(["-c", "core.quotepath=off", "-c", "color.ui=false"])
+        .args(["--no-optional-locks", "--literal-pathspecs"])
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())

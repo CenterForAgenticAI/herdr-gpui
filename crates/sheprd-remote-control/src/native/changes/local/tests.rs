@@ -196,3 +196,77 @@ fn hunk_headers_give_each_sides_start() {
     assert_eq!(hunk_start("@@ -0,0 +1 @@"), Some((0, 1)));
     assert_eq!(hunk_start("diff --git a/x b/x"), None);
 }
+
+fn diff_of(repository: &Path, path: &str) -> FileDiff {
+    let wanted = Wanted::Diff {
+        scope: Scope::Uncommitted,
+        path: path.into(),
+    };
+    match answer(repository, &wanted) {
+        Answer::Diff(diff) => diff,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_untracked_link_is_never_followed_out_of_the_checkout() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository = repository(dir.path());
+    let secret = dir.path().join("secret.txt");
+    std::fs::write(&secret, "token\n").unwrap();
+    std::os::unix::fs::symlink(&secret, repository.join("link.txt")).unwrap();
+    let list = listed(answer(
+        &repository,
+        &Wanted::Files {
+            scope: Scope::Uncommitted,
+        },
+    ));
+    assert_eq!(file(&list, "link.txt").shown, Shown::Unreadable);
+    let diff = diff_of(&repository, "link.txt");
+    assert!(diff.lines.is_empty());
+    assert_eq!(diff.shown, Shown::Unreadable);
+}
+
+#[test]
+fn a_workspace_in_a_subfolder_shows_the_checkouts_paths_and_their_diffs() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository = repository(dir.path());
+    let sub = repository.join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    std::fs::write(sub.join("b.txt"), "b\n").unwrap();
+    run(&repository, &["add", "."]);
+    run(&repository, &["commit", "--quiet", "-m", "sub"]);
+    std::fs::write(sub.join("b.txt"), "c\n").unwrap();
+    std::fs::write(sub.join("new.txt"), "n\n").unwrap();
+    let list = listed(answer(
+        &sub,
+        &Wanted::Files {
+            scope: Scope::Uncommitted,
+        },
+    ));
+    assert_eq!(file(&list, "sub/new.txt").added, Some(1));
+    let diff = diff_of(&sub, "sub/b.txt");
+    assert!(
+        diff.lines
+            .iter()
+            .any(|line| line.kind == LineKind::Added && line.text == "c")
+    );
+    assert_eq!(diff_of(&sub, "sub/new.txt").lines[1].text, "n");
+}
+
+#[test]
+fn colors_and_patterns_in_names_leave_a_diff_as_git_wrote_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository = repository(dir.path());
+    run(&repository, &["config", "color.diff", "always"]);
+    run(&repository, &["config", "color.ui", "always"]);
+    std::fs::write(repository.join("a*.txt"), "x\n").unwrap();
+    run(&repository, &["add", "."]);
+    run(&repository, &["commit", "--quiet", "-m", "star"]);
+    std::fs::write(repository.join("a*.txt"), "y\n").unwrap();
+    std::fs::write(repository.join("a.txt"), "other\n").unwrap();
+    let diff = diff_of(&repository, "a*.txt");
+    let texts: Vec<&str> = diff.lines.iter().map(|line| line.text.as_str()).collect();
+    assert_eq!(texts[1..], ["x", "y"], "{texts:?}");
+}
