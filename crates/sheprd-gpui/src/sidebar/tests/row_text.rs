@@ -155,7 +155,7 @@ fn cells_hand_their_state_and_data_to_the_layout() {
         }
     }
 
-    let snapshot = layout_tests::snapshot(1);
+    let snapshot = crate::session_model::of_snapshot(&layout_tests::snapshot(1));
     let (font, theme) = (crate::config::Config::default().sidebar, Theme::default());
     let cx = RowContext {
         indicators: Indicators::new(None, StatusIcons::default(), false, false, &theme),
@@ -178,7 +178,7 @@ fn cells_hand_their_state_and_data_to_the_layout() {
             grouped: false,
             badge: None,
             removing: false,
-            status: snapshot.workspaces[0].agent_status,
+            status: snapshot.workspaces[0].status,
             lines: vec![],
         })
     };

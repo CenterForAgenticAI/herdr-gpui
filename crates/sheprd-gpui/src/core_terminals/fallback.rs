@@ -4,7 +4,7 @@
 //! to the same one instead of starting another. Only when herdr-core is
 //! unavailable too does the window ask the user to install Herdr.
 
-use super::{CoreTerminalView, Start, State, worker};
+use super::{CoreTerminalView, Host, Start, State, worker};
 use crate::SheprdWindow;
 use gpui::{prelude::*, *};
 use sheprd_backend::{Backend as _, Role, Size, Spawn, TerminalId};
@@ -45,9 +45,18 @@ impl SheprdWindow {
             return;
         }
         self.core_terminals.hub.connect(Start::IfMissing);
+        // The shell belongs to the default workspace: once the user closes
+        // it, the shell ends with it and none starts again until the app
+        // keeps that workspace anew.
+        let kept = self.default_workspace_kept(cx);
         match &self.core_terminals.fallback {
-            Fallback::Off => self.start_fallback_shell(),
+            Fallback::Off if kept => self.start_fallback_shell(),
+            Fallback::Off => {}
             Fallback::Starting(found) => match found.try_recv() {
+                Ok(Ok(terminal)) if !kept => {
+                    self.end_core_terminal(&Host::Local, terminal);
+                    self.core_terminals.fallback = Fallback::Off;
+                }
                 Ok(Ok(terminal)) => self.show_fallback_shell(terminal, cx),
                 Ok(Err(error)) => {
                     tracing::warn!(%error, "Could not start the herdr-core shell");
@@ -58,6 +67,11 @@ impl SheprdWindow {
                     self.core_terminals.fallback = Fallback::Off
                 }
             },
+            Fallback::Shown(view) if !kept => {
+                self.end_core_terminal(&Host::Local, view.read(cx).terminal().clone());
+                self.core_terminals.fallback = Fallback::Off;
+                cx.notify();
+            }
             Fallback::Shown(_) => {}
         }
     }
