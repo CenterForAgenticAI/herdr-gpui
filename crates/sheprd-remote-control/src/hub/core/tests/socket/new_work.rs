@@ -293,6 +293,29 @@ async fn a_second_tab_in_a_phones_new_workspace_joins_it_by_folder() {
 }
 
 #[test]
+fn work_in_a_phones_new_workspace_is_listed_in_one_row() {
+    let labelled = |address: &str| {
+        let mut record = record(address);
+        record["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/one"});
+        record
+    };
+    let records = vec![labelled("t1"), labelled("t9"), record("t2")];
+    let (source, fake) = fake_with_doc(false, Value::Null, records);
+    let layout = source.poll().unwrap();
+    let rows: Vec<_> = layout
+        .workspaces
+        .iter()
+        .filter(|row| row.cwd == "/code/one")
+        .collect();
+    assert_eq!(rows.len(), 1, "one workspace for the folder");
+    // Named for a pane listed there.
+    assert!(rows[0].id.starts_with(&new_workspace_id("")));
+    assert_eq!(rows[0].terminals.len(), 2);
+    drop(source);
+    fake.server.join().unwrap();
+}
+
+#[test]
 fn closing_ends_one_named_terminal_and_refuses_a_tab_of_several() {
     let (source, fake) = fake();
     source.poll().unwrap();

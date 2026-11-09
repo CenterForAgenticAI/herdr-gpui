@@ -112,7 +112,17 @@ pub(super) fn lead_kept(layout: &mut Layout, saved: Option<&SavedTabs>, scope: O
 }
 
 /// A phone's new workspace in `cwd`, named for its folder, listed apart.
+/// More work there joins it: its id is its first pane's, and the rest are
+/// labelled with the same folder.
 fn add_new_workspace(layout: &mut Layout, pane: &str, cwd: &str, terminal: Terminal) {
+    if let Some(row) = layout
+        .workspaces
+        .iter_mut()
+        .find(|row| super::is_new_workspace(&row.id) && row.cwd == cwd)
+    {
+        row.terminals.push(terminal);
+        return;
+    }
     let label = Path::new(cwd)
         .file_name()
         .and_then(|name| name.to_str())

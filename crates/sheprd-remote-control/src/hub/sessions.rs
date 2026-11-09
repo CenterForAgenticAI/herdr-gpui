@@ -370,7 +370,9 @@ pub(super) async fn merge_sources(
 /// `base` followed by each session's workspaces under its prefix. The boot
 /// stays the base's: the desktop's pull request data is keyed on it. Sessions
 /// share what [`MAX_CHATS`] leaves after the base, in order; the chats past
-/// that are left out.
+/// that are left out. A base row a session lists too, as Herdr 2 work a
+/// phone started in that session's workspace is, joins the session's row:
+/// a phone shows the first of two rows with one id.
 pub(super) fn merge(base: &Layout, sessions: &[(String, Arc<Layout>)]) -> Layout {
     let mut merged = base.clone();
     let mut room = MAX_CHATS.saturating_sub(base.chats().count());
@@ -380,6 +382,16 @@ pub(super) fn merge(base: &Layout, sessions: &[(String, Arc<Layout>)]) -> Layout
         for workspace in &mut layout.workspaces {
             workspace.chats.truncate(room);
             room -= workspace.chats.len();
+            // The base's chats were counted already.
+            if let Some(at) = merged
+                .workspaces
+                .iter()
+                .position(|row| row.id == workspace.id)
+            {
+                let shared = merged.workspaces.remove(at);
+                workspace.terminals.extend(shared.terminals);
+                workspace.chats.extend(shared.chats);
+            }
         }
         merged.connected |= layout.connected;
         merged.working += layout.working;
