@@ -19,6 +19,7 @@ fn listed(name: &str, workspace: Option<&str>) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: None,
+        foreground: None,
         id: id(name),
         labels: workspace
             .map(|workspace| {
@@ -30,6 +31,7 @@ fn listed(name: &str, workspace: Option<&str>) -> TerminalInfo {
             })
             .unwrap_or_default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }
