@@ -49,6 +49,7 @@ pub enum Command {
     TabNumber(u8),
     ToggleSidebar,
     ToggleStatusBar,
+    ToggleMenuBar,
     /// Shows or hides the panel of mod sections on the window's right.
     ToggleModPanel,
     /// Moves keyboard focus to the next of the terminal, the title bar, the
@@ -580,6 +581,11 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::ToggleStatusBar,
         name: "toggle_status_bar",
         message: "commands-toggle-status-bar",
+    },
+    CommandInfo {
+        command: Command::ToggleMenuBar,
+        name: "toggle_menu_bar",
+        message: "commands-toggle-menu-bar",
     },
     CommandInfo {
         command: Command::ToggleModPanel,
