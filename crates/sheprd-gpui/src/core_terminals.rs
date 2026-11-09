@@ -884,7 +884,9 @@ impl SheprdWindow {
         self.core_terminals
             .shown
             .as_ref()
-            .is_some_and(|(shown_tab, shown_terminal)| *shown_tab == tab && shown_terminal == terminal)
+            .is_some_and(|(shown_tab, shown_terminal)| {
+                *shown_tab == tab && shown_terminal == terminal
+            })
     }
 
     /// How the window draws terminals, for its herdr-core views.

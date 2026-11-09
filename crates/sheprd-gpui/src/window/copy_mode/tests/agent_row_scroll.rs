@@ -44,7 +44,10 @@ fn shown(cx: &mut TestAppContext, peer: &MockPeer) -> Entity<SheprdWindow> {
         let surface = Arc::make_mut(view.live.surface.as_mut().unwrap());
         surface.frame.width = view.options.surface_size.cols;
         surface.frame.height = view.options.surface_size.rows;
-        assert!(view.input_ready(), "fixture window should be ready for input");
+        assert!(
+            view.input_ready(),
+            "fixture window should be ready for input"
+        );
     });
     view
 }

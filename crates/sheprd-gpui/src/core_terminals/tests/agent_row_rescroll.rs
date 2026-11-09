@@ -34,9 +34,8 @@ fn a_core_terminal_target_scrolls_its_view_to_the_bottom(cx: &mut TestAppContext
     let tab = TabId::test(1);
     let (view, cx) = cx.add_window_view(|window, cx| {
         let mut view = fixture_window(window, cx);
-        let core = cx.new(|cx| {
-            CoreTerminalView::new(terminal.clone(), link, look(), painter, false, cx)
-        });
+        let core =
+            cx.new(|cx| CoreTerminalView::new(terminal.clone(), link, look(), painter, false, cx));
         view.core_terminals
             .show_for_test(tab, Panes::single(terminal.clone()), false, Vec::new());
         view.core_terminals

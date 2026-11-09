@@ -12,7 +12,10 @@ use crate::{
     window::{MockPeer, SheprdWindow},
 };
 use gpui::{Entity, TestAppContext, VisualTestContext};
-use sheprd_client::{ConnectTarget, protocol::{ClientMessage, ClientPaneInputEvent}};
+use sheprd_client::{
+    ConnectTarget,
+    protocol::{ClientMessage, ClientPaneInputEvent},
+};
 
 fn behind(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext) -> f32 {
     view.read_with(cx, |view, _| {
@@ -110,9 +113,6 @@ fn a_shown_chat_means_a_local_transcript_rescroll(cx: &mut TestAppContext) {
         let pane = view.chats.pane("w1:p1").unwrap();
         assert!(pane.selection.is_empty(), "the rescroll clears a selection");
     });
-    assert!(
-        behind(&view, cx) <= 1.,
-        "the rescroll reaches the live end"
-    );
+    assert!(behind(&view, cx) <= 1., "the rescroll reaches the live end");
     assert_wire_quiet(&mut peer, cx);
 }

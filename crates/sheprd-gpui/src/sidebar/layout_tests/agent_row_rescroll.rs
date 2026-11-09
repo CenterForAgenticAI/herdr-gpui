@@ -77,12 +77,14 @@ fn rescroll_fixture(
             view.endpoints[0].request_surface_for_test();
             let mut listing = snapshot(1);
             listing.agents[0].focused = true;
-            listing.panes = vec![serde_json::from_value(serde_json::json!({
-                "pane_id": PANE, "workspace_id": "w0", "tab_id": "t0", "label": "review",
-                "cwd": "/repo", "foreground_cwd": "/repo", "focused": true,
-                "right_click_passthrough": false,
-            }))
-            .unwrap()];
+            listing.panes = vec![
+                serde_json::from_value(serde_json::json!({
+                    "pane_id": PANE, "workspace_id": "w0", "tab_id": "t0", "label": "review",
+                    "cwd": "/repo", "foreground_cwd": "/repo", "focused": true,
+                    "right_click_passthrough": false,
+                }))
+                .unwrap(),
+            ];
             listing.focused_pane_id = Some(PANE.into());
             view.live.snapshot = Some(Arc::new(listing.clone()));
             view.live.surface = Some(Arc::new(fixture_surface(&listing)));
@@ -116,25 +118,30 @@ fn rescroll_fixture(
         pane.rect.width = surface.frame.width;
         pane.rect.height = surface.frame.height;
         pane.inner_rect = pane.rect;
-        assert!(view.input_ready(), "fixture window should be ready for input");
+        assert!(
+            view.input_ready(),
+            "fixture window should be ready for input"
+        );
     });
     (view, peer, cx)
 }
 
 #[gpui::test]
-fn the_focused_row_means_a_rescroll_and_other_rows_mean_navigation(
-    cx: &mut gpui::TestAppContext,
-) {
+fn the_focused_row_means_a_rescroll_and_other_rows_mean_navigation(cx: &mut gpui::TestAppContext) {
     let (view, _peer, cx) = rescroll_fixture(cx);
     view.read_with(cx, |view, _| {
         assert_eq!(
             view.agent_row_action("local", PANE),
-            AgentRowAction::Rescroll(RescrollTarget::HerdrPane {
-                pane: PANE.into()
-            })
+            AgentRowAction::Rescroll(RescrollTarget::HerdrPane { pane: PANE.into() })
         );
-        assert_eq!(view.agent_row_action("ssh:test", PANE), AgentRowAction::Navigate);
-        assert_eq!(view.agent_row_action("local", "p1"), AgentRowAction::Navigate);
+        assert_eq!(
+            view.agent_row_action("ssh:test", PANE),
+            AgentRowAction::Navigate
+        );
+        assert_eq!(
+            view.agent_row_action("local", "p1"),
+            AgentRowAction::Navigate
+        );
     });
 }
 
@@ -146,7 +153,10 @@ fn an_unready_or_covered_pane_keeps_navigating(cx: &mut gpui::TestAppContext) {
     let held = view.update(cx, |view, _| {
         let held = view.live.surface.take();
         assert!(!view.input_ready());
-        assert_eq!(view.agent_row_action("local", PANE), AgentRowAction::Navigate);
+        assert_eq!(
+            view.agent_row_action("local", PANE),
+            AgentRowAction::Navigate
+        );
         held
     });
     view.update(cx, |view, cx| {
@@ -178,13 +188,14 @@ fn an_unready_or_covered_pane_keeps_navigating(cx: &mut gpui::TestAppContext) {
         let scope = crate::browser::scope(&view.endpoints[0]);
         view.set_core_session(scope, session);
         assert!(view.focus_kept_workspace(KEPT, cx));
-        assert_eq!(view.agent_row_action("local", PANE), AgentRowAction::Navigate);
+        assert_eq!(
+            view.agent_row_action("local", PANE),
+            AgentRowAction::Navigate
+        );
         view.leave_kept_workspace();
         assert_eq!(
             view.agent_row_action("local", PANE),
-            AgentRowAction::Rescroll(RescrollTarget::HerdrPane {
-                pane: PANE.into()
-            })
+            AgentRowAction::Rescroll(RescrollTarget::HerdrPane { pane: PANE.into() })
         );
     });
 }
