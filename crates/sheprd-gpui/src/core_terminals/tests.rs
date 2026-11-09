@@ -1,6 +1,8 @@
 mod accessibility;
 mod chats;
+mod context;
 mod focus;
+mod kept_checkouts;
 mod kept_workspaces;
 mod keys;
 mod paste;

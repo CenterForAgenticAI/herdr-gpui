@@ -36,6 +36,13 @@ tab lists a computer's repositories under each session's name when more than
 one session has workspaces, and as before otherwise. A new worktree started
 from a repository there names its session, and opens in it.
 
+herdr-core reports no branch or repository, so the core's worker reads each
+Herdr 2 workspace's from its folder with Git (cached for five seconds), as
+Herdr does: the repository is keyed by its common Git folder, which its linked
+worktrees share, and named after it. The phone then lists Herdr 2 workspaces
+under their repository and branch beside Herdr 1's. The group of terminals no
+tab holds has no one folder, and stays apart.
+
 Pairing a phone gives it this computer, not one session: a paired phone can
 read and type into every session the daemon follows, including one started
 after it was paired.

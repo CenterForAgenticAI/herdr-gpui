@@ -85,6 +85,7 @@ impl SheprdWindow {
                 workspace: id,
             },
             spawn,
+            cx,
         );
     }
 
@@ -207,15 +208,18 @@ impl SheprdWindow {
         }
         let scope = scope_of(self);
         let folder = cwd.map(|cwd| cwd.display().to_string());
+        let named = cwd
+            .and_then(|cwd| cwd.file_name())
+            .map(|name| name.to_string_lossy().into_owned());
+        // A name given that is not just its folder's is the user's, which a
+        // worktree row keeps rather than showing the branch.
+        let custom = label.is_some_and(|label| Some(label) != named.as_deref());
         let label = label
             .map(str::to_owned)
-            .or_else(|| {
-                cwd.and_then(|cwd| cwd.file_name())
-                    .map(|name| name.to_string_lossy().into_owned())
-            })
+            .or(named)
             .unwrap_or_else(|| fl!("core-workspaces-default"));
         let kept = Store::update(cx, |store| {
-            store.keep_workspace(&scope, &label, folder.as_deref().unwrap_or(""))
+            store.keep_workspace(&scope, &label, folder.as_deref().unwrap_or(""), custom)
         });
         let Some(id) = kept else {
             self.show_flash(Flash::warning(fl!("core-workspaces-too-many")), cx);
