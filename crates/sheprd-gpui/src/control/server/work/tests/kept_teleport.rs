@@ -15,7 +15,6 @@ use std::path::Path;
 const FOLDER: &str = "/src/app-feature";
 
 #[gpui::test]
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn teleport_opens_from_a_kept_workspace(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(fixture_window);
     cx.update(|window, cx| {
