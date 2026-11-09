@@ -1,10 +1,12 @@
 //! A small pass over the byte stream before vte sees it. It does two things
 //! vte cannot: it tracks Win32 input mode (DECSET/DECRST `?9001`), which
 //! alacritty ignores, and it bounds OSC strings, which vte buffers without a
-//! limit when built with `std`. Its state carries across feeds, so a sequence
-//! split anywhere gives the same result as one fed whole.
+//! limit when built with `std`. An OSC 52 clipboard write may be longer than
+//! the others, up to the base64 of [`MAX_CLIPBOARD_BYTES`]. Its state
+//! carries across feeds, so a sequence split anywhere gives the same result
+//! as one fed whole.
 
-use crate::MAX_OSC_BYTES;
+use crate::{MAX_CLIPBOARD_BYTES, MAX_OSC_BYTES};
 
 const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
@@ -13,6 +15,11 @@ const SUB: u8 = 0x1a;
 const WIN32_INPUT_MODE: u32 = 9001;
 /// Parameters past this are as invalid to vte (u16) as to the mode check.
 const PARAM_CAP: u32 = 100_000;
+/// How an OSC 52 clipboard write begins, as the scanner holds it.
+const OSC_52: &[u8] = b"]52;";
+/// The longest OSC 52 string: its selector and the base64 for
+/// [`MAX_CLIPBOARD_BYTES`], with room for a long selector.
+const MAX_OSC_52_BYTES: usize = MAX_CLIPBOARD_BYTES.div_ceil(3) * 4 + 64;
 
 #[derive(Debug, Default)]
 pub(crate) struct Scanner {
@@ -81,7 +88,7 @@ impl Scanner {
                         self.end_osc(&mut run, index + 1);
                     }
                     ESC => self.state = State::OscEscape,
-                    _ if self.osc.len() >= MAX_OSC_BYTES => {
+                    _ if self.osc.len() >= self.osc_limit() => {
                         // vte holds the ESC that began this string; `\`
                         // makes it a harmless ST.
                         forward(b"\\");
@@ -167,6 +174,15 @@ impl Scanner {
         }
         *run = next;
         self.state = State::Ground;
+    }
+
+    /// How long the held string may grow: a clipboard write further.
+    fn osc_limit(&self) -> usize {
+        if self.osc.starts_with(OSC_52) {
+            MAX_OSC_52_BYTES
+        } else {
+            MAX_OSC_BYTES
+        }
     }
 
     fn holding(&self) -> bool {

@@ -130,3 +130,20 @@ fn a_zoom_saved_on_another_pane_never_hides_the_one_in_use() {
     assert!(here.zoom.is_open());
     assert_eq!(here.zoomed, Some(id("t1")));
 }
+
+#[test]
+fn panes_both_windows_closed_leave_the_keyboard_on_one_still_there() {
+    let mut here = shown(&["a", "b", "c"]);
+    // This window closes b and moves to a.
+    here.panes.remove(&id("b"));
+    here.active = id("a");
+    here.unsaved = true;
+    // Another closes a and saves with b in use.
+    let mut there = Location::core_terminal(panes(&["b", "c"]), false);
+    if let Location::CoreTerminal { active, .. } = &mut there {
+        *active = Some(id("b"));
+    }
+    here.refresh(&there);
+    assert_eq!(here.panes, Panes::single(id("c")));
+    assert_eq!(here.active, id("c"));
+}
