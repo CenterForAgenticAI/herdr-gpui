@@ -3,7 +3,7 @@
 
 use crate::i18n::fl;
 use crate::{
-    NavigationTarget, SheprdWindow,
+    SheprdWindow,
     sidebar::{
         Indicators, agent_name,
         agents::{agent_icon, agent_place, pane_name, state_label, status_text},
@@ -190,7 +190,7 @@ impl SheprdWindow {
             }),
         )
         .on_click(cx.listener(move |this, _, window, cx| {
-            this.navigate_endpoint(&navigate_endpoint, NavigationTarget::Pane(&id), cx);
+            this.open_agent_row(&navigate_endpoint, &id, cx);
             window.focus(&this.focus, cx);
         }))
     }
