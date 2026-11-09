@@ -136,7 +136,11 @@ impl SheprdWindow {
             .as_ref()
             .and_then(|core| core.workspace(id))
             .map(|workspace| workspace.worktree.as_ref().map(|tree| tree.linked));
-        let action = match (shortcut, linked.flatten()) {
+        // Git runs through host scripts, which need `/bin/sh`, as the
+        // menu's rows say.
+        let scripts = cfg!(any(target_os = "linux", target_os = "macos"));
+        let linked = linked.flatten().filter(|_| scripts);
+        let action = match (shortcut, linked) {
             (_, None) => Err(Unavailable::NotGit),
             (WorktreeShortcut::Remove, Some(false)) => Err(Unavailable::MainCheckout),
             (WorktreeShortcut::Open, Some(_)) => Ok(WorkspaceAction::NewWorktree),

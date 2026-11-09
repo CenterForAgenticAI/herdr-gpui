@@ -15,7 +15,7 @@ mod scripts;
 
 pub(super) use kept_worktrees::Ask;
 pub(crate) use kept_worktrees::KeptDone;
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 pub(crate) use kept_worktrees::Landing as KeptLanding;
 
 use super::{Page, WorkspaceAction, WorkspaceMenuAction, state::Deletion};

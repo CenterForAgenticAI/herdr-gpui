@@ -16,6 +16,10 @@ use crate::{
 use gpui::{Entity, Subscription, Task, UniformListScrollHandle, prelude::*};
 use sheprd_client::Method;
 
+mod note;
+
+pub(in crate::menu) use note::{Note, write_note};
+
 /// Which part of the new worktree dialog is showing. A closed set: the tab
 /// strip, the key routing, and the panel geometry all match on it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -874,60 +878,6 @@ impl SheprdWindow {
             Some(pending) => self.submit_pick(&pending, cx),
             None => cx.notify(),
         }
-    }
-
-    /// Write the note naming what the created checkout is for. The daemon owns
-    /// the checkout, so its own reported path is used rather than a guess, and
-    /// the write itself is file I/O and never runs on the UI thread.
-    pub(super) fn write_worktree_note(
-        &mut self,
-        response: &serde_json::Value,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(checkout) = response["workspace"]["worktree"]["checkout_path"].as_str() {
-            self.write_worktree_note_at(checkout.to_owned(), cx);
-            return;
-        }
-        let item = self.menu.worktree.as_mut().and_then(|source| {
-            source
-                .lookup
-                .origin
-                .as_ref()
-                .and(source.pending.take())
-                .filter(|pending| matches!(pending, Pending::Item(_)))
-        });
-        if item.is_some() && self.pr_origin().is_some() {
-            self.local_error = Some(fl!("worktree-source-no-checkout-path"));
-        }
-    }
-
-    /// Writes the note naming the pull request or issue the dialog's pending
-    /// row is for into the new checkout at `checkout`, off the UI thread.
-    pub(super) fn write_worktree_note_at(&mut self, checkout: String, cx: &mut Context<Self>) {
-        let Some(host) = self.pr_origin() else {
-            return;
-        };
-        let Some(source) = &mut self.menu.worktree else {
-            return;
-        };
-        let (Some(Pending::Item(item)), Some(origin)) =
-            (source.pending.take(), source.lookup.origin.clone())
-        else {
-            return;
-        };
-        let write = cx
-            .background_executor()
-            .spawn(async move { repo_items::write_context(&host, &checkout, &item, &origin) });
-        cx.spawn(async move |this, cx| {
-            let result = write.await;
-            let _ = this.update(cx, |this, cx| {
-                if let Err(error) = result {
-                    this.local_error = Some(error.to_string());
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
     }
 }
 

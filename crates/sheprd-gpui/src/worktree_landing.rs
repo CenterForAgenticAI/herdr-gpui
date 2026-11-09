@@ -452,6 +452,10 @@ impl SheprdWindow {
                         crate::core_terminals::panes::Panes::single(terminal),
                         false,
                     );
+                    // Kept on this computer, whichever host is shown now.
+                    if !this.show_this_computer(cx) {
+                        return;
+                    }
                     this.open_kept_workspace(Some(&label), &checkout, location, window, cx);
                 }
                 Ok(sheprd_remote::work::Started::Herdr1 { .. }) => {}

@@ -244,7 +244,7 @@ pub(crate) struct SheprdWindow {
     pub(crate) integrations: crate::integrations::Integrations,
     /// Git work for a kept workspace's worktree dialog that finished off the
     /// UI thread, landed on the next tick, which has the window to land in.
-    pub(crate) kept_worktree_done: Option<menu::KeptDone>,
+    pub(crate) kept_worktree_done: Vec<menu::KeptDone>,
     /// What a key code types in the active layout, to restore a dropped Shift.
     pub(crate) key_layout: fn(u16) -> Option<prefix::KeyChars>,
     /// The key code and Shift of the key being handled, from AppKit's event.
