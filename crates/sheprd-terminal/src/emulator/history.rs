@@ -168,7 +168,8 @@ impl Emulator {
 
     /// Drops the history and the rows above the cursor's line, keeping that
     /// line and the input wrapped onto it at the top, as a terminal's clear
-    /// does. An alternate screen keeps no history and is left alone. The
+    /// does. Input longer than the screen keeps the history rows it starts
+    /// in. An alternate screen keeps no history and is left alone. The
     /// program is not told; its next output draws on the cleared screen.
     pub fn clear(&mut self) {
         if self.term.mode().contains(TermMode::ALT_SCREEN) {
@@ -176,18 +177,28 @@ impl Emulator {
         }
         let rows = self.term.screen_lines();
         let last = self.term.last_column();
+        let limit = super::config(self.size, self.scrollback_lines).scrolling_history;
         let grid = self.term.grid_mut();
+        let topmost = Line(-i32::try_from(grid.history_size()).unwrap_or(i32::MAX));
         let mut top = grid.cursor.point.line;
-        while top > Line(0) && grid[top - 1i32][last].flags.contains(Flags::WRAPLINE) {
+        while top > topmost && grid[top - 1i32][last].flags.contains(Flags::WRAPLINE) {
             top -= 1i32;
         }
-        let lines = usize::try_from(top.0).unwrap_or(0);
-        if lines > 0 {
-            let screen = Line(0)..Line(i32::try_from(rows).unwrap_or(i32::MAX));
-            grid.scroll_up(&screen, lines);
-            grid.cursor.point.line -= top.0;
+        if top.0 < 0 {
+            // Every row above the cursor is the input's: keep the history
+            // rows it starts in, dropping only the older ones, then let the
+            // history grow back to its limit.
+            grid.update_history(usize::try_from(-top.0).unwrap_or(0));
+            grid.update_history(limit);
+        } else {
+            let lines = usize::try_from(top.0).unwrap_or(0);
+            if lines > 0 {
+                let screen = Line(0)..Line(i32::try_from(rows).unwrap_or(i32::MAX));
+                grid.scroll_up(&screen, lines);
+                grid.cursor.point.line -= top.0;
+            }
+            grid.clear_history();
         }
-        grid.clear_history();
         grid.scroll_display(Scroll::Bottom);
         self.damage.full = true;
         self.revision = self.revision.wrapping_add(1);

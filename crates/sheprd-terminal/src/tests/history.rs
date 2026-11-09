@@ -220,6 +220,18 @@ fn clearing_keeps_the_cursor_line_and_its_wrapped_input() {
 }
 
 #[test]
+fn clearing_keeps_input_that_wrapped_into_the_history() {
+    let mut emulator = fed(5, 3, b"old\r\nold\r\nold\r\n$ abcdefghijklmnopq");
+    emulator.clear();
+    // The input's first row stays in the history; the older lines go.
+    assert_eq!(emulator.scroll_metrics().history, 1);
+    assert_eq!(emulator.text().trim_end(), "$ abcdefghijklmnopq");
+    // The history grows again as output scrolls.
+    emulator.feed(b"\r\nr\r\ns\r\nt");
+    assert_eq!(emulator.scroll_metrics().history, 4);
+}
+
+#[test]
 fn clearing_leaves_an_alternate_screen_alone() {
     let mut emulator = fed(10, 3, b"one\r\ntwo\r\nthree\r\nfour\x1b[?1049halt app");
     let before = emulator.frame();
