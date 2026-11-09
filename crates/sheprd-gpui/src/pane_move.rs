@@ -8,7 +8,7 @@
 use crate::i18n::fl;
 use crate::teleport::Host;
 use serde::Deserialize;
-use sheprd_client::protocol::{ClientShellSnapshot, ClientShellWorkspace};
+use sheprd_client::protocol::ClientShellSnapshot;
 use std::sync::atomic::AtomicBool;
 
 /// Where a pane goes. Every variant names its target explicitly, so the move
@@ -75,10 +75,13 @@ pub(crate) fn choices(snapshot: &ClientShellSnapshot, tab_id: &str) -> Vec<Choic
 /// The workspaces a tab in `workspace_id` can move to: a new workspace first,
 /// then a new tab in each other workspace, in sidebar order.
 pub(crate) fn workspace_choices(snapshot: &ClientShellSnapshot, workspace_id: &str) -> Vec<Choice> {
-    let order: Vec<&ClientShellWorkspace> = crate::sidebar::workspace_entries(&snapshot.workspaces)
-        .into_iter()
-        .map(|(index, _)| &snapshot.workspaces[index])
-        .collect();
+    // Herdr 1 moves its panes among its own workspaces only.
+    let session = crate::session_model::of_snapshot(snapshot);
+    let order: Vec<&sheprd_session::Workspace> =
+        crate::sidebar::workspace_entries(&session.workspaces)
+            .into_iter()
+            .map(|(index, _)| &session.workspaces[index])
+            .collect();
     std::iter::once(Choice {
         destination: Destination::NewWorkspace,
         workspace: None,
@@ -87,10 +90,10 @@ pub(crate) fn workspace_choices(snapshot: &ClientShellSnapshot, workspace_id: &s
     .chain(
         order
             .into_iter()
-            .filter(|workspace| workspace.workspace_id != workspace_id)
+            .filter(|workspace| workspace.id != workspace_id)
             .map(|workspace| Choice {
                 destination: Destination::NewTab {
-                    workspace_id: workspace.workspace_id.clone(),
+                    workspace_id: workspace.id.clone(),
                 },
                 workspace: None,
                 place: workspace.label.clone(),

@@ -571,6 +571,13 @@ impl LiveState {
     }
 
     /// Track activation without treating receipt or focus gain as presentation.
+    /// The session of the latest metadata, a snapshot still waiting for its
+    /// cells included, with that snapshot's boot.
+    pub(crate) fn latest_session(&self) -> Option<(&str, Arc<sheprd_session::Session>)> {
+        let snapshot = self.latest_snapshot()?;
+        Some((snapshot.boot_id.as_str(), self.session.get(snapshot)))
+    }
+
     /// The session Herdr 1's snapshot describes, if one landed.
     pub(crate) fn session(&self) -> Option<Arc<sheprd_session::Session>> {
         self.snapshot

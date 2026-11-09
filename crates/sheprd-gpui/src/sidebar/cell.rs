@@ -20,7 +20,8 @@ use crate::{
     icons::AgentIcon,
 };
 use gpui::{App, ClickEvent, Div, ElementId, ParentElement, Styled, Window};
-use sheprd_client::protocol::{AgentStatus, ClientShellWorkspace};
+use sheprd_client::protocol::AgentStatus;
+use sheprd_session::Workspace;
 use std::borrow::Cow;
 
 /// Read-only inputs every row of one render shares.
@@ -66,7 +67,7 @@ pub(super) struct Fold {
 }
 
 pub(super) struct WorkspaceRow<'a> {
-    pub(super) workspace: &'a ClientShellWorkspace,
+    pub(super) workspace: &'a Workspace,
     /// What the row is called: a child's branch unless the user renamed it.
     pub(super) label: &'a str,
     pub(super) tree: RowTree,
@@ -96,7 +97,7 @@ impl<'a> WorkspaceRow<'a> {
 
     /// Commits to push and pull against the branch's upstream, if any.
     pub(super) fn upstream(&self) -> Option<Upstream> {
-        Upstream::new(self.workspace.git_ahead_behind)
+        Upstream::new(self.workspace.ahead_behind)
     }
 
     pub(super) fn status(&self) -> AgentStatus {

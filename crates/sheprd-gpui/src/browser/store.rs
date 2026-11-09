@@ -6,7 +6,12 @@ use crate::i18n::fl;
 use crate::{reorder::Beside, state_file};
 use gpui::{App, Global};
 use serde::{Deserialize, Serialize};
+use sheprd_session::SavedWorkspace;
 use std::path::PathBuf;
+
+mod kept;
+
+pub(crate) use kept::is_kept_id;
 
 const MAX_TABS: usize = 256;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
@@ -196,11 +201,23 @@ impl Tab {
 #[derive(Serialize, Deserialize)]
 struct Saved {
     tabs: Vec<Tab>,
+    /// The workspaces the app keeps for Herdr 2 terminals; files from before
+    /// them have none.
+    #[serde(
+        default,
+        deserialize_with = "sheprd_session::saved::readable_workspaces",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    workspaces: Vec<SavedWorkspace>,
 }
 
 #[derive(Default)]
 pub(crate) struct Store {
     tabs: Vec<Tab>,
+    /// Herdr 2 workspaces, in the user's order (`kept.rs`).
+    pub(super) workspaces: Vec<SavedWorkspace>,
+    /// The last kept workspace number handed out this run.
+    last_kept: u64,
     next: u64,
     pub(super) closed: super::closed::ClosedTabs,
     writer: Option<state_file::Writer<Saved>>,
@@ -220,12 +237,15 @@ fn clean_title(title: &str) -> String {
         .to_owned()
 }
 
-fn parse(bytes: &[u8]) -> crate::Result<Vec<Tab>> {
-    let saved: Saved = serde_json::from_slice(bytes)?;
+fn parse(bytes: &[u8]) -> crate::Result<Saved> {
+    let mut saved: Saved = serde_json::from_slice(bytes)?;
     if saved.tabs.len() > MAX_TABS || !saved.tabs.iter().all(Tab::valid) {
         return Err(crate::Error::InvalidBrowserTabs);
     }
-    Ok(saved.tabs)
+    // A damaged workspace costs only itself: its tabs stay with their id.
+    saved.workspaces.retain(SavedWorkspace::valid);
+    saved.workspaces.truncate(kept::MAX_WORKSPACES);
+    Ok(saved)
 }
 
 impl Store {
@@ -237,18 +257,26 @@ impl Store {
     /// damaged file starts with no tabs.
     pub(crate) fn load() -> Self {
         let path = Self::path();
-        let tabs = path
+        let saved = path
             .as_deref()
             .map(|path| {
-                state_file::read(path, MAX_FILE_BYTES)
-                    .and_then(|bytes| bytes.as_deref().map_or(Ok(Vec::new()), parse))
+                state_file::read(path, MAX_FILE_BYTES).and_then(|bytes| {
+                    bytes.as_deref().map_or(
+                        Ok(Saved {
+                            tabs: Vec::new(),
+                            workspaces: Vec::new(),
+                        }),
+                        parse,
+                    )
+                })
             })
             .transpose()
             .unwrap_or_else(|error| {
                 tracing::warn!(%error, "Cannot restore browser tabs");
                 None
-            })
-            .unwrap_or_default();
+            });
+        let (tabs, workspaces) =
+            saved.map_or_else(Default::default, |saved| (saved.tabs, saved.workspaces));
         let writer = path.and_then(
             |path| match state_file::Writer::start("browser-tabs", path) {
                 Ok(writer) => Some(writer),
@@ -258,7 +286,9 @@ impl Store {
                 }
             },
         );
-        Self::with_tabs(tabs, writer)
+        let mut store = Self::with_tabs(tabs, writer);
+        store.workspaces = workspaces;
+        store
     }
 
     fn with_tabs(mut tabs: Vec<Tab>, writer: Option<state_file::Writer<Saved>>) -> Self {
@@ -268,6 +298,8 @@ impl Store {
         let next = tabs.iter().map(|tab| tab.id.0 + 1).max().unwrap_or(0);
         Self {
             tabs,
+            workspaces: Vec::new(),
+            last_kept: 0,
             next,
             closed: Default::default(),
             writer,
@@ -306,6 +338,7 @@ impl Store {
         if let Some(writer) = &self.writer {
             writer.save(Saved {
                 tabs: self.tabs.clone(),
+                workspaces: self.workspaces.clone(),
             });
         }
     }

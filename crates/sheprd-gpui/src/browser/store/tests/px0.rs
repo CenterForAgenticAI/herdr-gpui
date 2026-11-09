@@ -35,9 +35,10 @@ fn px0_is_a_separate_singleton_per_daemon_and_workspace() {
     assert_eq!(store.reopen_page(closed), Some(second));
     let saved = serde_json::to_vec(&Saved {
         tabs: store.tabs.clone(),
+        workspaces: Vec::new(),
     })
     .unwrap();
-    let restored = Store::with_tabs(parse(&saved).unwrap(), None);
+    let restored = Store::with_tabs(parse(&saved).unwrap().tabs, None);
     let tab = restored.px0_tab(&local, "w1").unwrap();
     assert!(tab.place.is_editor());
     assert!(tab.origin.is_none());

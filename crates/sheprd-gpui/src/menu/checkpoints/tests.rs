@@ -134,3 +134,40 @@ mod dialog {
         });
     }
 }
+
+#[test]
+fn a_herdr_2_agent_mid_turn_warns_a_restore_too() {
+    use crate::session_model::Sessions;
+    use sheprd_client::protocol::AgentStatus;
+    use sheprd_session::{Agent, Session};
+    let agent = |status| Agent {
+        focused: false,
+        identity: None,
+        name: "claude".into(),
+        pane: "t1".into(),
+        status,
+        tab: "1".into(),
+        workspace: "space-1".into(),
+    };
+    let sessions = |status| Sessions {
+        core: Some(std::sync::Arc::new(Session {
+            agents: vec![agent(status)],
+            ..Session::default()
+        })),
+        core_answers: true,
+        herdr_1: None,
+    };
+    assert!(super::agent_working(
+        &sessions(AgentStatus::Working),
+        "space-1"
+    ));
+    assert!(super::agent_working(
+        &sessions(AgentStatus::Blocked),
+        "space-1"
+    ));
+    assert!(!super::agent_working(
+        &sessions(AgentStatus::Idle),
+        "space-1"
+    ));
+    assert!(!super::agent_working(&sessions(AgentStatus::Working), "w0"));
+}
