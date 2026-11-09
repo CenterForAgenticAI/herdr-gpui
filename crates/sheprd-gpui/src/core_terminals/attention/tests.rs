@@ -278,3 +278,28 @@ fn a_shell_hidden_behind_a_page_still_sounds_when_it_finishes() {
     );
     assert!(heard.take_due(after(start, 1_000), DELAY).is_empty());
 }
+
+#[test]
+fn banners_wait_out_their_own_delay_apart_from_the_sound() {
+    let start = Instant::now();
+    let mut heard = heard_change(start, AgentStatus::Working, AgentStatus::Blocked);
+    // The sound plays after a second; the banner waits a minute.
+    let banner = Duration::from_secs(60);
+    assert_eq!(
+        names(&heard.take_due(after(start, 1_000), DELAY)),
+        [("t1", News::NeedsYou)]
+    );
+    assert!(heard.take_posts(after(start, 1_000), banner).is_empty());
+    assert_eq!(
+        names(&heard.take_posts(after(start, 60_000), banner)),
+        [("t1", News::NeedsYou)]
+    );
+    // A change answered before the banner's delay posts nothing.
+    let mut heard = heard_change(start, AgentStatus::Working, AgentStatus::Blocked);
+    heard.hear(
+        after(start, 30_000),
+        [(&id("t1"), AgentStatus::Working, None)],
+        |_| true,
+    );
+    assert!(heard.take_posts(after(start, 60_000), banner).is_empty());
+}
