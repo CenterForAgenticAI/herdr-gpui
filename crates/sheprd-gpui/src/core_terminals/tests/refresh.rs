@@ -37,7 +37,7 @@ fn a_focus_change_keeps_a_split_another_window_saved() {
     here.active = id("t2");
     here.unsaved = true;
     let there = Location::core_terminal(panes(&["t1", "t2", "t3"]), false);
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert_eq!(here.panes, panes(&["t1", "t2", "t3"]));
     assert_eq!(here.active, id("t2"), "this window's focus still stands");
     assert!(here.unsaved);
@@ -58,7 +58,7 @@ fn a_pane_gone_elsewhere_takes_the_focus_and_zoom_saved_there() {
     if let Location::CoreTerminal { active, .. } = &mut there {
         *active = Some(id("t3"));
     }
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert_eq!(here.active, id("t3"));
     assert!(!here.zoom.is_open(), "the zoomed pane went");
 }
@@ -70,7 +70,7 @@ fn focus_stays_where_this_windows_keyboard_is() {
     if let Location::CoreTerminal { active, .. } = &mut there {
         *active = Some(id("t2"));
     }
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert_eq!(here.active, id("t1"));
     assert!(!here.unsaved);
 }
@@ -83,7 +83,7 @@ fn a_name_another_window_gave_is_read() {
         *name = Some("build".into());
         names.insert(id("t2"), "tests".into());
     }
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert_eq!(here.name.as_deref(), Some("build"));
     assert_eq!(here.names.get(&id("t2")).map(String::as_str), Some("tests"));
 }
@@ -100,7 +100,7 @@ fn a_split_placed_here_while_another_window_saved_stays() {
     if let Location::CoreTerminal { active, .. } = &mut there {
         *active = Some(id("t1"));
     }
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert_eq!(here.panes, panes(&["t1", "t2", "t3"]));
     assert_eq!(here.active, id("t3"));
     assert!(here.unsaved, "the split still saves");
@@ -113,7 +113,7 @@ fn layouts_both_windows_changed_merge() {
     here.unsaved = true;
     // The other window closed t2 and opened t4.
     let there = Location::core_terminal(panes(&["t1", "t4"]), false);
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     let mut kept: Vec<String> = here
         .panes
         .terminals()
@@ -131,7 +131,7 @@ fn a_zoom_saved_on_another_pane_never_hides_the_one_in_use() {
     if let Location::CoreTerminal { zoomed, .. } = &mut there {
         *zoomed = Some(id("t2"));
     }
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert_eq!(here.active, id("t1"));
     assert!(!here.zoom.is_open(), "t1 in use is not hidden behind t2");
     // On the pane in use, the other window's zoom is taken.
@@ -139,7 +139,7 @@ fn a_zoom_saved_on_another_pane_never_hides_the_one_in_use() {
     if let Location::CoreTerminal { zoomed, .. } = &mut there {
         *zoomed = Some(id("t1"));
     }
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert!(here.zoom.is_open());
     assert_eq!(here.zoomed, Some(id("t1")));
 }
@@ -153,6 +153,55 @@ fn a_name_given_here_stays_when_another_window_saves() {
     if let Location::CoreTerminal { active, .. } = &mut there {
         *active = Some(id("t2"));
     }
-    here.refresh(&there);
+    assert!(here.refresh(&there).is_empty());
     assert_eq!(here.name.as_deref(), Some("build"));
+}
+
+#[test]
+fn panes_both_windows_closed_leave_the_keyboard_on_one_still_there() {
+    let mut here = shown(&["a", "b", "c"]);
+    // This window closes b and moves to a.
+    here.panes.remove(&id("b"));
+    here.active = id("a");
+    here.unsaved = true;
+    // Another closes a and saves with b in use.
+    let mut there = Location::core_terminal(panes(&["b", "c"]), false);
+    if let Location::CoreTerminal { active, .. } = &mut there {
+        *active = Some(id("b"));
+    }
+    assert!(here.refresh(&there).is_empty());
+    assert_eq!(here.panes, Panes::single(id("c")));
+    assert_eq!(here.active, id("c"));
+}
+
+#[test]
+fn a_pane_a_full_tab_cannot_take_comes_back_for_a_tab_of_its_own() {
+    let names: Vec<String> = (0..15).map(|index| format!("p{index}")).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut here = shown(&names);
+    // Both windows split the fifteen-pane tab at once.
+    here.panes.split(&id("p14"), Axis::Row, id("mine")).unwrap();
+    here.unsaved = true;
+    let mut theirs = panes(&names);
+    theirs.split(&id("p14"), Axis::Row, id("theirs")).unwrap();
+    let left = here.refresh(&Location::core_terminal(theirs, false));
+    assert_eq!(left, [id("theirs")]);
+    assert!(here.panes.contains(&id("mine")));
+    assert_eq!(here.panes.count(), 16);
+}
+
+#[test]
+fn closing_the_pane_in_use_elsewhere_leaves_the_keyboard_on_one_still_there() {
+    let mut here = shown(&["A", "B", "C"]);
+    // This window closes C and keeps A in use.
+    here.panes.remove(&id("C"));
+    here.unsaved = true;
+    // Another closes A and saves with C in use.
+    let mut there = Location::core_terminal(panes(&["B", "C"]), false);
+    if let Location::CoreTerminal { active, .. } = &mut there {
+        *active = Some(id("C"));
+    }
+    assert!(here.refresh(&there).is_empty());
+    assert_eq!(here.panes, Panes::single(id("B")));
+    assert_eq!(here.active, id("B"));
 }
