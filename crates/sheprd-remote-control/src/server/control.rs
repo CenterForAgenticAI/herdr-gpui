@@ -84,12 +84,15 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             return Response::Status(status(state));
         }
         Request::ChangeAsks => {
-            return Response::ChangeAsks {
-                asks: state.changes.take(control::ASK_WAIT),
-            };
+            let (asks, layout) = state.changes.take(control::ASK_WAIT);
+            return Response::ChangeAsks { asks, layout };
         }
         Request::ChangeAnswer { id, answer } => {
             state.changes.answer(id, answer);
+            return Response::Done;
+        }
+        Request::LayoutAnswer { id, answer } => {
+            state.changes.answer_layout(id, answer);
             return Response::Done;
         }
         Request::Pair => {

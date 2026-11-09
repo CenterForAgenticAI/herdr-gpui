@@ -14,9 +14,11 @@ base64.workspace                 = true
 chrono.workspace                 = true
 getrandom.workspace              = true
 httparse                         = { optional = true, workspace = true }
+sheprd-backend.workspace          = true
 sheprd-client.workspace           = true
 sheprd-control-protocol.workspace = true
 sheprd-credentials.workspace      = true
+sheprd-session.workspace          = true
 percent-encoding.workspace       = true
 rustls                           = { optional = true, workspace = true }
 secrecy.workspace                = true

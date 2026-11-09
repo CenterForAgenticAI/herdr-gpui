@@ -105,3 +105,80 @@ fn the_phone_hears_of_commits_without_a_pull_request_until_one_opens(cx: &mut Te
         assert_eq!(sent.entries.len(), 1);
     });
 }
+
+#[gpui::test]
+fn a_workspace_kept_for_herdr_2_gets_its_badge_and_answers_under_the_daemons_boot(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    let mut status = super::super::tests::status(0);
+    // No Herdr 1 answers: the daemon shows this computer's core.
+    status.boot_id = "core:abc".into();
+    cx.update(|_, cx| {
+        cx.set_global(Supervisor {
+            health: Health::Running(status),
+            config: RemoteConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Supervisor::default()
+        })
+    });
+    view.update(cx, |view, cx| {
+        let template = view.live.snapshot.as_ref().unwrap().workspaces[4].clone();
+        let tree = template.worktree.clone().unwrap();
+        view.live.snapshot = None;
+        view.live.missing_installation = true;
+        let kept = sheprd_session::Workspace {
+            ahead_behind: None,
+            branch: template.branch.clone(),
+            cwd: template.new_workspace_cwd.clone(),
+            custom_label: false,
+            id: "space-1".into(),
+            keeper: sheprd_session::Keeper::App,
+            label: "api".into(),
+            status: sheprd_backend::AgentStatus::Unknown,
+            tabs: Vec::new(),
+            tokens: Vec::new(),
+            worktree: Some(sheprd_session::Worktree {
+                key: tree.key.clone(),
+                label: tree.label.clone(),
+                linked: tree.is_linked_worktree,
+            }),
+        };
+        let shown = shell_workspace(&kept);
+        let scope = crate::browser::scope(&view.endpoints[0]);
+        view.set_core_session(
+            scope,
+            sheprd_session::Session {
+                agents: Vec::new(),
+                focused: None,
+                workspaces: vec![kept],
+            },
+        );
+        let input = crate::pull_request::workspace_input(&shown, &Origin::Local).unwrap();
+        let mut pr = crate::pull_request::fixture().unwrap();
+        pr.number = 851;
+        view.seed_pr(input, pr, Instant::now());
+        view.publish_remote_pull_requests(cx);
+        let supervisor = cx.global::<Supervisor>();
+        let sent = supervisor.pull_requests.as_ref().unwrap();
+        assert_eq!(sent.boot_id, "core:abc");
+        let badge = sent
+            .entries
+            .iter()
+            .find(|entry| entry.workspace_id == "space-1")
+            .unwrap();
+        assert_eq!(badge.number, 851);
+        assert_eq!(badge.cwd, template.new_workspace_cwd);
+        // The phone may ask about its changes and checks too.
+        assert_eq!(supervisor.changes.sources.boot_id, "core:abc");
+        assert!(
+            supervisor
+                .changes
+                .sources
+                .workspaces
+                .contains_key("space-1")
+        );
+    });
+}
