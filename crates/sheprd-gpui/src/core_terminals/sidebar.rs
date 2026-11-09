@@ -69,7 +69,14 @@ impl SheprdWindow {
         let Ok(terminal) = TerminalId::new(terminal) else {
             return;
         };
-        self.show_core_pane(TabId::from(tab), &terminal, window, cx);
+        let tab = TabId::from(tab);
+        // A tab of a workspace not shown since launch has no state until a
+        // sync restores it; without it the pane asked for would not be the
+        // one put in use.
+        if !self.core_terminals.tabs.contains_key(&tab) {
+            self.sync_core_views(cx);
+        }
+        self.show_core_pane(tab, &terminal, window, cx);
     }
 
     /// Shows `tab` with `terminal` as its pane in use, unzoomed if another
@@ -118,7 +125,6 @@ impl SheprdWindow {
         let tab_id = TabId::from(number);
         if !self.core_terminals.tabs.contains_key(&tab_id) {
             self.show_core_agent(endpoint, workspace, tab, terminal, window, cx);
-            self.sync_core_views(cx);
         }
         self.open_core_menu(
             super::menu::Target::Pane {

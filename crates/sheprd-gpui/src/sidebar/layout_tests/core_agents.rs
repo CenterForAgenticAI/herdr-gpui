@@ -109,3 +109,55 @@ fn a_herdr_2_agent_is_listed_and_stepped_to_with_herdr_1_agents(cx: &mut gpui::T
         assert_eq!(view.kept_in_front(), Some(workspace.as_str()));
     });
 }
+
+#[gpui::test]
+fn an_agent_in_a_tab_not_restored_yet_gets_its_own_pane(cx: &mut gpui::TestAppContext) {
+    let (fixture, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| fixture_window(window, cx));
+        SidebarFixture(view)
+    });
+    let view = cx.update(|_, cx| fixture.read(cx).0.clone());
+    let (t1, t2) = (
+        TerminalId::new("t1").unwrap(),
+        TerminalId::new("t2").unwrap(),
+    );
+    let mut panes = Panes::single(t1.clone());
+    panes
+        .split(&t1, crate::core_terminals::panes::Axis::Row, t2.clone())
+        .unwrap();
+    let location = Location::core_terminal(panes, false);
+    let workspace = cx
+        .update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.open_kept_workspace(None, Path::new("/src/api"), location, window, cx)
+            })
+        })
+        .unwrap();
+    let tab = view.read_with(cx, |view, cx| {
+        let scope = crate::browser::scope(&view.endpoints[0]);
+        cx.global::<Store>()
+            .in_workspace(&scope, &workspace)
+            .next()
+            .unwrap()
+            .id
+    });
+    let endpoint = view.read_with(cx, |view, _| view.endpoints[0].id.clone());
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            // As at launch: nothing of the tab restored yet.
+            view.forget_core_tabs_for_test();
+            view.show_core_agent(
+                &endpoint,
+                &workspace,
+                &u64::from(tab).to_string(),
+                "t2",
+                window,
+                cx,
+            );
+        })
+    });
+    cx.update(|_, cx| {
+        let shown = view.read(cx).shown_core_pane(cx);
+        assert_eq!(shown, Some((tab, t2)));
+    });
+}

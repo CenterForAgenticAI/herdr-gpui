@@ -202,6 +202,14 @@ impl SheprdWindow {
             .map(|(_, terminal)| terminal.clone())
     }
 
+    /// Drops what the window restored of every tab, as at launch before a
+    /// workspace is shown.
+    #[cfg(test)]
+    pub(crate) fn forget_core_tabs_for_test(&mut self) {
+        self.core_terminals.tabs.clear();
+        self.core_terminals.views.clear();
+    }
+
     /// This computer's Herdr 2 agents as the sidebar lists them, while the
     /// host of its herdr-core session is the one at `index`.
     pub(crate) fn listed_core_agents(
