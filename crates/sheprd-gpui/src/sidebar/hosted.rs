@@ -3,35 +3,24 @@
 //! back. It reads the same state the regions do, and goes through the same
 //! commands, so a host's row behaves as the window's own.
 
+mod actions;
+mod devices;
+
+pub use actions::{Action, Drag, Menu};
+
 use super::{
-    ActivityPanel,
-    workspaces::{workspace_badge, workspace_entries, workspace_label},
+    ActivityPanel, SidebarMetrics,
+    agents::{agent_name, agent_place, pane_name, state_label, status_style, status_text},
+    layout::{HeaderCase, Highlight},
 };
-use crate::{
-    controls::Command, navigation::NavigationTarget, system_load::Sample, window::SheprdWindow,
-};
-use gpui::{App, Context, Window};
+use crate::{config::Theme, preferences::AgentSort, system_load::Sample, window::SheprdWindow};
+use gpui::App;
 use serde_json::{Value, json};
-use sheprd_client::protocol::{
-    AgentStatus, ClientShellAgent, ClientShellSnapshot, ClientShellWorkspace,
-};
+use sheprd_client::protocol::{AgentStatus, ClientShellAgent, ClientShellSnapshot};
 use std::sync::Arc;
 
 /// Backgrounds below this relative luminance, about mid gray, take light text.
 const DARK_LUMINANCE: f32 = 0.2;
-
-/// What a host's layout asks of the window.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Action {
-    /// Runs a command by its name in the catalog, as a shortcut does.
-    Command(String),
-    /// Focuses the pane with this id.
-    FocusPane(String),
-    /// Focuses the workspace with this id.
-    FocusWorkspace(String),
-    /// Shows the activity panel with this id, as its button does.
-    Panel(String),
-}
 
 /// The window's state for a host's layout, in the parts that change apart, so
 /// a host can run only what reads the part that changed. Plain data: it holds
@@ -78,7 +67,11 @@ pub struct Palette {
 /// noticing, such as the machine's load, is not in it.
 #[derive(Clone)]
 pub struct Stamp {
+    agent_sort: AgentSort,
     connected: bool,
+    /// Every device's snapshot and folds; see `hosted_devices_stamp`.
+    devices: u64,
+    metrics: SidebarMetrics,
     panel: ActivityPanel,
     section: bool,
     sidebar_visible: bool,
@@ -95,7 +88,10 @@ impl PartialEq for Stamp {
             _ => false,
         };
         same_snapshot
+            && self.agent_sort == other.agent_sort
             && self.connected == other.connected
+            && self.devices == other.devices
+            && self.metrics == other.metrics
             && self.panel == other.panel
             && self.section == other.section
             && self.sidebar_visible == other.sidebar_visible
@@ -126,13 +122,66 @@ fn panel_id(panel: ActivityPanel) -> &'static str {
     }
 }
 
-fn agent_state(agent: &ClientShellAgent) -> Value {
+/// An agent as the window's agents list labels it: the place it runs (its
+/// workspace, and its tab when that earns a place), its pane's name, and the
+/// word its integration chose for its status.
+fn agent_state(
+    agent: &ClientShellAgent,
+    snapshot: &ClientShellSnapshot,
+    show_state: bool,
+    (endpoint, host): (&str, Option<&str>),
+) -> Value {
+    let name = agent_name(agent);
+    let place = agent_place(agent, snapshot);
+    let status = status_text(agent.agent_status);
     json!({
-        "name": agent.name.as_deref().or(agent.display_agent.as_deref()).or(agent.agent.as_deref()),
+        "endpoint": endpoint,
+        "focused": agent.focused,
+        "host": host,
+        "kind": agent.agent,
+        "name": name,
         "pane": agent.pane_id,
+        "pane_name": pane_name(agent, snapshot, name),
+        "state": show_state.then(|| state_label(agent, &status)),
         "status": status_name(agent.agent_status),
+        "tab": place.and_then(|(_, tab)| tab),
         "title": agent.title,
         "workspace": agent.workspace_id,
+        "workspace_label": place.map(|(workspace, _)| workspace),
+    })
+}
+
+/// The configured layout's name and the spacing it and the config's
+/// overrides select, as the window's own rows read them.
+fn layout_state(name: &str, metrics: &SidebarMetrics) -> Value {
+    json!({
+        "child_details": metrics.child_details,
+        "child_indent": metrics.child_indent,
+        "gap": metrics.gap,
+        "name": name,
+        "outline": metrics.highlight == Highlight::Outline,
+        "padding": metrics.padding,
+        "pr_counts": metrics.pr_counts,
+        "radius": metrics.radius,
+        "row_padding": metrics.row_padding,
+        "inset": metrics.inset,
+        "spacing": metrics.spacing,
+        "style_padding": metrics.style_padding,
+        "title_case": metrics.header_case == HeaderCase::Title,
+        "tree_lines": metrics.tree_lines,
+        "workspace_details": metrics.workspace_details,
+    })
+}
+
+/// Each status's color, as the window's status dots draw it.
+fn status_colors(theme: &Theme) -> Value {
+    let color = |status| hex(status_style(status, theme).2);
+    json!({
+        "blocked": color(AgentStatus::Blocked),
+        "done": color(AgentStatus::Done),
+        "idle": color(AgentStatus::Idle),
+        "unknown": color(AgentStatus::Unknown),
+        "working": color(AgentStatus::Working),
     })
 }
 
@@ -146,6 +195,16 @@ fn is_dark(color: u32) -> bool {
     crate::contrast::luminance(color) < DARK_LUMINANCE
 }
 
+/// The build's worktree, when it was built from one, as the window's foot
+/// names it: its branch and pull request.
+fn build_state() -> Value {
+    json!({
+        "branch": env!("HERDR_BUILD_BRANCH"),
+        "pr": Some(env!("HERDR_BUILD_PR")).filter(|pr| !pr.is_empty()),
+        "worktree": env!("HERDR_BUILD_WORKTREE") == "1",
+    })
+}
+
 fn load_state(sample: Option<&Sample>) -> Value {
     json!({
         "cpu": sample.and_then(|sample| sample.cpu),
@@ -154,48 +213,15 @@ fn load_state(sample: Option<&Sample>) -> Value {
 }
 
 impl SheprdWindow {
-    fn hosted_workspace(&self, workspace: &ClientShellWorkspace, child: bool) -> Value {
-        let endpoint = self.endpoints.get(self.selected_endpoint);
-        let pr_view = self.endpoint_pr_view(self.selected_endpoint);
-        let badge = endpoint.and_then(|endpoint| {
-            workspace_badge(
-                workspace,
-                pr_view.as_ref().map(|view| (&self.menu.pr_cache, view)),
-                (Some(&self.git), self.config.sidebar_style.change_counts),
-                (&self.teleport_marks, &endpoint.id),
-                (None, false),
-                &self.theme,
-            )
-        });
-        let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
-        let tree = workspace.worktree.as_ref();
-        let counts = badge.as_ref().and_then(|badge| badge.counts.as_ref());
-        json!({
-            "added": counts.map(|counts| counts.additions.clone()),
-            "agent_status": status_name(workspace.agent_status),
-            "ahead": ahead,
-            "behind": behind,
-            "branch": workspace.branch,
-            "child": child,
-            "dirty": badge.as_ref().is_some_and(|badge| badge.dirty),
-            "focused": workspace.focused,
-            "id": workspace.workspace_id,
-            "label": workspace_label(workspace, child),
-            "linked": tree.is_some_and(|tree| tree.is_linked_worktree),
-            "number": workspace.number,
-            "pr": badge.as_ref().and_then(|badge| badge.pr.as_ref()).map(|pr| pr.number.clone()),
-            "removed": counts.map(|counts| counts.deletions.clone()),
-            "repo": tree.map(|tree| tree.label.clone()),
-            "repo_key": tree.map(|tree| tree.key.clone()),
-        })
-    }
-
     /// Whether a host's state may have changed; see [`Stamp`].
     pub(crate) fn hosted_stamp(&self) -> Stamp {
         Stamp {
+            agent_sort: self.agent_sort,
             connected: self.live.status.is_connected(),
+            devices: self.hosted_devices_stamp(),
             panel: self.activity_panel(),
             section: self.activity_section().is_some(),
+            metrics: self.hosted_metrics(),
             sidebar_visible: self.sidebar_visible,
             snapshot: self.live.snapshot.clone(),
             status_bar_visible: self.status_bar_visible,
@@ -203,10 +229,42 @@ impl SheprdWindow {
         }
     }
 
+    /// The configured layout's spacing, with the config's overrides and
+    /// worktree guides, as the window's own sidebar lays out.
+    fn hosted_metrics(&self) -> SidebarMetrics {
+        SidebarMetrics::for_mode(self.config.layout.mode)
+            .with(&self.config.sidebar_style.overrides)
+            .with_guides(self.config.worktrees.sidebar)
+    }
+
+    /// Every listed device's agents in the order the agents list paints them,
+    /// each with its device, and the device's name when several are listed.
+    fn hosted_agents(&self) -> Vec<Value> {
+        let multi = self.endpoints.len() > 1;
+        self.panel_agents()
+            .into_iter()
+            .filter_map(|(index, agent)| {
+                let endpoint = self.endpoints.get(index)?;
+                let live = if index == self.selected_endpoint {
+                    &self.live
+                } else {
+                    &endpoint.live
+                };
+                let snapshot = live.snapshot.as_deref()?;
+                let shows = self
+                    .config
+                    .sidebar_layout
+                    .agents
+                    .shows_status_text(agent.agent.as_deref());
+                let host = multi.then_some(endpoint.label.as_str());
+                Some(agent_state(agent, snapshot, shows, (&endpoint.id, host)))
+            })
+            .collect()
+    }
+
     /// The window's state for a host's layout.
     pub(crate) fn hosted_state(&self, cx: &App) -> HostedState {
         let counts = self.activity_counts(cx);
-        let snapshot = self.live.snapshot.as_deref();
         let panels: Vec<Value> = ActivityPanel::ALL
             .iter()
             .copied()
@@ -214,6 +272,9 @@ impl SheprdWindow {
             .map(|panel| {
                 json!({
                     "count": counts.of(panel).filter(|count| *count > 0),
+                    // Drawn in the accent while it holds something unseen,
+                    // as the window's own bubble is.
+                    "unseen": self.activity.unseen(panel, counts.latest(panel)),
                     "id": panel_id(panel),
                     "label": super::activity::label(panel).to_string(),
                 })
@@ -247,9 +308,12 @@ impl SheprdWindow {
                 warning: theme.palette[3],
             },
             main: json!({
-                "agents": snapshot.map_or(Vec::new(), |snapshot| {
-                    snapshot.agents.iter().map(agent_state).collect()
-                }),
+                "agents": self.hosted_agents(),
+                "agent_sort": match self.agent_sort {
+                    AgentSort::Grouped => "grouped",
+                    AgentSort::Priority => "priority",
+                },
+                "layout": layout_state(self.config.layout.mode.name(), &self.hosted_metrics()),
                 "connected": self.live.status.is_connected(),
                 "panel": panel_id(self.activity_panel()),
                 "panels": panels,
@@ -257,62 +321,32 @@ impl SheprdWindow {
                 "sidebar_visible": self.sidebar_visible,
                 "status": self.live.status_text(self.local_error.as_deref()),
                 "status_bar_visible": self.status_bar_visible,
-                "workspaces": snapshot.map_or(Vec::new(), |snapshot| {
-                    workspace_entries(&snapshot.workspaces)
-                        .into_iter()
-                        .map(|(index, child)| self.hosted_workspace(&snapshot.workspaces[index], child))
-                        .collect()
-                }),
+            "workspaces": self.hosted_workspaces(cx),
+                "devices": self.hosted_devices(cx),
+                "multi": self.endpoints.len() > 1,
+                "build": build_state(),
             }),
             theme: json!({
                 "accent": hex(self.theme.primary()),
                 "active": hex(self.theme.active),
+                "added": hex(self.theme.ink(self.theme.palette[2])),
                 "background": hex(self.theme.background),
                 "danger": hex(self.theme.palette[1]),
+                // The uncommitted-work chip's hue, and its pencil's.
+                "dirty": hex(self.theme.palette[3]),
+                "dirty_ink": hex(self.theme.ink(self.theme.palette[3])),
                 "foreground": hex(self.theme.foreground),
                 "muted": hex(self.theme.muted),
+                "on_accent": hex(self.theme.text_on(self.theme.primary())),
+                "on_muted": hex(self.theme.text_on(self.theme.muted)),
+                "removed": hex(self.theme.ink(self.theme.palette[1])),
                 "sidebar": hex(self.theme.sidebar_background()),
                 "subtext": hex(self.theme.subtext()),
                 "success": hex(self.theme.palette[2]),
                 "surface": hex(self.theme.surface),
+                "status": status_colors(&self.theme),
                 "warning": hex(self.theme.palette[3]),
             }),
-        }
-    }
-
-    /// Does what a host's layout asked. An id no longer shown is ignored: it
-    /// came from a state a moment old.
-    pub(crate) fn hosted_action(
-        &mut self,
-        action: Action,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match action {
-            Action::Command(name) => {
-                let found = sheprd_commands::COMMANDS
-                    .iter()
-                    .find(|info| info.name == name);
-                if let Some(info) = found {
-                    let command: Command = info.command;
-                    self.command(command, window, cx);
-                }
-            }
-            Action::FocusPane(id) => {
-                self.navigate(NavigationTarget::Pane(&id), cx);
-            }
-            Action::FocusWorkspace(id) => {
-                self.navigate(NavigationTarget::Workspace(&id), cx);
-            }
-            Action::Panel(id) => {
-                let panel = ActivityPanel::ALL
-                    .iter()
-                    .copied()
-                    .find(|panel| panel_id(*panel) == id);
-                if let Some(panel) = panel {
-                    self.select_activity_panel(panel, window, cx);
-                }
-            }
         }
     }
 }

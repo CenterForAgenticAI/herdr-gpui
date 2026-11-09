@@ -18,7 +18,11 @@ path = "src/main.rs"
 async-channel.workspace = true
 futures-lite.workspace  = true
 # `acp` runs the agent behind the sparkles (the built-in `feedback` mod).
-moonframe            = { features = ["acp"], workspace = true }
+# `studio` is Developer Mode: Inspect Element and the Developer tools (edit
+# a mod's Luau as the window runs), off until the user turns it on in a
+# release build. Not `syntax` (which colors the editor): its SQL grammar
+# pins `cc` to a range the rest of the workspace can't share.
+moonframe            = { features = ["acp", "studio"], workspace = true }
 serde_json.workspace = true
 sheprd-gpui.path     = "../sheprd-gpui"
 

@@ -9,7 +9,7 @@ use {
         gpui_kit::{prelude::*, *},
     },
     serde_json::Value,
-    sheprd_gpui::embed::{Action, Host, HostedState, Region, Sizes, Stamp, Startup},
+    sheprd_gpui::embed::{Action, Drag, Host, HostedState, Menu, Region, Sizes, Stamp, Startup},
     std::{
         cell::RefCell,
         process::ExitCode,
@@ -26,6 +26,10 @@ mod theme;
 const REFRESH: Duration = Duration::from_secs(2);
 /// Actions waiting for the UI: clicks, so few. More are dropped, not queued.
 const ACTION_QUEUE: usize = 64;
+/// The build's own icon: Sheprd's paw in Moonframe's frame. Regenerate with
+/// `scripts/generate-moonframe-icon.py` after changing `assets/icon.svg`.
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+const ICON_ICNS: &[u8] = include_bytes!("../assets/Sheprd-Moonframe.icns");
 
 /// One provider's data: `app.<name>`, published as it changes. Each part of
 /// the state has its own, so a change runs only the views that read that part.
@@ -134,14 +138,83 @@ impl Feeds {
     }
 }
 
-/// What a mod's message to `provider:sheprd` asks for, if anything.
+/// What a mod's message to `provider:sheprd` asks for, if anything. A row
+/// on another device names it with `endpoint`; without one the selected
+/// device's is meant.
 fn action(message: &Data) -> Option<Action> {
     let text = |key: &str| message.get(key).and_then(Data::as_str).map(str::to_owned);
+    let flag = |key: &str| message.get(key).and_then(Data::as_bool);
+    let endpoint = text("endpoint");
+    let menu = |kind: &str| match kind {
+        "agent" => text("pane").map(|pane| Menu::Agent {
+            endpoint: endpoint.clone(),
+            pane,
+        }),
+        "device" => endpoint.clone().map(Menu::Device),
+        "workspace" => text("workspace").map(|workspace| Menu::Workspace {
+            endpoint: endpoint.clone(),
+            workspace,
+        }),
+        _ => None,
+    };
     text("command")
         .map(Action::Command)
-        .or_else(|| text("focus_workspace").map(Action::FocusWorkspace))
-        .or_else(|| text("focus_pane").map(Action::FocusPane))
+        .or_else(|| {
+            text("focus_workspace").map(|workspace| Action::FocusWorkspace {
+                endpoint: endpoint.clone(),
+                workspace,
+            })
+        })
+        .or_else(|| {
+            text("focus_pane").map(|pane| Action::FocusPane {
+                endpoint: endpoint.clone(),
+                pane,
+            })
+        })
         .or_else(|| text("panel").map(Action::Panel))
+        .or_else(|| text("menu").and_then(|kind| menu(&kind)).map(Action::Menu))
+        .or_else(|| {
+            text("note").map(|workspace| Action::EditNote {
+                endpoint: endpoint.clone(),
+                workspace,
+            })
+        })
+        .or_else(|| {
+            text("toggle_repository").map(|key| Action::ToggleRepository {
+                endpoint: endpoint.clone(),
+                key,
+            })
+        })
+        .or_else(|| {
+            let target = text("target")?;
+            text("move_workspace").map(|workspace| Action::MoveWorkspace {
+                workspace,
+                target,
+                after: flag("after").unwrap_or(false),
+            })
+        })
+        .or_else(|| sidebar_width(message))
+        .or_else(|| text("toggle_device").map(Action::ToggleDevice))
+        .or_else(|| text("select_device").map(Action::SelectDevice))
+        .or_else(|| flag("fold_all").map(Action::FoldAll))
+        .or_else(|| flag("toggle_agent_sort").map(|_| Action::ToggleAgentSort))
+        .or_else(|| flag("open_build_pr").map(|_| Action::OpenBuildPullRequest))
+}
+
+/// A drag of the sidebar's edge: `pointer = { sidebar_width = true }` sends
+/// its `phase`, its `dx` since the press, and the press's `clicks`.
+fn sidebar_width(message: &Data) -> Option<Action> {
+    message.get("sidebar_width").and_then(Data::as_bool)?;
+    let dx = message.get("dx").and_then(Data::as_f64).unwrap_or(0.0) as f32;
+    let phase = match message.get("phase").and_then(Data::as_str)? {
+        "down" => Drag::Down {
+            reset: message.get("clicks").and_then(Data::as_f64) == Some(2.0),
+        },
+        "move" => Drag::Move,
+        "up" => Drag::Up,
+        _ => return None,
+    };
+    Some(Action::SidebarWidth { phase, dx })
 }
 
 /// What is read before the event loop, and the host the first region makes.
@@ -156,6 +229,8 @@ struct Shared {
 }
 
 fn main() -> ExitCode {
+    // Before the app's startup sets the Dock icon and the About image.
+    sheprd_gpui::embed::icon(ICON_PNG, ICON_ICNS);
     // Read before the event loop, as the app's own startup does.
     let (actions, received) = bounded(ACTION_QUEUE);
     // One is enough: a wake only says to look.
@@ -183,7 +258,13 @@ fn main() -> ExitCode {
         .app_id("dev.sheprd.moonframe")
         .version(env!("CARGO_PKG_VERSION"))
         .app_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/app"))
+        .icon(ICON_PNG)
         .assets(sheprd_gpui::embed::assets())
+        // Sheprd's own menu bar, as its window has it; Moonframe adds its
+        // Developer menu.
+        .menus(sheprd_gpui::embed::menus)
+        // Sheprd's log file, which its Logs window reads, beside stderr.
+        .log_layer(sheprd_gpui::embed::log_layer())
         // The sparkles: ask an agent to change the layout or add something.
         .keep(["feedback"])
         .native("sheprd", move || bridge.clone())
@@ -343,7 +424,12 @@ fn host(shared: &RefCell<Shared>, window: &mut Window, cx: &mut App) -> Host {
     let startup = &mut shared.startup;
     shared
         .host
-        .get_or_insert_with(|| Host::new(startup.take(), window, cx))
+        .get_or_insert_with(|| {
+            // Before the host installs: from then on Sheprd's own changes to
+            // its menus (a layout picked, the language) rebuild Moonframe's bar.
+            sheprd_gpui::embed::keep_menus(moonframe::refresh_menus, cx);
+            Host::new(startup.take(), window, cx)
+        })
         .clone()
 }
 

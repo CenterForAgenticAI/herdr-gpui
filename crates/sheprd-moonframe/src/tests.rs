@@ -1,4 +1,4 @@
-use super::{Action, Bridge, Data, Feed, action};
+use super::{Action, Bridge, Data, Feed, Menu, action};
 use async_channel::bounded;
 
 #[test]
@@ -7,10 +7,54 @@ fn each_message_becomes_its_action() {
     assert_eq!(of("command"), Some(Action::Command("x".into())));
     assert_eq!(
         of("focus_workspace"),
-        Some(Action::FocusWorkspace("x".into()))
+        Some(Action::FocusWorkspace {
+            endpoint: None,
+            workspace: "x".into()
+        })
     );
-    assert_eq!(of("focus_pane"), Some(Action::FocusPane("x".into())));
+    assert_eq!(
+        of("focus_pane"),
+        Some(Action::FocusPane {
+            endpoint: None,
+            pane: "x".into()
+        })
+    );
     assert_eq!(of("panel"), Some(Action::Panel("x".into())));
+    assert_eq!(of("toggle_device"), Some(Action::ToggleDevice("x".into())));
+    assert_eq!(of("select_device"), Some(Action::SelectDevice("x".into())));
+}
+
+#[test]
+fn a_row_on_another_device_names_it() {
+    let message = Data::map([
+        ("menu", "workspace".into()),
+        ("workspace", "w1".into()),
+        ("endpoint", "studio".into()),
+    ]);
+    assert_eq!(
+        action(&message),
+        Some(Action::Menu(Menu::Workspace {
+            endpoint: Some("studio".into()),
+            workspace: "w1".into()
+        }))
+    );
+    let fold = Data::map([
+        ("toggle_repository", "repo".into()),
+        ("endpoint", "studio".into()),
+    ]);
+    assert_eq!(
+        action(&fold),
+        Some(Action::ToggleRepository {
+            endpoint: Some("studio".into()),
+            key: "repo".into()
+        })
+    );
+    assert_eq!(
+        action(&Data::map([("fold_all", true.into())])),
+        Some(Action::FoldAll(true))
+    );
+    // A device's menu needs the device.
+    assert_eq!(action(&Data::map([("menu", "device".into())])), None);
 }
 
 #[test]
@@ -50,4 +94,46 @@ fn state_already_published_is_not_published_again() {
     let mut last = Some(state.clone());
     assert!(feed.offer(&mut last, state.clone()));
     assert_eq!(last, Some(state));
+}
+
+#[test]
+fn a_dropped_row_and_a_dragged_edge_become_their_actions() {
+    let dropped = Data::map([
+        ("move_workspace", "c".into()),
+        ("target", "b".into()),
+        ("after", true.into()),
+    ]);
+    assert_eq!(
+        action(&dropped),
+        Some(Action::MoveWorkspace {
+            workspace: "c".into(),
+            target: "b".into(),
+            after: true
+        })
+    );
+    // A move needs its target.
+    assert_eq!(action(&Data::map([("move_workspace", "c".into())])), None);
+    let edge = |phase: &str, clicks: f64| {
+        action(&Data::map([
+            ("sidebar_width", true.into()),
+            ("phase", phase.into()),
+            ("dx", 12.5.into()),
+            ("clicks", clicks.into()),
+        ]))
+    };
+    assert_eq!(
+        edge("down", 2.0),
+        Some(Action::SidebarWidth {
+            phase: super::Drag::Down { reset: true },
+            dx: 12.5
+        })
+    );
+    assert_eq!(
+        edge("move", 1.0),
+        Some(Action::SidebarWidth {
+            phase: super::Drag::Move,
+            dx: 12.5
+        })
+    );
+    assert_eq!(edge("hover", 1.0), None);
 }

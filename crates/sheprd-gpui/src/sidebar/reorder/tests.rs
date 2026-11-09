@@ -1,6 +1,7 @@
 use super::*;
 use sheprd_client::protocol::ClientShellWorktree;
 
+mod host_drop;
 mod single_move;
 
 fn workspace(id: &str, tree: Option<(&str, bool)>) -> ClientShellWorkspace {

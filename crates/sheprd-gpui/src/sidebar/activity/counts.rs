@@ -66,7 +66,7 @@ impl Counts {
     }
 
     /// When the newest item `panel` counts changed, when known.
-    pub(super) fn latest(self, panel: ActivityPanel) -> Option<DateTime<Utc>> {
+    pub(in crate::sidebar) fn latest(self, panel: ActivityPanel) -> Option<DateTime<Utc>> {
         self.count(panel)?.latest
     }
 }

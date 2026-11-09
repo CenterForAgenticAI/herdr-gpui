@@ -58,6 +58,16 @@ return mod {
 							style = { background = theme.sidebar },
 							ui.mount "worktrees",
 							ui.mount "agents",
+							-- Its edge resizes it, as Sheprd's does; a double click
+							-- puts back the default width.
+							ui.column {
+								class = "sheprd-left-edge",
+								float = "right",
+								width = 5,
+								cursor = "ew-resize",
+								pointer = { sidebar_width = true },
+								to = "provider:sheprd",
+							},
 						},
 					},
 				},
@@ -73,6 +83,8 @@ return mod {
 					ui.row { height = state.status_bar, shrink = false, gap = "none", style = { background = theme.surface }, ui.column { grow = true, gap = "none", ui.mount "status" } },
 				},
 			},
+			-- A worktree build's strip, across the window's foot.
+			ui.mount "build",
 			-- The sparkles (the built-in feedback mod): say what to change, and
 			-- an agent changes this layout, asking before each edit.
 			ui.row {

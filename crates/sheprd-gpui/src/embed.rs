@@ -2,19 +2,21 @@
 //! what [`crate::app`] reads before its event loop, and [`Host`] installs it
 //! and makes the view, on the Local target, in the regions a layout places.
 //!
-//! Not yet the whole app: the host owns the window, so what finds a main window
-//! by its root view (the control socket, system notifications, opening links)
-//! is left out here, as are the updater and the app menus.
+//! The host owns the window, so the view registers itself with it (see
+//! `window::main_window`), and what looks for main windows (the control
+//! socket, system notifications, links) finds it there. Startup is the app's
+//! own (`app::install_services`), the menu bar is the app's, kept by the host
+//! (see [`keep_menus`]), and the log is the app's, as a layer of the host's
+//! (see [`log_layer`]).
 
 pub use crate::{
-    sidebar::hosted::{Action, HostedState, Palette, Stamp},
+    sidebar::hosted::{Action, Drag, HostedState, Menu, Palette, Stamp},
     window::host_regions::{Region, Sizes},
 };
 
 use crate::{
-    Hide, HideOthers, Quit, SheprdWindow, ShowAll, ShowLogs,
+    SheprdWindow,
     app::{InitialAppearance, StartupAppearance, Stores, light_appearance, shared_sound},
-    bind_keys,
     config::Config,
 };
 use gpui::{
@@ -39,6 +41,8 @@ pub struct Startup {
 /// Reads settings and stores. Call it before the host's event loop, so the
 /// first frame does no disk work on the UI thread.
 pub fn prepare() -> Startup {
+    // A panic leaves a report where the app's own do, beside the host's.
+    crate::crash::install(crate::APP_VERSION);
     sheprd_client::set_command_environment(crate::login_env::apply);
     sheprd_remote::config::set_loader(Config::load_remote);
     // Before anything resolves a config path or the daemon's socket.
@@ -52,19 +56,98 @@ pub fn prepare() -> Startup {
 fn install(startup: Startup, cx: &mut App) {
     startup.stores.install(cx);
     cx.set_global(startup.appearance.select(light_appearance(cx)));
-    let config = &cx.global::<InitialAppearance>().config;
-    let (ssh, language) = (config.ssh.clone(), config.language.clone());
-    crate::device_tags::DeviceTags::install(cx);
-    crate::config::ssh_hosts::install(&ssh, cx);
-    crate::i18n::install(&language, cx);
-    crate::caffeine::install(cx);
-    crate::endpoint::watch_network();
-    cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.on_action(|_: &Hide, cx| cx.hide());
-    cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
-    cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.on_action(|_: &ShowLogs, cx| crate::log_window::open(cx));
-    bind_keys(cx);
+    // Everything the app's own startup sets up: the control socket, system
+    // notifications, links, the Dock badge and icon, menus and keys.
+    crate::app::install_services(true, cx);
+}
+
+/// Shows `png` (1024px) and `icns` as the app's icon, in the Dock and the
+/// About box, in place of Sheprd's. Call it before the first [`Host`].
+pub fn icon(png: &'static [u8], icns: &'static [u8]) {
+    crate::app_icon::set_host(png, icns);
+}
+
+/// The app's log, as a layer for the host's subscriber: the file the log
+/// window reads and crash reports quote, written as the app writes it. Make it
+/// once, before the host starts its workers.
+pub fn log_layer()
+-> Box<dyn tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync + 'static> {
+    sheprd_diagnostics::layer(crate::log_targets::LOG_TARGETS)
+}
+
+/// The window's menu bar for the latest config, as the app installs it, for
+/// a host that keeps the bar itself; see [`keep_menus`].
+pub fn menus(cx: &App) -> Vec<gpui::Menu> {
+    crate::menus::bar(cx)
+}
+
+/// Has the host keep the menu bar: whenever the window would set its bar
+/// again (a layout picked, the language changed), `refresh` runs instead, and
+/// the host builds its bar with [`menus`].
+pub fn keep_menus(refresh: impl Fn(&mut App) + 'static, cx: &mut App) {
+    cx.set_global(crate::menus::HostMenus(std::rc::Rc::new(refresh)));
+}
+
+/// The menu bar's actions the window handles. In a host's window the focus
+/// may sit in the host's own layout, outside the window's view, so an action
+/// chosen there reaches no handler: each is sent on from the view's focus,
+/// as if it had been chosen with the view focused.
+fn forward_menu_actions(
+    view: WeakEntity<SheprdWindow>,
+    handle: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
+    fn forward<A: gpui::Action>(
+        view: WeakEntity<SheprdWindow>,
+        handle: gpui::AnyWindowHandle,
+        cx: &mut App,
+    ) {
+        thread_local! {
+            /// Set while an action is sent on, so one the view does not
+            /// handle either comes back here once and stops.
+            static SENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        cx.on_action(move |action: &A, cx| {
+            if SENDING.get() {
+                return;
+            }
+            let Some(view) = view.upgrade() else {
+                return;
+            };
+            let focus = view.read(cx).focus.clone();
+            let action = action.boxed_clone();
+            SENDING.set(true);
+            let _ = handle.update(cx, |_, window, cx| {
+                focus.dispatch_action(action.as_ref(), window, cx);
+            });
+            SENDING.set(false);
+        });
+    }
+    use crate::actions::{
+        RingBellPreview, SetChatLayout, SetLayout, SetTabLayout, ShowSystemNotificationPreview,
+        ShowToastPreview, ShowUpdateDownloadPreview, ShowUpdateHomebrewPreview,
+    };
+    use crate::{
+        CheckForUpdates, Minimize, PlaySound, RunCommand, ShowHerdrNotDetected, ShowUpdatePreview,
+        ZoomWindow,
+    };
+    // keep-sorted start
+    forward::<CheckForUpdates>(view.clone(), handle, cx);
+    forward::<Minimize>(view.clone(), handle, cx);
+    forward::<PlaySound>(view.clone(), handle, cx);
+    forward::<RingBellPreview>(view.clone(), handle, cx);
+    forward::<RunCommand>(view.clone(), handle, cx);
+    forward::<SetChatLayout>(view.clone(), handle, cx);
+    forward::<SetLayout>(view.clone(), handle, cx);
+    forward::<SetTabLayout>(view.clone(), handle, cx);
+    forward::<ShowHerdrNotDetected>(view.clone(), handle, cx);
+    forward::<ShowSystemNotificationPreview>(view.clone(), handle, cx);
+    forward::<ShowToastPreview>(view.clone(), handle, cx);
+    forward::<ShowUpdateDownloadPreview>(view.clone(), handle, cx);
+    forward::<ShowUpdateHomebrewPreview>(view.clone(), handle, cx);
+    forward::<ShowUpdatePreview>(view.clone(), handle, cx);
+    forward::<ZoomWindow>(view, handle, cx);
+    // keep-sorted end
 }
 
 /// The app's icons and other assets, for the host's application.
@@ -82,9 +165,13 @@ impl Host {
     /// Makes the view on the Local target. `startup` is what [`prepare`] read,
     /// `None` when an earlier host already installed it.
     pub fn new(startup: Option<Startup>, window: &mut Window, cx: &mut App) -> Self {
-        if let Some(startup) = startup {
+        let window_handle = window.window_handle();
+        // The first host installs the app, and its view checks for updates
+        // as the app's first window does.
+        let updater = startup.map(|startup| {
             install(startup, cx);
-        }
+            crate::updater::Updater::start(cx.global::<InitialAppearance>().config.updates.channel)
+        });
         let sound = shared_sound(cx);
         let window = cx.new(|cx| {
             let mut view = SheprdWindow::new(
@@ -96,8 +183,12 @@ impl Host {
             );
             view.hosted = true;
             view.use_sound(sound);
+            if let Some(updater) = updater {
+                view.updater = updater;
+            }
             view
         });
+        forward_menu_actions(window.downgrade(), window_handle, cx);
         Self { window }
     }
 

@@ -400,6 +400,39 @@ impl SheprdWindow {
         true
     }
 
+    /// Moves `workspace` before `target`, or after it with `after`, as
+    /// dropping its row there does: the same units, and the same move a drag
+    /// of the window's own row sends. For a host's rows, which run the drag
+    /// themselves. Only on the selected device, as a drag is; a target that
+    /// is not one of the row's places (another group's worktree) moves
+    /// nothing.
+    pub(super) fn move_workspace_to(
+        &mut self,
+        workspace: &str,
+        target: &str,
+        after: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.menu.page.is_some() || !self.live.status.is_connected() {
+            return;
+        }
+        let connection = &self.endpoints[self.selected_endpoint].connection;
+        let (Some(handle), Some(snapshot)) = (&connection.handle, &self.live.snapshot) else {
+            return;
+        };
+        let Some(request) = landing(&snapshot.workspaces, workspace, target, after) else {
+            return;
+        };
+        let reorder = request.reorder(&snapshot.workspaces, self.live.supports_workspace_move);
+        if let Err(error) = handle.reorder_workspaces(&snapshot.boot_id, &reorder) {
+            self.local_error = Some(fl!(
+                "sidebar-workspace-move-not-sent",
+                error = error.to_string()
+            ));
+            cx.notify();
+        }
+    }
+
     /// Drops a lifted row where it came from. Returns whether one was lifted.
     pub(crate) fn cancel_workspace_drag(&mut self, cx: &mut Context<Self>) -> bool {
         if !self
@@ -413,6 +446,21 @@ impl SheprdWindow {
         cx.notify();
         true
     }
+}
+
+/// The move that dropping `workspace` before `target` (after it with
+/// `after`) makes: `None` when `target` is not one of its places, or when it
+/// would land where it is.
+pub(super) fn landing(
+    workspaces: &[ClientShellWorkspace],
+    workspace: &str,
+    target: &str,
+    after: bool,
+) -> Option<MoveBlock> {
+    let plan = Plan::new(workspaces, workspace)?;
+    let index = workspaces.iter().position(|w| w.workspace_id == target)?;
+    let unit = plan.unit_of(index)?;
+    plan.request(workspaces, unit + usize::from(after))
 }
 
 /// Resolves the pointer to a gap, from each unit's rows and the move for every

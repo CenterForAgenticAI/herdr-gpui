@@ -155,6 +155,54 @@ fn open_window_placed(
     )
 }
 
+/// What every run of the app sets up once its stores and first-frame
+/// appearance are installed, whichever window shows it: the app's own, or a
+/// host's (see [`crate::embed`]), so the two never differ in what they answer
+/// or show. `personal` is false for the native test modes, which answer no
+/// agents and start nothing of the user's.
+pub(crate) fn install_services(personal: bool, cx: &mut App) {
+    // Only the user's own app answers agents; native test modes stay private.
+    if personal {
+        crate::control::install(cx);
+        crate::window::system_notifications::install(cx);
+        // Nor do they start VS Code.
+        crate::code_server::Launcher::install(cx);
+        crate::code_server::Hosts::install(cx);
+        crate::px0::Launcher::install(cx);
+        // Nor do they install or ask the remote control service.
+        crate::remote::Supervisor::install(cx);
+        crate::device_tags::DeviceTags::install(cx);
+        #[cfg(feature = "cloud")]
+        crate::cloud::install_idle_checks(cx);
+        // Nor do they follow the user's saved SSH host choices.
+        let ssh = cx.global::<InitialAppearance>().config.ssh.clone();
+        crate::config::ssh_hosts::install(&ssh, cx);
+    }
+    let language = cx.global::<InitialAppearance>().config.language.clone();
+    crate::i18n::install(&language, cx);
+    app_icon::install();
+    crate::caffeine::install(cx);
+    crate::endpoint::watch_network();
+    #[cfg(any(target_os = "macos", windows))]
+    crate::app_badge::install(cx);
+    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Hide, cx| cx.hide());
+    cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+    cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+    cx.on_action(|_: &ShowLogs, cx| log_window::open(cx));
+    cx.on_action(|action: &crate::actions::TogglePseudoLocale, cx| {
+        crate::i18n::toggle_pseudo(action.pseudo, cx);
+    });
+    cx.on_action(|_: &crate::actions::ToggleSlowAnimations, cx| {
+        crate::motion::set_slow(!crate::motion::is_slow());
+        // The menu shows the switch checked while it is on.
+        menus::install(cx);
+        cx.refresh_windows();
+    });
+    bind_keys(cx);
+    menus::install(cx);
+}
+
 /// The app's one sound worker. Each window holds its own connection and the
 /// daemon sends every notification to each of them, so a worker per window
 /// played one notification once per open window.
@@ -388,49 +436,8 @@ pub(crate) fn run() -> std::process::ExitCode {
             if let Some(link) = pending_link {
                 crate::link::follow::defer(link, cx);
             }
-            // Only the user's own app answers agents; native test modes stay private.
-            if mode == LaunchMode::Normal {
-                crate::control::install(cx);
-                crate::window::system_notifications::install(cx);
-                // Nor do they start VS Code.
-                crate::code_server::Launcher::install(cx);
-                crate::code_server::Hosts::install(cx);
-                crate::px0::Launcher::install(cx);
-                // Nor do they install or ask the remote control service.
-                crate::remote::Supervisor::install(cx);
-                crate::device_tags::DeviceTags::install(cx);
-                #[cfg(feature = "cloud")]
-                crate::cloud::install_idle_checks(cx);
-            }
             cx.set_global(appearance.select(light_appearance(cx)));
-            // Only the user's own app follows their saved SSH host choices.
-            if mode == LaunchMode::Normal {
-                let ssh = cx.global::<InitialAppearance>().config.ssh.clone();
-                crate::config::ssh_hosts::install(&ssh, cx);
-            }
-            let language = cx.global::<InitialAppearance>().config.language.clone();
-            crate::i18n::install(&language, cx);
-            app_icon::install();
-            crate::caffeine::install(cx);
-            crate::endpoint::watch_network();
-            #[cfg(any(target_os = "macos", windows))]
-            crate::app_badge::install(cx);
-            cx.on_action(|_: &Quit, cx| cx.quit());
-            cx.on_action(|_: &Hide, cx| cx.hide());
-            cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
-            cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-            cx.on_action(|_: &ShowLogs, cx| log_window::open(cx));
-            cx.on_action(|action: &crate::actions::TogglePseudoLocale, cx| {
-                crate::i18n::toggle_pseudo(action.pseudo, cx);
-            });
-            cx.on_action(|_: &crate::actions::ToggleSlowAnimations, cx| {
-                crate::motion::set_slow(!crate::motion::is_slow());
-                // The menu shows the switch checked while it is on.
-                menus::install(cx);
-                cx.refresh_windows();
-            });
-            bind_keys(cx);
-            menus::install(cx);
+            install_services(mode == LaunchMode::Normal, cx);
             cx.on_window_closed(move |cx, _| {
                 if cx.windows().is_empty() {
                     #[cfg(feature = "integration-test")]
