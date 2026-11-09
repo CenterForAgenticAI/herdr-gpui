@@ -22,6 +22,13 @@ impl Source {
         Some((id, terminal.address.clone()))
     }
 
+    /// Whether Sheprd keeps workspace `id` for this computer's Herdr 2.
+    pub(super) fn keeps_workspace(&self, id: &str) -> bool {
+        self.scope
+            .as_deref()
+            .is_some_and(|scope| lock(&self.poller).keeps(scope, id))
+    }
+
     /// The pane id of this core's terminal at `address`.
     fn pane_of(&self, address: &str) -> Option<String> {
         let state = lock(&self.state);
@@ -41,6 +48,14 @@ impl Hub {
         let core = self.core.as_ref().ok_or(Error::Disconnected)?;
         let target = core.saved_target(tab, pane).ok_or(Error::Unsupported)?;
         Ok(Some(target))
+    }
+
+    /// Whether `workspace` is one Sheprd keeps for Herdr 2, which only
+    /// Sheprd renames.
+    pub(crate) fn kept_workspace(&self, workspace: &str) -> bool {
+        self.core
+            .as_ref()
+            .is_some_and(|core| core.keeps_workspace(workspace))
     }
 
     /// The pane of the core terminal at `address`, such as a split Sheprd

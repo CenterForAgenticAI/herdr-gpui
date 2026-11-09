@@ -2,6 +2,7 @@
 use super::*;
 use crate::control::protocol::Request;
 
+mod holders;
 mod scoped_notes;
 
 #[test]

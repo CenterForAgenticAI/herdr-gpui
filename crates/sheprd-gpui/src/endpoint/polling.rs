@@ -24,10 +24,11 @@ impl SheprdWindow {
         Some(result)
     }
 
-    /// Writes daemon-forwarded OSC 52 payloads to the pasteboard and reports
+    /// Writes OSC 52 payloads, forwarded by Herdr or read by a herdr-core
+    /// terminal's emulator, to the pasteboard and reports
     /// the copy the way a local selection does. Returns whether anything was
     /// written, so the window repaints for the flash.
-    pub(super) fn apply_clipboard_writes(
+    pub(crate) fn apply_clipboard_writes(
         &mut self,
         writes: impl IntoIterator<Item = String>,
         cx: &mut Context<Self>,

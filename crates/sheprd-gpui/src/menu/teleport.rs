@@ -224,6 +224,7 @@ pub(crate) fn core_tabs(
             Some(Location::CoreTerminal {
                 panes,
                 observe: false,
+                ..
             }) => Some((tab.id, panes.clone())),
             _ => None,
         })

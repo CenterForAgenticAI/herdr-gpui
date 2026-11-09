@@ -9525,6 +9525,8 @@ name = "sheprd-terminal"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.23.1",
+ "flate2",
  "sheprd-backend",
  "sheprd-protocol",
  "thiserror 2.0.21",

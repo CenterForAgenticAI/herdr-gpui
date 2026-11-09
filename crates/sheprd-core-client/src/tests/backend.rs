@@ -9,9 +9,12 @@ use std::{thread, time::Duration};
 
 const WAIT: Duration = Duration::from_secs(5);
 
+/// History lines the test backend keeps.
+const SCROLLBACK: usize = 1000;
+
 fn backend() -> (CoreBackend, MockCore) {
     let (core, mock) = connected();
-    (CoreBackend::new(core, 1000), mock)
+    (CoreBackend::new(core, SCROLLBACK), mock)
 }
 
 fn line(value: Value) -> Vec<u8> {
@@ -166,6 +169,8 @@ fn attached(backend: &CoreBackend, mock: &mut MockCore, role: Role) -> crate::Co
             request["params"]["observe"].as_bool().unwrap_or(false),
             role == Role::Observer
         );
+        // The history the backend keeps is asked for, to restore it.
+        assert_eq!(request["params"]["history"], json!(SCROLLBACK));
         let mut t1 = terminal("t1");
         (t1["cols"], t1["rows"]) = (json!(20), json!(4));
         mock.answer(&request, json!({"channel": 5, "terminal": t1}));
@@ -178,9 +183,11 @@ fn attached(backend: &CoreBackend, mock: &mut MockCore, role: Role) -> crate::Co
 fn an_attached_terminal_paints_cells_and_ends() {
     let (backend, mut mock) = backend();
     let mut terminal = attached(&backend, &mut mock, Role::Active);
-    mock.send(5, Kind::Data, b"\x1b]2;work\x07hi");
+    mock.send(5, Kind::Data, b"\x1b]2;work\x07\x1b]52;c;aGk=\x07\x07hi");
     let updates = terminal.next(WAIT).unwrap();
     assert!(updates.contains(&SurfaceUpdate::Title("work".into())));
+    assert!(updates.contains(&SurfaceUpdate::Clipboard("hi".into())));
+    assert!(updates.contains(&SurfaceUpdate::Bell));
     let frame = updates.iter().find_map(|update| match update {
         SurfaceUpdate::Frame(frame) => Some(frame),
         _ => None,
@@ -405,4 +412,24 @@ fn the_view_is_told_which_key_events_the_program_asks_for() {
         .find(|frame| frame.kind == Kind::Data)
         .unwrap();
     assert_eq!(typed.payload, b"\x1b[97;1:3u");
+}
+
+#[test]
+fn the_view_is_told_which_rows_the_terminal_wrapped() {
+    let (backend, mut mock) = backend();
+    let mut terminal = attached(&backend, &mut mock, Role::Active);
+    // 25 characters wrap at 20 columns; the short line after ends there.
+    mock.send(5, Kind::Data, b"abcdefghijklmnopqrstuvwxy\r\nend");
+    until(
+        &mut terminal,
+        &SurfaceUpdate::Wraps(vec![true, false, false, false]),
+    );
+    // Told once, not on every update.
+    mock.send(5, Kind::Data, b"more");
+    let later = terminal.next(WAIT).unwrap();
+    assert!(
+        !later
+            .iter()
+            .any(|update| matches!(update, SurfaceUpdate::Wraps(_)))
+    );
 }

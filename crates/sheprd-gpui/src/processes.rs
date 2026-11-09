@@ -4,8 +4,8 @@
 //!
 //! Herdr names the pane's process; its GUI connection does not carry process
 //! details, so a worker asks the `herdr` CLI (`pane process-info`) as Teleport
-//! does, then lists this machine's processes with `sysinfo` and keeps the
-//! pane's subtree. Only a daemon on this machine is watched: a remote pane's
+//! does, or, for a herdr-core terminal, its core's terminal list, then lists
+//! this machine's processes with `sysinfo` and keeps the pane's subtree. Only a daemon on this machine is watched: a remote pane's
 //! pids mean nothing here. The worker samples every couple of seconds while a
 //! pane's process list is open, and stops when it closes.
 
@@ -116,6 +116,80 @@ impl Daemon {
     }
 }
 
+/// Where a pane's process is named.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Source {
+    /// A Herdr pane, asked through the `herdr` CLI.
+    Herdr { daemon: Daemon, pane: String },
+    /// A terminal of the herdr-core on this machine at `endpoint`, by its
+    /// address such as `t7`.
+    Core {
+        endpoint: sheprd_core_client::Endpoint,
+        terminal: String,
+    },
+}
+
+impl Source {
+    /// The pane or terminal, as the user names it.
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Herdr { pane, .. } => pane,
+            Self::Core { terminal, .. } => terminal,
+        }
+    }
+
+    /// Blocking: asks who runs in the pane.
+    fn process_info(&self, cancelled: &AtomicBool) -> Result<crate::teleport::ProcessInfo> {
+        match self {
+            Self::Herdr { daemon, pane } => daemon.process_info(pane, cancelled),
+            Self::Core { endpoint, terminal } => core_process_info(endpoint, terminal),
+        }
+    }
+}
+
+/// Blocking: what herdr-core reports of `terminal`'s program and its
+/// foreground job, in the shape Herdr's `pane process-info` has.
+fn core_process_info(
+    endpoint: &sheprd_core_client::Endpoint,
+    terminal: &str,
+) -> Result<crate::teleport::ProcessInfo> {
+    // A terminal on another machine this core added (`box/t7`) reports
+    // process IDs of that machine; sampled here they would name unrelated
+    // local processes.
+    if terminal.contains('/') {
+        return Err(Error::RemoteTerminal.into());
+    }
+    let core = sheprd_core_client::Core::connect(endpoint).map_err(Error::Core)?;
+    let list = core.list(false).map_err(Error::Core)?;
+    let record = list
+        .terminals
+        .iter()
+        .find(|record| record.address == terminal)
+        .ok_or(Error::TerminalGone)?;
+    Ok(core_info(record))
+}
+
+/// A herdr-core terminal record as Herdr describes a pane's processes. The
+/// core reports its foreground job's leader alone, which is the job while
+/// it differs from the terminal's own program.
+pub(crate) fn core_info(
+    record: &sheprd_core_client::wire::Terminal,
+) -> crate::teleport::ProcessInfo {
+    let pid = |pid: i32| u32::try_from(pid).ok().filter(|pid| *pid > 0);
+    let foreground = record.foreground.as_ref().and_then(|foreground| {
+        Some(sheprd_client::herdr::snapshot::Process {
+            pid: pid(foreground.pid)?,
+            argv: foreground.argv.clone(),
+            cwd: Some(foreground.cwd.clone()).filter(|cwd| !cwd.is_empty()),
+        })
+    });
+    crate::teleport::ProcessInfo {
+        foreground_process_group_id: foreground.as_ref().map(|process| process.pid),
+        shell_pid: record.pid.and_then(pid),
+        foreground_processes: foreground.into_iter().collect(),
+    }
+}
+
 /// What became of one process the user asked to end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -151,14 +225,14 @@ impl Drop for Watch {
 }
 
 impl Watch {
-    pub(crate) fn start(daemon: Daemon, pane: String) -> Result<Self> {
+    pub(crate) fn start(source: Source) -> Result<Self> {
         let (commands, received) = mpsc::sync_channel(1);
         let (sender, updates) = mpsc::sync_channel(4);
         let cancelled = Arc::new(AtomicBool::new(false));
         let shared = cancelled.clone();
         thread::Builder::new()
             .name("herdr-pane-processes".into())
-            .spawn(move || run(&daemon, &pane, &received, &sender, &shared))
+            .spawn(move || run(&source, &received, &sender, &shared))
             .map_err(Error::Worker)?;
         Ok(Self {
             commands,
@@ -208,8 +282,7 @@ impl Watch {
 }
 
 fn run(
-    daemon: &Daemon,
-    pane: &str,
+    source: &Source,
     commands: &mpsc::Receiver<Command>,
     updates: &mpsc::SyncSender<Update>,
     cancelled: &AtomicBool,
@@ -236,7 +309,7 @@ fn run(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
-        let result = sample(daemon, pane, &mut system, &mut sightings, cancelled);
+        let result = sample(source, &mut system, &mut sightings, cancelled);
         // Without a current listing nothing is known to be below the pane,
         // so kills are refused until the next one.
         root = result.as_ref().ok().and_then(Listing::root);
@@ -258,13 +331,12 @@ fn run(
 }
 
 fn sample(
-    daemon: &Daemon,
-    pane: &str,
+    source: &Source,
     system: &mut System,
     sightings: &mut HashMap<Identity, u8>,
     cancelled: &AtomicBool,
 ) -> Result<Listing> {
-    let info = daemon.process_info(pane, cancelled)?;
+    let info = source.process_info(cancelled)?;
     let root = info.shell_pid.ok_or(Error::NoRoot)?;
     refresh(system);
     let previous = std::mem::take(sightings);

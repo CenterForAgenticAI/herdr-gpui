@@ -59,6 +59,7 @@ fn start_matches_the_swift_fixture() {
                 computer: "studio".to_owned(),
                 computer_id: "AB".repeat(32),
                 pane: "w1-p3".to_owned(),
+                terminal: false,
                 workspace: "herdr-gpui".to_owned(),
             },
         },

@@ -8,6 +8,7 @@ mod notices;
 mod presence;
 mod send;
 mod subscription;
+mod terminals;
 mod throttle;
 mod triggers;
 mod vapid;

@@ -3,8 +3,11 @@
 //! Herdr exports `HERDR_WORKSPACE_ID` into every pane it starts, and a server
 //! launched from a pane inherits it, so a listener's own environment names
 //! its workspace exactly; no process tree or working directory is guessed.
-//! Listeners whose process lacks the variable (system services, containers,
-//! anything started outside Herdr) belong to no workspace and are dropped.
+//! herdr-core exports `HC_TERMINAL_ID` the same way, so a listener started in
+//! a herdr-core terminal names its terminal, which the app maps to the
+//! workspace whose tab shows it. Listeners whose process names neither
+//! (system services, containers, anything started outside both) belong to no
+//! workspace and are dropped.
 
 use super::Error;
 use super::tunnel::Key;
@@ -24,7 +27,9 @@ const MAX_SOCKET: usize = 1024;
 
 /// Prints `L <pid> <address:port> <process>` per listening socket, then
 /// `E <pid> <workspace> <api socket>` for each listener started inside a
-/// Herdr pane, the socket naming which daemon's pane that was, or
+/// Herdr pane, the socket naming which daemon's pane that was,
+/// `C <pid> <terminal> <core socket>` for one started in a herdr-core
+/// terminal outside any Herdr workspace, or
 /// `N` when the host has neither `ss` nor `lsof`. Linux prefers `ss`, which
 /// is quicker; macOS has only `lsof`. Both list only this user's processes
 /// with their owners, so another user's servers never show. The step runs in
@@ -65,8 +70,12 @@ for herdr_pid in $(printf '%s\n' "$herdr_ports" | awk '$1 == "L" { print $2 }' |
     fi
     herdr_workspace=$(printf '%s\n' "$herdr_env" | sed -n 's/^HERDR_WORKSPACE_ID=//p' | head -n 1)
     herdr_socket=$(printf '%s\n' "$herdr_env" | sed -n 's/^HERDR_SOCKET_PATH=//p' | head -n 1)
+    herdr_terminal=$(printf '%s\n' "$herdr_env" | sed -n 's/^HC_TERMINAL_ID=//p' | head -n 1)
+    herdr_core=$(printf '%s\n' "$herdr_env" | sed -n 's/^HC_TERMINAL_SOCKET=//p' | head -n 1)
     if [ -n "$herdr_workspace" ]; then
         printf 'E %s %s %s\n' "$herdr_pid" "$herdr_workspace" "$herdr_socket"
+    elif [ -n "$herdr_terminal" ]; then
+        printf 'C %s %s %s\n' "$herdr_pid" "$herdr_terminal" "$herdr_core"
     fi
 done
 true"#;
@@ -216,6 +225,14 @@ pub(crate) struct Owner {
 /// Each workspace's ports, by owner, lowest port first.
 pub(crate) type Ports = HashMap<Owner, Vec<Port>>;
 
+/// The herdr-core terminal a listener was started in, by its address such
+/// as `t7`, and its core's socket, empty when the process did not say.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct Terminal {
+    pub terminal: String,
+    pub socket: String,
+}
+
 /// What one scan of a host found.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Scan {
@@ -223,12 +240,18 @@ pub(crate) struct Scan {
     /// The pane each listening process was started in. Several processes
     /// can share a number, so only the process names a listener's owner.
     pub pids: HashMap<u32, Owner>,
+    /// Each herdr-core terminal's ports, lowest first, for listeners no
+    /// Herdr workspace claims.
+    pub terminals: HashMap<Terminal, Vec<Port>>,
+    /// The herdr-core terminal each such listening process was started in.
+    pub terminal_pids: HashMap<u32, Terminal>,
 }
 
 /// Parses what [`COMMAND`] printed.
 pub(crate) fn parse(text: &str) -> Result<Scan> {
     let mut listeners: Vec<(u32, Port)> = Vec::new();
     let mut owners: HashMap<u32, Owner> = HashMap::new();
+    let mut terminals: HashMap<u32, Terminal> = HashMap::new();
     for line in text.lines() {
         let mut words = line.splitn(4, ' ');
         match words.next() {
@@ -247,17 +270,8 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
                     continue;
                 };
                 let workspace = workspace.trim_end();
-                let plain = !workspace.is_empty()
-                    && workspace.len() <= MAX_WORKSPACE_ID
-                    && workspace.chars().all(|c| c.is_ascii_graphic() && c != '=');
-                // Paths are compared, never opened; an unusable one is unknown.
-                let socket = words
-                    .next()
-                    .map(str::trim_end)
-                    .filter(|socket| {
-                        socket.len() <= MAX_SOCKET && !socket.chars().any(char::is_control)
-                    })
-                    .unwrap_or_default();
+                let plain = plain(workspace, MAX_WORKSPACE_ID);
+                let socket = socket(words.next());
                 if let (Ok(pid), true) = (pid.parse(), plain) {
                     owners.insert(
                         pid,
@@ -268,31 +282,75 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
                     );
                 }
             }
+            Some("C") => {
+                let (Some(pid), Some(terminal)) = (words.next(), words.next()) else {
+                    continue;
+                };
+                let terminal = terminal.trim_end();
+                let plain = plain(terminal, sheprd_backend::MAX_TERMINAL_ID);
+                let socket = socket(words.next());
+                if let (Ok(pid), true) = (pid.parse(), plain) {
+                    terminals.insert(
+                        pid,
+                        Terminal {
+                            terminal: terminal.to_owned(),
+                            socket: socket.to_owned(),
+                        },
+                    );
+                }
+            }
             _ => {}
         }
     }
     let mut scan = Scan::default();
     for (pid, port) in listeners {
-        let Some(owner) = owners.get(&pid) else {
-            continue;
-        };
-        scan.pids.insert(pid, owner.clone());
-        let list = scan.ports.entry(owner.clone()).or_default();
-        match list.iter_mut().find(|known| known.number == port.number) {
-            // IPv4 and IPv6 sockets of one server share its number.
-            Some(known) => {
-                if port.bind.reach() > known.bind.reach() {
-                    *known = port;
-                }
-            }
-            None => list.push(port),
+        if let Some(owner) = owners.get(&pid) {
+            scan.pids.insert(pid, owner.clone());
+            add(scan.ports.entry(owner.clone()).or_default(), port);
+        } else if let Some(terminal) = terminals.get(&pid) {
+            scan.terminal_pids.insert(pid, terminal.clone());
+            add(scan.terminals.entry(terminal.clone()).or_default(), port);
         }
     }
-    for list in scan.ports.values_mut() {
-        list.sort_by_key(|port| port.number);
-        list.truncate(MAX_PORTS);
+    for list in scan.ports.values_mut().chain(scan.terminals.values_mut()) {
+        sorted(list);
     }
     Ok(scan)
+}
+
+/// A daemon token such as a workspace id or terminal address: printable,
+/// bounded, and with no `=` an environment line could smuggle in.
+fn plain(token: &str, max: usize) -> bool {
+    !token.is_empty()
+        && token.len() <= max
+        && token.chars().all(|c| c.is_ascii_graphic() && c != '=')
+}
+
+/// A socket path a process named. Paths are compared, never opened; an
+/// unusable one is unknown.
+fn socket(word: Option<&str>) -> &str {
+    word.map(str::trim_end)
+        .filter(|socket| socket.len() <= MAX_SOCKET && !socket.chars().any(char::is_control))
+        .unwrap_or_default()
+}
+
+/// Adds `port` to `list`, keeping one entry per number.
+pub(crate) fn add(list: &mut Vec<Port>, port: Port) {
+    match list.iter_mut().find(|known| known.number == port.number) {
+        // IPv4 and IPv6 sockets of one server share its number.
+        Some(known) => {
+            if port.bind.reach() > known.bind.reach() {
+                *known = port;
+            }
+        }
+        None => list.push(port),
+    }
+}
+
+/// Lowest port first, at most [`MAX_PORTS`].
+pub(crate) fn sorted(list: &mut Vec<Port>) {
+    list.sort_by_key(|port| port.number);
+    list.truncate(MAX_PORTS);
 }
 
 /// `127.0.0.1:3000`, `[::1]:3000`, `*:3000`, `0.0.0.0:3000`.
