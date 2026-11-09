@@ -251,6 +251,10 @@ pub(crate) fn router(state: Shared) -> Router {
             get(crate::native::changes::check_log),
         )
         .route(
+            "/api/v2/workspaces/{workspace}/terminals",
+            post(crate::native::new_terminal),
+        )
+        .route(
             "/api/v2/workspaces/{workspace}/rename",
             post(terminal::rename_workspace),
         )

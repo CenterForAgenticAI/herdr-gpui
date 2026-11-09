@@ -81,6 +81,16 @@ impl Poller {
             .is_some_and(|saved| saved.workspaces(scope).any(|workspace| workspace.id == id))
     }
 
+    /// The workspace of `scope`'s saved tab `tab`.
+    pub(super) fn saved_workspace(&self, scope: &str, tab: u64) -> Option<String> {
+        self.saved
+            .as_ref()
+            .and_then(|(_, saved)| saved.as_ref())?
+            .core_tabs(scope)
+            .find(|saved| saved.id == tab)
+            .map(|saved| saved.workspace_id.to_owned())
+    }
+
     fn refresh_saved(&mut self, path: &Path) {
         let changed = std::fs::metadata(path).and_then(|file| file.modified());
         match (changed, &self.saved) {

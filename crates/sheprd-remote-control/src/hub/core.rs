@@ -1,6 +1,8 @@
 //! A running herdr-core is an independent source. This service only joins;
 //! opening a phone never starts another user's terminal runtime.
 
+mod arrange;
+pub(crate) use arrange::{Keeper, arrangeable};
 mod chats;
 mod checkouts;
 mod convert;
@@ -9,6 +11,7 @@ pub(super) use create::Place;
 mod error;
 mod hold;
 mod lines;
+mod own;
 mod poller;
 mod projection;
 mod saved;
@@ -81,6 +84,8 @@ pub(super) struct Source {
     endpoint: crate::core_target::CoreTarget,
     /// The next phone size held on a screen gets this id.
     holds: AtomicU64,
+    /// The layouts of tabs no saved tab holds, which the daemon keeps.
+    own: Mutex<own::Store>,
     /// Only the worker reads the core's document and the saved tabs; it
     /// keeps them apart from `state`, whose lock phones wait on.
     poller: Mutex<poller::Poller>,
@@ -118,6 +123,7 @@ impl Source {
             connected: AtomicBool::new(false),
             endpoint,
             holds: AtomicU64::new(0),
+            own: Mutex::new(own::Store::load(state_dir)),
             poller: Mutex::default(),
             scope: target
                 .socket_path()
@@ -166,6 +172,14 @@ impl Source {
                 self.tabs.as_deref(),
                 self.scope.as_deref(),
             );
+            let mut own = lock(&self.own);
+            if own.fit(&boot, &terminals)
+                && let Err(error) = own.save()
+            {
+                tracing::warn!(%error, "The phone's Herdr 2 tab layouts were not saved");
+            }
+            own.layouts.apply(&mut next, &boot, &terminals);
+            drop(own);
             chats::lift(&mut next, &boot, &terminals);
             next
         };
@@ -431,6 +445,25 @@ pub(super) async fn merge_sources(
             changed = core.changed() => if changed.is_err() { return; },
             () = sender.closed() => return,
         }
+    }
+}
+
+/// A source that never joins a core, with the saved tabs at `tabs` for
+/// `scope`, for tests of what the daemon keeps.
+#[cfg(test)]
+pub(super) fn tests_support_source(
+    tabs: Option<std::path::PathBuf>,
+    scope: Option<&str>,
+) -> Source {
+    Source {
+        connected: AtomicBool::new(false),
+        endpoint: crate::core_target::CoreTarget::default(),
+        holds: AtomicU64::new(0),
+        own: Mutex::default(),
+        poller: Mutex::default(),
+        scope: scope.map(str::to_owned),
+        state: Mutex::default(),
+        tabs,
     }
 }
 
