@@ -9,6 +9,7 @@ mod control_holder;
 mod copy_mode;
 mod copy_mode_relink;
 mod effects;
+mod fall_through;
 mod fallback_bells;
 mod focus;
 mod folders;
