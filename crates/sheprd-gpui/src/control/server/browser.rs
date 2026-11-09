@@ -282,18 +282,9 @@ pub(super) fn feedback(
 /// browser tabs name it, in the first window holding it.
 pub(super) fn core_scope(pane_id: &str, cx: &App) -> Option<Scope> {
     let terminal = crate::chat::core_pane::terminal_of(pane_id)?;
-    let target = Target {
-        daemon: None,
-        workspace: None,
-        pane: None,
-        terminal: Some(terminal.as_str()),
-    };
     main_windows(cx).into_iter().find_map(|handle| {
         handle
-            .read_with(cx, |view, _| {
-                let (index, _) = view.control_target(&target, false)?;
-                Some(crate::browser::scope(&view.endpoints[index]))
-            })
+            .read_with(cx, |view, _| view.core_terminal_scope(terminal.as_str()))
             .ok()
             .flatten()
     })

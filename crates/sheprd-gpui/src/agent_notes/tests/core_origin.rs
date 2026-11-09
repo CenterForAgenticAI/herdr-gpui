@@ -47,3 +47,36 @@ fn notes_for_a_core_terminal_wait_for_it_without_herdr(cx: &mut TestAppContext) 
     }));
     assert!(matches!(gone, Delivered::Copy(_)));
 }
+
+#[gpui::test]
+fn notes_for_a_core_terminal_are_kept_under_its_tabs_daemon(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(fixture_window);
+    let key = view.update(cx, |view, cx| {
+        // The terminal's tab is in a workspace of another local daemon than
+        // the one the window shows.
+        let other = crate::browser::Scope::local(std::path::Path::new("/run/b/herdr-client.sock"));
+        let t1 = TerminalId::new("t1").unwrap();
+        let location = Location::CoreTerminal {
+            panes: Panes::single(t1.clone()),
+            observe: false,
+        };
+        let tab = Store::update(cx, |store| {
+            store.open(other.clone(), "kept-1", Some(location), None)
+        })
+        .unwrap();
+        view.core_terminals
+            .show_for_test(tab, Panes::single(t1), false, Vec::new());
+        view.core_terminals
+            .place_for_test(tab, other.clone(), "kept-1");
+        let delivered = view.deliver_from(None, Some("core:t1".into()), "Note".into(), None, cx);
+        assert!(!matches!(delivered, Delivered::Copy(_)));
+        FeedbackKey {
+            scope: other,
+            pane_id: "core:t1".into(),
+        }
+    });
+    // Where `feedback --wait` from that terminal looks for them.
+    assert!(view.read_with(cx, |_, cx| {
+        cx.global::<crate::browser::Feedback>().has(&key)
+    }));
+}

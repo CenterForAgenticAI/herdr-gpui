@@ -86,6 +86,23 @@ impl SheprdWindow {
         Some((index, workspace.to_owned()))
     }
 
+    /// The daemon, as browser tabs name it, of what holds herdr-core
+    /// `terminal` in this window: the pages it opens and the notes on them
+    /// belong there.
+    /// A tab the window has not placed yet, like the shell, is the shown
+    /// host's.
+    pub(crate) fn core_terminal_scope(&self, terminal: &str) -> Option<Scope> {
+        let terminal = sheprd_backend::TerminalId::new(terminal).ok()?;
+        let placed = match self.core_terminals.holder(&terminal)? {
+            Holder::Tab(tab) => self.core_terminals.tab_workspace(tab),
+            Holder::Fallback => None,
+        };
+        Some(placed.map_or_else(
+            || scope(&self.endpoints[self.selected_endpoint]),
+            |(placed, _)| placed.clone(),
+        ))
+    }
+
     /// Whether one of this window's herdr-core tabs, or the shell shown in
     /// place of Herdr 1, holds `terminal`.
     pub(crate) fn holds_core_terminal(&self, terminal: &str) -> bool {
