@@ -4,7 +4,7 @@
 //! `origin`, the pane of the agent its notes go to. The review's state lives
 //! in the window: made when the tab is opened or first seen after a restart,
 //! and read off the UI thread from the window's tick, never from drawing.
-use super::{Agent, Layout, Review, State, agent_in, pick_agent, rows, search};
+use super::{Agent, Layout, Review, State, agent_in, review_recipient, rows, search};
 use crate::{
     SheprdWindow,
     browser::{Location, ReviewCheckout, Slot, Store, Tab, TabId},
@@ -52,7 +52,9 @@ impl SheprdWindow {
             return;
         };
         let scope = crate::browser::scope(&self.endpoints[self.selected_endpoint]);
-        let agent = self.live.snapshot.as_deref().and_then(pick_agent);
+        // Read before the review replaces the pane in the active group.
+        let core = self.shown_core_pane(cx);
+        let agent = review_recipient(self.live.snapshot.as_deref(), core.is_some());
         let existing = cx.try_global::<Store>().and_then(|store| {
             store
                 .in_workspace(&scope, &workspace)
@@ -76,13 +78,14 @@ impl SheprdWindow {
             self.show_flash(Flash::warning(fl!("review-too-many-tabs")), cx);
             return;
         };
-        // Read before the review replaces the pane in the active group.
-        let core = self.shown_core_pane(cx);
         self.dismiss_menu(window, cx);
         self.ensure_review(id, agent, cx);
         if let Some(review) = self.reviews.get_mut(&id)
             && core.is_some()
         {
+            // A review kept from before sent to Herdr's agent; this one is
+            // the herdr-core pane's, whose agent Herdr does not know.
+            review.agent = None;
             review.core = core;
         }
         self.load_review(id, cx);
