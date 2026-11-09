@@ -20,6 +20,7 @@ mod folders;
 mod hosts;
 mod hub;
 mod infos;
+pub(crate) mod install;
 pub(crate) mod menu;
 mod phone;
 mod requests;
