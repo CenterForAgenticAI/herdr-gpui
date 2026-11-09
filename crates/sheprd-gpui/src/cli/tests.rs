@@ -18,6 +18,7 @@ mod open_command;
 mod px0;
 mod quota;
 mod remote;
+mod remote_update;
 mod security;
 mod ui_agent_group;
 mod ui_panel;
