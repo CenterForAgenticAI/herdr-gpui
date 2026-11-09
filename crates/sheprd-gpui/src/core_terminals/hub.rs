@@ -95,7 +95,8 @@ impl Hub {
         }
     }
 
-    /// How many attempts it made, for the Unix-only lifecycle tests.
+    /// How many attempts it made.
+    // Only the lifecycle tests, which need Unix sockets, count them.
     #[cfg(all(test, unix))]
     pub(crate) fn dials(&self) -> usize {
         self.dials
