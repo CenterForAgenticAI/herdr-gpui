@@ -6,6 +6,7 @@ mod kept_checkouts;
 mod kept_workspaces;
 mod keys;
 mod paste;
+mod requests;
 mod saved_tabs;
 mod screen;
 mod selection;
