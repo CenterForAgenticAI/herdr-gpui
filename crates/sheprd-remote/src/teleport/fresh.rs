@@ -35,6 +35,7 @@ impl Origin {
             branch: None,
             tab_labels: HashMap::new(),
             core_tabs: Vec::new(),
+            core_preferred: false,
         }
     }
 }

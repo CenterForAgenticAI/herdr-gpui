@@ -38,7 +38,7 @@ Right-click a linked worktree and choose **Teleport...** to move it to another c
 - the programs running in them, started again with their arguments,
 - agent sessions, resumed with their full history.
 
-Herdr 2 tabs in the worktree's workspace move too, after its Herdr tabs and with their splits. Herdr 2 reports no agent session, so an agent there writes a handoff note and starts again with it on the destination, rather than resuming.
+Herdr 2 tabs in the worktree's workspace move too, after its Herdr tabs and with their splits. They run in the destination's Herdr 2 when it has `herdr-core`, and in its Herdr otherwise. With **Settings > Tabs > New terminals use Herdr 2** turned on, the Herdr tabs move into the destination's Herdr 2 as well, without their labels, and the workspace there keeps one Herdr shell tab. The review marks each tab that will run in Herdr 2. A tab of more than 16 panes stays in Herdr. Herdr 2 reports no agent session, so an agent there writes a handoff note and starts again with it on the destination, rather than resuming.
 
 Ignored files such as `.env` and build output stay behind, and so do submodule contents, environment variables, shell history, background jobs, and unsaved editor buffers.
 
