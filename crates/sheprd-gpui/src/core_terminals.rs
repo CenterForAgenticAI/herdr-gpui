@@ -13,6 +13,7 @@
 
 mod adopt;
 mod asks;
+mod attention;
 mod checkouts;
 mod commands;
 mod context;
@@ -714,6 +715,7 @@ impl SheprdWindow {
         let listed = self.core_terminals.poll_infos(std::time::Instant::now());
         self.adopt_labelled_terminals(listed, cx);
         if listed {
+            self.hear_core_agents(cx);
             cx.notify();
         }
         if let Some(view) = fallback {
@@ -725,6 +727,7 @@ impl SheprdWindow {
             view.update(cx, |view, cx| view.set_cwd(cwd.as_deref(), cx));
         }
         self.core_terminals.shown = self.shown_core_pane(cx);
+        self.tell_core_agents(window, cx);
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
