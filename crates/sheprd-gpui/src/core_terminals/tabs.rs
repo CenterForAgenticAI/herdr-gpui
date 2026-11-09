@@ -2,10 +2,15 @@
 //! the pane in use, panes whose program ended, and the layout saved with the
 //! tab once a change settles.
 
-use super::{CoreTerminalView, Host, Start, TabPanes, panes::Axis, worker};
+use super::{
+    CoreTerminalView, Host, Start, TabPanes,
+    panes::{Axis, Panes},
+    worker,
+};
 use crate::{
     SheprdWindow,
     browser::{Location, Store, TabId},
+    i18n::fl,
     window::Flash,
 };
 use gpui::{prelude::*, *};
@@ -54,6 +59,7 @@ impl SheprdWindow {
             return;
         };
         let mut missing: Vec<(TabId, TerminalId, Role, Host)> = Vec::new();
+        let mut overflow = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
             let Some(
                 location @ Location::CoreTerminal {
@@ -80,7 +86,7 @@ impl SheprdWindow {
             // Each window holds its own copy: one another window saved over
             // is read again before this one can save.
             if shown.saved.as_ref() != Some(location) {
-                shown.refresh(location);
+                overflow.extend(shown.refresh(location));
             }
             if shown.workspace.is_none() {
                 shown.workspace = Some((scope.clone(), workspace.clone()));
@@ -109,6 +115,22 @@ impl SheprdWindow {
                         (tab.id, terminal.clone(), role, shown.host.clone())
                     }),
             );
+        }
+        // Panes another window opened in a tab this one filled meanwhile
+        // run on in a tab of their own rather than in none.
+        for terminal in overflow {
+            let location = Location::core_terminal(Panes::single(terminal.clone()), false);
+            let opened = Store::update(cx, |store| {
+                store.open(scope.clone(), &workspace, Some(location), None)
+            });
+            let said = match opened {
+                Some(_) => fl!("core-terminals-pane-own-tab"),
+                None => {
+                    tracing::warn!(%terminal, "No room for a herdr-core pane's own tab");
+                    fl!("core-terminals-too-many-tabs")
+                }
+            };
+            self.show_flash(Flash::warning(said), cx);
         }
         if missing.is_empty() {
             return;
