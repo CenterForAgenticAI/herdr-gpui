@@ -255,6 +255,14 @@ impl SheprdWindow {
                 }
             }
             Action::ServerKeybindings => self.toggle_server_keybindings(cx),
+            Action::InstallCore => {
+                let Some(id) = self.menu.host.as_ref().map(|host| host.id.clone()) else {
+                    return;
+                };
+                self.dismiss_menu(window, cx);
+                self.install_core_on(&id, cx);
+                return;
+            }
             Action::Theme => self.open_device_theme(window, cx),
             Action::Tags(mode) => self.open_device_tags(mode, window, cx),
             #[cfg(feature = "cloud")]
