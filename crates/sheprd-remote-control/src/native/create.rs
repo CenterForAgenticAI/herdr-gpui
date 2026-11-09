@@ -178,7 +178,7 @@ pub(crate) async fn new_options(
     let folders = tokio::task::spawn_blocking(move || folders(&layout))
         .await
         .map_err(|_| ApiError::Folder)?;
-    let agents = offered(installed_agents(state.hub.program()).await);
+    let agents = offered(installed_agents(state.hub.program().as_deref()).await);
     Ok(Json(NewOptions::new(
         &agents,
         folders.recent,
