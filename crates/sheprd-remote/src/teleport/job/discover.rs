@@ -45,6 +45,25 @@ pub fn repositories_of(snapshot: &HostSnapshot) -> Vec<Repository> {
     found
 }
 
+/// Why `theirs` is the source's project, if it is. Chosen without asking,
+/// a name alone is not enough when there are remotes to compare: that is
+/// likely another project.
+fn same_project(ours: &RepoIdentity, theirs: &RepoIdentity) -> Option<MatchReason> {
+    let reason = ours.matches(theirs)?;
+    (reason != MatchReason::Name || ours.remotes.is_empty()).then_some(reason)
+}
+
+/// A repository's name from its Git common directory `key`: the folder
+/// holding `.git`, or a bare repository's own name without `.git`.
+fn repository_name(key: &str) -> String {
+    let path = std::path::Path::new(key.trim_end_matches('/'));
+    let named = match path.file_name() {
+        Some(name) if name == ".git" => path.parent().and_then(std::path::Path::file_name),
+        _ => path.file_stem(),
+    };
+    named.map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
 /// Where the worktree goes on `host`: the checkout it once left, a matching
 /// open repository, an existing checkout to open, or a place to clone to.
 /// Only the chosen host is looked at, so picking a host is instant.
@@ -98,7 +117,14 @@ fn discover_host(
             repositories_of(&snapshot.snapshot)
         }
     };
-    let keys: Vec<_> = repositories.iter().map(|r| r.key.clone()).collect();
+    // The app's retired checkouts are asked too, as no open repository may
+    // stand for them.
+    let mut keys: Vec<_> = repositories.iter().map(|r| r.key.clone()).collect();
+    for retired in &host.retired {
+        if matches!(retired.keeping, Keeping::App { .. }) && !keys.contains(&retired.repo_key) {
+            keys.push(retired.repo_key.clone());
+        }
+    }
     let remotes = git::remotes(&host.place.host, &keys, cancelled)?;
     let candidate = |destination| Candidate {
         place: host.place.clone(),
@@ -113,12 +139,7 @@ fn discover_host(
                 name: repository.label.clone(),
                 remotes: remotes.get(&repository.key).cloned().unwrap_or_default(),
             };
-            let reason = identity.matches(&theirs)?;
-            // Chosen without asking, a name alone is not enough when there
-            // are remotes to compare: that is likely another project.
-            if reason == MatchReason::Name && !identity.remotes.is_empty() {
-                return None;
-            }
+            let reason = same_project(identity, &theirs)?;
             Some(candidate(Destination::Open { repository, reason }))
         })
         .collect();
@@ -131,6 +152,13 @@ fn discover_host(
                 return None;
             }
             if let Keeping::App { .. } = retired.keeping {
+                // The same branch of another project must never be reset
+                // to this work: its repository must be this one.
+                let theirs = RepoIdentity {
+                    name: repository_name(&retired.repo_key),
+                    remotes: remotes.get(&retired.repo_key).cloned().unwrap_or_default(),
+                };
+                same_project(identity, &theirs)?;
                 return Some(Destination::Reclaim {
                     repository: Repository {
                         key: retired.repo_key.clone(),
@@ -176,3 +204,7 @@ fn discover_host(
     let arrival = provision::probe(&host.place.host, source, identity, cancelled)?;
     Ok(vec![candidate(Destination::Arrive(arrival))])
 }
+
+#[cfg(test)]
+#[path = "tests/discover.rs"]
+mod tests;
