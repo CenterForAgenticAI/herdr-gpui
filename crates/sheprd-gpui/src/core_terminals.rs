@@ -20,6 +20,7 @@ mod hub;
 mod infos;
 mod screen;
 mod selection;
+mod session;
 mod sidebar;
 mod split;
 mod tabs;
@@ -50,6 +51,10 @@ use std::collections::HashMap;
 /// The workspace of a window with no Herdr 1 installed. herdr-core has no
 /// workspaces of its own, so its tabs gather here until the app keeps them.
 pub(crate) const WORKSPACE: &str = "herdr-2";
+
+/// The tab the shell shown in place of Herdr 1 counts as in a session: no
+/// store tab, whose IDs count up from zero, ever reaches it.
+pub(crate) const SHELL_TAB: u64 = u64::MAX;
 
 type Started = std::sync::mpsc::Receiver<Result<TerminalInfo, sheprd_core_client::Error>>;
 
@@ -140,6 +145,9 @@ pub(crate) struct CoreTerminals {
     infos: infos::Infos,
     /// How the views draw now, to tell when the window's look changed.
     look: Option<Look>,
+    /// The session over herdr-core of the selected host, by its scope,
+    /// while that host is this computer.
+    session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
     /// Other hosts' cores, by the scope of their workspaces.
     remote: HashMap<Scope, hosts::Remote>,
     /// A shell starting, and what for.
@@ -181,6 +189,14 @@ impl CoreTerminals {
             .filter(|shown| shown.holds_chats())
             .flat_map(|shown| shown.panes.terminals())
             .filter_map(|terminal| self.infos.get(terminal))
+    }
+
+    /// What herdr-core last reported of `terminal`, while it answers. A
+    /// lost core's last list may name agents that have since stopped, so
+    /// none is reported until it answers again.
+    pub(super) fn reported(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
+        self.hub.backend()?;
+        self.infos.get(terminal)
     }
 
     /// The pane a new chat in `tab` opens beside: the one in use, in a tab
@@ -376,6 +392,7 @@ impl SheprdWindow {
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
+        self.refresh_core_session(cx);
         // A zoom in motion draws a frame each tick until it lands.
         let now = crate::motion::now();
         if self
