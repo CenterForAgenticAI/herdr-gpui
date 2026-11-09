@@ -15,7 +15,8 @@ use crate::{
 use gpui::{
     App, AppContext as _, Context, Entity, KeyDownEvent, ScrollHandle, Subscription, Window,
 };
-use sheprd_client::protocol::{AgentStatus, ClientShellWorkspace};
+use sheprd_client::protocol::AgentStatus;
+use sheprd_session::Workspace;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -107,7 +108,8 @@ pub(super) struct Hit {
 pub(super) struct Device<'a> {
     pub id: &'a str,
     pub label: &'a str,
-    pub workspaces: &'a [ClientShellWorkspace],
+    /// Each of its sessions' workspaces: Herdr 1's, then Herdr 2's.
+    pub workspaces: Vec<&'a [Workspace]>,
     pub notes: Option<&'a crate::worktree_notes::Notes>,
 }
 
@@ -129,7 +131,7 @@ pub(super) fn search(query: &str, devices: &[Device<'_>]) -> Vec<Hit> {
         if room(&found)
             && let Some(range) = find(device.label, query)
         {
-            let count = device.workspaces.len();
+            let count: usize = device.workspaces.iter().map(|session| session.len()).sum();
             found.push(Hit {
                 kind: Kind::Device,
                 target: Target::Device {
@@ -142,13 +144,17 @@ pub(super) fn search(query: &str, devices: &[Device<'_>]) -> Vec<Hit> {
             });
         }
         // Use sidebar grouping and labels, including children of collapsed groups.
-        for (index, child) in workspace_entries(device.workspaces) {
-            let workspace = &device.workspaces[index];
+        let entries = device.workspaces.iter().flat_map(|workspaces| {
+            workspace_entries(workspaces)
+                .into_iter()
+                .map(move |(index, child)| (&workspaces[index], child))
+        });
+        for (workspace, child) in entries {
             let label = workspace_label(workspace, child);
             let branch = workspace.branch.as_deref().unwrap_or_default();
             let target = || Target::Workspace {
                 endpoint: device.id.to_owned(),
-                workspace: workspace.workspace_id.clone(),
+                workspace: workspace.id.clone(),
             };
             if room(&worktrees)
                 && let Some(range) = find(label, query)
@@ -159,7 +165,7 @@ pub(super) fn search(query: &str, devices: &[Device<'_>]) -> Vec<Hit> {
                     text: label.to_owned(),
                     range,
                     context: place(device, branch),
-                    status: Some(workspace.agent_status),
+                    status: Some(workspace.status),
                 });
             }
             if room(&branches)
@@ -171,7 +177,7 @@ pub(super) fn search(query: &str, devices: &[Device<'_>]) -> Vec<Hit> {
                     text: branch.to_owned(),
                     range,
                     context: place(device, label),
-                    status: Some(workspace.agent_status),
+                    status: Some(workspace.status),
                 });
             }
             if room(&notes)
@@ -262,25 +268,22 @@ impl SheprdWindow {
             return Vec::new();
         };
         let notes = crate::worktree_notes::Notes::of(cx);
-        let devices: Vec<_> = self
+        let listed: Vec<_> = self
             .displayed_devices()
             .into_iter()
             .filter(|(_, endpoint)| self.device_visible(&endpoint.id))
-            .map(|(index, endpoint)| {
-                let live = if index == self.selected_endpoint {
-                    &self.live
-                } else {
-                    &endpoint.live
-                };
-                Device {
-                    id: &endpoint.id,
-                    label: &endpoint.label,
-                    workspaces: live
-                        .snapshot
-                        .as_deref()
-                        .map_or(&[], |snapshot| &snapshot.workspaces),
-                    notes,
-                }
+            .map(|(index, endpoint)| (endpoint, self.sessions(index)))
+            .collect();
+        let devices: Vec<_> = listed
+            .iter()
+            .map(|(endpoint, sessions)| Device {
+                id: &endpoint.id,
+                label: &endpoint.label,
+                workspaces: sessions
+                    .each()
+                    .map(|session| session.workspaces.as_slice())
+                    .collect(),
+                notes,
             })
             .collect();
         search(query, &devices)

@@ -1,16 +1,16 @@
 use super::*;
-use sheprd_client::protocol::ClientShellWorktree;
 use std::path::PathBuf;
 
-fn workspace(worktree: Option<&str>) -> ClientShellWorkspace {
-    let mut workspace = crate::sidebar::layout_tests::snapshot(1)
-        .workspaces
-        .remove(0);
-    workspace.new_workspace_cwd = "/home/user/src/app".into();
-    workspace.worktree = worktree.map(|key| ClientShellWorktree {
+fn workspace(worktree: Option<&str>) -> Workspace {
+    let mut workspace =
+        crate::session_model::of_snapshot(&crate::sidebar::layout_tests::snapshot(1))
+            .workspaces
+            .remove(0);
+    workspace.cwd = "/home/user/src/app".into();
+    workspace.worktree = worktree.map(|key| sheprd_session::Worktree {
         key: key.into(),
         label: "app".into(),
-        is_linked_worktree: false,
+        linked: false,
     });
     workspace
 }

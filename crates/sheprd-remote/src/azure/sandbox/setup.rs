@@ -107,6 +107,9 @@ pub fn add_device(
                 return Err(cloud::Error::Install(install::Failure::Missing).into());
             }
         }
+        if install {
+            install::add_core(command(), &cancelled)?;
+        }
         Ok(())
     };
     let discard = || {

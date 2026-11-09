@@ -9,7 +9,19 @@ use crate::{
     i18n::{Localize, fl},
 };
 use gpui::{prelude::*, *};
-use sheprd_automation::report::{RunDetail, RunState, RunSummary, ScriptStatus, StepRecord, Usage};
+use sheprd_automation::report::{
+    RunDetail, RunState, RunSummary, ScriptStatus, StepRecord, Terminals, Usage,
+};
+use sheprd_backend::TerminalId;
+
+/// Where an agent step's pane can be shown from this window.
+#[derive(Clone)]
+enum AgentPane {
+    /// A pane of the Herdr 1 endpoint that reaches the step's machine.
+    Herdr { endpoint: String, pane: String },
+    /// A terminal of this computer's herdr-core.
+    Core(TerminalId),
+}
 
 /// Lines of a step's tail shown on the page; Full log shows the rest.
 const TAIL_LINES: usize = 12;
@@ -232,7 +244,7 @@ impl SheprdWindow {
         let pane = step
             .pane
             .as_ref()
-            .and_then(|pane| self.automation_pane(host, pane));
+            .and_then(|pane| self.automation_pane(host, step.terminals, pane));
         let mut block = div()
             .debug_selector(move || selector.clone())
             .flex()
@@ -262,7 +274,7 @@ impl SheprdWindow {
                             .text_color(rgb(theme.subtext()))
                             .child(line),
                     )
-                    .children(pane.clone().map(|(endpoint, pane)| {
+                    .children(pane.clone().map(|pane| {
                         self.automation_button(
                             format!("automations-pane-{}", step.position),
                             "icons/terminal.svg",
@@ -270,7 +282,7 @@ impl SheprdWindow {
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
-                                this.open_automation_pane(&endpoint, &pane, window, cx);
+                                this.open_automation_pane(pane.clone(), window, cx);
                             },
                         ))
                     }))
@@ -333,8 +345,20 @@ impl SheprdWindow {
     }
 
     /// The pane an agent step runs in, when this window shows it: the
-    /// endpoint that reaches the step's machine has a pane by that ID.
-    fn automation_pane(&self, host: &HostState, pane: &str) -> Option<(String, String)> {
+    /// endpoint that reaches the step's machine has a pane by that ID, or it
+    /// is a herdr-core terminal on this computer, whose core the window joins.
+    fn automation_pane(
+        &self,
+        host: &HostState,
+        terminals: Terminals,
+        pane: &str,
+    ) -> Option<AgentPane> {
+        if terminals == Terminals::HerdrCore {
+            return (host.machine == super::super::Machine::Local)
+                .then(|| TerminalId::new(pane).ok())
+                .flatten()
+                .map(AgentPane::Core);
+        }
         self.endpoints
             .iter()
             .enumerate()
@@ -349,23 +373,30 @@ impl SheprdWindow {
                     .panes
                     .iter()
                     .any(|known| known.pane_id == pane)
-                    .then(|| (endpoint.id.clone(), pane.to_owned()))
+                    .then(|| AgentPane::Herdr {
+                        endpoint: endpoint.id.clone(),
+                        pane: pane.to_owned(),
+                    })
             })
     }
 
     /// Shows the agent's pane among the terminals; Back returns here.
     fn open_automation_pane(
         &mut self,
-        endpoint: &str,
-        pane: &str,
+        pane: AgentPane,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         use crate::sidebar::ActivityPanel;
         self.show_activity_panel(ActivityPanel::Workspaces, window, cx);
         self.activity.return_to = Some(ActivityPanel::Automations);
-        self.navigate_endpoint(endpoint, crate::NavigationTarget::Pane(pane), cx);
-        window.focus(&self.focus, cx);
+        match pane {
+            AgentPane::Herdr { endpoint, pane } => {
+                self.navigate_endpoint(&endpoint, crate::NavigationTarget::Pane(&pane), cx);
+                window.focus(&self.focus, cx);
+            }
+            AgentPane::Core(terminal) => self.open_core_terminal(terminal, window, cx),
+        }
         cx.notify();
     }
 }

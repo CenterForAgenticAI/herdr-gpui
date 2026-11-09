@@ -202,6 +202,7 @@ impl SheprdWindow {
                         axis,
                     },
                     sheprd_backend::Spawn::default(),
+                    cx,
                 );
             }
             (Action::Zoom | Action::Unzoom, Target::Pane { terminal, .. }) => {

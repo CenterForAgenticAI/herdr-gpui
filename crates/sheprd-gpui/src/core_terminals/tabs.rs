@@ -75,6 +75,13 @@ impl SheprdWindow {
             if shown.saved.as_ref() != Some(location) {
                 shown.refresh(location);
             }
+            if shown.workspace.is_none() {
+                shown.workspace = Some((scope.clone(), workspace.clone()));
+            }
+            // Only this computer's folders root a workspace's local views.
+            if shown.host == Host::Local {
+                shown.keep_root(&self.core_terminals.infos);
+            }
             missing.extend(
                 shown
                     .panes
@@ -217,7 +224,16 @@ impl SheprdWindow {
             .core_terminals
             .tabs
             .iter()
-            .filter_map(|(tab, shown)| Some((*tab, self.core_tab_title(*tab, shown, cx)?)))
+            .filter_map(|(tab, shown)| {
+                let title = self.core_tab_title(*tab, shown, cx);
+                // A pane's name left over from when it was in use goes, even
+                // before the pane now in use has a title of its own.
+                let shown_title = store_title(*tab, cx);
+                let stale = shown_title
+                    .is_some_and(|title| shown.names.values().any(|name| *name == title));
+                let title = title.or_else(|| stale.then(|| shown.location().default_title()))?;
+                Some((*tab, title))
+            })
             .collect();
         for (tab, title) in titles {
             let stale = cx
@@ -272,6 +288,14 @@ impl SheprdWindow {
             return;
         }
         self.sync_core_views(cx);
+        // A split asked for from elsewhere, such as an editor opened from a
+        // review, brings its tab forward.
+        if self
+            .shown_core_pane(cx)
+            .is_none_or(|(shown, _)| shown != tab)
+        {
+            self.show_browser_tab(tab, window, cx);
+        }
         self.focus_core_terminal(tab, window, cx);
     }
 
@@ -403,4 +427,10 @@ impl SheprdWindow {
             Store::update(cx, |store| store.visited(tab, Some(location), None));
         }
     }
+}
+
+/// The title `tab` shows now.
+fn store_title(tab: TabId, cx: &App) -> Option<String> {
+    let store = cx.try_global::<Store>()?;
+    Some(store.get(tab)?.title.clone())
 }

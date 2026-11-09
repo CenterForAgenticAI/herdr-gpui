@@ -96,6 +96,7 @@ fn step(position: u32, kind: &str, summary: &str, exit: Option<i32>) -> StepReco
         log_tail: "Already up to date.".into(),
         worktree: Some("/repo".into()),
         pane: None,
+        terminals: sheprd_automation::report::Terminals::Herdr,
         usage: Usage {
             tokens: None,
             cpu_ms: Some(1200),

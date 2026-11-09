@@ -40,7 +40,7 @@ pub(crate) use resume::Resume;
 mod search;
 
 use agent_filter::AgentFilter;
-use go_to::{destination_exists, go_to_entries, note_entries};
+use go_to::{destination_exists, go_to_entries, kept_go_to_entries, note_entries};
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -727,6 +727,14 @@ impl SheprdWindow {
                 .map(|endpoint| endpoint.label.as_str());
             go_to_entries(&source.endpoint, host, snapshot, &mut entries);
         }
+        // This computer's kept workspaces, whichever host is shown.
+        if let Some(index) = self.core_host()
+            && let Some(core) = self.sessions(index).core
+        {
+            let local = &self.endpoints[index];
+            let host = (self.endpoints.len() > 1).then_some(local.label.as_str());
+            kept_go_to_entries(&local.id, host, &core, &mut entries);
+        }
         // Their rows nest under rows of their own: counted from here.
         let core = self.core_palette_entries(cx);
         let core_rows = go_to::core_rows(&core);
@@ -742,6 +750,7 @@ impl SheprdWindow {
                 .filter(|info| match info.command {
                     Command::ClearPane => self.live.supports_pane_clear,
                     Command::EditScrollback => self.live.supports_edit_scrollback,
+                    Command::ToggleMenuBar => crate::menus::IN_WINDOW,
                     _ => true,
                 })
                 .map(|info| {
