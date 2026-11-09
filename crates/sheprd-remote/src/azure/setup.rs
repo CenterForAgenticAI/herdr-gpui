@@ -168,6 +168,13 @@ fn ensure_herdr(
             return Err(cloud::Error::Install(install::Failure::Missing).into());
         }
     }
+    if install {
+        gateway
+            .with_command(|command| {
+                install::add_core(Ok::<_, std::convert::Infallible>(command), &cancelled)
+            })
+            .unwrap_or_else(|error| install::core_unprepared(error, &cancelled))?;
+    }
     Ok(())
 }
 

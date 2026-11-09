@@ -160,6 +160,7 @@ fn a_runs_usage_adds_up_what_its_steps_measured() {
         log_tail: String::new(),
         worktree: None,
         pane: None,
+        terminals: sheprd_automation::report::Terminals::Herdr,
         usage: Usage {
             tokens: tokens.map(|input| Tokens {
                 input,

@@ -64,14 +64,14 @@ fn a_pane_gone_elsewhere_takes_the_focus_and_zoom_saved_there() {
 }
 
 #[test]
-fn with_nothing_unsaved_the_other_windows_focus_is_taken() {
+fn focus_stays_where_this_windows_keyboard_is() {
     let mut here = shown(&["t1", "t2"]);
     let mut there = Location::core_terminal(panes(&["t1", "t2"]), false);
     if let Location::CoreTerminal { active, .. } = &mut there {
         *active = Some(id("t2"));
     }
     here.refresh(&there);
-    assert_eq!(here.active, id("t2"));
+    assert_eq!(here.active, id("t1"));
     assert!(!here.unsaved);
 }
 
@@ -86,4 +86,73 @@ fn a_name_another_window_gave_is_read() {
     here.refresh(&there);
     assert_eq!(here.name.as_deref(), Some("build"));
     assert_eq!(here.names.get(&id("t2")).map(String::as_str), Some("tests"));
+}
+
+#[test]
+fn a_split_placed_here_while_another_window_saved_stays() {
+    let mut here = shown(&["t1", "t2"]);
+    // A split this window just placed, not saved yet.
+    here.panes.split(&id("t2"), Axis::Row, id("t3")).unwrap();
+    here.active = id("t3");
+    here.unsaved = true;
+    // Another window saved a focus change on the old layout meanwhile.
+    let mut there = Location::core_terminal(panes(&["t1", "t2"]), false);
+    if let Location::CoreTerminal { active, .. } = &mut there {
+        *active = Some(id("t1"));
+    }
+    here.refresh(&there);
+    assert_eq!(here.panes, panes(&["t1", "t2", "t3"]));
+    assert_eq!(here.active, id("t3"));
+    assert!(here.unsaved, "the split still saves");
+}
+
+#[test]
+fn layouts_both_windows_changed_merge() {
+    let mut here = shown(&["t1", "t2"]);
+    here.panes.split(&id("t1"), Axis::Row, id("t3")).unwrap();
+    here.unsaved = true;
+    // The other window closed t2 and opened t4.
+    let there = Location::core_terminal(panes(&["t1", "t4"]), false);
+    here.refresh(&there);
+    let mut kept: Vec<String> = here
+        .panes
+        .terminals()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    kept.sort();
+    assert_eq!(kept, ["t1", "t3", "t4"]);
+}
+
+#[test]
+fn a_zoom_saved_on_another_pane_never_hides_the_one_in_use() {
+    let mut here = shown(&["t1", "t2"]);
+    let mut there = Location::core_terminal(panes(&["t1", "t2"]), false);
+    if let Location::CoreTerminal { zoomed, .. } = &mut there {
+        *zoomed = Some(id("t2"));
+    }
+    here.refresh(&there);
+    assert_eq!(here.active, id("t1"));
+    assert!(!here.zoom.is_open(), "t1 in use is not hidden behind t2");
+    // On the pane in use, the other window's zoom is taken.
+    let mut there = Location::core_terminal(panes(&["t1", "t2"]), false);
+    if let Location::CoreTerminal { zoomed, .. } = &mut there {
+        *zoomed = Some(id("t1"));
+    }
+    here.refresh(&there);
+    assert!(here.zoom.is_open());
+    assert_eq!(here.zoomed, Some(id("t1")));
+}
+
+#[test]
+fn a_name_given_here_stays_when_another_window_saves() {
+    let mut here = shown(&["t1", "t2"]);
+    here.name = Some("build".into());
+    here.unsaved = true;
+    let mut there = Location::core_terminal(panes(&["t1", "t2"]), false);
+    if let Location::CoreTerminal { active, .. } = &mut there {
+        *active = Some(id("t2"));
+    }
+    here.refresh(&there);
+    assert_eq!(here.name.as_deref(), Some("build"));
 }

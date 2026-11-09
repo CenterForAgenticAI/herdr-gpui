@@ -291,6 +291,8 @@ fn teleport_between_two_daemons() {
             tab["tab"]["tab_id"].as_str().unwrap().to_owned(),
             "server".to_owned(),
         )]),
+        core_tabs: Vec::new(),
+        core_preferred: false,
     };
     let cancelled = AtomicBool::new(false);
     let resolved = job::resolve(
@@ -392,6 +394,8 @@ fn teleport_between_two_daemons() {
         repo_label: "app".into(),
         branch: Some("feat".into()),
         tab_labels: HashMap::new(),
+        core_tabs: Vec::new(),
+        core_preferred: false,
     };
     let resolved = job::resolve(
         &back,
@@ -500,6 +504,8 @@ fn teleport_copies_the_repository_where_it_is_missing() {
         repo_label: "app".into(),
         branch: Some("feat".into()),
         tab_labels: HashMap::new(),
+        core_tabs: Vec::new(),
+        core_preferred: false,
     };
     let cancelled = AtomicBool::new(false);
     // No GUI snapshot: the host is read through its CLI, as when disconnected.
