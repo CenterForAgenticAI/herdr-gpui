@@ -1,4 +1,4 @@
-use super::super::context::{Herdr, api_socket, apply};
+use super::super::context::{Daemon, Herdr, api_socket, apply};
 use sheprd_backend::Spawn;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +14,7 @@ fn env<'a>(spawn: &'a Spawn, name: &str) -> Option<&'a str> {
 fn a_terminal_in_a_herdr_workspace_names_that_workspace_and_no_pane() {
     let mut spawn = Spawn::default();
     let herdr = Herdr {
-        api_socket: PathBuf::from("/run/herdr/herdr.sock"),
+        daemon: Daemon::Socket(PathBuf::from("/run/herdr/herdr.sock")),
         workspace: "wFH".into(),
     };
     apply(&mut spawn, Some(PathBuf::from("/src/app")), Some(herdr));
@@ -28,6 +28,22 @@ fn a_terminal_in_a_herdr_workspace_names_that_workspace_and_no_pane() {
     // cleared so nothing reports to a pane the terminal is not in.
     assert_eq!(env(&spawn, "HERDR_PANE_ID"), Some(""));
     assert_eq!(env(&spawn, "HERDR_TAB_ID"), Some(""));
+}
+
+#[test]
+fn a_terminal_on_a_saved_host_names_its_daemon_by_session() {
+    let mut spawn = Spawn::default();
+    let herdr = Herdr {
+        daemon: Daemon::Session("work".into()),
+        workspace: "w2".into(),
+    };
+    apply(&mut spawn, Some(PathBuf::from("/home/me/app")), Some(herdr));
+    assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/home/me/app")));
+    assert_eq!(env(&spawn, "HERDR_WORKSPACE_ID"), Some("w2"));
+    assert_eq!(env(&spawn, "HERDR_SESSION"), Some("work"));
+    // That host's socket is under its own home, unknown here.
+    assert_eq!(env(&spawn, "HERDR_SOCKET_PATH"), None);
+    assert_eq!(env(&spawn, "HERDR_PANE_ID"), Some(""));
 }
 
 #[test]

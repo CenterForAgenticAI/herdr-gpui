@@ -65,15 +65,35 @@ impl SheprdWindow {
         // stand-in workspace, when that host is this computer.
         let fallback = (!self.selected_is_remote())
             .then(|| crate::browser::scope(&self.endpoints[self.selected_endpoint]));
-        changed |= self
-            .listening_ports
-            .place_terminals(self.core_terminals.terminal_workspaces(fallback));
+        let places = self
+            .core_terminals
+            .terminal_workspaces(fallback)
+            .into_iter()
+            .filter_map(|(host, terminal, place)| {
+                Some((self.scanned_host(&host)?, terminal, place))
+            })
+            .collect();
+        changed |= self.listening_ports.place_terminals(places);
         // A tunnel lives as long as its remote port is listed at the address
         // it dials and its SSH child runs; either ending removes its close
         // button.
         let ports = &self.listening_ports;
         let closed = self.tunnels.retain(|key| ports.tunnels_to(key));
         changed || closed
+    }
+
+    /// The host whose port scan finds the listeners of `host`'s core: this
+    /// computer, or the machine the saved device reaches, while that one is
+    /// a device. A cloud machine is not scanned.
+    fn scanned_host(&self, host: &crate::core_terminals::Host) -> Option<crate::usage::Host> {
+        match host {
+            crate::core_terminals::Host::Local => Some(crate::usage::Host::Local),
+            crate::core_terminals::Host::Remote(scope) => self
+                .endpoints
+                .iter()
+                .find(|endpoint| crate::browser::scope(endpoint) == *scope)
+                .and_then(|endpoint| crate::usage::Host::of(&endpoint.connection.target)),
+        }
     }
 
     /// This computer's ports are listed while the Ports section is shown,
