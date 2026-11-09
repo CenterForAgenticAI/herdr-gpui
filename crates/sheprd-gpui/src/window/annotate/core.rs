@@ -1,9 +1,34 @@
 //! Notes on text selected in a herdr-core pane. The pane keeps its own
 //! selection, which may reach into its history; the note card is the one a
-//! Herdr 1 pane's note uses, laid over the pane in the window. Herdr 2
-//! agents do not take notes yet, so a note is copied to the clipboard.
+//! Herdr 1 pane's note uses, laid over the pane in the window. A note goes
+//! to the pane's agent, else the first agent of its tab, typed in once its
+//! turn is over, as a Herdr 1 agent's is; with no agent there, or once the
+//! agent left or asks a question, it is copied to the clipboard.
 
 use super::*;
+use sheprd_backend::TerminalId;
+use sheprd_core_client::{
+    agent::Until,
+    reply::{self, Replied},
+};
+use std::{
+    sync::atomic::AtomicBool,
+    time::{Duration, Instant},
+};
+
+/// How long notes wait for a busy agent before they are typed in anyway, as
+/// a Herdr 1 agent's notes do.
+const HOLD: Duration = Duration::from_secs(120);
+
+/// The Herdr 2 agent a note goes to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CoreAgent {
+    pub(super) tab: crate::browser::TabId,
+    pub(super) terminal: TerminalId,
+    /// Its name, so a note never reaches another program that took the
+    /// terminal since.
+    pub(super) agent: String,
+}
 
 impl SheprdWindow {
     /// Opens the note card about `view`'s selection once its text is read
@@ -65,7 +90,123 @@ impl SheprdWindow {
             return;
         }
         let place = view.read(cx).title().unwrap_or_default().to_owned();
-        self.open_terminal_note(Source::Core(view), None, place, quote, window, cx);
+        let target = self
+            .core_note_agent(&view, cx)
+            .map(|agent| agent.terminal.to_string());
+        self.open_terminal_note(Source::Core(view), target, place, quote, window, cx);
+    }
+
+    /// The agent a note on `view`'s pane goes to: the pane's own, else the
+    /// first of its tab's panes that runs one.
+    pub(super) fn core_note_agent(
+        &self,
+        view: &Entity<CoreTerminalView>,
+        cx: &App,
+    ) -> Option<CoreAgent> {
+        let terminals = &self.core_terminals;
+        let (tab, terminal) = terminals.view_key(view).or_else(|| {
+            let terminal = view.read(cx).terminal().clone();
+            Some((terminals.tab_of(&terminal)?, terminal))
+        })?;
+        let agent = |terminal: &TerminalId| {
+            let info = terminals.info(tab, terminal)?;
+            Some(CoreAgent {
+                tab,
+                terminal: terminal.clone(),
+                agent: sheprd_core_client::agent_name(info)?,
+            })
+        };
+        agent(&terminal).or_else(|| {
+            let panes = terminals.visible_chat_panes(tab);
+            panes.into_iter().find_map(agent)
+        })
+    }
+
+    /// Types each Herdr 2 agent's notes into its terminal, off the UI
+    /// thread, once its turn is over. Notes whose agent's core cannot be
+    /// reached go to `clipboard`, with the rest of the Send's copies.
+    pub(super) fn send_core_notes(
+        &mut self,
+        queued: Vec<Queued>,
+        clipboard: &crate::agent_notes::Copies,
+        cx: &mut Context<Self>,
+    ) {
+        let mut queued = queued;
+        while let Some(first) = queued.first() {
+            let Some(agent) = first.core.clone() else {
+                queued.remove(0);
+                continue;
+            };
+            let (batch, rest): (Vec<_>, Vec<_>) = queued
+                .into_iter()
+                .partition(|queued| queued.core.as_ref() == Some(&agent));
+            queued = rest;
+            let text = terminal_notes::prompt(batch.iter().map(|queued| &queued.note));
+            let Some(backend) = self.core_terminals.tab_backend(agent.tab).cloned() else {
+                clipboard.extend([text]);
+                self.show_flash(Flash::warning(fl!("window-annotate-core-unreachable")), cx);
+                continue;
+            };
+            self.deliver_core_notes(backend, agent, text, cx);
+        }
+    }
+
+    fn deliver_core_notes(
+        &mut self,
+        backend: sheprd_core_client::CoreBackend,
+        agent: CoreAgent,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_flash(Flash::success(fl!("agent-notes-will-send")), cx);
+        let work = cx.background_executor().spawn(async move {
+            let stop = AtomicBool::new(false);
+            let until = Until {
+                deadline: Instant::now() + HOLD,
+                stop: &stop,
+            };
+            let sent = reply::when_free(
+                backend.core(),
+                agent.terminal.as_str(),
+                &agent.agent,
+                &text,
+                until,
+            );
+            (sent, text)
+        });
+        cx.spawn(async move |this, cx| {
+            let (sent, text) = work.await;
+            this.update(cx, |this, cx| this.core_notes_delivered(sent, text, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Says where the notes went; what the agent did not take is copied.
+    pub(super) fn core_notes_delivered(
+        &mut self,
+        sent: sheprd_core_client::Result<Replied>,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        let delivered = matches!(sent, Ok(Replied::Sent));
+        let flash = match sent {
+            Ok(Replied::Sent) => Flash::success(fl!("agent-notes-sent")),
+            Ok(Replied::Gone) => Flash::warning(fl!("window-annotate-core-gone")),
+            Err(sheprd_core_client::Error::Refused {
+                kind: Some(kind), ..
+            }) if kind == sheprd_core_client::wire::BLOCKED => {
+                Flash::warning(fl!("window-annotate-core-blocked"))
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Could not send notes to a Herdr 2 agent");
+                Flash::warning(fl!("window-annotate-core-unreachable"))
+            }
+        };
+        if !delivered {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+        self.show_flash(flash, cx);
     }
 
     /// The card over the herdr-core pane its note is about, beside the

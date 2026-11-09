@@ -72,3 +72,105 @@ fn a_reply_to_an_agent_that_left_is_not_typed() {
     // No send follows.
     assert_eq!(call.join().unwrap().unwrap(), Replied::Gone);
 }
+
+fn until(deadline: std::time::Instant) -> (std::sync::atomic::AtomicBool, std::time::Instant) {
+    (std::sync::atomic::AtomicBool::new(false), deadline)
+}
+
+#[test]
+fn a_note_waits_for_the_turn_to_end_then_goes_to_the_idle_agent() {
+    let (client, mut core) = connected();
+    let call = thread::spawn(move || {
+        let (stop, deadline) =
+            until(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        when_free(
+            &client,
+            "t1",
+            "claude",
+            "see note",
+            Until {
+                deadline,
+                stop: &stop,
+            },
+        )
+    });
+    let list = core.request();
+    core.answer(
+        &list,
+        json!({"terminals": [claude_record("zsh", 200, "working")]}),
+    );
+    let wait = core.request();
+    assert_eq!(wait["method"], "terminal.wait");
+    core.answer(
+        &wait,
+        json!({"ended": true, "reason": "status", "status": "idle", "turn": 3}),
+    );
+    let list = core.request();
+    core.answer(
+        &list,
+        json!({"terminals": [claude_record("zsh", 200, "idle")]}),
+    );
+    let send = core.request();
+    assert_eq!(
+        send["params"],
+        json!({"terminal": "t1", "text": "see note", "if": "idle"})
+    );
+    core.answer(&send, json!({"turn": 4, "started": true}));
+    assert_eq!(call.join().unwrap().unwrap(), Replied::Sent);
+}
+
+#[test]
+fn past_the_deadline_a_note_goes_in_whatever_the_agent_does() {
+    let (client, mut core) = connected();
+    let call = thread::spawn(move || {
+        let (stop, deadline) = until(std::time::Instant::now());
+        when_free(
+            &client,
+            "t1",
+            "claude",
+            "see note",
+            Until {
+                deadline,
+                stop: &stop,
+            },
+        )
+    });
+    let list = core.request();
+    core.answer(
+        &list,
+        json!({"terminals": [claude_record("zsh", 200, "working")]}),
+    );
+    let send = core.request();
+    assert_eq!(send["method"], "terminal.send");
+    assert_eq!(
+        send["params"],
+        json!({"terminal": "t1", "text": "see note"})
+    );
+    core.answer(&send, json!({"turn": 4, "started": true}));
+    assert_eq!(call.join().unwrap().unwrap(), Replied::Sent);
+}
+
+#[test]
+fn a_note_to_an_agent_that_left_is_not_typed() {
+    let (client, mut core) = connected();
+    let call = thread::spawn(move || {
+        let (stop, deadline) =
+            until(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        when_free(
+            &client,
+            "t1",
+            "codex",
+            "see note",
+            Until {
+                deadline,
+                stop: &stop,
+            },
+        )
+    });
+    let list = core.request();
+    core.answer(
+        &list,
+        json!({"terminals": [claude_record("zsh", 200, "idle")]}),
+    );
+    assert_eq!(call.join().unwrap().unwrap(), Replied::Gone);
+}

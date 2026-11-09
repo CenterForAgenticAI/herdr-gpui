@@ -3,7 +3,7 @@
 //! unique within one core, so each host keeps its own hub and its own list
 //! of what that core reports.
 
-use super::{CoreTerminals, Error, Hub, Purpose, State, infos::Infos};
+use super::{CoreTerminalView, CoreTerminals, Error, Hub, Purpose, State, infos::Infos};
 use crate::{
     SheprdWindow,
     browser::{Scope, TabId},
@@ -11,7 +11,7 @@ use crate::{
     i18n::fl,
     window::Flash,
 };
-use gpui::{Context, Window};
+use gpui::{Context, Entity, Window};
 use sheprd_backend::{TerminalId, TerminalInfo};
 use sheprd_client::ConnectTarget;
 use sheprd_core_client::CoreBackend;
@@ -103,6 +103,19 @@ impl CoreTerminals {
     /// What `tab`'s core reports of `terminal`.
     pub(crate) fn info(&self, tab: TabId, terminal: &TerminalId) -> Option<&TerminalInfo> {
         self.infos_of(&self.tabs.get(&tab)?.host)?.get(terminal)
+    }
+
+    /// The core `tab`'s terminals run in, while it answers.
+    pub(crate) fn tab_backend(&self, tab: TabId) -> Option<&CoreBackend> {
+        self.backend_of(&self.tabs.get(&tab)?.host)
+    }
+
+    /// The tab and terminal `view` shows, if it is one of the tabs' panes.
+    pub(crate) fn view_key(&self, view: &Entity<CoreTerminalView>) -> Option<(TabId, TerminalId)> {
+        self.views
+            .iter()
+            .find(|(_, shown)| *shown == view)
+            .map(|(key, _)| key.clone())
     }
 
     /// Every host whose core the window knows of, this computer first.
