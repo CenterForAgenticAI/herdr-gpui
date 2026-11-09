@@ -54,10 +54,10 @@ fn frame(width: u16, rows: &[&str]) -> FrameData {
 #[test]
 fn a_whole_frame_reads_addresses_and_paths() {
     let shown = frame(40, &[&format!("see {URL} now"), "edit src/main.rs:12 then"]);
-    let link = frame_link_at(&shown, 6, 0).unwrap();
+    let link = frame_link_at(&shown, 6, 0, &[]).unwrap();
     assert_eq!(link.target, RowTarget::Web(URL.into()));
     assert_eq!((link.row, link.columns), (0, 4..4 + URL.len() as u16));
-    let path = frame_link_at(&shown, 7, 1).unwrap();
+    let path = frame_link_at(&shown, 7, 1, &[]).unwrap();
     assert_eq!(
         path.target,
         RowTarget::Path {
@@ -67,9 +67,9 @@ fn a_whole_frame_reads_addresses_and_paths() {
         }
     );
     // A blank is no link; any word may name a file, which a check decides.
-    assert_eq!(frame_link_at(&shown, 3, 0), None);
+    assert_eq!(frame_link_at(&shown, 3, 0, &[]), None);
     // Outside the frame is nothing.
-    assert_eq!(frame_link_at(&shown, 0, 5), None);
+    assert_eq!(frame_link_at(&shown, 0, 5, &[]), None);
 }
 
 type Asked = Rc<RefCell<Vec<ToWindow>>>;
@@ -314,6 +314,29 @@ fn another_hosts_paths_are_no_links_but_its_addresses_are(cx: &mut TestAppContex
     cx.update(|_, cx| assert_eq!(view.read(cx).link_rows(), [(0, 0..9)]));
 }
 
+#[gpui::test]
+fn a_file_made_after_its_path_was_printed_becomes_a_link(cx: &mut TestAppContext) {
+    let folder = tempfile::tempdir().unwrap();
+    let (view, cx, backend, _) = shown(cx, &["see notes.txt"], false);
+    cx.update(|_, cx| view.update(cx, |view, cx| view.set_cwd(Some(folder.path()), cx)));
+    let path = at(&view, cx, 6, 0);
+    cx.simulate_mouse_move(path, None, link_modifier());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(view.read(cx).link_rows().is_empty()));
+    // A build writes the file and prints its path again, under the pointer.
+    std::fs::write(folder.path().join("notes.txt"), "hi").unwrap();
+    backend.push(vec![SurfaceUpdate::Frame(frame(
+        40,
+        &["see notes.txt", "$"],
+    ))]);
+    until(|| {
+        cx.update(|_, cx| view.update(cx, |view, cx| view.poll(cx)))
+            .then_some(())
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(view.read(cx).link_rows(), [(0, 4..13)]));
+}
+
 #[test]
 fn a_terminal_found_by_name_has_its_details() {
     let mut infos = crate::core_terminals::infos::Infos::default();
@@ -361,4 +384,50 @@ fn a_terminal_only_a_mirror_shows_is_still_this_computers() {
     assert!(terminals.mirrors(&id("t1")));
     // Another host's `t2` is no terminal of this computer's.
     assert!(!terminals.mirrors(&id("t2")));
+}
+
+/// `URL` after "see ", wrapped at 16 columns.
+fn wrapped_url() -> FrameData {
+    let text = format!("see {URL} now");
+    frame(16, &[&text[..16], &text[16..]])
+}
+
+#[test]
+fn an_address_the_terminal_wrapped_is_read_across_its_rows() {
+    let shown = wrapped_url();
+    let link = frame_link_at(&shown, 3, 1, &[true, false]).unwrap();
+    assert_eq!(link.target, RowTarget::Web(URL.into()));
+    assert_eq!(link.rows().collect::<Vec<_>>(), [(0, 4..16), (1, 0..9)]);
+    // The same from its first row.
+    assert_eq!(frame_link_at(&shown, 6, 0, &[true, false]), Some(link));
+    // A line that merely filled its row is not read on into the next.
+    assert_eq!(frame_link_at(&shown, 6, 0, &[false, false]), None);
+    assert_eq!(frame_link_at(&shown, 6, 0, &[]), None);
+}
+
+#[gpui::test]
+fn a_wrapped_address_opens_once_the_terminal_says_it_wrapped(cx: &mut TestAppContext) {
+    let text = format!("see {URL} now");
+    let (view, cx, backend, asked) = shown(cx, &[], false);
+    backend.push(vec![
+        SurfaceUpdate::Frame(frame(16, &[&text[..16], &text[16..]])),
+        SurfaceUpdate::Wraps(vec![true, false]),
+    ]);
+    until(|| {
+        cx.update(|_, cx| view.update(cx, |view, cx| view.poll(cx)))
+            .then_some(())
+    });
+    cx.run_until_parked();
+    let tail = at(&view, cx, 3, 1);
+    cx.simulate_mouse_move(tail, None, link_modifier());
+    cx.update(|_, cx| assert_eq!(view.read(cx).link_rows(), [(0, 4..16), (1, 0..9)]));
+    cx.simulate_mouse_down(tail, MouseButton::Left, link_modifier());
+    cx.simulate_mouse_up(tail, MouseButton::Left, link_modifier());
+    assert_eq!(
+        opened(&asked)
+            .into_iter()
+            .map(|click| click.target)
+            .collect::<Vec<_>>(),
+        [RowTarget::Web(URL.into())]
+    );
 }

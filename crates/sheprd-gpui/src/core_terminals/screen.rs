@@ -18,6 +18,9 @@ pub(crate) struct Screen {
     /// Whether the program reads the mouse, so presses go to it.
     pub(crate) mouse_reporting: bool,
     pub(crate) title: Option<String>,
+    /// Whether each row's line goes on to the next, as the terminal
+    /// wrapped it: what lets an address be read across rows.
+    pub(crate) wraps: Arc<[bool]>,
 }
 
 impl Screen {
@@ -53,6 +56,7 @@ impl Screen {
             SurfaceUpdate::Title(title) => {
                 self.title = Some(title).filter(|title| !title.is_empty())
             }
+            SurfaceUpdate::Wraps(wraps) => self.wraps = wraps.into(),
         }
     }
 }

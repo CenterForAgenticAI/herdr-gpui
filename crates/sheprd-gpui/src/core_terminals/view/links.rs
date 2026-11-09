@@ -46,8 +46,13 @@ impl CoreTerminalView {
     /// The link at `cell`: any kind in a pane of this computer's core, and
     /// no file path in another host's.
     fn link_at(&self, cell: Cell) -> Option<RowLink> {
-        frame_link_at(self.screen.frame.as_deref()?, cell.column, cell.row)
-            .filter(|link| !self.remote || !matches!(link.target, RowTarget::Path { .. }))
+        frame_link_at(
+            self.screen.frame.as_deref()?,
+            cell.column,
+            cell.row,
+            &self.screen.wraps,
+        )
+        .filter(|link| !self.remote || !matches!(link.target, RowTarget::Path { .. }))
     }
 
     fn file_link(&self, target: &RowTarget) -> Option<FileLink> {
@@ -110,11 +115,16 @@ impl CoreTerminalView {
         }
     }
 
-    /// Reads the hover again after the screen changed under the pointer.
+    /// Reads the hover again after the screen changed under the pointer. A
+    /// path found missing is looked for again, as the output that redrew it
+    /// may have made the file; one check runs at a time.
     pub(super) fn rehover_link(&mut self, cx: &mut Context<Self>) {
         if let Some((position, modifiers)) = self.links.pointer
             && crate::keymap::secondary(&modifiers)
         {
+            if matches!(self.links.checked, Some((_, Some(false)))) {
+                self.links.checked = None;
+            }
             self.hover_link(position, modifiers, cx);
         }
     }

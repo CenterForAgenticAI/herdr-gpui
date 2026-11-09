@@ -200,6 +200,13 @@ impl Emulator {
         self.damage.take(&mut self.term, alt_screen)
     }
 
+    /// Whether each visible row's line goes on to the next row: the
+    /// terminal wrapped it, rather than the program ending it at the edge.
+    /// Frames cannot say so, and text read across rows needs it.
+    pub fn wrapped_rows(&self) -> Vec<bool> {
+        cells::wrapped(&self.term)
+    }
+
     pub fn modes(&self) -> Modes {
         Modes::new(*self.term.mode(), self.scanner.win32_input())
     }

@@ -406,3 +406,23 @@ fn the_view_is_told_which_key_events_the_program_asks_for() {
         .unwrap();
     assert_eq!(typed.payload, b"\x1b[97;1:3u");
 }
+
+#[test]
+fn the_view_is_told_which_rows_the_terminal_wrapped() {
+    let (backend, mut mock) = backend();
+    let mut terminal = attached(&backend, &mut mock, Role::Active);
+    // 25 characters wrap at 20 columns; the short line after ends there.
+    mock.send(5, Kind::Data, b"abcdefghijklmnopqrstuvwxy\r\nend");
+    until(
+        &mut terminal,
+        &SurfaceUpdate::Wraps(vec![true, false, false, false]),
+    );
+    // Told once, not on every update.
+    mock.send(5, Kind::Data, b"more");
+    let later = terminal.next(WAIT).unwrap();
+    assert!(
+        !later
+            .iter()
+            .any(|update| matches!(update, SurfaceUpdate::Wraps(_)))
+    );
+}

@@ -312,9 +312,22 @@ fn link_cell(
 }
 
 /// The link at cell (`column`, `row`) of a frame that is one terminal's
-/// screen, as a herdr-core pane's is.
-pub(crate) fn frame_link_at(frame: &FrameData, column: u16, row: u16) -> Option<RowLink> {
-    frame_link(frame, column, row, 0..frame.width, 0..frame.height)
+/// screen, as a herdr-core pane's is, with `wraps` saying which rows the
+/// terminal wrapped onto the next.
+pub(crate) fn frame_link_at(
+    frame: &FrameData,
+    column: u16,
+    row: u16,
+    wraps: &[bool],
+) -> Option<RowLink> {
+    wrapped_frame_link(
+        frame,
+        column,
+        row,
+        0..frame.width,
+        0..frame.height,
+        Some(wraps),
+    )
 }
 
 /// The link at cell (`column`, `row`) of the pane or popup that covers
@@ -325,6 +338,19 @@ fn frame_link(
     row: u16,
     columns: Range<u16>,
     rows: Range<u16>,
+) -> Option<RowLink> {
+    wrapped_frame_link(frame, column, row, columns, rows, None)
+}
+
+/// [`frame_link`], knowing from `wraps`, when the terminal says, which
+/// rows it wrapped onto the next.
+fn wrapped_frame_link(
+    frame: &FrameData,
+    column: u16,
+    row: u16,
+    columns: Range<u16>,
+    rows: Range<u16>,
+    wraps: Option<&[bool]>,
 ) -> Option<RowLink> {
     if !rows.contains(&row) {
         return None;
@@ -374,12 +400,22 @@ fn frame_link(
     }
     let segments = run.segments(found.range());
     let target = found.target(&run.text)?;
-    // The surface does not tell a wrapped row from a line that happened to
-    // fill it, so text read across rows is a link only where the disk
+    // A Herdr surface does not tell a wrapped row from a line that happened
+    // to fill it, so text read across rows is a link only where the disk
     // confirms it: a file, which is one only once it is found. A web address
     // the terminal wrapped is the daemon's to read (`pane.link.resolve`),
-    // from the terminal's own wrap flags.
-    if segments.len() > 1 && !matches!(target, RowTarget::Path { .. }) {
+    // from the terminal's own wrap flags; a herdr-core pane has those flags
+    // here, and reads it when every row it crosses wrapped.
+    let wrapped = |wraps: &[bool]| {
+        segments
+            .iter()
+            .take(segments.len().saturating_sub(1))
+            .all(|(row, _)| wraps.get(usize::from(*row)).copied().unwrap_or(false))
+    };
+    if segments.len() > 1
+        && !matches!(target, RowTarget::Path { .. })
+        && !wraps.is_some_and(wrapped)
+    {
         return None;
     }
     let mut segments = segments.into_iter();

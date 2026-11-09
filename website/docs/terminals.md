@@ -105,7 +105,7 @@ open_files_in = "editor"   # or "system"
 
 Paths are not links in panes on SSH hosts, whose files live on that host. On Windows, files always open in the system's application.
 
-Herdr 2 panes read links from their own screen, the same way. A file opens in the editor in a new Herdr 2 pane split to the right, and quitting the editor closes it. Plugin `[[link_handlers]]` belong to Herdr 1 and see no clicks in Herdr 2 panes.
+Herdr 2 panes read links from their own screen, the same way, and a web address the terminal wrapped onto the next row opens as one link. A file opens in the editor in a new Herdr 2 pane split to the right, and quitting the editor closes it. Plugin `[[link_handlers]]` belong to Herdr 1 and see no clicks in Herdr 2 panes.
 
 ## Images
 
