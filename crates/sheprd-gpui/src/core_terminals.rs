@@ -146,6 +146,14 @@ impl TabPanes {
         let zoomed = self.zoomed.as_ref()?;
         (self.zoom.is_open() || self.zoom.moving(now)).then(|| (zoomed, self.zoom.shown(now)))
     }
+
+    /// The panes drawn at `now`: a zoom that has landed hides the others.
+    fn drawn_at(&self, now: std::time::Instant) -> Vec<&TerminalId> {
+        match self.zoom_at(now) {
+            Some((zoomed, shown)) if shown >= 1. => vec![zoomed],
+            _ => self.panes.terminals(),
+        }
+    }
 }
 
 /// The most terminals waiting to start at once.

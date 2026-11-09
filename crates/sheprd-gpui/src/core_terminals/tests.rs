@@ -22,6 +22,7 @@ mod slide;
 mod split_shown;
 mod wanted;
 mod worker;
+mod zoom_drawn;
 
 impl crate::SheprdWindow {
     /// Stands in for the herdr-core session the window builds each tick.
