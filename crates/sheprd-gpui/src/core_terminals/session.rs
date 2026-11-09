@@ -57,6 +57,27 @@ impl SheprdWindow {
                 .unwrap_or_default();
             built.push((scope, Arc::new(session)));
         }
+        // A saved host with no Herdr 1 gathers its tabs in a workspace of
+        // its own, as this computer does, while its core is not known to be
+        // missing too. Kept anew, it opens a shell there, standing in for
+        // the one Herdr 1 would show; the workspace goes again if that core
+        // turns out to be missing.
+        for index in 0..self.endpoints.len() {
+            let endpoint = &self.endpoints[index];
+            if !endpoint.connection.target.is_remote() || !endpoint.enabled {
+                continue;
+            }
+            let scope = scope(endpoint);
+            let missing = self.live_at(index).herdr_1_missing()
+                && !self.core_terminals.lacks_core(&super::Host::of(&scope));
+            if self.keep_default_workspace(missing, &scope, cx) {
+                let purpose = super::Purpose::Tab {
+                    scope,
+                    workspace: super::WORKSPACE.to_owned(),
+                };
+                self.start_core_program(purpose, sheprd_backend::Spawn::default(), cx);
+            }
+        }
         if let Some(store) = cx.try_global::<Store>() {
             for scope in self.remote_core_scopes(store) {
                 let session = self.core_session_of(None, store, &scope, cx);

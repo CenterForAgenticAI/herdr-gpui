@@ -605,8 +605,8 @@ impl SheprdWindow {
         if self.core_terminals.lacks_core(&host) {
             return false;
         }
-        let herdr_1_missing =
-            self.live.snapshot.is_none() && self.core_terminals.backend_of(&host).is_some();
+        let herdr_1_missing = self.live.herdr_1_missing()
+            || (self.live.snapshot.is_none() && self.core_terminals.backend_of(&host).is_some());
         self.config.herdr_2_terminals || herdr_1_missing
     }
 

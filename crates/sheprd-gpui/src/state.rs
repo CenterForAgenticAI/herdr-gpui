@@ -275,6 +275,14 @@ pub(crate) enum Answer {
 }
 
 impl LiveState {
+    /// Whether the host has no Herdr 1 to answer: none installed on this
+    /// computer, or a saved host whose bridge found none. Such a host runs
+    /// its terminals in herdr-core alone.
+    pub(crate) fn herdr_1_missing(&self) -> bool {
+        self.missing_installation
+            || self.ssh_failure == Some(sheprd_client::SshFailure::HerdrMissing)
+    }
+
     fn answer_slot(&mut self, answer: Answer) -> &mut Option<(String, Option<DialogResponse>)> {
         match answer {
             Answer::Cleanup => &mut self.cleanup_response,
