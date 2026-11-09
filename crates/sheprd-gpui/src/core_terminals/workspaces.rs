@@ -209,16 +209,7 @@ impl SheprdWindow {
         }
         let scope = scope_of(self);
         let folder = cwd.map(|cwd| cwd.display().to_string());
-        let named = cwd
-            .and_then(|cwd| cwd.file_name())
-            .map(|name| name.to_string_lossy().into_owned());
-        // A name given that is not just its folder's is the user's, which a
-        // worktree row keeps rather than showing the branch.
-        let custom = label.is_some_and(|label| Some(label) != named.as_deref());
-        let label = label
-            .map(str::to_owned)
-            .or(named)
-            .unwrap_or_else(|| fl!("core-workspaces-default"));
+        let (label, custom) = kept_label(label, cwd);
         let kept = Store::update(cx, |store| {
             store.keep_workspace(&scope, &label, folder.as_deref().unwrap_or(""), custom)
         });
@@ -371,6 +362,21 @@ impl SheprdWindow {
         let label = fl!("core-workspaces-default");
         Store::update(cx, |store| store.keep_default(scope, WORKSPACE, &label));
     }
+}
+
+/// The name a new kept workspace in `cwd` gets: `label`, else its folder's,
+/// and whether it is the user's. A name given that is not just its folder's
+/// is, which a worktree row keeps rather than showing the branch.
+pub(crate) fn kept_label(label: Option<&str>, cwd: Option<&Path>) -> (String, bool) {
+    let named = cwd
+        .and_then(|cwd| cwd.file_name())
+        .map(|name| name.to_string_lossy().into_owned());
+    let custom = label.is_some_and(|label| Some(label) != named.as_deref());
+    let label = label
+        .map(str::to_owned)
+        .or(named)
+        .unwrap_or_else(|| fl!("core-workspaces-default"));
+    (label, custom)
 }
 
 fn scope_of(window: &SheprdWindow) -> Scope {

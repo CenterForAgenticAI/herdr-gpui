@@ -40,6 +40,8 @@ Right-click a linked worktree and choose **Teleport...** to move it to another c
 
 Herdr 2 tabs in the worktree's workspace move too, after its Herdr tabs and with their splits. They run in the destination's Herdr 2 when it has `herdr-core`, and in its Herdr otherwise. With **Settings > Tabs > New terminals use Herdr 2** turned on, the Herdr tabs move into the destination's Herdr 2 as well, without their labels, and the workspace there keeps one Herdr shell tab. The review marks each tab that will run in Herdr 2. A tab of more than 16 panes stays in Herdr. Herdr 2 reports no agent session, so an agent there writes a handoff note and starts again with it on the destination, rather than resuming.
 
+A Herdr 2 workspace on this computer, one Sheprd keeps with no Herdr workspace behind it, teleports the same way. Work coming to this computer lands in such a workspace when new workspaces here use Herdr 2 (that setting is on, or Herdr is not installed): Sheprd adds the worktree with Git under `~/.herdr/worktrees/<repository>/<branch>`, where Herdr would, and opens every tab in Herdr 2. A tab of more than 16 panes cannot open there, and the review says so. Herdr 2 workspaces on SSH hosts and cloud devices are not offered yet.
+
 Ignored files such as `.env` and build output stay behind, and so do submodule contents, environment variables, shell history, background jobs, and unsaved editor buffers.
 
 Teleport works on the local session, saved SSH hosts, and Coder, Daytona, and Railway cloud devices, in either direction. It does not create a cloud machine or install Herdr.

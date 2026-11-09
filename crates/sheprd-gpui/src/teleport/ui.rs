@@ -182,6 +182,11 @@ impl Teleport {
     }
 
     #[cfg(test)]
+    pub(crate) fn source_for_test(&self) -> &Source {
+        &self.source
+    }
+
+    #[cfg(test)]
     pub(crate) fn reviewing(&self) -> bool {
         matches!(self.stage, Stage::Reviewing(_))
     }
@@ -199,6 +204,7 @@ impl Teleport {
                 path: "/tmp/repo".into(),
             }),
             origin: None,
+            lands_in: sheprd_session::Keeper::Herdr1,
         };
         self.cancelled.store(true, Ordering::Release);
         self.stage = Stage::Moving(candidate, Some(Step::Fetch));
@@ -264,7 +270,7 @@ impl Teleport {
         let (candidate, review) = (candidate.clone(), review.clone());
         let source = self.source.clone();
         let target = candidate.clone();
-        let leftover = (scope, self.closing.clone());
+        let leftover = (scope, self.closing.clone(), source.clone());
         self.restart(move |sender, cancelled| {
             let result = job::run(
                 &source,
@@ -353,9 +359,14 @@ impl SheprdWindow {
             Location::CoreTerminal { panes, .. } => Some(panes.clone()),
             _ => None,
         };
+        // Past stopping its programs, a kept source keeps one idle shell.
+        let retired = result.is_ok() || teleport.retired;
         let closed = teleport.closed_tabs(result.is_ok(), panes);
         for tab in closed {
             self.close_browser_tab(tab, window, cx);
+        }
+        if retired {
+            self.retire_kept_source(&source, cx);
         }
         let outcome = match result {
             Ok(outcome) => outcome,
@@ -376,6 +387,10 @@ impl SheprdWindow {
         for warning in &outcome.warnings {
             tracing::warn!(%warning, "teleport");
         }
+        let scope = self.endpoint_scope(&outcome.endpoint_id);
+        let Some(workspace) = self.settle_teleport(&outcome, &scope, window, cx) else {
+            return;
+        };
         // The checkout left behind is marked; the one the work came back to,
         // if any, no longer is.
         self.teleport_marks
@@ -388,7 +403,7 @@ impl SheprdWindow {
                 endpoint: outcome.endpoint_id.clone(),
                 label: destination.clone(),
                 repo_key: outcome.repo_key.clone(),
-                workspace_id: outcome.workspace_id.clone(),
+                workspace_id: workspace.clone(),
             },
         });
         let flash = match outcome.warnings.first() {
@@ -401,9 +416,7 @@ impl SheprdWindow {
             )),
         };
         self.show_flash(flash, cx);
-        let scope = self.endpoint_scope(&outcome.endpoint_id);
-        self.open_teleported_core_tabs(&outcome, &scope, cx);
-        self.teleport_follow = Some(Follow::new(outcome.endpoint_id, outcome.workspace_id));
+        self.teleport_follow = Some(Follow::new(outcome.endpoint_id, workspace));
         self.follow_teleport(cx);
     }
 
@@ -432,6 +445,11 @@ impl SheprdWindow {
         };
         if self.endpoints[self.selected_endpoint].id != endpoint {
             self.navigate_endpoint(&endpoint, target, cx);
+            return;
+        }
+        // A workspace the app keeps needs no daemon to list it.
+        if pane.is_none() && self.focus_kept_workspace(&workspace, cx) {
+            self.teleport_follow = None;
             return;
         }
         let Some(snapshot) = &self.live.snapshot else {

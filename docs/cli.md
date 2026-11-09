@@ -43,8 +43,9 @@ Every command accepts:
   session the app does not show, the command exits 5 rather than act on
   another session's window. Outside both, it acts in the frontmost window.
   Commands that keep Herdr's workspace state (`work` notes, mutes, restore,
-  scripts, Teleport, fan-out) exit 8 from a herdr-core terminal in no Herdr
-  workspace.
+  scripts, fan-out) exit 8 from a herdr-core terminal in no Herdr
+  workspace. Teleport works from a workspace the app keeps for Herdr 2 on
+  this computer, as its menu does.
 
 | Exit | Meaning |
 | --- | --- |

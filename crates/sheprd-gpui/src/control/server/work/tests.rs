@@ -5,6 +5,7 @@ use crate::sidebar::layout_tests::{REPO_KEY, fixture_window, snapshot};
 mod core_only;
 mod dialogs;
 mod identity;
+mod kept_teleport;
 mod list_budget;
 mod muting;
 

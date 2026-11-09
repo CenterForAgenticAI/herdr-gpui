@@ -1,6 +1,6 @@
 //! The discovery phase: find where on a host the worktree lands, from the
 //! checkout it once left to a fresh clone.
-use super::{Candidate, Destination, HostRepositories, Repository, Source};
+use super::{Candidate, Destination, HostRepositories, Keeping, Repository, Source};
 use crate::teleport::{
     error::{Error, Result, Step},
     git,
@@ -8,6 +8,7 @@ use crate::teleport::{
     remote::{MatchReason, RepoIdentity},
     snapshot::{HostSnapshot, SnapshotResult},
 };
+use sheprd_session::Keeper;
 use std::sync::atomic::AtomicBool;
 
 impl Candidate {
@@ -103,6 +104,7 @@ fn discover_host(
         place: host.place.clone(),
         destination,
         origin: source.origin.clone(),
+        lands_in: host.lands_in,
     };
     let open: Vec<Candidate> = repositories
         .into_iter()
@@ -134,11 +136,23 @@ fn discover_host(
             (retired.branch == branch).then(|| Destination::Reclaim {
                 repository,
                 workspace_id: retired.workspace_id.clone(),
+                keeping: retired.keeping.clone(),
             })
         })
     });
     if let Some(back) = back {
-        return Ok(vec![candidate(back)]);
+        // The checkout the work comes back to is kept by whoever kept it.
+        let lands_in = match &back {
+            Destination::Reclaim {
+                keeping: Keeping::App { .. },
+                ..
+            } => Keeper::App,
+            _ => Keeper::Herdr1,
+        };
+        return Ok(vec![Candidate {
+            lands_in,
+            ..candidate(back)
+        }]);
     }
     if !open.is_empty() {
         return Ok(open);
