@@ -124,6 +124,39 @@ impl CoreTerminals {
         );
     }
 
+    /// `host`'s hub, which a test drives directly.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn hub_of_mut_for_test(&mut self, host: &Host) -> Option<&mut Hub> {
+        self.hub_of_mut(host)
+    }
+
+    /// Whether a terminal waits for `host`'s core to connect.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn waits_on_for_test(&self, host: &Host) -> bool {
+        self.waits_on(host)
+    }
+
+    /// Records `info` as what `host`'s core reports, as a finished list
+    /// would.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn record_for_test(&mut self, host: &Host, info: TerminalInfo) {
+        if let Some(infos) = self.infos_of_mut(host) {
+            infos.insert(info);
+        }
+    }
+
+    /// Shows `terminal` of `host`'s core in `tab`, as a restored tab would.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn show_on_host_for_test(&mut self, tab: TabId, host: Host, terminal: TerminalId) {
+        let panes = super::panes::Panes::single(terminal);
+        self.tabs
+            .insert(tab, super::TabPanes::new(host, panes, false));
+    }
+
     /// A terminal for `purpose` on `host` that started as `outcome` says,
     /// waiting to be placed.
     // Only the lifecycle tests, which need Unix sockets, use it.
@@ -184,6 +217,22 @@ impl CoreTerminals {
         {
             self.starting = None;
         }
+    }
+
+    /// Whether a terminal waits for `host`'s core to connect.
+    pub(super) fn waits_on(&self, host: &Host) -> bool {
+        self.wanted.iter().any(|(_, wanted, _)| wanted == host)
+    }
+
+    /// How many agents `host`'s core last reported working, for ranking
+    /// hosts by how busy they are. The list is only kept current while the
+    /// window has a tab of that core, so without one it counts none rather
+    /// than agents that may have stopped since.
+    pub(crate) fn working(&self, host: &Host) -> u32 {
+        if !self.tabs.values().any(|shown| shown.host == *host) {
+            return 0;
+        }
+        self.infos_of(host).map_or(0, Infos::working)
     }
 
     /// Whether `host` was found to have no herdr-core installed, so new
