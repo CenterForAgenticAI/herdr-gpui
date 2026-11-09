@@ -32,6 +32,8 @@ pub struct CoreTerminal {
     sizing: Option<(Arc<Core>, Instant)>,
     /// When the synchronized update the emulator holds began.
     sync_since: Option<Instant>,
+    /// The rows the view was last told wrap onto the next.
+    wraps: Vec<bool>,
 }
 
 impl CoreTerminal {
@@ -69,6 +71,7 @@ impl CoreTerminal {
             role,
             sizing: (role == Role::Observer).then(|| (Arc::clone(core), Instant::now())),
             sync_since: None,
+            wraps: Vec::new(),
         })
     }
 
@@ -207,10 +210,23 @@ impl sheprd_backend::Terminal for CoreTerminal {
             self.reporting = Some(reporting);
             updates.push(SurfaceUpdate::MouseReporting(reporting));
         }
-        match self.emulator.take_damage() {
-            Damage::Full(frame) => updates.push(SurfaceUpdate::Frame(frame)),
-            damage if damage.is_empty() => {}
-            Damage::Rows { rows, cursor } => updates.push(SurfaceUpdate::Rows { cursor, rows }),
+        let damaged = match self.emulator.take_damage() {
+            Damage::Full(frame) => {
+                updates.push(SurfaceUpdate::Frame(frame));
+                true
+            }
+            damage if damage.is_empty() => false,
+            Damage::Rows { rows, cursor } => {
+                updates.push(SurfaceUpdate::Rows { cursor, rows });
+                true
+            }
+        };
+        if damaged {
+            let wraps = self.emulator.wrapped_rows();
+            if wraps != self.wraps {
+                self.wraps = wraps.clone();
+                updates.push(SurfaceUpdate::Wraps(wraps));
+            }
         }
         match chunk.end {
             Some(End::Closed(closed)) => {
