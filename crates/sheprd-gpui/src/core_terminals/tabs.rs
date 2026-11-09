@@ -470,6 +470,9 @@ impl SheprdWindow {
             Ok(mut unended) => std::mem::take(&mut *unended),
             Err(_) => Vec::new(),
         };
+        // A host this window cannot reach yet, as before its saved devices
+        // load, keeps its kills for a window that can.
+        let mut unreached = Vec::new();
         for (host, terminal) in unended {
             if self.core_terminals.backend_of(&host).is_none()
                 && let Some(hub) = self.core_hub(&host)
@@ -479,7 +482,14 @@ impl SheprdWindow {
             // Ends it now, or puts it back to wait for the core.
             if self.core_terminals.hub_of(&host).is_some() {
                 self.end_core_terminal(&host, terminal);
+            } else {
+                unreached.push((host, terminal));
             }
+        }
+        if !unreached.is_empty()
+            && let Ok(mut unended) = self.core_terminals.unended.lock()
+        {
+            unended.extend(unreached);
         }
         if !cx
             .try_global::<Store>()
