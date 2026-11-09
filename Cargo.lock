@@ -9486,6 +9486,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "sheprd-apns",
+ "sheprd-backend",
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-core-client",
