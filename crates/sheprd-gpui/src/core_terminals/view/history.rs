@@ -29,6 +29,9 @@ pub(super) struct Reading {
     /// The history lines above the screen when asked; fewer since means a
     /// clear dropped lines the rows were counted from.
     history: usize,
+    /// Whether the copy is said and its selection settled once its text
+    /// reaches the clipboard, as a selection's copy is.
+    announce: bool,
 }
 
 impl CoreTerminalView {
@@ -50,6 +53,7 @@ impl CoreTerminalView {
             exact,
             grid: self.screen.grid(),
             history: self.screen.history.history,
+            announce: false,
         }
     }
 
@@ -65,6 +69,14 @@ impl CoreTerminalView {
                 || self.screen.history.full
                 || self.screen.history.history < reading.history
                 || self.screen.grid() != reading.grid)
+    }
+
+    /// Says the copy waiting on its text once it lands, rather than when
+    /// it is asked for: the read may still be refused or fail.
+    pub(super) fn announce_copy(&mut self) {
+        if let Some(reading) = &mut self.copying {
+            reading.announce = true;
+        }
     }
 
     /// Whether a copy waits on its text.
@@ -100,6 +112,7 @@ impl CoreTerminalView {
                     }
                     Ok(HistoryAnswer::Text(text)) => {
                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                        self.copied |= reading.announce;
                     }
                     Ok(_) => tracing::warn!("A herdr-core history read answered no text"),
                     Err(error) => tracing::warn!(%error, "Could not read a herdr-core history"),

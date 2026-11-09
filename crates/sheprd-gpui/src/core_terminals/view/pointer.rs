@@ -207,7 +207,7 @@ impl CoreTerminalView {
                     && event.button == MouseButton::Left
                     && self.copy_selection() =>
             {
-                self.finish_copy(window, cx);
+                self.announce_copy();
             }
             Some(Press::Selecting) | None => {}
         }
