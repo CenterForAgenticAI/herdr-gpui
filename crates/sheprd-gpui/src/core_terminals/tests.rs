@@ -1,5 +1,6 @@
 mod accessibility;
 mod chats;
+mod clear;
 mod context;
 mod copy_mode;
 mod effects;

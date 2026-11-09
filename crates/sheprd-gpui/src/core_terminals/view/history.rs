@@ -26,6 +26,9 @@ pub(super) struct Reading {
     /// The screen's columns and rows when asked; a resize since rewrapped
     /// the rows the read named.
     grid: Option<(u16, u16)>,
+    /// The history lines above the screen when asked; fewer since means a
+    /// clear dropped lines the rows were counted from.
+    history: usize,
 }
 
 impl CoreTerminalView {
@@ -46,18 +49,22 @@ impl CoreTerminalView {
             revision,
             exact,
             grid: self.screen.grid(),
+            history: self.screen.history.history,
         }
     }
 
     /// Whether the rows `reading` named may now hold other text: any output
     /// since an exact read's revision, or, since it was asked, output into
-    /// a full history, which dropped its oldest lines, or a resize, which
-    /// rewrapped them. The worker shows each output's and resize's screen
+    /// a full history, which dropped its oldest lines, a clear, which
+    /// dropped them all, or a resize, which rewrapped them. The worker shows each output's and resize's screen
     /// before it answers anything after it, and the answers are taken with
     /// the screen, so the screen here is never older than the read saw.
     fn moved(&self, reading: Reading) -> bool {
         self.screen.revision != reading.revision
-            && (reading.exact || self.screen.history.full || self.screen.grid() != reading.grid)
+            && (reading.exact
+                || self.screen.history.full
+                || self.screen.history.history < reading.history
+                || self.screen.grid() != reading.grid)
     }
 
     /// Whether a copy waits on its text.
@@ -149,7 +156,13 @@ impl CoreTerminalView {
     /// `clear_pane` command does to a Herdr 1 pane. Only this view changes:
     /// the program and the terminal's other views keep what they show.
     pub(crate) fn clear_history(&mut self, cx: &mut Context<Self>) {
+        // What was selected, marked, or being copied names rows the clear
+        // drops.
         self.selection = None;
+        self.copying = None;
+        if let Some(state) = &mut self.copy_mode {
+            state.forget_mark();
+        }
         self.ask(History::Clear);
         cx.notify();
     }
