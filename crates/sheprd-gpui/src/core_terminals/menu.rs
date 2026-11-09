@@ -76,6 +76,11 @@ pub(crate) struct CoreMenu {
     selected: Option<usize>,
     /// The name being typed on the rename page.
     input: Option<Entity<SearchInput>>,
+    /// What held the keyboard as the menu opened: a pane of another tab, or
+    /// a chat's composer over the target's pane, still takes the keys back.
+    return_focus: Option<FocusHandle>,
+    /// Whether `return_focus` was a pane's, which may have gone since.
+    from_pane: bool,
 }
 
 impl CoreMenu {
@@ -132,6 +137,11 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Read before the menu takes the keyboard.
+        let return_focus = window.focused(cx);
+        let from_pane = return_focus
+            .as_ref()
+            .is_some_and(|focus| self.is_core_pane_focus(focus, cx));
         if !self.core_terminals.tabs.contains_key(&target.tab()) || !self.open_menu(window, cx) {
             return;
         }
@@ -141,6 +151,8 @@ impl SheprdWindow {
             target,
             selected: None,
             input: None,
+            return_focus,
+            from_pane,
         });
     }
 
@@ -238,12 +250,32 @@ impl SheprdWindow {
         }
     }
 
-    /// Where the keyboard goes back to as a herdr-core menu closes: the
-    /// pane in use of its tab, which held it before, rather than the
-    /// window, whose keys a Herdr pane would take.
+    /// Whether `focus` is a herdr-core pane's the window still shows.
+    fn is_core_pane_focus(&self, focus: &FocusHandle, cx: &App) -> bool {
+        self.core_terminals
+            .views
+            .values()
+            .any(|view| view.read(cx).focus_handle() == focus)
+    }
+
+    /// Where the keyboard goes back to as a herdr-core menu closes: what
+    /// held it as the menu opened, else the pane in use of the menu's tab,
+    /// rather than the window, whose keys a Herdr pane would take.
     pub(crate) fn core_menu_return_focus(&self, cx: &App) -> Option<FocusHandle> {
-        let tab = self.menu.core.as_ref()?.target.tab();
-        Some(self.core_pane_view(tab)?.read(cx).focus_handle().clone())
+        let menu = self.menu.core.as_ref()?;
+        // A pane whose program exited while the menu was open is gone: the
+        // keys go to the pane left in use instead.
+        if let Some(focus) = &menu.return_focus
+            && (!menu.from_pane || self.is_core_pane_focus(focus, cx))
+        {
+            return Some(focus.clone());
+        }
+        Some(
+            self.core_pane_view(menu.target.tab())?
+                .read(cx)
+                .focus_handle()
+                .clone(),
+        )
     }
 
     /// Closes a pane: its terminal ends, unless the tab only mirrors it. The

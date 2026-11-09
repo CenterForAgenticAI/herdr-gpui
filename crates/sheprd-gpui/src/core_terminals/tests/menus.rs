@@ -205,6 +205,55 @@ fn closing_a_menu_gives_the_keyboard_back_to_the_pane(cx: &mut TestAppContext) {
     assert!(focused);
 }
 
+#[gpui::test]
+fn closing_a_menu_gives_the_keyboard_back_to_what_held_it(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    // A chat's composer over the pane, say, holds the keyboard.
+    let composer = cx.update(|window, cx| {
+        let composer = cx.focus_handle();
+        window.focus(&composer, cx);
+        composer
+    });
+    let kept = cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let pane = Target::Pane {
+                tab,
+                terminal: id("t2"),
+            };
+            view.open_core_menu(pane, point(px(10.), px(10.)), window, cx);
+            assert_eq!(view.menu.page, Some(Page::CoreMenu));
+            view.dismiss_menu(window, cx);
+        });
+        composer.is_focused(window)
+    });
+    assert!(kept, "not the terminal behind it");
+}
+
+#[gpui::test]
+fn a_pane_that_exits_under_its_menu_hands_the_keyboard_on(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    run(&view, cx, Command::FocusRight);
+    let focused = cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let pane = Target::Pane {
+                tab,
+                terminal: id("t2"),
+            };
+            view.open_core_menu(pane, point(px(10.), px(10.)), window, cx);
+            // Its program exits while the menu is open.
+            assert!(view.remove_core_pane(tab, &id("t2"), window, cx));
+            view.core_terminals.views.remove(&(tab, id("t2")));
+            view.dismiss_menu(window, cx);
+        });
+        let view = view.read(cx);
+        view.core_terminals.views[&(tab, id("t1"))]
+            .read(cx)
+            .focus_handle()
+            .is_focused(window)
+    });
+    assert!(focused);
+}
+
 #[test]
 fn a_name_is_one_bounded_line() {
     assert_eq!(clean_name(" a\u{202e}b\n"), Some("ab".into()));
