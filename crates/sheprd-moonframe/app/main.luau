@@ -25,9 +25,11 @@ return mod {
 		if msg == "toggle-details" then
 			state.details = not state.details
 		elseif type(msg) == "table" and msg.left then
-			state.activity_bar = math.max(msg.activity_bar, 48)
+			-- Zero is meant: the activity bar turned off, or Zen mode hiding
+			-- the left column, and then neither is drawn.
+			state.activity_bar = msg.activity_bar
 			state.header = msg.header
-			state.left = math.max(msg.left, 48)
+			state.left = msg.left
 			state.status_bar = msg.status_bar
 		end
 	end,
@@ -41,7 +43,7 @@ return mod {
 			ui.row {
 				grow = true,
 				gap = "none",
-				ui.column {
+				if state.left > 0 then ui.column {
 					width = state.left,
 					shrink = false,
 					gap = "none",
@@ -49,7 +51,9 @@ return mod {
 					ui.row {
 						grow = true,
 						gap = "none",
-						ui.column { width = state.activity_bar, shrink = false, gap = "none", style = { background = theme.sidebar }, ui.mount "activity" },
+						if state.activity_bar > 0
+							then ui.column { width = state.activity_bar, shrink = false, gap = "none", style = { background = theme.sidebar }, ui.mount "activity" }
+							else false,
 						-- The left pane: the worktrees, then the agents, each a mod.
 						ui.column {
 							class = "sheprd-left",
@@ -70,7 +74,7 @@ return mod {
 							},
 						},
 					},
-				},
+				} else false,
 				ui.column {
 					grow = true,
 					gap = "none",

@@ -376,18 +376,6 @@ local function minimal_row(workspace: any, layout: any, theme: any)
 	}
 end
 
-local function workspace_row(workspace: any, last: boolean, layout: any, theme: any)
-	local kind = design(layout)
-	if kind == "superset" then
-		return with_note(superset_row(workspace, layout, theme), workspace, theme)
-	elseif kind == "orca" then
-		return with_note(orca_row(workspace, theme), workspace, theme)
-	elseif kind == "minimal" then
-		return with_note(minimal_row(workspace, layout, theme), workspace, theme)
-	end
-	return classic_row(workspace, last, layout, theme)
-end
-
 -- A row's note, under it, for the layouts whose rows draw no lines of their
 -- own beneath the name.
 local function with_note(row_element: any, workspace: any, theme: any)
@@ -400,6 +388,19 @@ local function with_note(row_element: any, workspace: any, theme: any)
 		ui.row { gap = "none", ui.row { width = DOT + 20, shrink = false }, note_line(workspace, theme) },
 	}
 end
+
+local function workspace_row(workspace: any, last: boolean, layout: any, theme: any)
+	local kind = design(layout)
+	if kind == "superset" then
+		return with_note(superset_row(workspace, layout, theme), workspace, theme)
+	elseif kind == "orca" then
+		return with_note(orca_row(workspace, theme), workspace, theme)
+	elseif kind == "minimal" then
+		return with_note(minimal_row(workspace, layout, theme), workspace, theme)
+	end
+	return classic_row(workspace, last, layout, theme)
+end
+
 
 -- A row when the sidebar is collapsed: its number on a tile, the label in the
 -- tooltip.

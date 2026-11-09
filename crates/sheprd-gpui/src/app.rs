@@ -262,41 +262,53 @@ pub(crate) fn open_additional_window_then(
     });
 }
 
-pub(crate) fn run() -> std::process::ExitCode {
-    use cli::{LaunchMode, LaunchOptions};
-    let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+/// The private entry points the app starts itself as (the clipboard reader,
+/// the updater's helper, restarts, setup and exec relays), run before
+/// anything else reads the command line. Every executable that is the app,
+/// the Moonframe build's included, must run them first: the app starts
+/// `current_exe()` with these arguments and waits for its answer.
+pub(crate) fn run_helpers(args: &mut Vec<std::ffi::OsString>) -> Option<std::process::ExitCode> {
     #[cfg(target_os = "macos")]
-    if let Some(exit) = crate::window::run_clipboard_helper(&args) {
-        return exit;
+    if let Some(exit) = crate::window::run_clipboard_helper(args) {
+        return Some(exit);
     }
-    if let Some(exit) = updater::run_helper(&args) {
-        return exit;
+    if let Some(exit) = updater::run_helper(args) {
+        return Some(exit);
     }
     // Restart Manager restarts this executable itself; see `restart_manager`.
-    if let Some(exit) = crate::restart_manager::hand_off(&mut args) {
-        return exit;
+    if let Some(exit) = crate::restart_manager::hand_off(args) {
+        return Some(exit);
     }
     #[cfg(unix)]
-    if let Some(exit) = crate::setup_relay::run_helper(&args) {
-        return exit;
+    if let Some(exit) = crate::setup_relay::run_helper(args) {
+        return Some(exit);
     }
     // The exec relays below read their provider's table, so they need the
     // loader too; setting it reads nothing yet.
     sheprd_remote::config::set_loader(Config::load_remote);
     #[cfg(feature = "azure")]
-    if let Some(exit) = crate::azure::sandbox::relay::run_helper(&args) {
-        return exit;
+    if let Some(exit) = crate::azure::sandbox::relay::run_helper(args) {
+        return Some(exit);
     }
     #[cfg(feature = "boxd")]
-    if let Some(exit) = crate::boxd::relay::run_helper(&args) {
-        return exit;
+    if let Some(exit) = crate::boxd::relay::run_helper(args) {
+        return Some(exit);
     }
     #[cfg(feature = "sprites")]
-    if let Some(exit) = crate::sprites::relay::run_helper(&args) {
-        return exit;
+    if let Some(exit) = crate::sprites::relay::run_helper(args) {
+        return Some(exit);
     }
     #[cfg(feature = "opensandbox")]
-    if let Some(exit) = crate::opensandbox::relay::run_helper(&args) {
+    if let Some(exit) = crate::opensandbox::relay::run_helper(args) {
+        return Some(exit);
+    }
+    None
+}
+
+pub(crate) fn run() -> std::process::ExitCode {
+    use cli::{LaunchMode, LaunchOptions};
+    let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(exit) = run_helpers(&mut args) {
         return exit;
     }
     // A control command asked for JSON gets its usage errors as JSON too.

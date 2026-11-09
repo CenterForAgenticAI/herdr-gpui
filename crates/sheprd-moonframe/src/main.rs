@@ -229,6 +229,11 @@ struct Shared {
 }
 
 fn main() -> ExitCode {
+    // Sheprd starts its own executable to read the clipboard, update itself,
+    // or relay a command: answer those before Moonframe reads the arguments.
+    if let Some(exit) = sheprd_gpui::embed::run_helpers() {
+        return exit;
+    }
     // Before the app's startup sets the Dock icon and the About image.
     sheprd_gpui::embed::icon(ICON_PNG, ICON_ICNS);
     // Read before the event loop, as the app's own startup does.

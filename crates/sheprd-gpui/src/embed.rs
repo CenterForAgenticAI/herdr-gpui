@@ -38,6 +38,15 @@ pub struct Startup {
     stores: Stores,
 }
 
+/// Runs the app's private entry points when this process was started as one:
+/// the app starts its own executable to read the clipboard, apply an update,
+/// or relay a command, and waits for the answer. Call it first in `main`,
+/// before the host reads the command line, and exit with what it returns.
+pub fn run_helpers() -> Option<std::process::ExitCode> {
+    let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+    crate::app::run_helpers(&mut args)
+}
+
 /// Reads settings and stores. Call it before the host's event loop, so the
 /// first frame does no disk work on the UI thread.
 pub fn prepare() -> Startup {

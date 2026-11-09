@@ -41,6 +41,9 @@ FOCUS_COUNT = 24
 SETTLE_S = 8
 # Seconds a daemon gets to open its socket.
 DAEMON_WAIT_S = 15
+# What the app needs to reach the desktop on Linux (X11 or Wayland), kept
+# from the caller's environment for the app alone.
+DESKTOP = ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XAUTHORITY", "XDG_SESSION_TYPE")
 
 UNITS = {"ns": 1e-6, "µs": 1e-3, "us": 1e-3, "ms": 1.0, "s": 1000.0}
 FRAME = re.compile(r"frame duration: ([\d.]+)(ns|µs|us|ms|s)\b")
@@ -89,6 +92,12 @@ class Sandbox:
                 raise SystemExit(f"{herdr} server did not start")
             time.sleep(0.2)
         self.panes = self._populate(home, trees)
+
+    def app_env(self) -> dict:
+        """The private environment, plus what a GUI needs to reach the
+        desktop: the app gets these, the daemon never does."""
+        desktop = {name: os.environ[name] for name in DESKTOP if name in os.environ}
+        return {**self.env, **desktop}
 
     def run(self, *args: str) -> dict:
         done = subprocess.run(
@@ -174,7 +183,7 @@ def run_once(herdr: str, binary: str, trees: int, phase_s: float) -> dict:
     try:
         app = subprocess.Popen(
             [binary],
-            env={**sandbox.env, "ZED_MEASUREMENTS": "1"},
+            env={**sandbox.app_env(), "ZED_MEASUREMENTS": "1"},
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
