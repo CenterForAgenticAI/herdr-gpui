@@ -55,6 +55,10 @@ pub(crate) fn kept_candidates<'a, R: std::ops::Deref<Target = PullRequest>>(
 impl SheprdWindow {
     /// The selected host's kept workspaces, when it is this computer.
     fn kept_workspaces(&self) -> Vec<Workspace> {
+        // Another host's checkouts are there, out of this computer's Git.
+        if self.selected_is_remote() {
+            return Vec::new();
+        }
         self.sessions(self.selected_endpoint)
             .core
             .map(|core| core.workspaces.clone())
