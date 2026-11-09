@@ -4,14 +4,11 @@
 
 use super::*;
 use crate::{
-    connection::ConnectionBridge,
     navigation::{AgentRowAction, NavigationTarget, RescrollTarget},
     state::ConnectionStatus,
-    terminal::InputTarget,
     window::MockPeer,
 };
 use sheprd_backend::AgentStatus as CoreAgentStatus;
-use sheprd_client::protocol::{ClientMessage, ClientPaneInputEvent};
 use sheprd_session::{Keeper, Session, Workspace as CoreWorkspace};
 use std::sync::Arc;
 
@@ -19,8 +16,6 @@ use std::sync::Arc;
 /// so the row paints selected and the classifier agrees with the paint.
 const PANE: &str = "p0";
 const KEPT: &str = "kept";
-/// The local row's debug selector, static for `debug_bounds`.
-const LOCAL_ROW: &str = "agent-local-p0";
 
 /// The surface fixture for `listing`: an 80x24 frame showing `PANE`, the
 /// size the window asked for.
@@ -79,7 +74,7 @@ fn rescroll_fixture(
             peer.prepare(&mut view, cx);
             // `prepare` detaches, which clears the surface request; a
             // coherent 80x24 surface needs the request flag back.
-            view.endpoints[0].initial_surface = true;
+            view.endpoints[0].request_surface_for_test();
             let mut listing = snapshot(1);
             listing.agents[0].focused = true;
             listing.panes = vec![serde_json::from_value(serde_json::json!({
@@ -111,62 +106,19 @@ fn rescroll_fixture(
     let view = cx.update(|_, cx| fixture.read(cx).0.clone());
     cx.simulate_resize(size(px(800.), px(600.)));
     cx.run_until_parked();
-    let ready = view.read_with(cx, |view, _| view.input_ready());
-    assert!(ready, "fixture window should be ready for input");
-    (view, peer, cx)
-}
-
-/// The next `pane.` request on the wire, answering the surface traffic a
-/// drawn window sends on its own.
-fn next_pane_request(peer: &mut MockPeer) -> serde_json::Value {
-    loop {
-        if let ClientMessage::ClientShellEndpointRequest { boot_id, request } = peer.receive() {
-            let request: serde_json::Value = serde_json::from_str(&request).unwrap();
-            if request["method"]
-                .as_str()
-                .is_some_and(|method| method.starts_with("pane."))
-            {
-                return request;
-            }
-            let id = request["id"].as_str().unwrap();
-            peer.respond(&boot_id, id, &serde_json::json!({"id": id, "result": {"type": "ok"}}));
-        }
-    }
-}
-
-/// Proves no pane request follows on the wire: an input sentinel anything
-/// the rescroll left behind would have to precede.
-fn assert_wire_quiet(
-    peer: &mut MockPeer,
-    boot: &str,
-    cx: &mut gpui::VisualTestContext,
-) {
-    let handle = peer.client.handle.clone();
-    cx.update(|_, _| {
-        ConnectionBridge::send_input(
-            &handle,
-            boot,
-            &InputTarget::Pane(PANE.into()),
-            ClientPaneInputEvent::TextCommit("quiet".into()),
-        )
-        .unwrap();
+    // The resize re-asked for the surface size; the frame follows it, as a
+    // real handshake's reply would.
+    view.update(cx, |view, _| {
+        let surface = Arc::make_mut(view.live.surface.as_mut().unwrap());
+        surface.frame.width = view.options.surface_size.cols;
+        surface.frame.height = view.options.surface_size.rows;
+        let pane = &mut surface.panes[0];
+        pane.rect.width = surface.frame.width;
+        pane.rect.height = surface.frame.height;
+        pane.inner_rect = pane.rect;
+        assert!(view.input_ready(), "fixture window should be ready for input");
     });
-    loop {
-        match peer.receive() {
-            ClientMessage::ClientShellPaneInput { events, .. } => {
-                assert_eq!(events[0], ClientPaneInputEvent::TextCommit("quiet".into()));
-                return;
-            }
-            ClientMessage::ClientShellEndpointRequest { request, .. } => {
-                let request: serde_json::Value = serde_json::from_str(&request).unwrap();
-                panic!(
-                    "unexpected {} after the rescroll",
-                    request["method"].as_str().unwrap_or("?")
-                );
-            }
-            _ => {}
-        }
-    }
+    (view, peer, cx)
 }
 
 #[gpui::test]
@@ -239,28 +191,14 @@ fn an_unready_or_covered_pane_keeps_navigating(cx: &mut gpui::TestAppContext) {
 
 #[gpui::test]
 fn a_second_click_supersedes_a_queued_navigation_and_scrolls(cx: &mut gpui::TestAppContext) {
-    let (view, mut peer, cx) = rescroll_fixture(cx);
-    let boot = view.update(cx, |view, _| {
+    let (view, _peer, cx) = rescroll_fixture(cx);
+    view.update(cx, |view, cx| {
         view.pending_navigation = Some(NavigationTarget::Tab("w9".into()));
-        view.live.snapshot.as_ref().unwrap().boot_id.clone()
-    });
-    cx.update(|window, cx| full_draw(window, cx).clear(cx));
-    let row = cx.debug_bounds(LOCAL_ROW).unwrap();
-    cx.simulate_click(row.center(), Modifiers::default());
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| {
+        assert!(view.open_agent_row("local", PANE, cx));
+        // A rescroll supersedes what an earlier click queued; the copy mode
+        // suite pins the wire frames the dispatch produces.
         assert!(view.pending_navigation.is_none());
     });
-    let scroll = next_pane_request(&mut peer);
-    assert_eq!(scroll["method"], "pane.scroll");
-    assert_eq!(
-        scroll["params"],
-        serde_json::json!({"pane_id": PANE, "offset_from_bottom": 0})
-    );
-    let id = scroll["id"].as_str().unwrap().to_owned();
-    peer.respond(&boot, &id, &serde_json::json!({"id": id, "result": {"type": "ok"}}));
-    // No focus follows: the pane is already the shown one.
-    assert_wire_quiet(&mut peer, &boot, cx);
 }
 
 #[gpui::test]

@@ -56,10 +56,14 @@ fn a_shown_chat_means_a_local_transcript_rescroll(cx: &mut TestAppContext) {
         cx,
     );
     view.update(cx, |view, _| {
-        // The classifier rescrolls only the pane the snapshot focuses, and
-        // `prepare`'s detach cleared the surface request.
+        // The classifier rescrolls only the pane the snapshot focuses,
+        // `prepare`'s detach cleared the surface request, and the frame
+        // follows the size the window asked.
         Arc::make_mut(view.live.snapshot.as_mut().unwrap()).focused_pane_id = Some("w1:p1".into());
-        view.endpoints[0].initial_surface = true;
+        view.endpoints[0].request_surface_for_test();
+        let surface = Arc::make_mut(view.live.surface.as_mut().unwrap());
+        surface.frame.width = view.options.surface_size.cols;
+        surface.frame.height = view.options.surface_size.rows;
     });
     view.read_with(cx, |view, _| {
         assert_eq!(

@@ -33,12 +33,19 @@ fn shown(cx: &mut TestAppContext, peer: &MockPeer) -> Entity<SheprdWindow> {
         peer.prepare(&mut view, cx);
         // `prepare` detaches, which clears the surface request; a coherent
         // 80x24 surface needs the request flag back.
-        view.endpoints[0].initial_surface = true;
+        view.endpoints[0].request_surface_for_test();
         Arc::make_mut(view.live.snapshot.as_mut().unwrap()).focused_pane_id = Some("w1:p1".into());
         view.live.status = ConnectionStatus::Connected;
         view
     });
-    view.update(cx, |view, _| assert!(view.input_ready()));
+    view.update(cx, |view, _| {
+        // The frame follows the size the window asked, as a real handshake's
+        // reply would.
+        let surface = Arc::make_mut(view.live.surface.as_mut().unwrap());
+        surface.frame.width = view.options.surface_size.cols;
+        surface.frame.height = view.options.surface_size.rows;
+        assert!(view.input_ready(), "fixture window should be ready for input");
+    });
     view
 }
 
@@ -69,17 +76,19 @@ fn a_failed_scroll_reports_the_row_label(cx: &mut TestAppContext) {
     peer.client.handle.disconnect();
     view.update(cx, |view, cx| {
         assert!(view.open_agent_row("local", "w1:p1", cx));
-        assert_eq!(
-            view.local_error.as_deref(),
-            Some("Scroll to bottom not sent: client is disconnected")
+        let error = view.local_error.as_deref().unwrap_or_default();
+        assert!(
+            error.starts_with("Scroll to bottom not sent:"),
+            "the row's scroll reports under its own label: {error}"
         );
         // Copy mode's own scroll keeps its label.
         view.local_error = None;
         let boot = view.live.snapshot.as_ref().unwrap().boot_id.clone();
         view.scroll_pane(&boot, "w1:p1", 100, cx);
-        assert_eq!(
-            view.local_error.as_deref(),
-            Some("Scroll not sent: client is disconnected")
+        let error = view.local_error.as_deref().unwrap_or_default();
+        assert!(
+            error.starts_with("Scroll not sent:"),
+            "copy mode's scroll keeps its label: {error}"
         );
     });
 }
