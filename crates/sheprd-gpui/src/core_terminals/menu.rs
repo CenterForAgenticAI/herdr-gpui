@@ -149,7 +149,12 @@ impl SheprdWindow {
         }
     }
 
-    fn activate_core_menu(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn activate_core_menu(
+        &mut self,
+        action: Action,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(target) = self.menu.core.as_ref().map(|menu| menu.target.clone()) else {
             return;
         };
@@ -171,6 +176,18 @@ impl SheprdWindow {
             return;
         }
         self.dismiss_menu(window, cx);
+        // A pane that exited while its menu was open is no longer the tab's:
+        // acting on it would zoom, split, or mirror nothing, or close the rest.
+        if let Target::Pane { terminal, .. } = &target
+            && !self
+                .core_terminals
+                .tabs
+                .get(&tab)
+                .is_some_and(|shown| shown.panes.contains(terminal))
+        {
+            cx.notify();
+            return;
+        }
         match (action, target) {
             (Action::NewTab, _) => self.new_core_terminal(window, cx),
             (Action::Close, Target::Tab(_)) => self.close_browser_tab(tab, window, cx),
