@@ -577,7 +577,7 @@ enum Prepared {
 
 /// The files of a file-manager copy. Finder also publishes their names as
 /// text, which would otherwise be pasted instead of the paths.
-fn external_paths(item: &ClipboardItem) -> Option<Vec<PathBuf>> {
+pub(crate) fn external_paths(item: &ClipboardItem) -> Option<Vec<PathBuf>> {
     item.entries().iter().find_map(|entry| match entry {
         ClipboardEntry::ExternalPaths(paths) if !paths.paths().is_empty() => {
             Some(paths.paths().to_vec())

@@ -11,6 +11,7 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod asks;
 mod checkouts;
 mod commands;
 mod context;
@@ -42,7 +43,7 @@ pub(crate) use error::Error;
 pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
-pub(crate) use view::{CoreTerminalView, Look};
+pub(crate) use view::{CoreTerminalView, LinkClick, Look};
 
 use crate::{
     SheprdWindow,
@@ -300,6 +301,14 @@ impl CoreTerminals {
             .map(|(id, _)| *id)
     }
 
+    /// Whether a tab on this computer's core shows `terminal`, a mirror
+    /// included, which [`Self::tab_of`] leaves out.
+    pub(crate) fn mirrors(&self, terminal: &TerminalId) -> bool {
+        self.tabs
+            .values()
+            .any(|shown| shown.host == Host::Local && shown.panes.contains(terminal))
+    }
+
     /// The tab and pane whose view holds the keyboard.
     pub(crate) fn focused_pane(&self, window: &Window, cx: &App) -> Option<(TabId, TerminalId)> {
         self.views
@@ -437,9 +446,21 @@ impl SheprdWindow {
             cx,
         );
         self.poll_core_panes(window, cx);
+        // Split chrome and the sidebar's rows name panes from what herdr-core
+        // reports, and the shell shown in place of Herdr 1 reads its links
+        // against its folder, which this computer's core reports.
+        let fallback = self.core_fallback_view();
         self.answer_phone_split(cx);
         if self.core_terminals.poll_infos(std::time::Instant::now()) {
             cx.notify();
+        }
+        if let Some(view) = fallback {
+            let cwd = self
+                .core_terminals
+                .infos_of(&Host::Local)
+                .and_then(|infos| infos.named(view.read(cx).terminal()))
+                .and_then(|info| info.cwd.clone());
+            view.update(cx, |view, cx| view.set_cwd(cwd.as_deref(), cx));
         }
         self.core_terminals.shown = self.shown_core_pane(cx);
         if !cx.has_active_drag() {

@@ -8,6 +8,7 @@ mod folders;
 mod kept_checkouts;
 mod kept_workspaces;
 mod keys;
+mod links;
 mod open_terminal;
 mod paste;
 mod phone;

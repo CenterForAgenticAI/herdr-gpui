@@ -105,6 +105,8 @@ open_files_in = "editor"   # or "system"
 
 Paths are not links in panes on SSH hosts, whose files live on that host. On Windows, files always open in the system's application.
 
+Herdr 2 panes read links from their own screen, the same way, and a web address the terminal wrapped onto the next row opens as one link. A file opens in the editor in a new Herdr 2 pane split to the right, and quitting the editor closes it. Plugin `[[link_handlers]]` belong to Herdr 1 and see no clicks in Herdr 2 panes.
+
 ## Images
 
 Paste an image into an agent with Cmd-V. Sheprd sends it through Herdr's image bridge: the daemon writes a temporary file and pastes its path into the pane, where an agent such as OpenCode can read it as an image. Sheprd never presses Enter for you.
@@ -120,7 +122,7 @@ On Linux, pasting needs `wl-paste` (from `wl-clipboard`) on Wayland or `xclip` o
 
 Drop files from your file manager onto a pane or popup to paste their paths there, even if another pane is focused. Paths are pasted with shell characters escaped (`/tmp/Shot\ 1.png`), separated by spaces, and Enter is never pressed. Files copied in the file manager and pasted with Cmd-V work the same way. A drop is limited to 256 paths.
 
-A live macOS screenshot thumbnail, dropped before it saves, goes through the image bridge as a pasted image does. A WSL distribution receives its own paths for the files, with nothing copied.
+Herdr 2 panes take dropped and copied files the same way. A live macOS screenshot thumbnail, dropped before it saves, goes through the image bridge as a pasted image does on a Herdr 1 pane; a Herdr 2 pane, which has no image bridge, gets its path. A WSL distribution receives its own paths for the files, with nothing copied.
 
 ## SSH file copies
 
