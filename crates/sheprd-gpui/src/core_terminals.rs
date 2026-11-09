@@ -166,7 +166,9 @@ impl TabPanes {
     /// is kept. The pane in use is this window's, where the keyboard is;
     /// a zoom stands only on that pane, so commands never reach a pane
     /// hidden behind another.
-    fn refresh(&mut self, location: &Location) {
+    /// Returns the other window's new panes this tab had no room left for.
+    #[must_use]
+    fn refresh(&mut self, location: &Location) -> Vec<TerminalId> {
         let Location::CoreTerminal {
             panes,
             observe,
@@ -174,7 +176,7 @@ impl TabPanes {
             zoomed,
         } = location
         else {
-            return;
+            return Vec::new();
         };
         let base = match &self.saved {
             Some(Location::CoreTerminal { panes, .. }) => Some(panes.clone()),
@@ -187,13 +189,16 @@ impl TabPanes {
             active.as_ref(),
             zoomed.as_ref(),
         );
+        let mut overflow = Vec::new();
         if let Some(base) = base
             && self.panes != base
         {
             fresh.panes = if *panes == base {
                 self.panes.clone()
             } else {
-                merged(&self.panes, &base, panes, &self.active)
+                let (panes, left) = merged(&self.panes, &base, panes, &self.active);
+                overflow = left;
+                panes
             };
         }
         if fresh.panes.contains(&self.active) {
@@ -227,6 +232,7 @@ impl TabPanes {
         fresh.unsaved = self.unsaved;
         fresh.saved = Some(location.clone());
         *self = fresh;
+        overflow
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -703,9 +709,16 @@ impl SheprdWindow {
 
 /// `here`, a layout changed since `base`, with the changes `there` made to
 /// `base` too: its closed panes go, and its new ones split off `active`
-/// while there is room.
-fn merged(here: &Panes, base: &Panes, there: &Panes, active: &TerminalId) -> Panes {
+/// while there is room. The new ones a full layout cannot take come back
+/// beside it, for the caller to give a tab of their own.
+fn merged(
+    here: &Panes,
+    base: &Panes,
+    there: &Panes,
+    active: &TerminalId,
+) -> (Panes, Vec<TerminalId>) {
     let mut panes = here.clone();
+    let mut overflow = Vec::new();
     for gone in base.terminals() {
         if !there.contains(gone) {
             panes.remove(gone);
@@ -718,12 +731,12 @@ fn merged(here: &Panes, base: &Panes, there: &Panes, active: &TerminalId) -> Pan
             } else {
                 panes.first().clone()
             };
-            // A full layout leaves it to the other window's tab, which the
-            // next save replaces; nothing better is open to it.
-            let _ = panes.split(&at, Axis::Row, new.clone());
+            if panes.split(&at, Axis::Row, new.clone()).is_err() {
+                overflow.push(new.clone());
+            }
         }
     }
-    panes
+    (panes, overflow)
 }
 
 /// Whether a pane waiting for the keyboard may take it: nothing holds it, or
