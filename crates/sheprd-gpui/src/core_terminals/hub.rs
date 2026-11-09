@@ -135,6 +135,16 @@ impl Hub {
         };
     }
 
+    /// Forgets the last attempt and its outcome, so the next ask dials anew,
+    /// as for a core just installed. An attempt in flight is left to end
+    /// unread.
+    pub(crate) fn forget(&mut self) {
+        self.attempt = None;
+        self.failed = None;
+        self.state = State::Idle;
+        self.wants_start = false;
+    }
+
     /// Takes the connection's outcome; true when the state changed. A lost
     /// connection reads as idle again, so the next ask reconnects.
     pub(crate) fn poll(&mut self) -> bool {

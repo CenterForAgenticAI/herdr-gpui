@@ -5,7 +5,7 @@
 //! not reach the host drops its hub, so the next Herdr 2 tab dials it again
 //! rather than remembering that the host had none.
 
-use super::Host;
+use super::{Host, Start};
 use crate::{
     SheprdWindow,
     i18n::{Localize, fl},
@@ -143,10 +143,20 @@ impl SheprdWindow {
 
     /// Forgets what this window found of `host` once it has a core. Only a
     /// host the window could not reach is dialed anew; a connected core
-    /// keeps its views and their history.
+    /// keeps its views and their history. A terminal asked for meanwhile
+    /// keeps its place and waits for the new attempt.
     fn core_installed(&mut self, host: &Host) {
-        if self.core_terminals.backend_of(host).is_none() {
-            self.core_terminals.forget_host(host);
+        let terminals = &mut self.core_terminals;
+        if terminals.backend_of(host).is_some() {
+            return;
+        }
+        let waiting = terminals.waits_on(host);
+        let Some(hub) = terminals.hub_of_mut(host) else {
+            return;
+        };
+        hub.forget();
+        if waiting {
+            hub.connect(Start::IfMissing);
         }
     }
 

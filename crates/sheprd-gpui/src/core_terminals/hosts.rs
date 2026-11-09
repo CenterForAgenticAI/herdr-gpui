@@ -120,6 +120,13 @@ impl CoreTerminals {
         self.hub_of_mut(host)
     }
 
+    /// Whether a terminal waits for `host`'s core to connect.
+    // Only the lifecycle tests, which need Unix sockets, use it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn waits_on_for_test(&self, host: &Host) -> bool {
+        self.waits_on(host)
+    }
+
     /// Records `info` as what `host`'s core reports, as a finished list
     /// would.
     // Only the lifecycle tests, which need Unix sockets, use it.
@@ -199,6 +206,11 @@ impl CoreTerminals {
         {
             self.starting = None;
         }
+    }
+
+    /// Whether a terminal waits for `host`'s core to connect.
+    pub(super) fn waits_on(&self, host: &Host) -> bool {
+        self.wanted.iter().any(|(_, wanted, _)| wanted == host)
     }
 
     /// How many agents `host`'s core last reported working, for ranking

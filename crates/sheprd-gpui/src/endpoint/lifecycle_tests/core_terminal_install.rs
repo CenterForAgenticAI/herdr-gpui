@@ -5,7 +5,7 @@
 use super::*;
 use crate::{
     browser::Scope,
-    core_terminals::{Error, Host, Hub, Start},
+    core_terminals::{Error, Host, Hub, Start, State},
 };
 use sheprd_backend::{RunState, TerminalId, TerminalInfo};
 use sheprd_client::protocol::AgentStatus;
@@ -69,7 +69,11 @@ fn installing_herdr_core_lets_the_host_take_herdr_2_tabs_again(cx: &mut gpui::Te
             Ok(sheprd_remote::core_install::Outcome::Installed),
             cx,
         );
-        assert!(view.core_terminals.hub_of(&host).is_none());
+        assert!(!view.core_terminals.lacks_core(&host));
+        assert!(matches!(
+            view.core_terminals.hub_of(&host).map(Hub::state),
+            Some(State::Idle)
+        ));
         assert!(view.new_tabs_use_core());
     });
 }
@@ -199,7 +203,53 @@ fn an_install_clears_the_missing_core_in_every_window(cx: &mut gpui::TestAppCont
     for view in &views {
         view.update(cx, |view, _| {
             assert!(!view.core_terminals.lacks_core(&host));
-            assert!(view.core_terminals.hub_of(&host).is_none());
+            assert!(matches!(
+                view.core_terminals.hub_of(&host).map(Hub::state),
+                Some(State::Idle)
+            ));
         });
     }
+}
+
+#[gpui::test]
+fn a_terminal_asked_for_while_herdr_core_installs_waits_for_it(cx: &mut gpui::TestAppContext) {
+    let (fixture, cx) = cx.add_window_view(|window, cx| {
+        Fixture(cx.new(|cx| crate::sidebar::layout_tests::fixture_window(window, cx)))
+    });
+    let view = fixture.update(cx, |fixture, _| fixture.0.clone());
+    let (mut remote, _server) = connected_endpoint("ssh:fixture");
+    remote.connection.target = ssh();
+    // Every attempt holds until the test ends, as a bridge still dialing.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = Mutex::new(held);
+    let join = move |start| {
+        let _ = held.lock().map(|held| held.recv());
+        missing(start)
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.endpoints.push(remote);
+            view.selected_endpoint = 1;
+            view.reset_selected(cx);
+            view.config.herdr_2_terminals = true;
+            let host = Host::Remote(scope());
+            view.core_terminals
+                .set_remote_hub_for_test(scope(), ssh(), Hub::with_join(join));
+            view.command(Command::NewCoreTerminal, window, cx);
+            assert!(view.core_terminals.waits_on_for_test(&host));
+            view.core_install_ended(
+                host.clone(),
+                "fixture",
+                Ok(sheprd_remote::core_install::Outcome::Installed),
+                cx,
+            );
+            // The terminal keeps its place, and the core is dialed anew.
+            assert!(view.core_terminals.waits_on_for_test(&host));
+            assert!(matches!(
+                view.core_terminals.hub_of(&host).map(Hub::state),
+                Some(State::Connecting(_))
+            ));
+        })
+    });
+    drop(release);
 }
