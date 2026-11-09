@@ -41,14 +41,7 @@ fn a_core_terminal_caller_opens_in_the_workspace_of_its_tab(cx: &mut gpui::TestA
     view.update(cx, |view, cx| {
         let scope = scope(&view.endpoints[0]);
         let t1 = TerminalId::new("t1").unwrap();
-        let location = Location::CoreTerminal {
-            panes: Panes::single(t1.clone()),
-            observe: false,
-            active: None,
-            zoomed: None,
-            name: None,
-            names: std::collections::BTreeMap::new(),
-        };
+        let location = Location::core_terminal(Panes::single(t1.clone()), false);
         let tab = Store::update(cx, |store| {
             store.open(scope.clone(), "w1", Some(location), None)
         })

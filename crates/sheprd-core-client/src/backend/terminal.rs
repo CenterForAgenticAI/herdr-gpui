@@ -1,7 +1,7 @@
 use crate::{Attachment, Core, End, Error, Result, wire::Attach};
 use sheprd_backend::{
-    ClientMouseKind, ClientPaneInputEvent, Exit, KeyReporting, Role, Size, SurfaceUpdate,
-    TerminalId,
+    ClientMouseKind, ClientPaneInputEvent, Exit, History, HistoryAnswer, KeyReporting, Role,
+    ScrollMetrics, Size, SurfaceUpdate, TerminalId,
 };
 use sheprd_terminal::{Damage, Emulator, Event, MouseReporting, Scroll};
 use std::{
@@ -27,6 +27,9 @@ pub struct CoreTerminal {
     /// Whether the program read the mouse when the view was last told.
     reporting: Option<bool>,
     role: Role,
+    /// Where the view was in its history, and the revision of its text,
+    /// when the view was last told.
+    scroll: Option<(ScrollMetrics, u64)>,
     /// An observer's core and when it last read the terminal's size there;
     /// an active view sets the size itself.
     sizing: Option<(Arc<Core>, Instant)>,
@@ -69,6 +72,7 @@ impl CoreTerminal {
             keys: None,
             reporting: None,
             role,
+            scroll: None,
             sizing: (role == Role::Observer).then(|| (Arc::clone(core), Instant::now())),
             sync_since: None,
             wraps: Vec::new(),
@@ -107,6 +111,41 @@ impl CoreTerminal {
 
     fn drives(&self) -> bool {
         self.role == Role::Active
+    }
+
+    /// The view's place in its history and what changed on screen, when
+    /// either changed since the view was last told.
+    fn push_view(&mut self, updates: &mut Vec<SurfaceUpdate>) {
+        let scroll = (self.emulator.scroll_metrics(), self.emulator.revision());
+        if self.scroll != Some(scroll) {
+            self.scroll = Some(scroll);
+            updates.push(SurfaceUpdate::Scroll {
+                metrics: scroll.0,
+                revision: scroll.1,
+            });
+        }
+        let damaged = match self.emulator.take_damage() {
+            Damage::Full(frame) => {
+                updates.push(SurfaceUpdate::Frame(frame));
+                true
+            }
+            damage if damage.is_empty() => false,
+            Damage::Rows { rows, cursor } => {
+                updates.push(SurfaceUpdate::Rows { cursor, rows });
+                true
+            }
+        };
+        if damaged {
+            let wraps = self.emulator.wrapped_rows();
+            if wraps != self.wraps {
+                self.wraps = wraps.clone();
+                updates.push(SurfaceUpdate::Wraps(wraps));
+            }
+        }
+        // After the cells, so the images land on the screen they belong to.
+        if let Some(scene) = self.emulator.take_graphics() {
+            updates.push(SurfaceUpdate::Graphics(scene));
+        }
     }
 
     fn release_stale_sync(&mut self) {
@@ -187,7 +226,13 @@ impl sheprd_backend::Terminal for CoreTerminal {
     fn next(&mut self, timeout: Duration) -> Result<Vec<SurfaceUpdate>> {
         match &self.end {
             Some(End::Lost) => return Err(Error::Lost),
-            Some(End::Closed(_)) => return Ok(Vec::new()),
+            // The program is gone but its history stays: what a history
+            // request changed (a scroll, a clear) is still shown.
+            Some(End::Closed(_)) => {
+                let mut updates = Vec::new();
+                self.push_view(&mut updates);
+                return Ok(updates);
+            }
             None => {}
         }
         // A held update is released on time even when no bytes follow it.
@@ -225,28 +270,7 @@ impl sheprd_backend::Terminal for CoreTerminal {
             self.reporting = Some(reporting);
             updates.push(SurfaceUpdate::MouseReporting(reporting));
         }
-        let damaged = match self.emulator.take_damage() {
-            Damage::Full(frame) => {
-                updates.push(SurfaceUpdate::Frame(frame));
-                true
-            }
-            damage if damage.is_empty() => false,
-            Damage::Rows { rows, cursor } => {
-                updates.push(SurfaceUpdate::Rows { cursor, rows });
-                true
-            }
-        };
-        if damaged {
-            let wraps = self.emulator.wrapped_rows();
-            if wraps != self.wraps {
-                self.wraps = wraps.clone();
-                updates.push(SurfaceUpdate::Wraps(wraps));
-            }
-        }
-        // After the cells, so the images land on the screen they belong to.
-        if let Some(scene) = self.emulator.take_graphics() {
-            updates.push(SurfaceUpdate::Graphics(scene));
-        }
+        self.push_view(&mut updates);
         match chunk.end {
             Some(End::Closed(closed)) => {
                 updates.push(SurfaceUpdate::Ended(Exit {
@@ -260,5 +284,11 @@ impl sheprd_backend::Terminal for CoreTerminal {
             None => {}
         }
         Ok(updates)
+    }
+
+    /// Answered from this view's emulator, an observer's too: scrolling
+    /// and clearing change what this view shows, never the program.
+    fn history(&mut self, request: &History) -> Result<HistoryAnswer> {
+        Ok(self.emulator.history(request)?)
     }
 }

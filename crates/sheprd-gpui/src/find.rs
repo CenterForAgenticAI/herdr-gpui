@@ -7,6 +7,7 @@
 //! once the answer arrives. Nothing here touches the window or the socket.
 // i18n: migrated
 
+pub(crate) mod bar;
 pub(crate) mod memory;
 
 use crate::{

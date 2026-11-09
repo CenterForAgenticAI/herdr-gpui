@@ -19,12 +19,14 @@ fn labelled(name: &str, labels: &[(&str, &str)]) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: None,
+        foreground: None,
         id: id(name),
         labels: labels
             .iter()
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }

@@ -359,7 +359,9 @@ impl SheprdWindow {
         {
             self.input_probe.actions += 1;
         }
-        if self.core_pane_command(command, window, cx) {
+        if self.core_pane_command(command, window, cx)
+            || self.core_history_command(command, window, cx)
+        {
             return;
         }
         match command {
@@ -650,7 +652,7 @@ impl SheprdWindow {
                 return;
             }
             Command::ConvertToChat => {
-                self.convert_to_chat_or_flash(cx);
+                self.convert_to_chat_or_flash(window, cx);
                 return;
             }
             // A focused page zooms instead of the terminal font, and keeps

@@ -7,10 +7,11 @@ mod terminal;
 use crate::{
     Core, Error, Result,
     event::{Notice, TerminalChange},
-    wire::{Run, Status, StatusState, Terminal, TerminalState},
+    wire::{Foreground, Run, Status, StatusState, Terminal, TerminalState},
 };
 use sheprd_backend::{
-    AgentStatus, Change, Exit, Generation, Role, RunState, Size, Spawn, TerminalId, TerminalInfo,
+    AgentStatus, Change, Exit, Generation, Process, Role, RunState, Size, Spawn, TerminalId,
+    TerminalInfo,
 };
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
@@ -207,7 +208,8 @@ fn update(record: &mut Terminal, change: TerminalChange) -> bool {
     true
 }
 
-pub(crate) fn info(terminal: &Terminal) -> Result<TerminalInfo> {
+/// What a client is told of `terminal`, as [`CoreBackend`] lists it.
+pub fn info(terminal: &Terminal) -> Result<TerminalInfo> {
     let cwd = terminal
         .foreground
         .as_ref()
@@ -218,11 +220,27 @@ pub(crate) fn info(terminal: &Terminal) -> Result<TerminalInfo> {
     Ok(TerminalInfo {
         agent: terminal.status.as_ref().map_or(AgentStatus::Unknown, agent),
         cwd,
+        foreground: terminal.foreground.as_ref().and_then(process),
         id: TerminalId::new(terminal.address.clone())?,
         labels: terminal.labels.clone(),
         name: terminal.name.clone(),
+        reporter: terminal
+            .status
+            .as_ref()
+            .map(|status| status.app.trim())
+            .filter(|app| !app.is_empty())
+            .map(str::to_owned),
         state: run_state(terminal),
         title: terminal.title.clone().filter(|title| !title.is_empty()),
+    })
+}
+
+/// The foreground process, unless its pid is not one a process can have.
+fn process(foreground: &Foreground) -> Option<Process> {
+    Some(Process {
+        argv: foreground.argv.clone(),
+        name: foreground.name.clone(),
+        pid: u32::try_from(foreground.pid).ok().filter(|pid| *pid > 0)?,
     })
 }
 

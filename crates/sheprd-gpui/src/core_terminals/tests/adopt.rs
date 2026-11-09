@@ -19,6 +19,7 @@ fn listed(name: &str, workspace: Option<&str>) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: None,
+        foreground: None,
         id: id(name),
         labels: workspace
             .map(|workspace| {
@@ -30,6 +31,7 @@ fn listed(name: &str, workspace: Option<&str>) -> TerminalInfo {
             })
             .unwrap_or_default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }
@@ -71,14 +73,8 @@ fn a_terminal_labelled_for_a_workspace_gets_a_tab_there_once(cx: &mut TestAppCon
     cx.update(|_, cx| {
         // Another host's tab holds its own `t5`, another terminal.
         Store::update(cx, |store| {
-            let location = Location::CoreTerminal {
-                panes: sheprd_session::panes::Panes::single(id("t5")),
-                observe: false,
-                active: None,
-                zoomed: None,
-                name: None,
-                names: std::collections::BTreeMap::new(),
-            };
+            let location =
+                Location::core_terminal(sheprd_session::panes::Panes::single(id("t5")), false);
             store.open(
                 crate::browser::Scope::endpoint("box"),
                 "w9",

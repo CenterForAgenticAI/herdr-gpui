@@ -100,14 +100,7 @@ impl SheprdWindow {
                 // Tried again once a workspace can be kept.
                 continue;
             };
-            let location = Location::CoreTerminal {
-                panes: Panes::single(terminal.clone()),
-                observe: false,
-                active: None,
-                zoomed: None,
-                name: None,
-                names: std::collections::BTreeMap::new(),
-            };
+            let location = Location::core_terminal(Panes::single(terminal.clone()), false);
             let tab = Store::update(cx, |store| {
                 store.open(scope.clone(), &workspace, Some(location), None)
             });

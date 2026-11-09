@@ -119,7 +119,7 @@ impl Filter {
                     Action::Native(_) | Action::Configured(..) | Action::Mod { .. } => {
                         Self::Commands
                     }
-                    Action::Go { .. } => Self::Navigation,
+                    Action::Go { .. } | Action::Core { .. } => Self::Navigation,
                     Action::Project(_) | Action::NewProject(_) => Self::Projects,
                     Action::Note { .. } => Self::Notes,
                 }
@@ -144,6 +144,12 @@ enum Action {
         endpoint: String,
         boot: String,
         workspace: String,
+    },
+    /// A Herdr 2 (herdr-core) tab, or one of its panes, shown with the
+    /// keyboard.
+    Core {
+        tab: crate::browser::TabId,
+        terminal: Option<sheprd_backend::TerminalId>,
     },
     /// A command a mod declares; choosing it sends the mod `command:<id>`.
     Mod {
@@ -219,6 +225,7 @@ enum Identity {
     Project(std::path::PathBuf),
     NewProject(std::path::PathBuf),
     Note(String, String),
+    Core(crate::browser::TabId, Option<sheprd_backend::TerminalId>),
     Mod(String, String),
 }
 
@@ -261,6 +268,7 @@ impl Action {
                 workspace,
                 ..
             } => Identity::Note(endpoint.clone(), workspace.clone()),
+            Self::Core { tab, terminal } => Identity::Core(*tab, terminal.clone()),
             Self::Mod { name, id } => Identity::Mod(name.clone(), id.clone()),
         }
     }
@@ -401,6 +409,12 @@ pub(super) struct Palette {
     keymap: crate::keymap::Keymap,
     supports_clear: bool,
     supports_edit_scrollback: bool,
+    /// What the Herdr 2 rows showed when the entries were prepared.
+    core_rows: Vec<go_to::CoreRow>,
+    /// The herdr-core pane that held the keyboard as the palette opened. It
+    /// clears and edits its history itself, whatever Herdr 1 supports, and
+    /// takes the keyboard back to run the command chosen.
+    pub(crate) core_view: Option<Entity<crate::core_terminals::CoreTerminalView>>,
     /// The notes revision the entries were prepared from.
     notes_revision: Option<u64>,
     /// Paints Go To's preview at its own size, apart from the terminal's
@@ -594,6 +608,8 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Read before the menu takes the keyboard.
+        let core_view = self.core_terminals.focused_view(window, cx);
         if !self.open_menu(window, cx) {
             return;
         }
@@ -658,6 +674,8 @@ impl SheprdWindow {
             keymap: self.keymap().clone(),
             supports_clear: self.live.supports_pane_clear,
             supports_edit_scrollback: self.live.supports_edit_scrollback,
+            core_rows: Vec::new(),
+            core_view,
             notes_revision: None,
             restore: None,
             preview_painter: Default::default(),
@@ -665,7 +683,7 @@ impl SheprdWindow {
                 .map_or_else(Default::default, |history| history.boosts(frecency::now())),
             _subscription: subscription,
         };
-        self.prepare_palette_entries(&mut palette, crate::worktree_notes::Notes::of(cx));
+        self.prepare_palette_entries(&mut palette, crate::worktree_notes::Notes::of(cx), cx);
         self.menu.palette = Some(palette);
         self.rank_palette(Selection::Keep, cx);
         self.load_palette_projects(window, cx);
@@ -698,6 +716,7 @@ impl SheprdWindow {
         &self,
         palette: &mut Palette,
         notes: Option<&crate::worktree_notes::Notes>,
+        cx: &App,
     ) {
         let mut entries = Vec::new();
         let sources = self.palette_sources();
@@ -723,13 +742,25 @@ impl SheprdWindow {
             let host = (self.endpoints.len() > 1).then_some(local.label.as_str());
             kept_go_to_entries(&local.id, host, &core, &mut entries);
         }
+        // Their rows nest under rows of their own: counted from here.
+        let core = self.core_palette_entries(cx);
+        let core_rows = go_to::core_rows(&core);
+        let base = entries.len();
+        entries.extend(core.into_iter().map(|mut entry| {
+            entry.parent = entry.parent.map(|parent| parent + base);
+            entry
+        }));
         entries.extend(
             COMMANDS
                 .iter()
                 .filter(|info| !matches!(info.command, Command::Palette | Command::ResumePalette))
                 .filter(|info| match info.command {
-                    Command::ClearPane => self.live.supports_pane_clear,
-                    Command::EditScrollback => self.live.supports_edit_scrollback,
+                    Command::ClearPane => {
+                        self.live.supports_pane_clear || palette.core_view.is_some()
+                    }
+                    Command::EditScrollback => {
+                        self.live.supports_edit_scrollback || palette.core_view.is_some()
+                    }
                     Command::ToggleMenuBar => crate::menus::IN_WINDOW,
                     _ => true,
                 })
@@ -828,6 +859,7 @@ impl SheprdWindow {
         palette.keymap = self.keymap().clone();
         palette.supports_clear = self.live.supports_pane_clear;
         palette.supports_edit_scrollback = self.live.supports_edit_scrollback;
+        palette.core_rows = core_rows;
         palette.notes_revision = notes.map(crate::worktree_notes::Notes::revision);
     }
 
@@ -849,7 +881,11 @@ impl SheprdWindow {
                 palette.configuration = self.config.palette.clone();
                 palette.projects = projects::Collection::default();
                 palette.loading_projects = !self.config.palette.project_roots.is_empty();
-                self.prepare_palette_entries(&mut palette, crate::worktree_notes::Notes::of(cx));
+                self.prepare_palette_entries(
+                    &mut palette,
+                    crate::worktree_notes::Notes::of(cx),
+                    cx,
+                );
                 self.menu.palette = Some(palette);
                 self.rank_palette(Selection::Keep, cx);
                 self.load_palette_projects(window, cx);
@@ -863,6 +899,7 @@ impl SheprdWindow {
             || palette.keymap != *self.keymap()
             || palette.supports_clear != self.live.supports_pane_clear
             || palette.supports_edit_scrollback != self.live.supports_edit_scrollback
+            || go_to::core_rows(&self.core_palette_entries(cx)) != palette.core_rows
             || sources.len() != palette.sources.len()
             || sources.iter().zip(&palette.sources).any(|(a, b)| {
                 a.endpoint != b.endpoint
@@ -875,7 +912,7 @@ impl SheprdWindow {
                     }
             });
         if changed && let Some(mut palette) = self.menu.palette.take() {
-            self.prepare_palette_entries(&mut palette, notes);
+            self.prepare_palette_entries(&mut palette, notes, cx);
             self.menu.palette = Some(palette);
             self.rank_palette(Selection::Keep, cx);
         }

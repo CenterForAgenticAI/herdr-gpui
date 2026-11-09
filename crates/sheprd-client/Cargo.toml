@@ -29,6 +29,7 @@ test-support = []
 [dependencies]
 base64.workspace            = true
 crossbeam-channel.workspace = true
+sheprd-backend.workspace     = true
 sheprd-protocol.workspace    = true
 # The agents a chat runs, for moving a terminal agent into one.
 sheprd-chat-protocol.workspace = true

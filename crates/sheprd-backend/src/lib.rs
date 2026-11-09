@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod error;
+mod history;
 mod terminal;
 
 #[cfg(test)]
@@ -10,14 +11,18 @@ mod tests;
 use std::time::Duration;
 
 pub use error::{Error, Result};
+pub use history::{
+    CopyMotion, History, HistoryAnswer, MAX_SEARCH_MATCHES, MAX_SEARCH_QUERY_BYTES, Matches,
+    ScrollMetrics, Search, SearchDirection, TextPoint, TextRange,
+};
 pub use sheprd_protocol::{
     AgentStatus, ClientKeyCode, ClientKeyKind, ClientMouseButton, ClientMouseKind,
     ClientMousePosition, ClientPaneInputEvent, CursorState, FrameData, PaneSurfacePatchRow,
     SurfaceGraphicsScene,
 };
 pub use terminal::{
-    Change, Exit, KeyReporting, MAX_CELLS, MAX_SIDE, MAX_TERMINAL_ID, Role, RunState, Size, Spawn,
-    SurfaceUpdate, TerminalId, TerminalInfo,
+    Change, Exit, KeyReporting, MAX_CELLS, MAX_SIDE, MAX_TERMINAL_ID, Process, Role, RunState,
+    Size, Spawn, SurfaceUpdate, TerminalId, TerminalInfo,
 };
 
 /// Which Herdr runs a host's terminals.
@@ -80,6 +85,10 @@ pub trait Terminal: Send {
 
     /// What changed, waiting at most `timeout`; empty when nothing did.
     fn next(&mut self, timeout: Duration) -> Result<Vec<SurfaceUpdate>, Self::Error>;
+
+    /// Answers `request` from the history this view keeps. Scrolling and
+    /// clearing change only this view; the program never sees them.
+    fn history(&mut self, request: &History) -> Result<HistoryAnswer, Self::Error>;
 }
 
 /// Changes to a host's terminals after a `Backend::watch` snapshot.

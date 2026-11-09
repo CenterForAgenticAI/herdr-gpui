@@ -217,7 +217,7 @@ impl CoreTerminals {
         let tabs = &self.tabs;
         self.views
             .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != *host));
-        self.wanted.retain(|(_, wanted, _)| wanted != host);
+        self.wanted.retain(|(_, wanted, _, _)| wanted != host);
         if self
             .starting
             .as_ref()
@@ -229,7 +229,7 @@ impl CoreTerminals {
 
     /// Whether a terminal waits for `host`'s core to connect.
     pub(super) fn waits_on(&self, host: &Host) -> bool {
-        self.wanted.iter().any(|(_, wanted, _)| wanted == host)
+        self.wanted.iter().any(|(_, wanted, ..)| wanted == host)
     }
 
     /// How many agents `host`'s core last reported working, for ranking
@@ -295,11 +295,12 @@ impl SheprdWindow {
             // Every terminal waiting for a core that cannot start is
             // dropped, and the user is told once.
             if let Some(error) = failed {
-                let (here, others) = std::mem::take(&mut self.core_terminals.wanted)
-                    .into_iter()
-                    .partition::<VecDeque<_>, _>(|(_, wanted, _)| *wanted == host);
+                let (here, others) =
+                    std::mem::take(&mut self.core_terminals.wanted)
+                        .into_iter()
+                        .partition::<VecDeque<_>, _>(|(_, wanted, _, _)| *wanted == host);
                 self.core_terminals.wanted = others;
-                if let Some((purpose, _, _)) = here.into_iter().next() {
+                if let Some((purpose, ..)) = here.into_iter().next() {
                     self.core_unavailable(purpose, &error, window, cx);
                 }
             }

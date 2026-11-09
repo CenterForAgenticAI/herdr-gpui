@@ -25,6 +25,12 @@ graphics scene for the app's painter.
 - `frame()` is the viewport at any time; it does not reset damage.
 - `modes()`, `title()`, `take_events()` (one coalesced title change, the
   latest OSC 52 clipboard write, and a bell count), `scroll()` and `scroll_metrics()`.
+- `history(&History)` answers what a view asks of its history: `search()`
+  (smart-case, literal, wrapping, at most `MAX_SEARCH_MATCHES` around the
+  current match), `motion()` (copy-mode words, line ends, paragraphs),
+  `read()`, `text()`, `scroll_to()`, and `clear()`, which drops the history
+  and the rows above the cursor's line, leaving an alternate screen alone.
+  `revision()` counts changes to the text; history points hold for one.
 - `encode(&ClientPaneInputEvent)` (or `input::encode` with `Modes`) turns the
   app's semantic input into PTY bytes: xterm keys, the kitty keyboard
   protocol, Win32 input records (DECSET 9001), mouse reports, and bracketed

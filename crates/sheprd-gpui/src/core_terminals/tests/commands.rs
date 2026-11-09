@@ -80,7 +80,13 @@ pub(super) fn run(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext, comma
 
 #[gpui::test]
 fn a_command_a_core_pane_cannot_run_says_so(cx: &mut TestAppContext) {
-    let (view, cx, _) = window_with_split(cx, &["t1", "t2"]);
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    // A mirror's pane is moved where it types.
+    cx.update(|_, cx| {
+        view.update(cx, |view, _| {
+            view.core_terminals.tabs.get_mut(&tab).unwrap().observe = true;
+        })
+    });
     run(&view, cx, Command::MovePane);
     assert_eq!(flash(&view, cx), Some(fl!("core-terminals-unsupported")));
 }

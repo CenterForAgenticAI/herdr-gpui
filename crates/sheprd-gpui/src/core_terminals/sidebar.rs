@@ -1,5 +1,6 @@
 //! The sidebar's Herdr 2 rows: every pane of the focused workspace's
-//! herdr-core tabs, under the agents, with the status dot its agent reports.
+//! herdr-core tabs, under the agents, with the status dot its agent reports
+//! and the mark of the agent it runs.
 //! Clicking a row shows its tab and gives that pane the keyboard. Mirrors are
 //! left out: the terminal they watch is listed where it types.
 
@@ -14,11 +15,15 @@ use gpui::{prelude::*, *};
 use sheprd_backend::TerminalId;
 
 impl SheprdWindow {
-    /// The Herdr 2 rows, or nothing when the workspace has no herdr-core tab.
-    pub(crate) fn core_sidebar_rows(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let store = cx.try_global::<Store>()?;
-        let (scope, workspace) = self.browser_key()?;
-        let panes: Vec<(TabId, TerminalId)> = store
+    /// Every pane of the focused workspace's herdr-core tabs that type into
+    /// their terminals, tab by tab, as the sidebar and Go To list them.
+    pub(crate) fn listed_core_panes(&self, cx: &App) -> Vec<(TabId, TerminalId)> {
+        let (Some(store), Some((scope, workspace))) =
+            (cx.try_global::<Store>(), self.browser_key())
+        else {
+            return Vec::new();
+        };
+        store
             .in_workspace(&scope, &workspace)
             .filter_map(|tab| match &tab.location {
                 Some(Location::CoreTerminal {
@@ -33,7 +38,12 @@ impl SheprdWindow {
                     .into_iter()
                     .map(move |terminal| (tab, terminal.clone()))
             })
-            .collect();
+            .collect()
+    }
+
+    /// The Herdr 2 rows, or nothing when the workspace has no herdr-core tab.
+    pub(crate) fn core_sidebar_rows(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let panes = self.listed_core_panes(cx);
         if panes.is_empty() {
             return None;
         }
@@ -43,6 +53,11 @@ impl SheprdWindow {
         let hover = theme.active;
         let rows = panes.into_iter().map(|(tab, terminal)| {
             let (title, status) = self.core_pane_label(tab, &terminal, cx);
+            // The tab's host's record: IDs repeat across machines.
+            let agent = self
+                .core_terminals
+                .info(tab, &terminal)
+                .and_then(sheprd_core_client::agent_kind);
             let id = SharedString::from(format!("core-sidebar-{}-{terminal}", u64::from(tab)));
             let clicked = terminal.clone();
             // The ID beside a title, unless the title already is the ID.
@@ -60,6 +75,10 @@ impl SheprdWindow {
                 .cursor_pointer()
                 .hover(move |row| row.bg(rgb(hover)))
                 .child(status_indicator(status, font, indicators).flex_none())
+                .children(agent.map(|agent| {
+                    crate::icons::AgentIcon::from_identity(Some(agent.name()))
+                        .element(font.size, theme.muted)
+                }))
                 .child(
                     div()
                         .flex_1()
@@ -133,7 +152,7 @@ impl SheprdWindow {
 
     /// Shows `tab` with `terminal` as its pane in use, unzoomed if another
     /// pane filled it, and gives that pane the keyboard.
-    pub(super) fn show_core_pane(
+    pub(crate) fn show_core_pane(
         &mut self,
         tab: TabId,
         terminal: &TerminalId,

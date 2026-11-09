@@ -18,6 +18,7 @@ core-terminals-ended = Ended
 # Shown over a terminal's last frame while the app reconnects to herdr-core.
 core-terminals-reconnecting = Reconnecting...
 core-terminals-input-dropped = Not connected to herdr-core: input not sent
+core-terminals-pane-own-tab = Another window split this tab while it was full, so its new pane opened in a tab of its own
 # What an agent in a split pane reports, beside its title.
 core-terminals-state-blocked = blocked
 core-terminals-state-done = done
@@ -28,10 +29,16 @@ core-terminals-mirror-needs-pane = Click a Herdr 2 pane to mirror first
 core-terminals-menu-mirror = Mirror in New Tab
 # A pane or tab command a Herdr 2 pane cannot run.
 core-terminals-unsupported = Herdr 2 panes cannot do this yet
+# Move Pane on a Herdr 2 pane that is its tab's only one, with no other tab.
+core-terminals-nowhere-to-move = No other tab to move this pane to
 # Shown on a watch-only view of a terminal another view types into.
 core-terminals-watching = Watching
 # The sidebar's list of herdr-core panes, under the agents.
 core-terminals-sidebar = Herdr 2
+core-terminals-edit-failed = Could not open the history in an editor
+# Editing scrollback saves it on this computer, so it is refused for a pane
+# running on another machine's Herdr 2.
+core-terminals-edit-remote = Editing scrollback works only for panes on this computer
 # Installing herdr-core (Herdr 2) on a saved device, from its menu.
 # $device is the device's name; $version is herdr-core's version.
 core-terminals-install-started = Installing Herdr 2 on { $device }...

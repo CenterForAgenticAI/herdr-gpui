@@ -16,14 +16,7 @@ fn hold(handle: WindowHandle<crate::SheprdWindow>, terminal: &str, cx: &mut Test
         .update(cx, |view, _, cx| {
             let scope = crate::browser::scope(&view.endpoints[0]);
             let id = TerminalId::new(terminal).unwrap();
-            let location = Location::CoreTerminal {
-                panes: Panes::single(id.clone()),
-                observe: false,
-                active: None,
-                zoomed: None,
-                name: None,
-                names: std::collections::BTreeMap::new(),
-            };
+            let location = Location::core_terminal(Panes::single(id.clone()), false);
             let tab = Store::update(cx, |store| {
                 store.open(scope.clone(), "w3", Some(location), None)
             })

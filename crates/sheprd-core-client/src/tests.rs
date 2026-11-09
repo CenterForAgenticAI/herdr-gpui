@@ -7,10 +7,13 @@ mod endpoint;
 mod event;
 mod frame;
 mod hello;
+mod identity;
+mod label;
 mod labels;
 mod live;
 #[cfg(unix)]
 mod live_bridge;
+mod send;
 
 use crate::frame::{Decoder, Frame, Kind, encode};
 use serde_json::{Value, json};
