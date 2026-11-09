@@ -12,6 +12,7 @@ mod pointer;
 mod slide;
 
 use super::{
+    effects::Effects,
     screen::Screen,
     selection::{Cell, Selection},
     worker::{Command, Link},
@@ -70,6 +71,8 @@ pub(crate) struct CoreTerminalView {
     copy_mode: Option<copy_mode::CopyModeState>,
     /// The history read whose text goes to the clipboard.
     copying: Option<history::Reading>,
+    /// Bells and clipboard writes the window has not taken yet.
+    effects: Effects,
     /// The history text asked for an editor, once it arrived.
     edit_ready: Option<Result<String, super::Error>>,
     /// The history request whose text goes to an editor.
@@ -133,6 +136,7 @@ impl CoreTerminalView {
             bounds: None,
             copy_mode: None,
             copying: None,
+            effects: Effects::default(),
             edit_ready: None,
             editing: None,
             dragged_to: None,
@@ -220,7 +224,15 @@ impl CoreTerminalView {
     pub(crate) fn poll(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let (screen, answers) = self.link.mailbox.take_with_answers();
         let changed = screen.is_some();
-        if let Some(screen) = screen {
+        if let Some(mut screen) = screen {
+            // A mirror only watches; the tab driving the terminal rings and
+            // copies.
+            if !self.observe {
+                self.effects.merge(Effects {
+                    bells: screen.bells,
+                    clipboard: screen.clipboard.take(),
+                });
+            }
             let before = std::mem::replace(&mut self.screen, screen);
             self.slide_from(&before);
             // Output into a full history drops its oldest lines, and a
@@ -243,6 +255,11 @@ impl CoreTerminalView {
         self.poll_copy_mode(window, cx);
         self.follow_drag(cx);
         changed
+    }
+
+    /// Bells and the clipboard write found since the last take.
+    pub(crate) fn take_effects(&mut self) -> Effects {
+        std::mem::take(&mut self.effects)
     }
 
     pub(crate) fn set_look(&mut self, look: Look, cx: &mut Context<Self>) {

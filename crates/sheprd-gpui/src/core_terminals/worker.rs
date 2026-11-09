@@ -72,8 +72,9 @@ impl Mailbox {
         self.changed.store(true, Ordering::Release);
     }
 
-    /// The screen, when it changed since the last take, and the history
-    /// answers that arrived since, oldest first. The answers are drained
+    /// The screen, when it changed since the last take, its bells and
+    /// clipboard write handed over once, and the history answers that
+    /// arrived since, oldest first. The answers are drained
     /// while the screen is held: the worker shows each screen before it
     /// answers anything after it, so none was made from a newer screen
     /// than the one taken with it.
@@ -81,14 +82,14 @@ impl Mailbox {
         if !self.changed.swap(false, Ordering::AcqRel) {
             return (None, Vec::new());
         }
-        let screen = self.screen.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut screen = self.screen.lock().unwrap_or_else(PoisonError::into_inner);
         let answers = self
             .answers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .drain(..)
             .collect();
-        (Some(screen.clone()), answers)
+        (Some(screen.take()), answers)
     }
 
     /// The history answers that arrived since the last take, oldest first.
@@ -105,14 +106,15 @@ impl Mailbox {
         self.changed.load(Ordering::Acquire)
     }
 
-    /// The screen, when it changed since the last take.
+    /// The screen, when it changed since the last take. Its bells and
+    /// clipboard write are handed over once.
     #[cfg(test)]
     pub(crate) fn take(&self) -> Option<Screen> {
         self.changed.swap(false, Ordering::AcqRel).then(|| {
             self.screen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .clone()
+                .take()
         })
     }
 }

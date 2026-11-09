@@ -42,3 +42,24 @@ fn an_answer_never_comes_with_an_older_screen_than_it_was_made_from() {
     }
     worker.join().unwrap();
 }
+
+#[test]
+fn bells_and_clipboard_writes_are_taken_with_the_answers_once() {
+    let mailbox = Mailbox::default();
+    mailbox.update(|screen| {
+        screen.bells = 2;
+        screen.clipboard = Some("copied".into());
+    });
+    mailbox.answer(1, Ok(HistoryAnswer::Done));
+    let (screen, answers) = mailbox.take_with_answers();
+    let screen = screen.unwrap();
+    assert_eq!(
+        (screen.bells, screen.clipboard.as_deref()),
+        (2, Some("copied"))
+    );
+    assert_eq!(answers.len(), 1);
+    // A later screen does not ring or copy them again.
+    mailbox.update(|screen| screen.revision = 1);
+    let screen = mailbox.take_with_answers().0.unwrap();
+    assert_eq!((screen.bells, screen.clipboard), (0, None));
+}

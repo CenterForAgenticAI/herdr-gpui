@@ -54,6 +54,7 @@ pub(super) fn lists(state: &Shared, board: bool) -> (Markup, usize) {
 }
 
 pub(super) async fn home(State(state): State<Shared>, _device: Device) -> Html<String> {
+    state.hub.wake_for_phone();
     searchable(lists(&state, false).0)
 }
 
