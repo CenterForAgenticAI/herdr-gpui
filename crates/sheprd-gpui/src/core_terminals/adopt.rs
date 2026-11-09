@@ -146,7 +146,8 @@ impl SheprdWindow {
         let label = std::path::Path::new(&cwd)
             .file_name()
             .map_or_else(|| cwd.clone(), |name| name.to_string_lossy().into_owned());
-        let id = Store::update(cx, |store| store.keep_workspace(scope, &label, &cwd));
+        // Named for its folder, not by the user.
+        let id = Store::update(cx, |store| store.keep_workspace(scope, &label, &cwd, false));
         if id.is_some() {
             self.refresh_core_session(cx);
         }

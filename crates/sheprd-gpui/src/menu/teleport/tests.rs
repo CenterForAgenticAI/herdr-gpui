@@ -4,6 +4,7 @@ use crate::teleport::Repository;
 
 #[cfg(feature = "cloud")]
 mod cloud;
+mod core_tabs;
 
 #[test]
 fn repositories_prefer_their_main_checkout_workspace() {
