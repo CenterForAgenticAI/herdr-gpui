@@ -210,6 +210,33 @@ impl Page {
                 | Self::PrReview
                 | Self::PrComment
                 | Self::PrMerge
+                | Self::CoreMenu
+                | Self::CoreMove
+                | Self::RenameCore
+        )
+    }
+
+    /// Context menus and their dialogs, sized to their rows rather than
+    /// the window.
+    pub(crate) fn context_sized(self) -> bool {
+        matches!(
+            self,
+            Self::Tab
+                | Self::RenameTab
+                | Self::MoveTab
+                | Self::Group
+                | Self::Pane
+                | Self::RenamePane
+                | Self::MovePane
+                | Self::CarryPane
+                | Self::PaneProcesses
+                | Self::KillProcesses
+                | Self::Host
+                | Self::RemoveDevice
+                | Self::RemoveWsl
+                | Self::CoreMenu
+                | Self::CoreMove
+                | Self::RenameCore
         )
     }
 
