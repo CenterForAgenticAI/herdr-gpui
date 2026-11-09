@@ -60,6 +60,10 @@ pub(crate) struct Closed {
     /// Reopened agents not yet listed again, by endpoint and key: when one
     /// turns up, it is the agent reopened, not a closed twin coming back.
     reopened: Vec<(String, Key)>,
+    /// Closed agents being started again whose start may still fail, by
+    /// endpoint, key, and id: each stays listed, for another try, until an
+    /// agent of its key turns up and takes it off.
+    reopening: Vec<(String, Key, u64)>,
 }
 
 /// The pane, or herdr-core terminal, an agent row stands in.
@@ -141,6 +145,7 @@ impl Closed {
             .is_some_and(|previous| previous.boot != boot)
         {
             self.reopened.retain(|(host, _)| host != endpoint);
+            self.reopening.retain(|(host, _, _)| host != endpoint);
         }
         let previous = previous
             .filter(|previous| previous.boot == boot)
@@ -163,6 +168,16 @@ impl Closed {
             let count =
                 |agents: &[Listed]| agents.iter().filter(|shown| shown.row.key == *key).count();
             let mut back = count(current).saturating_sub(count(&previous));
+            while back > 0
+                && let Some(index) = self
+                    .reopening
+                    .iter()
+                    .position(|(host, reopening, _)| host == endpoint && reopening == key)
+            {
+                let (_, _, id) = self.reopening.remove(index);
+                self.agents.retain(|agent| agent.id != id);
+                back -= 1;
+            }
             while back > 0
                 && let Some(index) = self
                     .reopened
@@ -221,6 +236,7 @@ impl Closed {
     pub(crate) fn retain_hosts(&mut self, mut kept: impl FnMut(&str) -> bool) {
         self.seen.retain(|endpoint, _| kept(endpoint));
         self.reopened.retain(|(endpoint, _)| kept(endpoint));
+        self.reopening.retain(|(endpoint, _, _)| kept(endpoint));
         let before = self.agents.len();
         self.agents.retain(|agent| kept(&agent.host));
         if self.agents.len() != before {
@@ -246,6 +262,7 @@ impl Closed {
     }
 
     pub(crate) fn forget(&mut self, id: u64) {
+        self.reopening.retain(|(_, _, pending)| *pending != id);
         let before = self.agents.len();
         self.agents.retain(|agent| agent.id != id);
         if self.agents.len() != before {
@@ -267,6 +284,21 @@ impl Closed {
         }
         self.reopened.push(reopened);
         self.forget(id);
+    }
+
+    /// Notes that the closed agent `id` is being started again, by a start
+    /// that may yet fail: it stays listed until it turns up again, then is
+    /// the one taken off, not a closed twin.
+    pub(crate) fn reopening(&mut self, id: u64) {
+        let Some(agent) = self.get(id) else {
+            return;
+        };
+        let reopening = (agent.host.clone(), agent.row.key.clone(), id);
+        self.reopening.retain(|(_, _, pending)| *pending != id);
+        if self.reopening.len() >= MAX_CLOSED {
+            self.reopening.remove(0);
+        }
+        self.reopening.push(reopening);
     }
 
     pub(crate) fn revision(&self) -> u64 {

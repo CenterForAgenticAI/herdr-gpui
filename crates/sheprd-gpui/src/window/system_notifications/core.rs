@@ -46,6 +46,15 @@ pub(super) fn text(task: Option<&str>, agent: &str, place: Option<&str>) -> Opti
     }
 }
 
+/// What a notification names: the agent, its terminal's title, and where
+/// it works.
+#[derive(Default)]
+struct Details {
+    agent: Option<String>,
+    task: Option<String>,
+    place: Option<String>,
+}
+
 impl SheprdWindow {
     /// Posts a system notification about the agent in herdr-core terminal
     /// `terminal`, when notices go to the OS, the quiet hours allow it, and,
@@ -68,12 +77,18 @@ impl SheprdWindow {
         if cx.try_global::<Registry>().is_none() {
             return;
         }
-        let info = self.core_agent_info(terminal, cx);
-        let agent = info
-            .and_then(sheprd_core_client::agent_name)
-            .unwrap_or_else(|| fl!("core-notifications-agent"));
-        let place = self.core_agent_place(terminal, cx);
-        let task = info.and_then(|info| info.title.as_deref());
+        // Any window may hear the change first; the details are the
+        // window's that holds the agent.
+        let details = self.core_agent_details(terminal, cx).or_else(|| {
+            cx.windows()
+                .into_iter()
+                .filter_map(|window| window.downcast::<SheprdWindow>())
+                .filter(|window| *window != handle)
+                .find_map(|window| window.read(cx).ok()?.core_agent_details(terminal, cx))
+        });
+        let Details { agent, task, place } = details.unwrap_or_default();
+        let agent = agent.unwrap_or_else(|| fl!("core-notifications-agent"));
+        let task = task.as_deref();
         // The host leads the place line once there is another host to tell
         // this computer from.
         let host = (self.endpoints.len() > 1)
@@ -101,6 +116,20 @@ impl SheprdWindow {
             bus_id: None,
         });
         deliver(notification, cx);
+    }
+
+    /// What a notification about `terminal`'s agent says of it, from this
+    /// window, while it holds the agent.
+    fn core_agent_details(&self, terminal: &TerminalId, cx: &App) -> Option<Details> {
+        if !self.holds_core_agent(terminal, cx) {
+            return None;
+        }
+        let info = self.core_agent_info(terminal, cx);
+        Some(Details {
+            agent: info.and_then(sheprd_core_client::agent_name),
+            task: info.and_then(|info| info.title.clone()),
+            place: self.core_agent_place(terminal, cx),
+        })
     }
 
     /// What the core last said of `terminal`: a pane of one of the window's

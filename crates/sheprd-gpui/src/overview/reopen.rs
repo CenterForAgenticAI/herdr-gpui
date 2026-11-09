@@ -236,7 +236,9 @@ impl SheprdWindow {
             spawn,
             cx,
         );
-        self.overview.closed.reopened(id);
+        // The start is only queued and may fail, as in a folder since
+        // removed: the entry stays for another try until the agent is back.
+        self.overview.closed.reopening(id);
         cx.notify();
     }
 

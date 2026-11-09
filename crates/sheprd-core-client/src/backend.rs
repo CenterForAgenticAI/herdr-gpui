@@ -217,22 +217,42 @@ pub fn info(terminal: &Terminal) -> Result<TerminalInfo> {
         .filter(|cwd| !cwd.is_empty())
         .or(Some(terminal.cwd.as_str()).filter(|cwd| !cwd.is_empty()))
         .map(PathBuf::from);
+    let status = terminal.status.as_ref().filter(|_| !agent_left(terminal));
     Ok(TerminalInfo {
-        agent: terminal.status.as_ref().map_or(AgentStatus::Unknown, agent),
+        agent: status.map_or(AgentStatus::Unknown, agent),
         cwd,
         foreground: terminal.foreground.as_ref().and_then(process),
         id: TerminalId::new(terminal.address.clone())?,
         labels: terminal.labels.clone(),
         name: terminal.name.clone(),
-        reporter: terminal
-            .status
-            .as_ref()
+        reporter: status
             .map(|status| status.app.trim())
             .filter(|app| !app.is_empty())
             .map(str::to_owned),
         state: run_state(terminal),
         title: terminal.title.clone().filter(|title| !title.is_empty()),
     })
+}
+
+/// Whether the agent whose report `terminal` holds has quit: the core keeps
+/// a program's last status report, so once a known agent started from the
+/// terminal's shell exits, the shell is back in front with the agent's last
+/// word. A report from a program Sheprd does not know, such as a shell's own
+/// integration, stands.
+fn agent_left(terminal: &Terminal) -> bool {
+    let Some(status) = &terminal.status else {
+        return false;
+    };
+    if sheprd_client::herdr::AgentKind::identify(Some(status.app.trim()), "", &[]).is_none() {
+        return false;
+    }
+    let own_program_in_front = terminal
+        .pid
+        .zip(terminal.foreground.as_ref())
+        .is_some_and(|(pid, front)| front.pid == pid);
+    let program = terminal.argv.first().map_or("", String::as_str);
+    own_program_in_front
+        && sheprd_client::herdr::AgentKind::identify(None, program, &terminal.argv).is_none()
 }
 
 /// The foreground process, unless its pid is not one a process can have.

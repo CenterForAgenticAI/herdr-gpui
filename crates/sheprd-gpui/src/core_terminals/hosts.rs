@@ -110,6 +110,14 @@ impl CoreTerminals {
         self.backend_of(&self.tabs.get(&tab)?.host)
     }
 
+    /// Every terminal of `tab`, the panes a zoom hides included.
+    pub(crate) fn tab_terminals(&self, tab: TabId) -> Vec<&TerminalId> {
+        self.tabs
+            .get(&tab)
+            .map(|shown| shown.panes.terminals())
+            .unwrap_or_default()
+    }
+
     /// The tab and terminal `view` shows, if it is one of the tabs' panes.
     pub(crate) fn view_key(&self, view: &Entity<CoreTerminalView>) -> Option<(TabId, TerminalId)> {
         self.views

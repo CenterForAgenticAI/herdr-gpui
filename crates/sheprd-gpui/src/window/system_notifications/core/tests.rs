@@ -105,3 +105,59 @@ fn a_click_on_a_herdr_2_notification_is_routed_to_its_window() {
     });
     cx.run_until_parked();
 }
+
+#[test]
+fn a_banner_names_the_agent_another_window_holds() {
+    use sheprd_backend::{AgentStatus, Process, RunState, TerminalInfo};
+    let mut cx = gpui::TestAppContext::single();
+    let terminal = TerminalId::new("t5").unwrap();
+    let info = TerminalInfo {
+        agent: AgentStatus::Blocked,
+        cwd: None,
+        foreground: Some(Process {
+            argv: vec!["claude".into()],
+            name: "claude".into(),
+            pid: 9,
+        }),
+        id: terminal.clone(),
+        labels: Default::default(),
+        name: None,
+        reporter: None,
+        state: RunState::Running,
+        title: Some("Fix the login".into()),
+    };
+    let holder = cx.add_window(crate::sidebar::layout_tests::fixture_window);
+    holder
+        .update(&mut cx, |view, _, _| {
+            view.core_terminals.show_for_test(
+                crate::browser::TabId::test(2),
+                crate::core_terminals::panes::Panes::single(terminal.clone()),
+                false,
+                vec![info],
+            );
+        })
+        .unwrap();
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    cx.update(|_, cx| super::super::install_registry(cx));
+    cx.update(|window, cx| {
+        let handle = window.window_handle().downcast::<SheprdWindow>().unwrap();
+        view.update(cx, |view, cx| {
+            view.config.notifications.enabled = false;
+            view.config.notifications.system = true;
+            view.post_core_notification(
+                handle,
+                &terminal,
+                SemanticNotificationKind::NeedsAttention,
+                cx,
+            );
+        });
+    });
+    let shown = cx.shown_system_notifications();
+    let [shown] = shown.as_slice() else {
+        panic!("expected one notification: {shown:?}");
+    };
+    assert_eq!(shown.title, "\u{2068}claude\u{2069} needs you");
+    assert!(shown.body.starts_with("Fix the login"), "{}", shown.body);
+    // A click goes to the window holding it.
+    cx.update(|_, cx| assert!(super::super::open("herdr-core:t5", cx)));
+}

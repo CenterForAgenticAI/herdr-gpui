@@ -116,10 +116,8 @@ impl SheprdWindow {
                 agent: sheprd_core_client::agent_name(info)?,
             })
         };
-        agent(&terminal).or_else(|| {
-            let panes = terminals.visible_chat_panes(tab);
-            panes.into_iter().find_map(agent)
-        })
+        // Every pane of the tab, a zoomed-away one too.
+        agent(&terminal).or_else(|| terminals.tab_terminals(tab).into_iter().find_map(agent))
     }
 
     /// Types each Herdr 2 agent's notes into its terminal, off the UI
@@ -147,15 +145,19 @@ impl SheprdWindow {
                 self.show_flash(Flash::warning(fl!("window-annotate-core-unreachable")), cx);
                 continue;
             };
-            self.deliver_core_notes(backend, agent, text, cx);
+            self.deliver_core_notes(backend, agent, text, clipboard.clone(), cx);
         }
     }
 
+    /// Types `text` into `agent`'s terminal once its turn is over. What it
+    /// does not take joins the Send's other copies, `copies`, so a later
+    /// failure does not overwrite an earlier one on the clipboard.
     fn deliver_core_notes(
         &mut self,
         backend: sheprd_core_client::CoreBackend,
         agent: CoreAgent,
         text: String,
+        copies: crate::agent_notes::Copies,
         cx: &mut Context<Self>,
     ) {
         self.show_flash(Flash::success(fl!("agent-notes-will-send")), cx);
@@ -176,17 +178,21 @@ impl SheprdWindow {
         });
         cx.spawn(async move |this, cx| {
             let (sent, text) = work.await;
-            this.update(cx, |this, cx| this.core_notes_delivered(sent, text, cx))
-                .ok();
+            this.update(cx, |this, cx| {
+                this.core_notes_delivered(sent, text, &copies, cx);
+            })
+            .ok();
         })
         .detach();
     }
 
-    /// Says where the notes went; what the agent did not take is copied.
+    /// Says where the notes went; what the agent did not take is copied,
+    /// with the rest of its Send's copies.
     pub(super) fn core_notes_delivered(
         &mut self,
         sent: sheprd_core_client::Result<Replied>,
         text: String,
+        copies: &crate::agent_notes::Copies,
         cx: &mut Context<Self>,
     ) {
         let delivered = matches!(sent, Ok(Replied::Sent));
@@ -204,7 +210,10 @@ impl SheprdWindow {
             }
         };
         if !delivered {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            copies.extend([text]);
+            if let Some(text) = copies.text() {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
         }
         self.show_flash(flash, cx);
     }

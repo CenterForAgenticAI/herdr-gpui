@@ -110,3 +110,23 @@ fn a_herdr_2_agent_starts_again_as_its_program() {
         "codex resume --last"
     );
 }
+
+#[test]
+fn a_herdr_2_agent_being_reopened_stays_listed_until_it_is_back() {
+    let mut closed = Closed::default();
+    let first = core_row("t1", "claude");
+    let second = core_row("t2", "claude");
+    closed.observe_core(vec![listed(&first), listed(&second)], at(10), |_| false);
+    closed.observe_core(Vec::new(), at(20), |_| false);
+    // The older of the two is reopened.
+    let id = closed.agents().last().unwrap().id;
+    closed.reopening(id);
+    // Its start failed: nothing turns up, and it can be tried again.
+    closed.observe_core(Vec::new(), at(30), |_| false);
+    assert!(closed.get(id).is_some());
+    // It is back: it, not its twin, leaves the list.
+    let again = core_row("t3", "claude");
+    closed.observe_core(vec![listed(&again)], at(40), |_| false);
+    assert!(closed.get(id).is_none());
+    assert_eq!(closed.len(), 1);
+}

@@ -70,10 +70,26 @@ fn notes_a_herdr_2_agent_did_not_take_are_copied(cx: &mut TestAppContext) {
         cx.update(|_, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string("before".into())));
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                view.core_notes_delivered(sent, "the notes".into(), cx);
+                let copies = crate::agent_notes::Copies::default();
+                view.core_notes_delivered(sent, "the notes".into(), &copies, cx);
             })
         });
         let expected = if copies { "the notes" } else { "before" };
         assert_eq!(copied(cx).as_deref(), Some(expected));
     }
+}
+
+#[gpui::test]
+fn a_later_refusal_keeps_the_sends_earlier_copies(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, shown(None, false));
+    let gone = || Ok(Replied::Gone);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            let copies = crate::agent_notes::Copies::default();
+            view.core_notes_delivered(gone(), "first agent".into(), &copies, cx);
+            view.core_notes_delivered(gone(), "second agent".into(), &copies, cx);
+        })
+    });
+    let text = copied(cx).unwrap();
+    assert!(text.contains("first agent") && text.contains("second agent"));
 }
