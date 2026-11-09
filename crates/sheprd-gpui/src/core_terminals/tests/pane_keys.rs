@@ -67,3 +67,20 @@ fn equalize_evens_out_the_splits(cx: &mut TestAppContext) {
         assert!((width - 1. / 3.).abs() < 0.01, "{width}");
     }
 }
+
+#[test]
+fn a_drag_held_through_equalize_never_moves_another_split() {
+    use crate::core_terminals::{panes::Axis, split::SplitDrag};
+    let tab = TabId::test(1);
+    // t1 | (t2 | (t3 | t4)): the split at [second] divides t2 from t3 and t4.
+    let mut panes = crate::core_terminals::panes::Panes::single(id("t1"));
+    for pair in [("t1", "t2"), ("t2", "t3"), ("t3", "t4")] {
+        panes.split(&id(pair.0), Axis::Row, id(pair.1)).unwrap();
+    }
+    let held = SplitDrag::at(tab, panes.root(), &[true]).unwrap();
+    assert!(panes.equalize());
+    // Balanced as (t1 | t2) | (t3 | t4), the same place now divides t3 from
+    // t4: the drag held from before is not its drag.
+    let now = SplitDrag::at(tab, panes.root(), &[true]).unwrap();
+    assert_ne!(held, now);
+}
