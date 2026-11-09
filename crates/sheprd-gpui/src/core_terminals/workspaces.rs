@@ -271,6 +271,30 @@ impl SheprdWindow {
         cx.notify();
     }
 
+    /// Closes the kept workspace `id` of `scope` when it has no tab left,
+    /// as when the first terminal it was made for could not start.
+    pub(super) fn forget_empty_kept_workspace(
+        &mut self,
+        scope: &Scope,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let empty = cx.try_global::<Store>().is_some_and(|store| {
+            store.kept_workspace(scope, id).is_some()
+                && store.in_workspace(scope, id).next().is_none()
+        });
+        if !empty {
+            return;
+        }
+        if *scope == scope_of(self) {
+            self.close_kept_workspace(id, window, cx);
+            return;
+        }
+        Store::update(cx, |store| store.forget_kept(scope, id));
+        self.refresh_core_session(cx);
+    }
+
     /// Moves a kept workspace beside another of the selected host's.
     pub(crate) fn move_kept_workspace(
         &mut self,

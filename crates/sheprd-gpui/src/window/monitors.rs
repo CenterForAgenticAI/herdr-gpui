@@ -108,8 +108,8 @@ impl SheprdWindow {
     }
 
     /// The machines background monitors watch: this one always, a remote
-    /// host while it is connected, so a dropped host is not dialled every
-    /// few seconds.
+    /// host while its Herdr 1 or its herdr-core is connected, so a dropped
+    /// host is not dialled every few seconds.
     pub(super) fn watched_hosts(&self) -> Vec<crate::usage::Host> {
         self.connected_hosts(crate::usage::Host::of)
     }
@@ -130,8 +130,13 @@ impl SheprdWindow {
                 } else {
                     &endpoint.live
                 };
+                // A host whose core answers while its Herdr 1 does not
+                // keeps workspaces too, with ports and load of its own.
+                let core = crate::core_terminals::Host::of(&crate::browser::scope(endpoint));
                 endpoint.enabled
-                    && (live.status.is_connected() || !endpoint.connection.target.is_remote())
+                    && (live.status.is_connected()
+                        || !endpoint.connection.target.is_remote()
+                        || self.core_terminals.answers(&core))
             })
             .filter_map(|(_, endpoint)| host(&endpoint.connection.target))
             .collect()
