@@ -98,9 +98,9 @@ impl SheprdWindow {
         cx.notify();
     }
 
-    /// Opens the pane menu of a Herdr 2 agent the sidebar lists. An agent
-    /// in a workspace not shown since the app started has no tab state yet,
-    /// so its workspace comes forward first, as a click would bring it.
+    /// Opens the pane menu of a Herdr 2 agent the sidebar lists, its
+    /// workspace and host first brought forward as a click brings them, so
+    /// the menu acts where the agent is and its tab state is restored.
     pub(crate) fn open_core_agent_menu(
         &mut self,
         endpoint: &str,
@@ -122,10 +122,10 @@ impl SheprdWindow {
         else {
             return;
         };
+        // The menu's actions, Move To's destinations among them, are those
+        // of the workspace and host in front: bring the agent's forward.
+        self.show_core_agent(endpoint, workspace, tab, terminal, window, cx);
         let tab_id = TabId::from(number);
-        if !self.core_terminals.tabs.contains_key(&tab_id) {
-            self.show_core_agent(endpoint, workspace, tab, terminal, window, cx);
-        }
         self.open_core_menu(
             super::menu::Target::Pane {
                 tab: tab_id,

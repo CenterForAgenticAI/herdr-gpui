@@ -82,7 +82,7 @@ fn core<'a>(
                 focused: false,
             })
             .collect(),
-        recency,
+        recency: Some(recency),
     }
 }
 

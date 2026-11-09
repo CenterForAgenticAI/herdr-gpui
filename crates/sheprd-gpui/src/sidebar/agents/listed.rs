@@ -231,7 +231,8 @@ pub(crate) struct CoreAgents<'a> {
     /// Whether the core answers, which a connected Herdr 1 host compares to.
     pub(crate) answers: bool,
     pub(crate) agents: Vec<CoreAgent<'a>>,
-    pub(crate) recency: &'a crate::state::StatusRecency,
+    /// None before the core's agents were first observed.
+    pub(crate) recency: Option<&'a crate::state::StatusRecency>,
 }
 
 /// Every listed host's agents in the order the panel paints them, as
@@ -297,7 +298,11 @@ pub(crate) fn listed_agents<'a>(
                         live.agent_recency.of(&agent.pane_id),
                     )
                 }),
-                Listed::Core(agent) => (core.answers, core.recency.of(&agent.agent.pane)),
+                Listed::Core(agent) => (
+                    core.answers,
+                    core.recency
+                        .map_or(0, |recency| recency.of(&agent.agent.pane)),
+                ),
             };
             (
                 !connected,

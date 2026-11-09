@@ -66,10 +66,16 @@ impl SheprdWindow {
         }
         let unchanged = self.core_terminals.sessions == built;
         if !unchanged {
-            let agents = built.iter().flat_map(|(_, session)| &session.agents);
-            self.core_terminals
-                .recency
-                .observe(agents.map(|agent| (agent.pane.as_str(), agent.status)));
+            let recency = &mut self.core_terminals.recency;
+            recency.retain(|scope, _| built.iter().any(|(kept, _)| kept == scope));
+            for (scope, session) in &built {
+                recency.entry(scope.clone()).or_default().observe(
+                    session
+                        .agents
+                        .iter()
+                        .map(|agent| (agent.pane.as_str(), agent.status)),
+                );
+            }
             self.core_terminals.sessions = built;
         }
         !unchanged || checkouts_changed
@@ -247,10 +253,13 @@ impl SheprdWindow {
         let scope = scope(self.endpoints.get(index)?);
         let session = self.core_terminals.session_of(&scope)?;
         let host = super::Host::of(&scope);
+        // The pane in use only marks this host's agent: IDs repeat across
+        // cores.
         let shown = self
             .core_terminals
             .shown
             .as_ref()
+            .filter(|(tab, _)| self.core_terminals.host_of(*tab) == host)
             .map(|(_, terminal)| terminal.as_str());
         let snapshot = self.live_at(index).snapshot.as_deref();
         let agents = session
@@ -270,7 +279,7 @@ impl SheprdWindow {
             index,
             answers: self.core_terminals.backend_of(&host).is_some(),
             agents,
-            recency: &self.core_terminals.recency,
+            recency: self.core_terminals.recency.get(&scope),
         })
     }
 
