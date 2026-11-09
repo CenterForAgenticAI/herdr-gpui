@@ -4,8 +4,8 @@
 //!
 //! This guards against mistakes, not against a hostile agent: an agent with
 //! a shell could run commands directly. It refuses where an agent would
-//! most easily approve its own script: off a terminal, from a pane Herdr
-//! says runs an agent, and `--hash` from inside any Herdr pane.
+//! most easily approve its own script: off a terminal, from a Herdr pane or
+//! herdr-core terminal that runs an agent, and `--hash` from inside either.
 
 use crate::{
     Result, fingerprint::Fingerprint, herdr::Herdr, paths::Paths, runner::now, scan, store::Store,
@@ -34,6 +34,28 @@ pub enum Error {
     HashInPane,
 }
 
+/// The pane a command runs in, which an agent may run too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pane<'a> {
+    /// A Herdr 1 pane, by its `HERDR_PANE_ID`.
+    Herdr(&'a str),
+    /// A herdr-core (Herdr 2) terminal, by its `HC_TERMINAL_ID`.
+    Core(&'a str),
+}
+
+impl<'a> Pane<'a> {
+    /// The pane `var` names: a Herdr 1 pane, else a herdr-core terminal.
+    /// Herdr 2 terminals Sheprd starts carry an empty `HERDR_PANE_ID`, and
+    /// one started from a Herdr pane inherits that pane's, so the terminal
+    /// wins whenever both are set.
+    pub fn of(herdr: Option<&'a str>, core: Option<&'a str>) -> Option<Self> {
+        let set = |id: Option<&'a str>| id.filter(|id| !id.is_empty());
+        set(core)
+            .map(Self::Core)
+            .or_else(|| set(herdr).map(Self::Herdr))
+    }
+}
+
 /// How the approval is given.
 pub enum Mode<'a> {
     /// Show the plan and ask on this terminal.
@@ -47,14 +69,16 @@ pub struct Approved {
     pub hash: String,
 }
 
-/// `pane` is the Herdr pane the command runs in (`HERDR_PANE_ID`), if any.
+/// `pane` is the pane the command runs in, if any; `core_agent` names the
+/// agent a herdr-core terminal runs, asked only for one.
 pub fn approve(
     paths: &Paths,
     store: &Store,
     herdr: &Herdr,
     file: &Path,
     mode: Mode<'_>,
-    pane: Option<&str>,
+    pane: Option<Pane<'_>>,
+    core_agent: impl FnOnce(&str) -> Option<String>,
 ) -> Result<Approved> {
     let found = scan::locate(paths, store, file)?;
     let source = Source::read(&found.path)?;
@@ -78,9 +102,12 @@ pub fn approve(
             if !std::io::stdin().is_terminal() {
                 return Err(Error::NotTerminal.into());
             }
-            if let Some(pane) = pane
-                && let Some(agent) = herdr.pane_agent(pane).ok().and_then(|pane| pane.agent)
-            {
+            let agent = match pane {
+                Some(Pane::Herdr(pane)) => herdr.pane_agent(pane).ok().and_then(|pane| pane.agent),
+                Some(Pane::Core(terminal)) => core_agent(terminal),
+                None => None,
+            };
+            if let Some(agent) = agent {
                 return Err(Error::AgentPane { agent }.into());
             }
             let mut out = std::io::stdout().lock();
@@ -118,3 +145,6 @@ pub fn approve(
         hash: fingerprint.hash,
     })
 }
+
+#[cfg(test)]
+mod tests;

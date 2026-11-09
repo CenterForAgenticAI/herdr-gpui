@@ -272,7 +272,7 @@ fn a_script_is_approved_by_hash_then_can_be_run_by_hand() {
     assert_eq!(output(&repo_add, paths).0, ExitCode::SUCCESS);
     let store = fixture.store();
     let source = sheprd_automation::Source::read(&script).unwrap();
-    let approve = |hash: &str, pane: Option<&str>| {
+    let approve = |hash: &str, pane: Option<approve::Pane<'_>>| {
         approve::approve(
             paths,
             &store,
@@ -280,16 +280,20 @@ fn a_script_is_approved_by_hash_then_can_be_run_by_hand() {
             &script,
             Mode::Hash(hash),
             pane,
+            |_| None,
         )
     };
     assert!(matches!(
         approve(&"0".repeat(64), None),
         Err(crate::Error::Approve(approve::Error::Changed { .. }))
     ));
-    assert!(matches!(
-        approve(&source.hash, Some("w1p1")),
-        Err(crate::Error::Approve(approve::Error::HashInPane))
-    ));
+    // Inside a Herdr pane or a Herdr 2 terminal alike.
+    for pane in [approve::Pane::Herdr("w1p1"), approve::Pane::Core("t3")] {
+        assert!(matches!(
+            approve(&source.hash, Some(pane)),
+            Err(crate::Error::Approve(approve::Error::HashInPane))
+        ));
+    }
     assert_eq!(approve(&source.hash, None).unwrap().hash, source.hash);
     let (code, text) = output(&Command::Status { json: true }, paths);
     assert_eq!(code, ExitCode::SUCCESS);

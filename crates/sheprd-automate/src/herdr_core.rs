@@ -169,6 +169,28 @@ impl HerdrCore {
     }
 }
 
+/// The agent the herdr-core terminal `terminal` runs, as Sheprd names it,
+/// asked of the core it runs in (`HC_TERMINAL_SOCKET`, else the one `hc`
+/// reaches). None for a shell, or when the core cannot say.
+pub fn terminal_agent(terminal: &str) -> Option<String> {
+    let endpoint = Endpoint::resolve(|name| {
+        let terminal_socket =
+            std::env::var_os("HC_TERMINAL_SOCKET").filter(|socket| !socket.is_empty());
+        match name {
+            "HC_SOCKET" => terminal_socket.or_else(|| std::env::var_os(name)),
+            _ => std::env::var_os(name),
+        }
+    })
+    .ok()?;
+    let listed = Core::connect(&endpoint).ok()?.list(false).ok()?;
+    let found = listed
+        .terminals
+        .iter()
+        .find(|known| known.address == terminal)?;
+    let info = sheprd_core_client::terminal_info(found).ok()?;
+    sheprd_core_client::agent_name(&info)
+}
+
 /// How a step's harness starts: a known agent's own program, else the
 /// harness as a command.
 fn argv(harness: &str) -> Vec<String> {
