@@ -163,6 +163,47 @@ fn moving_on_from_a_named_pane_drops_its_name_from_the_strip(cx: &mut TestAppCon
     assert_eq!(title(cx), opened);
 }
 
+#[gpui::test]
+fn closing_a_pane_while_disconnected_ends_it_once_the_core_answers(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.close_core_pane(tab, id("t2"), window, cx)
+        })
+    });
+    let unended = cx.update(|_, cx| view.read(cx).core_terminals.unended.lock().unwrap().clone());
+    assert_eq!(unended, [(crate::core_terminals::Host::Local, id("t2"))]);
+}
+
+#[gpui::test]
+fn a_menu_left_on_a_pane_that_went_closes_nothing(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            // t2's program ended while its menu was open.
+            view.remove_core_pane(tab, &id("t2"), window, cx);
+            view.close_core_pane(tab, id("t2"), window, cx);
+        })
+    });
+    let open = cx.update(|_, cx| cx.global::<Store>().get(tab).is_some());
+    assert!(open, "t1, the pane left, still runs in its tab");
+}
+
+#[gpui::test]
+fn closing_a_menu_gives_the_keyboard_back_to_the_pane(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    run(&view, cx, Command::RenameTab);
+    let focused = cx.update(|window, cx| {
+        view.update(cx, |view, cx| view.dismiss_menu(window, cx));
+        let view = view.read(cx);
+        view.core_terminals.views[&(tab, id("t1"))]
+            .read(cx)
+            .focus_handle()
+            .is_focused(window)
+    });
+    assert!(focused);
+}
+
 #[test]
 fn a_name_is_one_bounded_line() {
     assert_eq!(clean_name(" a\u{202e}b\n"), Some("ab".into()));

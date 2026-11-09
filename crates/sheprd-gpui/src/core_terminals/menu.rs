@@ -208,6 +208,14 @@ impl SheprdWindow {
         }
     }
 
+    /// Where the keyboard goes back to as a herdr-core menu closes: the
+    /// pane in use of its tab, which held it before, rather than the
+    /// window, whose keys a Herdr pane would take.
+    pub(crate) fn core_menu_return_focus(&self, cx: &App) -> Option<FocusHandle> {
+        let tab = self.menu.core.as_ref()?.target.tab();
+        Some(self.core_pane_view(tab)?.read(cx).focus_handle().clone())
+    }
+
     /// Closes a pane: its terminal ends, unless the tab only mirrors it. The
     /// last pane closes as its tab does.
     pub(super) fn close_core_pane(
@@ -217,7 +225,11 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(shown) = self.core_terminals.tabs.get(&tab) else {
+        // A menu opened on a pane that has since gone closes nothing: the
+        // tab's last pane left is another one.
+        let Some(shown) =
+            (self.core_terminals.tabs.get(&tab)).filter(|shown| shown.panes.contains(&terminal))
+        else {
             return;
         };
         if shown.panes.count() <= 1 {

@@ -60,6 +60,7 @@ impl SheprdWindow {
         };
         let mut missing: Vec<(TabId, TerminalId, Role, Host)> = Vec::new();
         let mut overflow = Vec::new();
+        let mut emptied = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
             let Some(location) = &tab.location else {
                 continue;
@@ -78,7 +79,11 @@ impl SheprdWindow {
             // Each window holds its own copy: one another window saved over
             // is read again before this one can save.
             if shown.saved.as_ref() != Some(location) {
-                overflow.extend(shown.refresh(location));
+                let left = shown.refresh(location);
+                overflow.extend(left.overflow);
+                if left.emptied {
+                    emptied.push(tab.id);
+                }
             }
             if shown.workspace.is_none() {
                 shown.workspace = Some((scope.clone(), workspace.clone()));
@@ -107,6 +112,12 @@ impl SheprdWindow {
                         (tab.id, terminal.clone(), role, shown.host.clone())
                     }),
             );
+        }
+        // Each window closed the other's last pane: the tab goes, as one
+        // whose last pane closed does.
+        for tab in emptied {
+            self.core_terminals.tabs.remove(&tab);
+            Store::update(cx, |store| store.close(tab));
         }
         // Panes another window opened in a tab this one filled meanwhile
         // run on in a tab of their own rather than in none.
@@ -385,10 +396,14 @@ impl SheprdWindow {
     /// Ends a terminal of `host`'s core on a worker thread, so herdr-core's
     /// answer is never awaited on the UI thread.
     pub(super) fn end_core_terminal(&self, host: &Host, terminal: TerminalId) {
+        let unended = std::sync::Arc::clone(&self.core_terminals.unended);
+        // Not connected: it ends once its core answers again.
         let Some(backend) = self.core_terminals.backend_of(host).cloned() else {
+            if let Ok(mut unended) = unended.lock() {
+                unended.push((host.clone(), terminal));
+            }
             return;
         };
-        let unended = std::sync::Arc::clone(&self.core_terminals.unended);
         let host = host.clone();
         let ended = std::thread::Builder::new()
             .name("herdr-core-kill".into())
@@ -413,12 +428,24 @@ impl SheprdWindow {
     /// Ends the terminals of closed tabs, joining the core to do it when
     /// the window is not connected yet.
     pub(super) fn end_closed_core_terminals(&mut self, cx: &mut Context<Self>) {
+        // Panes closed, or kills sent, while their core did not answer. They
+        // wait here rather than with closed tabs, whose queue passes over a
+        // terminal a saved layout still holds, as a pane just closed is
+        // until its tab saves.
         let unended = match self.core_terminals.unended.lock() {
             Ok(mut unended) => std::mem::take(&mut *unended),
             Err(_) => Vec::new(),
         };
-        if !unended.is_empty() {
-            Store::update(cx, |store| store.end_terminals(unended));
+        for (host, terminal) in unended {
+            if self.core_terminals.backend_of(&host).is_none()
+                && let Some(hub) = self.core_hub(&host)
+            {
+                hub.connect(Start::Join);
+            }
+            // Ends it now, or puts it back to wait for the core.
+            if self.core_terminals.hub_of(&host).is_some() {
+                self.end_core_terminal(&host, terminal);
+            }
         }
         if !cx
             .try_global::<Store>()
