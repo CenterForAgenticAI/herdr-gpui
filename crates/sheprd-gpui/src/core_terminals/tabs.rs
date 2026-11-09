@@ -125,18 +125,41 @@ impl SheprdWindow {
             .iter()
             .map(|(key, view)| (key.clone(), view.clone()))
             .collect();
-        let mut ended = Vec::new();
-        for ((tab, terminal), view) in views {
-            let remote = self.core_terminals.host_of(tab) != Host::Local;
+        let in_sight: std::collections::HashSet<TabId> = self
+            .browser_key()
+            .zip(cx.try_global::<Store>())
+            .map(|((scope, workspace), store)| {
+                store
+                    .in_workspace(&scope, &workspace)
+                    .map(|tab| tab.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Links are read against each pane's folder, and a path is no link
+        // in another host's pane: both are known before the screens change.
+        for ((tab, terminal), view) in &views {
+            let remote = self.core_terminals.host_of(*tab) != Host::Local;
             let cwd = self
                 .core_terminals
-                .info(tab, &terminal)
+                .info(*tab, terminal)
                 .and_then(|info| info.cwd.as_deref());
             view.update(cx, |view, cx| {
                 view.set_remote(remote, cx);
                 view.set_cwd(cwd, cx);
-                view.poll(cx);
             });
+        }
+        let polled = views
+            .iter()
+            .map(|((tab, _), view)| {
+                let host = in_sight
+                    .contains(tab)
+                    .then(|| self.core_terminals.host_of(*tab));
+                (view.clone(), host)
+            })
+            .collect::<Vec<_>>();
+        self.poll_core_views(polled, window, cx);
+        let mut ended = Vec::new();
+        for ((tab, terminal), view) in views {
             let split = self
                 .core_terminals
                 .tabs

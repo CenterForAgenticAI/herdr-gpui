@@ -400,8 +400,11 @@ fn an_address_the_terminal_wrapped_is_read_across_its_rows() {
     assert_eq!(link.rows().collect::<Vec<_>>(), [(0, 4..16), (1, 0..9)]);
     // The same from its first row.
     assert_eq!(frame_link_at(&shown, 6, 0, &[true, false]), Some(link));
-    // A line that merely filled its row is not read on into the next.
-    assert_eq!(frame_link_at(&shown, 6, 0, &[false, false]), None);
+    // A line that merely filled its row is not read on into the next: the
+    // row is the whole address the program printed.
+    let ended = frame_link_at(&shown, 6, 0, &[false, false]).unwrap();
+    assert_eq!(ended.rows().collect::<Vec<_>>(), [(0, 4..16)]);
+    // Before the terminal says which rows wrapped, nothing is guessed.
     assert_eq!(frame_link_at(&shown, 6, 0, &[]), None);
 }
 
@@ -440,4 +443,19 @@ fn a_blank_the_terminal_wrapped_still_ends_the_address() {
     let link = frame_link_at(&shown, 4, 0, &[true, false]).unwrap();
     assert_eq!(link.target, RowTarget::Web("https://example.com/".into()));
     assert_eq!(link.rows().collect::<Vec<_>>(), [(0, 0..20)]);
+}
+
+#[test]
+fn an_address_that_fills_its_row_ends_at_a_newline() {
+    // The program ended the line at the edge; the next line is its own.
+    let shown = frame(20, &["https://example.com/", "next prompt"]);
+    let link = frame_link_at(&shown, 4, 0, &[false, false]).unwrap();
+    assert_eq!(link.target, RowTarget::Web("https://example.com/".into()));
+    assert_eq!(link.rows().collect::<Vec<_>>(), [(0, 0..20)]);
+    // Wrapped, it goes on.
+    let wrapped = frame_link_at(&shown, 4, 0, &[true, false]).unwrap();
+    assert_eq!(
+        wrapped.target,
+        RowTarget::Web("https://example.com/next".into())
+    );
 }

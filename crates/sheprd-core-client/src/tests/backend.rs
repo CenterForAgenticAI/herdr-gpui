@@ -183,9 +183,11 @@ fn attached(backend: &CoreBackend, mock: &mut MockCore, role: Role) -> crate::Co
 fn an_attached_terminal_paints_cells_and_ends() {
     let (backend, mut mock) = backend();
     let mut terminal = attached(&backend, &mut mock, Role::Active);
-    mock.send(5, Kind::Data, b"\x1b]2;work\x07hi");
+    mock.send(5, Kind::Data, b"\x1b]2;work\x07\x1b]52;c;aGk=\x07\x07hi");
     let updates = terminal.next(WAIT).unwrap();
     assert!(updates.contains(&SurfaceUpdate::Title("work".into())));
+    assert!(updates.contains(&SurfaceUpdate::Clipboard("hi".into())));
+    assert!(updates.contains(&SurfaceUpdate::Bell));
     let frame = updates.iter().find_map(|update| match update {
         SurfaceUpdate::Frame(frame) => Some(frame),
         _ => None,

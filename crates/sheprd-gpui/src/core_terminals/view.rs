@@ -11,6 +11,7 @@ mod pointer;
 pub(crate) use links::LinkClick;
 
 use super::{
+    effects::Effects,
     screen::Screen,
     selection::{Cell, Selection},
     worker::{Command, Link},
@@ -82,6 +83,8 @@ pub(crate) struct CoreTerminalView {
     bounds: Option<Bounds<Pixels>>,
     /// The terminal's working directory, as herdr-core last reported it.
     cwd: Option<String>,
+    /// Bells and clipboard writes the window has not taken yet.
+    effects: Effects,
     focus: FocusHandle,
     /// Releases for keys pressed while the program asked for them.
     held_keys: HeldKeys,
@@ -134,6 +137,7 @@ impl CoreTerminalView {
         Self {
             bounds: None,
             cwd: None,
+            effects: Effects::default(),
             focus: cx.focus_handle(),
             held_keys: HeldKeys::default(),
             hovered: None,
@@ -237,13 +241,26 @@ impl CoreTerminalView {
 
     /// Takes what the worker produced; true when there was something.
     pub(crate) fn poll(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(screen) = self.link.mailbox.take() else {
+        let Some(mut screen) = self.link.mailbox.take() else {
             return false;
         };
+        // A mirror only watches; the tab driving the terminal rings and
+        // copies.
+        if !self.observe {
+            self.effects.merge(Effects {
+                bells: screen.bells,
+                clipboard: screen.clipboard.take(),
+            });
+        }
         self.screen = screen;
         self.rehover_link(cx);
         cx.notify();
         true
+    }
+
+    /// Bells and the clipboard write found since the last take.
+    pub(crate) fn take_effects(&mut self) -> Effects {
+        std::mem::take(&mut self.effects)
     }
 
     pub(crate) fn set_look(&mut self, look: Look, cx: &mut Context<Self>) {

@@ -389,14 +389,42 @@ fn wrapped_frame_link(
     // text under the point that a neighbouring row may continue is read with
     // the rows it may span, as one line.
     let right = columns.end;
+    // No flags yet, before the terminal first says, is the same as none.
+    let wraps = wraps.filter(|wraps| !wraps.is_empty());
     let area = wrap::Area::new(frame, columns, rows);
     let lines = area.around(row, source);
-    let first = *lines.start();
+    // Where the terminal says which rows it wrapped, a line is exactly the
+    // rows it wrapped across: a row that ends at the edge with a newline
+    // ends its line, and one the terminal wrapped goes on.
+    let wrapped = |at: u16| wraps.and_then(|wraps| wraps.get(usize::from(at)).copied());
+    let lines = match wraps {
+        Some(_) => {
+            let mut first = row;
+            while first > *lines.start() && wrapped(first - 1) == Some(true) {
+                first -= 1;
+            }
+            let mut last = row;
+            while last < *lines.end() && wrapped(last) == Some(true) {
+                last += 1;
+            }
+            first..=last
+        }
+        None => lines,
+    };
+    let (first, last) = (*lines.start(), *lines.end());
     let run = area.read(lines, wraps)?;
     let found = Plain::read(&run.text, run.start_of(row, source)?)?;
     // Text past either end of what was read may go on with the link, off
     // screen or beyond the rows read: a destination is never guessed.
-    if found.open() || (found.range().start == 0 && area.continued_above(first)) {
+    let goes_on = match wraps {
+        Some(_) => wrapped(last) == Some(true),
+        None => found.open(),
+    };
+    let came_from_above = match wraps {
+        Some(_) => first.checked_sub(1).and_then(wrapped) == Some(true),
+        None => area.continued_above(first),
+    };
+    if (found.open() && goes_on) || (found.range().start == 0 && came_from_above) {
         return None;
     }
     let segments = run.segments(found.range());
