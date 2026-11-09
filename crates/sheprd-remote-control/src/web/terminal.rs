@@ -354,6 +354,32 @@ pub(super) async fn action(
             })
             .ok_or(ApiError::NotFound)?
     };
+    // Sheprd keeps a Herdr 2 tab's layout: it makes the change.
+    let op = match request.action {
+        Action::SplitRight => Some(crate::control::layout::Op::SplitRight),
+        Action::SplitDown => Some(crate::control::layout::Op::SplitDown),
+        Action::Zoom => Some(crate::control::layout::Op::Zoom),
+        Action::ClosePane | Action::CloseTab | Action::NewTab => None,
+    };
+    if let Some(op) = op
+        && let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)?
+    {
+        let created = crate::native::changes::change_layout(&state, saved, terminal, op).await?;
+        // A split shows its new shell next, as Herdr 1's does.
+        let next = match created {
+            Some(address) => state.hub.core_pane_listed(&address).await,
+            None => None,
+        }
+        .unwrap_or(pane);
+        let location = format!("/term/{}", render::urlencode(&next));
+        return Ok(Json(json!({ "location": location, "pane": next })));
+    }
+    // A Herdr 2 tab Sheprd keeps is named before its terminals end (they
+    // leave the listing as they do), and Sheprd drops it after, or its last
+    // pane would stay there, ended. Without Sheprd its terminals still end.
+    let saved_tab = (request.action == Action::CloseTab)
+        .then(|| state.hub.core_saved_pane(&tab, &pane).ok().flatten())
+        .flatten();
     let core_tab = if request.action == Action::NewTab {
         state.hub.new_core_tab(&workspace).await?
     } else {
@@ -366,6 +392,13 @@ pub(super) async fn action(
             state.hub.call(method, params).await?
         }
     };
+    if let Some((saved, terminal)) = saved_tab {
+        let op = crate::control::layout::Op::Close;
+        if let Err(error) = crate::native::changes::change_layout(&state, saved, terminal, op).await
+        {
+            tracing::debug!(%error, "Sheprd did not drop a Herdr 2 tab a phone closed");
+        }
+    }
     let created = result["pane"]["pane_id"]
         .as_str()
         .or_else(|| result["root_pane"]["pane_id"].as_str())

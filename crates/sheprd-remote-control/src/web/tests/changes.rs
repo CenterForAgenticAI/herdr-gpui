@@ -43,7 +43,7 @@ fn desktop(state: &Shared, respond: impl FnOnce(&Ask) -> Answer + Send + 'static
     let state = state.clone();
     std::thread::spawn(move || {
         let (stop, _) = tokio::sync::watch::channel(false);
-        let Response::ChangeAsks { asks } =
+        let Response::ChangeAsks { asks, .. } =
             crate::server::answer_for_tests(&state, &stop, Request::ChangeAsks)
         else {
             panic!("the daemon did not hand over the question");
@@ -132,7 +132,7 @@ async fn a_workspace_this_daemon_does_not_list_never_reaches_sheprd() {
     open(&state);
     let (status, ..) = send(&state, authed(&token, "/api/v2/workspaces/other/changes")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    assert!(state.changes.take(Duration::ZERO).is_empty());
+    assert!(state.changes.take(Duration::ZERO).0.is_empty());
 }
 
 #[tokio::test]
@@ -176,7 +176,7 @@ async fn a_diff_names_its_file_and_a_path_past_the_bound_is_refused_here() {
     let path = format!("/api/v2/workspaces/w1/changes/diff?path={long}");
     let (status, ..) = send(&state, authed(&token, &path)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(state.changes.take(Duration::ZERO).is_empty());
+    assert!(state.changes.take(Duration::ZERO).0.is_empty());
     desktop(&state, |ask| {
         assert_eq!(
             ask.wanted,

@@ -8,6 +8,7 @@ mod kept_workspaces;
 mod keys;
 mod open_terminal;
 mod paste;
+mod phone;
 mod requests;
 mod saved_tabs;
 mod screen;

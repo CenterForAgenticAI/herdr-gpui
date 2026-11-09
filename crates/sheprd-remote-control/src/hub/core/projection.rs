@@ -62,7 +62,7 @@ pub(super) fn project(
             .collect();
         if let Some(terminal) = terminal(
             boot,
-            &format!("core:tab:{}", tab.id),
+            &format!("{}{}", super::saved::SAVED_TAB, tab.id),
             tab.title,
             &members,
             urgency,
