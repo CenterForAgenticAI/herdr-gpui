@@ -80,19 +80,29 @@ impl SheprdWindow {
         };
         self.dismiss_menu(window, cx);
         self.ensure_review(id, agent, cx);
-        if let Some(review) = self.reviews.get_mut(&id)
-            && core.is_some()
-        {
-            // A review kept from before sent to Herdr's agent; this one is
-            // the herdr-core pane's, whose agent Herdr does not know.
-            review.agent = None;
-            review.core = core;
-        }
+        self.aim_review(id, core);
         self.load_review(id, cx);
         self.show_browser_tab(id, window, cx);
         if let Some(review) = self.reviews.get(&id) {
             window.focus(&review.focus, cx);
         }
+    }
+
+    /// Points `id`'s review at the pane it was opened from: the herdr-core
+    /// pane `core`, whose agent Herdr does not know, or with none, Herdr's
+    /// agent, so its editor opens beside whichever opened it last.
+    pub(super) fn aim_review(
+        &mut self,
+        id: TabId,
+        core: Option<(TabId, sheprd_backend::TerminalId)>,
+    ) {
+        let Some(review) = self.reviews.get_mut(&id) else {
+            return;
+        };
+        if core.is_some() {
+            review.agent = None;
+        }
+        review.core = core;
     }
 
     /// Makes `id`'s review from its tab, if the window has none yet; a newly
