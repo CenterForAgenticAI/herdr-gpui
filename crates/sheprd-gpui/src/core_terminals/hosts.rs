@@ -43,6 +43,11 @@ pub(super) struct Remote {
     pub(super) infos: Infos,
     /// The saved device the hub dials, to tell when it was edited.
     pub(super) target: ConnectTarget,
+    /// Browser request labels, by terminal, this window never serves (again):
+    /// those already there when it first listed the core, those left on a
+    /// terminal it did not show, and those it served and is removing.
+    /// `None` until the first list.
+    pub(super) old_requests: Option<std::collections::HashSet<(TerminalId, String)>>,
 }
 
 impl CoreTerminals {
@@ -101,16 +106,22 @@ impl CoreTerminals {
 
     /// Uses `hub` for the core of the host `scope` names, as the first ask
     /// for it would, so a test never dials a real host.
-    // Only the lifecycle tests, which need Unix sockets, use it.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn set_remote_hub_for_test(
         &mut self,
         scope: Scope,
         target: ConnectTarget,
         hub: Hub,
     ) {
-        let infos = Infos::default();
-        self.remote.insert(scope, Remote { hub, infos, target });
+        self.remote.insert(
+            scope,
+            Remote {
+                hub,
+                infos: Infos::default(),
+                old_requests: None,
+                target,
+            },
+        );
     }
 
     /// A terminal for `purpose` on `host` that started as `outcome` says,
@@ -283,6 +294,7 @@ impl SheprdWindow {
                 Remote {
                     hub: Hub::remote(target.clone()),
                     infos: Infos::default(),
+                    old_requests: None,
                     target,
                 },
             );

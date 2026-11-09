@@ -16,9 +16,12 @@ mod commands;
 mod context;
 mod error;
 mod fallback;
+mod folders;
 mod hosts;
 mod hub;
 mod infos;
+mod phone;
+mod requests;
 mod screen;
 mod selection;
 mod session;
@@ -84,10 +87,15 @@ struct TabPanes {
     /// A mirror tab only watches: it neither types nor splits.
     observe: bool,
     panes: Panes,
+    /// The folder the tab's first pane was first seen in, kept when its
+    /// program moves on, as Herdr keeps where a workspace started.
+    root: Option<std::path::PathBuf>,
     /// The tab's location as this window last read or saved it, to tell
     /// when another window saved a change.
     saved: Option<Location>,
     unsaved: bool,
+    /// The workspace whose tab this is, known once the window has shown it.
+    workspace: Option<(Scope, String)>,
     /// How far the zoomed pane has grown over the tab; it shrinks back to
     /// its place when unzoomed.
     zoom: crate::motion::Toggle,
@@ -111,8 +119,10 @@ impl TabPanes {
             host,
             observe,
             panes,
+            root: None,
             saved: None,
             unsaved: false,
+            workspace: None,
             zoom: crate::motion::Toggle::default(),
             zoomed: None,
         }
@@ -142,9 +152,15 @@ impl TabPanes {
     }
 
     /// Takes `location`, saved by another window since this one last read
-    /// or saved the tab, so that its next save does not undo it. Focus and
-    /// zoom this window changed and has not saved yet still stand where
-    /// their pane is still there.
+    /// or saved the tab, so that its next save does not undo it.
+    ///
+    /// The layout merges three ways against what this window last read: a
+    /// side that did not change it takes the other's; when both did, this
+    /// window's layout stays, less the panes the other closed and with the
+    /// panes it opened, so a split placed here while another window saved
+    /// is kept. The pane in use is this window's, where the keyboard is;
+    /// a zoom stands only on that pane, so commands never reach a pane
+    /// hidden behind another.
     fn refresh(&mut self, location: &Location) {
         let Location::CoreTerminal {
             panes,
@@ -155,6 +171,10 @@ impl TabPanes {
         else {
             return;
         };
+        let base = match &self.saved {
+            Some(Location::CoreTerminal { panes, .. }) => Some(panes.clone()),
+            _ => None,
+        };
         let mut fresh = Self::restore(
             self.host.clone(),
             panes.clone(),
@@ -162,21 +182,38 @@ impl TabPanes {
             active.as_ref(),
             zoomed.as_ref(),
         );
-        if self.unsaved {
-            if fresh.panes.contains(&self.active) {
-                fresh.active = self.active.clone();
-            }
-            let zoomed = (self.zoomed.clone())
-                .filter(|zoomed| self.zoom.is_open() && fresh.panes.contains(zoomed));
-            fresh.zoom = match zoomed {
-                Some(_) => self.zoom,
-                None => crate::motion::Toggle::default(),
+        if let Some(base) = base
+            && self.panes != base
+        {
+            fresh.panes = if *panes == base {
+                self.panes.clone()
+            } else {
+                merged(&self.panes, &base, panes, &self.active)
             };
-            fresh.zoomed = zoomed;
-        } else if fresh.zoomed == self.zoomed && fresh.zoom.is_open() == self.zoom.is_open() {
-            // Unchanged: an animation in flight carries on.
-            fresh.zoom = self.zoom;
         }
+        if fresh.panes.contains(&self.active) {
+            fresh.active = self.active.clone();
+        }
+        let zoomed = if self.unsaved {
+            self.zoomed.clone().filter(|_| self.zoom.is_open())
+        } else {
+            fresh.zoomed.clone().filter(|_| fresh.zoom.is_open())
+        }
+        .filter(|zoomed| *zoomed == fresh.active && fresh.panes.count() > 1);
+        let same = zoomed == self.zoomed.clone().filter(|_| self.zoom.is_open());
+        fresh.zoom = match (&zoomed, same) {
+            // Unchanged: an animation in flight carries on.
+            (_, true) => self.zoom,
+            (Some(_), false) => {
+                let mut zoom = crate::motion::Toggle::default();
+                zoom.set(true, crate::motion::now(), true);
+                zoom
+            }
+            (None, false) => crate::motion::Toggle::default(),
+        };
+        fresh.zoomed = zoomed;
+        fresh.root = self.root.take();
+        fresh.workspace = self.workspace.take();
         fresh.unsaved = self.unsaved;
         fresh.saved = Some(location.clone());
         *self = fresh;
@@ -218,7 +255,8 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
-    /// The Git checkout of each kept workspace's folder.
+    /// The Git checkout of each kept workspace's folder and of the shown
+    /// pane's.
     checkouts: checkouts::Checkouts,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
@@ -236,6 +274,11 @@ pub(crate) struct CoreTerminals {
     /// The session over herdr-core of the selected host, by its scope,
     /// while that host is this computer.
     session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
+    /// A phone's split on its way, answered once it lands or fails.
+    phone_split: Option<phone::Pending>,
+    /// The tab the active group shows and its pane in use, as of the last
+    /// tick, for work that runs without the app's state at hand.
+    shown: Option<(TabId, TerminalId)>,
     /// Other hosts' cores, by the scope of their workspaces.
     remote: HashMap<Scope, hosts::Remote>,
     /// A shell starting, and what for.
@@ -311,11 +354,12 @@ impl CoreTerminals {
         observe: bool,
         infos: Vec<TerminalInfo>,
     ) {
-        self.tabs
-            .insert(tab, TabPanes::new(Host::Local, panes, observe));
+        let mut shown = TabPanes::new(Host::Local, panes, observe);
         for info in infos {
             self.infos.insert(info);
         }
+        shown.keep_root(&self.infos);
+        self.tabs.insert(tab, shown);
     }
 
     /// Whether `tab` is a herdr-core tab that holds chats: it drives its
@@ -500,9 +544,11 @@ impl SheprdWindow {
             }
         }
         self.poll_core_panes(window, cx);
+        self.answer_phone_split(cx);
         if self.core_terminals.poll_infos(std::time::Instant::now()) {
             cx.notify();
         }
+        self.core_terminals.shown = self.shown_core_pane(cx);
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
@@ -635,6 +681,31 @@ impl SheprdWindow {
         }
         self.core_terminals.look = Some(look);
     }
+}
+
+/// `here`, a layout changed since `base`, with the changes `there` made to
+/// `base` too: its closed panes go, and its new ones split off `active`
+/// while there is room.
+fn merged(here: &Panes, base: &Panes, there: &Panes, active: &TerminalId) -> Panes {
+    let mut panes = here.clone();
+    for gone in base.terminals() {
+        if !there.contains(gone) {
+            panes.remove(gone);
+        }
+    }
+    for new in there.terminals() {
+        if !base.contains(new) && !panes.contains(new) {
+            let at = if panes.contains(active) {
+                active.clone()
+            } else {
+                panes.first().clone()
+            };
+            // A full layout leaves it to the other window's tab, which the
+            // next save replaces; nothing better is open to it.
+            let _ = panes.split(&at, Axis::Row, new.clone());
+        }
+    }
+    panes
 }
 
 /// Whether a pane waiting for the keyboard may take it: nothing holds it, or

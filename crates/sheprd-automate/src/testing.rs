@@ -2,7 +2,7 @@
 //! records its arguments and answers as Herdr does, so steps run end to end
 //! without a real daemon.
 
-use crate::{herdr::Herdr, paths::Paths, settings::Settings, store::Store};
+use crate::{drive::Drive, herdr::Herdr, paths::Paths, settings::Settings, store::Store};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -17,6 +17,8 @@ pub struct Fixture {
     _dir: tempfile::TempDir,
     pub paths: Paths,
     pub herdr: Herdr,
+    /// `herdr`, as the daemon drives it.
+    pub drive: Drive,
     pub calls: PathBuf,
 }
 
@@ -31,6 +33,7 @@ case "$*" in
     mkdir -p '{worktree}'
     echo '{"id":"1","result":{"type":"worktree_created","worktree":{"path":"{worktree}","branch":"b"},"root_pane":{"pane_id":"w1p1"}}}' ;;
   *"agent start"*) echo '{"id":"1","result":{"type":"agent_started"}}' ;;
+  *"agent prompt"*"refuse-me"*) echo '{"id":"1","error":{"code":"agent_blocked","message":"the agent is blocked"}}' >&2; exit 1 ;;
   *"agent prompt"*"slow"*"--wait"*) sleep 30; echo '{"id":"1","result":{"type":"agent_prompted"}}' ;;
   *"agent prompt"*) echo '{"id":"1","result":{"type":"agent_prompted"}}' ;;
   *"notification show"*) echo '{"id":"1","result":{"type":"notification_show","shown":true}}' ;;
@@ -53,8 +56,10 @@ impl Fixture {
             .replace("{calls}", &calls.to_string_lossy())
             .replace("{worktree}", &root.join("worktree").to_string_lossy());
         executable::write(&fake, script, 0o755).unwrap();
+        let herdr = Herdr::new(Some(fake), None);
         Self {
-            herdr: Herdr::new(Some(fake), None),
+            drive: Drive::Herdr(herdr.clone()),
+            herdr,
             _dir: dir,
             paths,
             calls,
