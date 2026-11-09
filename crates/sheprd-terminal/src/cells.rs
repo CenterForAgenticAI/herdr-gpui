@@ -79,6 +79,25 @@ pub(crate) fn frame(term: &Term<Listener>, uris: &mut Vec<String>) -> FrameData 
     }
 }
 
+/// Whether each viewport row's line goes on to the next row because the
+/// program's text ran past the right edge, rather than ending there.
+pub(crate) fn wrapped(term: &Term<Listener>) -> Vec<bool> {
+    let grid = term.grid();
+    let Some(last) = grid.columns().checked_sub(1) else {
+        return Vec::new();
+    };
+    let offset = i32::try_from(grid.display_offset()).unwrap_or(0);
+    (0..grid.screen_lines())
+        .map(|line| {
+            i32::try_from(line).is_ok_and(|line| {
+                grid[Line(line - offset)][Column(last)]
+                    .flags
+                    .contains(Flags::WRAPLINE)
+            })
+        })
+        .collect()
+}
+
 /// One viewport row, or `None` when it links a URI the table lacks.
 pub(crate) fn row(term: &Term<Listener>, line: usize, links: &mut Links) -> Option<Vec<CellData>> {
     let grid = term.grid();
