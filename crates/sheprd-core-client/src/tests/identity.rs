@@ -125,6 +125,12 @@ fn an_agent_that_quit_to_its_shell_is_no_agent() {
     let exec = info(&record(value.clone())).unwrap();
     assert_eq!(crate::agent_kind(&exec), Some(AgentKind::Claude));
     assert_eq!(exec.agent, sheprd_backend::AgentStatus::Idle);
+    // Claude quit and the shell became Codex, which has not reported yet:
+    // Claude's report is stale, so Codex is named by its process.
+    value["foreground"] = json!({"pid": 100, "name": "codex", "argv": ["codex"], "cwd": ""});
+    let codex = info(&record(value.clone())).unwrap();
+    assert_eq!(crate::agent_kind(&codex), Some(AgentKind::Codex));
+    assert_eq!(codex.agent, sheprd_backend::AgentStatus::Unknown);
     // A report from a program Sheprd does not know stands.
     value["argv"] = json!(["zsh"]);
     value["foreground"] = json!({"pid": 100, "name": "zsh", "argv": ["zsh"], "cwd": ""});

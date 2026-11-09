@@ -243,9 +243,11 @@ fn agent_left(terminal: &Terminal) -> bool {
     let Some(status) = &terminal.status else {
         return false;
     };
-    if sheprd_client::herdr::AgentKind::identify(Some(status.app.trim()), "", &[]).is_none() {
+    let Some(reporter) =
+        sheprd_client::herdr::AgentKind::identify(Some(status.app.trim()), "", &[])
+    else {
         return false;
-    }
+    };
     let Some(front) = terminal
         .foreground
         .as_ref()
@@ -253,11 +255,20 @@ fn agent_left(terminal: &Terminal) -> bool {
     else {
         return false;
     };
-    // The process in front may be an agent the shell became (`exec claude`),
-    // which keeps the shell's pid.
+    // The process in front may be the reporting agent the shell became
+    // (`exec claude`), which keeps the shell's pid; any other program there,
+    // another agent included, means the report is stale.
     let program = terminal.argv.first().map_or("", String::as_str);
-    sheprd_client::herdr::AgentKind::identify(None, &front.name, &front.argv).is_none()
-        && sheprd_client::herdr::AgentKind::identify(None, program, &terminal.argv).is_none()
+    let is = |kind: Option<sheprd_client::herdr::AgentKind>| kind == Some(reporter);
+    !is(sheprd_client::herdr::AgentKind::identify(
+        None,
+        &front.name,
+        &front.argv,
+    )) && !is(sheprd_client::herdr::AgentKind::identify(
+        None,
+        program,
+        &terminal.argv,
+    ))
 }
 
 /// The foreground process, unless its pid is not one a process can have.

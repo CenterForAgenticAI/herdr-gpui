@@ -118,10 +118,12 @@ pub fn agent_in_front(record: &Terminal, agent: &str) -> bool {
         return true;
     };
     // The terminal's own program is in front: the agent is still there if
-    // that program is the agent, started as it or `exec`ed by its shell.
+    // that program is this very agent, started as it or `exec`ed by its
+    // shell. Another agent `exec`ed there may not have reported yet.
     let program = record.argv.first().map_or("", String::as_str);
-    AgentKind::identify(None, &front.name, &front.argv).is_some()
-        || AgentKind::identify(None, program, &record.argv).is_some()
+    let is = |kind: Option<AgentKind>| kind.is_some_and(|kind| kind.name() == agent);
+    is(AgentKind::identify(None, &front.name, &front.argv))
+        || is(AgentKind::identify(None, program, &record.argv))
 }
 
 #[cfg(test)]

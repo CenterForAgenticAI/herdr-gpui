@@ -37,7 +37,11 @@ fn the_agent_is_in_front_until_its_shell_is_back() {
     // The shell became Claude (`exec claude`): its pid, Claude in front.
     let mut exec = claude_record("zsh", 100, "idle");
     exec["foreground"] = json!({"pid": 100, "name": "claude", "argv": ["claude"], "cwd": ""});
-    assert!(agent_in_front(&record(exec), "claude"));
+    assert!(agent_in_front(&record(exec.clone()), "claude"));
+    // Claude quit and the shell became Codex, before Codex reported.
+    let mut codex = exec;
+    codex["foreground"] = json!({"pid": 100, "name": "codex", "argv": ["codex"], "cwd": ""});
+    assert!(!agent_in_front(&record(codex), "claude"));
     // Another agent.
     assert!(!agent_in_front(
         &record(claude_record("zsh", 200, "idle")),
