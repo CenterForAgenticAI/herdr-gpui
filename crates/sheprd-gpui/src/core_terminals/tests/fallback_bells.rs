@@ -3,12 +3,13 @@
 
 use crate::{
     SheprdWindow,
-    core_terminals::WORKSPACE,
+    core_terminals::{Error, Hub, WORKSPACE},
     sidebar::layout_tests::{SidebarFixture, fixture_window},
 };
 use gpui::{Entity, TestAppContext, VisualTestContext, prelude::*};
 
-/// A window on a computer with no Herdr 1 installed.
+/// A window on a computer with no Herdr 1 installed, whose core is never
+/// found, so no test reaches or starts the user's own.
 fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestContext) {
     let (fixture, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| fixture_window(window, cx));
@@ -17,6 +18,7 @@ fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestCont
     let view = cx.update(|_, cx| fixture.read(cx).0.clone());
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
+            view.core_terminals.hub = Hub::with_join(|_| Err(Error::NotBundled));
             view.live.snapshot = None;
             view.live.missing_installation = true;
             view.refresh_core_session(cx);
