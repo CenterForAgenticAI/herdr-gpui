@@ -5,6 +5,8 @@ use super::{
     *,
 };
 
+mod core;
+
 fn entry(pid: u32, parent: Option<u32>, started: u64) -> Entry {
     Entry {
         identity: Identity { pid, started },

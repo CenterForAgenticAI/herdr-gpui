@@ -5,6 +5,7 @@ usage() {
     cat <<'EOF'
 Usage: bash scripts/verify-release.sh --version vYYYYMMDD.COUNTER [--directory DIR] [--sha SHA]
        [--gpg-key PUBLIC_KEY_FILE --gpg-fingerprint FULL_SIGNING_FINGERPRINT] [--legacy]
+       [--without-host-chats]
 
 Without --directory, download the release into a temporary directory.
 Verify the exact asset set, both checksums, Sigstore, and GitHub provenance.
@@ -14,10 +15,12 @@ and requires the full fingerprint of the actual signing key, including subkeys.
 Requires Python 3.11+, gh, and cosign 2.x; optional GPG verification requires gpg.
 --legacy verifies an immutable pre-rebrand release with its original asset names
 and exact penso/herdr-gpui provenance identity. There is no automatic trust fallback.
+--without-host-chats verifies a release published before the host builds'
+sheprd-acp archive (sheprd-acp-VERSION-linux-musl.tar.gz) existed.
 EOF
 }
 
-version='' directory='' sha='' gpg_key='' fingerprint='' legacy=false
+version='' directory='' sha='' gpg_key='' fingerprint='' legacy=false host_chats=true
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version|--directory|--sha|--gpg-key|--gpg-fingerprint)
@@ -32,6 +35,7 @@ while [[ $# -gt 0 ]]; do
             shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --legacy) legacy=true; shift ;;
+        --without-host-chats) host_chats=false; shift ;;
         *) usage >&2; exit 1 ;;
     esac
 done
@@ -47,6 +51,7 @@ if $legacy; then
     repo=penso/herdr-gpui
     manifest_options=(--legacy-names)
 fi
+$host_chats || manifest_options+=(--without-host-chats)
 identity="https://github.com/$repo/.github/workflows/release.yml@refs/heads/main"
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT

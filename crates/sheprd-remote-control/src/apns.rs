@@ -28,6 +28,7 @@ mod decide;
 mod pacer;
 mod payload;
 mod redact;
+mod terminal;
 mod tokens;
 
 pub(crate) use decide::{computer_id, decide};
@@ -36,6 +37,7 @@ pub(crate) use pacer::Pacer;
 pub(crate) use payload::ATTRIBUTES_TYPE;
 pub(crate) use payload::{Alert, Attributes, ContentState, Event, Live, Phase};
 pub(crate) use sheprd_apns::{DeviceToken, Outcome, Priority, Push, PushType, Sender, seal};
+pub(crate) use terminal::decide as decide_terminal;
 #[cfg(test)]
 pub(crate) use tokens::ActivityToken;
 pub(crate) use tokens::Registration;

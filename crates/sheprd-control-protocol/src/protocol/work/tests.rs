@@ -10,6 +10,7 @@ fn work_requests_have_a_stable_wire_form() {
             workspace_id: Some("w_1".into()),
             daemon_socket: None,
             window: None,
+            terminal_id: None,
         },
         op: WorkOp::FanOut(FanOutRequest {
             prompt: "fix it".into(),

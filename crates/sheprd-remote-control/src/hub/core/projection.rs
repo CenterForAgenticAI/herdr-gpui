@@ -75,8 +75,21 @@ pub(super) fn project(
         .filter(|record| !assigned.contains(record.address.as_str()))
     {
         let tab = pane_id(boot, &record.address);
+        // Started for a workspace, as by a phone: listed there before Sheprd
+        // puts it in a tab of its own.
+        if let Some(cwd) = sheprd_session::new_workspace(&record.labels) {
+            // A phone's new workspace, until Sheprd keeps one for it.
+            if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
+                add_new_workspace(&mut layout, cwd, terminal);
+            }
+            continue;
+        }
+        let workspace = sheprd_session::labelled_workspace(&record.labels).map_or_else(
+            || super::UNLISTED.to_owned(),
+            |labelled| crate::hub::sessions::join_id(labelled.session, labelled.id),
+        );
         if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
-            add(&mut layout, super::UNLISTED, terminal);
+            add(&mut layout, &workspace, terminal);
         }
     }
     layout
@@ -95,6 +108,31 @@ pub(super) fn lead_kept(layout: &mut Layout, saved: Option<&SavedTabs>, scope: O
         kept.iter()
             .position(|id| *id == workspace.id)
             .unwrap_or(kept.len())
+    });
+}
+
+/// A phone's new workspace in `cwd`, named for its folder, listed apart.
+/// More work there, labelled with the same folder, joins it.
+fn add_new_workspace(layout: &mut Layout, cwd: &str, terminal: Terminal) {
+    let id = super::new_workspace_id(cwd);
+    if let Some(row) = layout.workspaces.iter_mut().find(|row| row.id == id) {
+        row.terminals.push(terminal);
+        return;
+    }
+    let label = Path::new(cwd)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(cwd)
+        .to_owned();
+    layout.workspaces.push(Workspace {
+        branch: None,
+        chats: Vec::new(),
+        cwd: cwd.to_owned(),
+        id,
+        label,
+        session: None,
+        terminals: vec![terminal],
+        worktree: None,
     });
 }
 
@@ -162,10 +200,9 @@ pub(super) fn terminal(
             pane: pane_id(boot, &record.address),
         })
         .collect();
-    let agent = records
+    let agents: Vec<TerminalAgent> = records
         .iter()
         .filter(|record| record.status.is_some())
-        .max_by_key(|record| urgency(status(record)))
         .map(|record| TerminalAgent {
             name: record
                 .status
@@ -181,9 +218,15 @@ pub(super) fn terminal(
                 .filter(|title| !title.is_empty())
                 .or_else(|| record.title.clone()),
             changed_ms: None,
-        });
+        })
+        .collect();
+    let agent = agents
+        .iter()
+        .max_by_key(|agent| urgency(agent.status))
+        .cloned();
     Some(Terminal {
         agent,
+        agents,
         // A core reports no agent sessions or process info to move with.
         convert: None,
         cwd: cwd(first),

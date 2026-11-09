@@ -118,9 +118,10 @@ fn referenced(scene: &SurfaceGraphicsScene) -> HashSet<SurfaceGraphicsAssetKey> 
         .collect()
 }
 
-/// The worker's image bytes for one connection.
+/// The worker's image bytes for one connection, or for one herdr-core
+/// terminal, whose emulator sends its scenes the same way.
 #[derive(Default)]
-pub(crate) struct ImageStore {
+pub struct ImageStore {
     images: HashMap<SurfaceGraphicsAssetKey, SurfaceImage>,
     bytes: usize,
     /// Keys the newest received surface references.
@@ -134,7 +135,12 @@ impl ImageStore {
     /// Moves a received surface's asset bytes into the store, leaving the
     /// surface with metadata only. Returns whether the published set changed.
     pub(crate) fn receive(&mut self, surface: &mut PaneSurfaceFrame) -> bool {
-        let scene = &mut surface.graphics;
+        self.receive_scene(&mut surface.graphics)
+    }
+
+    /// Moves a scene's asset bytes into the store, leaving it with
+    /// metadata only. Returns whether the published set changed.
+    pub fn receive_scene(&mut self, scene: &mut SurfaceGraphicsScene) -> bool {
         if scene.placements.len() > MAX_PLACEMENTS {
             tracing::debug!(
                 category = "surface_images",
@@ -167,14 +173,26 @@ impl ImageStore {
         changed
     }
 
+    /// Takes `scene` as the one shown from now on, for a viewer that paints
+    /// each scene as it comes and keeps the images it published until the
+    /// next. What the last scene showed and this one does not is freed
+    /// before this one's images are kept, so a replaced image's new bytes
+    /// fit even when every slot was in use. Returns whether the published
+    /// set changed.
+    pub fn receive_shown_scene(&mut self, scene: &mut SurfaceGraphicsScene) -> bool {
+        self.shown.clear();
+        let received = self.receive_scene(scene);
+        self.show() || received
+    }
+
     /// Records that the newest received surface was emitted. Returns whether
     /// the published set changed.
-    pub(crate) fn show(&mut self) -> bool {
+    pub fn show(&mut self) -> bool {
         self.shown.clone_from(&self.latest);
         self.prune()
     }
 
-    pub(crate) fn published(&self) -> Arc<SurfaceImages> {
+    pub fn published(&self) -> Arc<SurfaceImages> {
         Arc::new(SurfaceImages {
             images: self.images.clone(),
         })

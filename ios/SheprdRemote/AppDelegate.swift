@@ -88,7 +88,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         guard let computer = info[AlertKeys.computer] as? String, let pane = info[AlertKeys.pane] as? String else { return }
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             let name = model.computers.first { $0.fingerprint == Fingerprint(computer) }?.name ?? ""
-            model.open(ChatLink(computer: name, computerId: computer, pane: pane).url)
+            let terminal = info[AlertKeys.terminal] as? Bool ?? false
+            model.open(ChatLink(computer: name, computerId: computer, pane: pane, terminal: terminal).url)
             return
         }
         let permission = (info[AlertKeys.permission] as? NSNumber).map { PermissionId($0.uint64Value) }

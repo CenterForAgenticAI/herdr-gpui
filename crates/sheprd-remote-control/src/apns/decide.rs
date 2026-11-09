@@ -64,6 +64,7 @@ pub(crate) fn decide(
                         computer: excerpt(computer),
                         computer_id: computer_id(fingerprint),
                         pane: chat.pane.to_owned(),
+                        terminal: false,
                         workspace: excerpt(chat.workspace),
                     },
                 },
