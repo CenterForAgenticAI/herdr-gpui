@@ -6,22 +6,26 @@ mod checkouts;
 mod create;
 pub(super) use create::Place;
 mod error;
+mod hold;
+mod lines;
 mod poller;
 mod projection;
+mod saved;
 mod screen;
 mod spaces;
-pub(super) mod worktree;
 
 use super::Error as HubError;
 use super::{ApiMethod, Layout};
 pub use error::Error;
+pub(super) use hold::Hold;
 use serde_json::Value;
+pub(super) use sheprd_client::herdr::worktree;
 use sheprd_core_client::{Core, Subscription, event::Notice, wire::Terminal};
 use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -65,6 +69,8 @@ impl From<sheprd_core_client::Error> for HubError {
 pub(super) struct Source {
     connected: AtomicBool,
     endpoint: crate::core_target::CoreTarget,
+    /// The next phone size held on a screen gets this id.
+    holds: AtomicU64,
     /// Only the worker reads the core's document and the saved tabs; it
     /// keeps them apart from `state`, whose lock phones wait on.
     poller: Mutex<poller::Poller>,
@@ -76,10 +82,12 @@ pub(super) struct Source {
 /// What phones and the worker share. Its lock is held only to read or swap
 /// these, never across a core call: a stalled core or pane must not stop
 /// the other panes. Each screen has a lock of its own for the same reason.
+type SharedScreen = Arc<Mutex<screen::Screen>>;
+
 #[derive(Default)]
 struct State {
     core: Option<Arc<Core>>,
-    screens: HashMap<String, Arc<Mutex<screen::Screen>>>,
+    screens: HashMap<String, SharedScreen>,
     /// The panes of each listed tab, chats included, as the last poll saw.
     tabs: HashMap<String, Vec<String>>,
     terminals: Vec<Terminal>,
@@ -99,6 +107,7 @@ impl Source {
         let source = Arc::new(Self {
             connected: AtomicBool::new(false),
             endpoint,
+            holds: AtomicU64::new(0),
             poller: Mutex::default(),
             scope: target
                 .socket_path()
@@ -182,26 +191,29 @@ impl Source {
             return Err(Error::Unsupported.into());
         }
         let pane = params["pane_id"].as_str().ok_or(HubError::Response)?;
-        let (core, terminal) = {
-            let state = lock(&self.state);
-            let core = state.core.clone().ok_or(Error::Disconnected)?;
-            let boot = &core.hello().core.id;
-            let terminal = state
-                .terminals
-                .iter()
-                .find(|terminal| pane_id(boot, &terminal.address) == pane)
-                .cloned()
-                .ok_or(HubError::Response)?;
-            (core, terminal)
-        };
+        let (core, terminal) = self.terminal(pane)?;
         let screen = self.screen(&core, &terminal)?;
         let mut screen = lock(&screen);
         screen.follow_size(&terminal)?;
         screen.call(&core, method, params)
     }
 
+    /// The connection and the terminal `pane` names, as the last poll saw.
+    fn terminal(&self, pane: &str) -> Result<(Arc<Core>, Terminal)> {
+        let state = lock(&self.state);
+        let core = state.core.clone().ok_or(Error::Disconnected)?;
+        let boot = &core.hello().core.id;
+        let terminal = state
+            .terminals
+            .iter()
+            .find(|terminal| pane_id(boot, &terminal.address) == pane)
+            .cloned()
+            .ok_or(HubError::Response)?;
+        Ok((core, terminal))
+    }
+
     /// The shared screen of `terminal`, opened outside the state lock.
-    fn screen(&self, core: &Arc<Core>, terminal: &Terminal) -> Result<Arc<Mutex<screen::Screen>>> {
+    fn screen(&self, core: &Arc<Core>, terminal: &Terminal) -> Result<SharedScreen> {
         let address = &terminal.address;
         let found = lock(&self.state).screens.get(address).cloned();
         if let Some(screen) = found {
@@ -244,7 +256,7 @@ impl Source {
 /// The screen nobody has read or typed into for longest, if any is idle.
 /// Bounds emulators and attachments without letting abandoned panes keep
 /// out a pane a phone wants now.
-fn oldest_idle(screens: &HashMap<String, Arc<Mutex<screen::Screen>>>) -> Option<String> {
+fn oldest_idle(screens: &HashMap<String, SharedScreen>) -> Option<String> {
     screens
         .iter()
         .filter_map(|(address, screen)| {

@@ -1,4 +1,6 @@
 use super::*;
+
+mod prompt;
 use crate::{
     store::{AgentRow, NewRun},
     testing::{Fixture, git},
@@ -54,7 +56,7 @@ fn run_with(
     let ended = execute(
         &fixture.paths,
         &fixture.settings(),
-        &fixture.herdr,
+        &fixture.drive,
         &slots,
         &job,
     )

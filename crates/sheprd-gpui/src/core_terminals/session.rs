@@ -27,17 +27,26 @@ impl SheprdWindow {
     /// store's workspaces and tabs, the shell shown in place of Herdr 1, and
     /// what the core last reported. Whether it changed.
     pub(crate) fn refresh_core_session(&mut self, cx: &mut App) -> bool {
+        let mut checkouts_changed = false;
         let built = self.core_host().map(|index| {
             let scope = scope(&self.endpoints[index]);
             self.keep_default_workspace(self.live_at(index).missing_installation, &scope, cx);
-            let folders = cx.try_global::<Store>().map_or_else(Vec::new, |store| {
-                store
-                    .kept_workspaces(&scope)
-                    .filter(|workspace| !workspace.cwd.is_empty())
-                    .map(|workspace| workspace.cwd.clone())
-                    .collect()
-            });
-            self.core_terminals
+            let mut folders: Vec<String> =
+                cx.try_global::<Store>().map_or_else(Vec::new, |store| {
+                    store
+                        .kept_workspaces(&scope)
+                        .filter(|workspace| !workspace.cwd.is_empty())
+                        .map(|workspace| workspace.cwd.clone())
+                        .collect()
+                });
+            // The shown pane's checkout, for the Git and pull request chips.
+            if let Some(folder) = self.shown_core_folder()
+                && !folders.contains(&folder)
+            {
+                folders.push(folder);
+            }
+            checkouts_changed = self
+                .core_terminals
                 .checkouts
                 .poll(folders, std::time::Instant::now());
             let session = cx
@@ -54,7 +63,7 @@ impl SheprdWindow {
         if !unchanged {
             self.core_terminals.session = built;
         }
-        !unchanged
+        !unchanged || checkouts_changed
     }
 
     pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {

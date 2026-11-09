@@ -1,17 +1,25 @@
 //! The supervisor's part in answering phones about workspaces: while a phone
 //! is connected it waits on the daemon for their questions, one long request
 //! at a time, the next tick starting the next, and answers each on the
-//! background executor. With no phone connected it asks nothing.
+//! background executor. With no phone connected it asks nothing. A phone's
+//! split or zoom of a Herdr 2 tab arrives the same way, and the window that
+//! holds the tab makes it at once.
 //!
 //! The daemon's limit counts only questions a phone still waits for, and an
 //! answer keeps running after its phone gives up, so the answers running here
-//! are limited too. While that many run, or questions taken wait their turn,
-//! no more are taken: the rest stay with the daemon, where a phone that stops
-//! waiting frees its place.
+//! are limited too; questions taken beyond that wait their turn here. Taking
+//! goes on meanwhile, so a split or zoom, which needs no answer worked out,
+//! does not wait behind slow workspace answers. A phone that gives up frees
+//! its place at the daemon but not here, so taking stops once `QUEUED`
+//! questions wait here.
 
 use super::*;
+use crate::SheprdWindow;
 use crate::remote::changes::Sources;
-use sheprd_remote_control::control::changes::Ask;
+use sheprd_remote_control::control::{
+    changes::{Ask, AskId},
+    layout,
+};
 use std::collections::VecDeque;
 
 /// How long after a failed wait the daemon is asked again.
@@ -19,6 +27,9 @@ const RETRY: Duration = Duration::from_secs(5);
 
 /// How many answers are worked out at once.
 pub(super) const RUNNING: usize = 4;
+/// How many taken questions may wait for one of those: the daemon's own
+/// limit, so the work queued here stays bounded however phones come and go.
+pub(super) const QUEUED: usize = 16;
 
 #[derive(Default)]
 pub(crate) struct Changes {
@@ -28,7 +39,7 @@ pub(crate) struct Changes {
     retry_at: Option<Instant>,
     /// Answers being worked out now, at most `RUNNING`.
     pub(super) running: usize,
-    sources: Arc<Sources>,
+    pub(super) sources: Arc<Sources>,
 }
 
 impl Supervisor {
@@ -53,8 +64,8 @@ impl Supervisor {
             .changes
             .retry_at
             .is_some_and(|at| Instant::now() < at);
-        let busy = supervisor.changes.running >= RUNNING || !supervisor.changes.queued.is_empty();
-        if !phones || waiting || busy || supervisor.changes.polling {
+        let full = supervisor.changes.queued.len() >= QUEUED;
+        if !phones || waiting || full || supervisor.changes.polling {
             return;
         }
         let Some(address) = supervisor.address.clone() else {
@@ -73,7 +84,7 @@ impl Supervisor {
     pub(super) fn take_asks(cx: &mut App, answer: Result<Response, control::Error>) {
         let supervisor = cx.global_mut::<Self>();
         supervisor.changes.polling = false;
-        let Ok(Response::ChangeAsks { asks }) = answer else {
+        let Ok(Response::ChangeAsks { asks, layout }) = answer else {
             // A daemon that does not know the request answers at once.
             supervisor.changes.retry_at = Some(Instant::now() + RETRY);
             return;
@@ -81,6 +92,31 @@ impl Supervisor {
         supervisor.changes.retry_at = None;
         supervisor.changes.queued.extend(asks);
         Self::start_answers(cx);
+        for ask in layout {
+            // A split's window answers once its shell is in place.
+            if let Some(answer) = change_layout(cx, &ask) {
+                Self::send_layout_answer(cx, ask.id, answer);
+            }
+        }
+    }
+
+    /// Hands what a window did with a phone's layout change to the daemon.
+    pub(crate) fn send_layout_answer(cx: &mut App, id: AskId, answer: layout::Answer) {
+        let Some(supervisor) = cx.try_global::<Self>() else {
+            return;
+        };
+        let Some(address) = supervisor.address.clone() else {
+            return;
+        };
+        let send = supervisor.send;
+        cx.background_executor()
+            .spawn(async move {
+                let request = Request::LayoutAnswer { id, answer };
+                if let Err(error) = send(&address, &request) {
+                    tracing::debug!(%error, "The daemon did not take a layout answer for a phone");
+                }
+            })
+            .detach();
     }
 
     /// Starts queued answers while fewer than `RUNNING` run.
@@ -114,6 +150,24 @@ impl Supervisor {
             .detach();
         }
     }
+}
+
+/// Makes a phone's change in the window that holds its tab; `None` when
+/// that window answers later.
+fn change_layout(cx: &mut App, ask: &layout::Ask) -> Option<layout::Answer> {
+    if !ask.valid() {
+        return Some(layout::Answer::Failed(layout::Failure::Refused));
+    }
+    for handle in cx.windows() {
+        let Some(window) = handle.downcast::<SheprdWindow>() else {
+            continue;
+        };
+        let made = window.update(cx, |this, window, cx| this.phone_layout(ask, window, cx));
+        if let Ok(Some(answer)) = made {
+            return answer;
+        }
+    }
+    Some(layout::Answer::Failed(layout::Failure::Gone))
 }
 
 /// Works out one answer and hands it to the daemon. Blocking.

@@ -79,7 +79,8 @@ impl Source {
     ) -> Result<String> {
         let root = root.ok_or(worktree::Error::NoHome).map_err(Error::from)?;
         let repository = Path::new(cwd);
-        let checkout = worktree::add(repository, branch, root).map_err(Error::from)?;
+        let checkout =
+            worktree::add(repository, branch, "HEAD", root, || false).map_err(Error::from)?;
         // A new workspace of its own, in the new checkout.
         let checkout = checkout.to_string_lossy().into_owned();
         let started = self.open_chat(agent, program, &checkout, Some(Place::New(&checkout)));
@@ -107,31 +108,39 @@ impl Source {
         Ok(pane)
     }
 
-    /// Ends the one terminal `target` names: a pane, or a tab holding only
-    /// that pane. A tab of several is refused, so nothing closes in bulk.
+    /// Ends the terminals `target` names: a pane's, or every pane's of a
+    /// tab, chats included, as closing a Herdr 1 tab closes them all. The
+    /// desktop drops a pane whose program ended, and its tab with the last.
     pub(super) fn close(&self, target: &str) -> Result<Value> {
-        let (core, address) = {
+        let (core, addresses) = {
             let state = lock(&self.state);
             let core = state.core.clone().ok_or(Error::Disconnected)?;
-            let pane = match state.tabs.get(target).map(Vec::as_slice) {
-                Some([pane]) => pane.as_str(),
-                Some(_) => return Err(Error::Unsupported.into()),
-                None => target,
-            };
-            let address = state
+            let boot = &core.hello().core.id;
+            let panes = state
+                .tabs
+                .get(target)
+                .cloned()
+                .unwrap_or_else(|| vec![target.to_owned()]);
+            let addresses: Vec<String> = state
                 .terminals
                 .iter()
                 .map(|terminal| terminal.address.clone())
-                .find(|address| pane_id(&core.hello().core.id, address) == pane)
-                .ok_or(Error::Unsupported)?;
-            (core, address)
+                .filter(|address| panes.contains(&pane_id(boot, address)))
+                .collect();
+            if addresses.is_empty() {
+                return Err(Error::Unsupported.into());
+            }
+            (core, addresses)
         };
-        core.kill(&address)?;
-        let mut state = lock(&self.state);
-        state.screens.remove(&address);
-        state
-            .terminals
-            .retain(|terminal| terminal.address != address);
+        // Each one ended is gone from the list, even if a later one fails.
+        for address in addresses {
+            core.kill(&address)?;
+            let mut state = lock(&self.state);
+            state.screens.remove(&address);
+            state
+                .terminals
+                .retain(|terminal| terminal.address != address);
+        }
         Ok(json!({}))
     }
 }

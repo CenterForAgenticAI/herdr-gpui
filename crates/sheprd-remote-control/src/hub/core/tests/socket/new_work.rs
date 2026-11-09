@@ -1,7 +1,28 @@
 use super::*;
 use crate::hub::{Error as HubError, Workspace};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// A repository with one commit, named `project`, in `parent`.
+fn committed_repository(parent: &Path) -> PathBuf {
+    let repository = parent.join("project");
+    std::fs::create_dir(&repository).unwrap();
+    for args in [
+        &["init", "--quiet"][..],
+        &["commit", "--quiet", "--allow-empty", "-m", "start"],
+    ] {
+        let status = sheprd_client::new_command("git")
+            .current_dir(&repository)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    repository
+}
 
 fn chat_record(address: &str, endpoint: &EndpointId) -> Value {
     let mut record = record(address);
@@ -124,7 +145,7 @@ async fn a_core_failure_is_reported_and_not_retried_on_herdr_one() {
 #[tokio::test]
 async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
     let dir = tempfile::tempdir().unwrap();
-    let repository = worktree::tests::committed_repository(dir.path());
+    let repository = committed_repository(dir.path());
     let root = dir.path().join("worktrees");
     let (source, fake) = fake_with_chat(&EndpointId::random());
     source.poll().unwrap();
@@ -156,7 +177,7 @@ async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
 #[tokio::test]
 async fn a_worktree_whose_chat_fails_leaves_the_branch_free_to_retry() {
     let dir = tempfile::tempdir().unwrap();
-    let repository = worktree::tests::committed_repository(dir.path());
+    let repository = committed_repository(dir.path());
     let root = dir.path().join("worktrees");
     let (source, fake) = fake();
     source.poll().unwrap();
@@ -316,7 +337,7 @@ fn work_in_a_phones_new_workspace_is_listed_in_one_row() {
 }
 
 #[test]
-fn closing_ends_one_named_terminal_and_refuses_a_tab_of_several() {
+fn closing_ends_one_named_terminal_and_refuses_a_tab_it_does_not_list() {
     let (source, fake) = fake();
     source.poll().unwrap();
     source
@@ -357,7 +378,7 @@ fn closing_a_tab_of_one_pane_ends_that_terminal() {
 }
 
 #[test]
-fn closing_a_tab_of_a_shell_and_a_chat_ends_neither() {
+fn closing_a_tab_of_a_shell_and_a_chat_ends_both() {
     let endpoint = EndpointId::random();
     let root = json!({"type": "row", "children": [block("t1"), block("t9")]});
     let records = vec![record("t1"), chat_record("t9", &endpoint)];
@@ -365,13 +386,30 @@ fn closing_a_tab_of_a_shell_and_a_chat_ends_neither() {
     let layout = source.poll().unwrap();
     let tab = layout.terminal(&id("t1")).unwrap().1.tab.clone();
     assert_eq!(layout.chat(&id("t9")).unwrap().1.tab, tab);
-    assert!(matches!(
-        source
-            .call(ApiMethod::TabClose, &json!({"tab_id": tab}))
-            .unwrap_err(),
-        HubError::Core(Error::Unsupported)
-    ));
-    assert!(fake.inputs.try_recv().is_err());
+    source
+        .call(ApiMethod::TabClose, &json!({"tab_id": tab}))
+        .unwrap();
+    let mut ended = [request(&fake), request(&fake)]
+        .map(|kill| kill["params"]["terminal"].as_str().unwrap().to_owned());
+    ended.sort();
+    assert_eq!(ended, ["t1", "t9"]);
+    assert!(lock(&source.state).terminals.is_empty());
+    drop(source);
+    fake.server.join().unwrap();
+}
+
+#[test]
+fn a_saved_tab_names_its_id_and_the_panes_terminal() {
+    let (source, fake) = fake();
+    source.poll().unwrap();
+    assert_eq!(
+        source.saved_target("core:tab:4", &id("t1")),
+        Some((4, "t1".to_owned()))
+    );
+    // A desktop space's tab, or a terminal no tab holds, is not Sheprd's.
+    assert_eq!(source.saved_target("core:app-tab:ab", &id("t1")), None);
+    assert_eq!(source.saved_target(&id("t1"), &id("t1")), None);
+    assert_eq!(source.saved_target("core:tab:4", &id("t404")), None);
     drop(source);
     fake.server.join().unwrap();
 }

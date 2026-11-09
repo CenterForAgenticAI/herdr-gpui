@@ -22,6 +22,8 @@ pub(super) struct Infos {
     fresh: HashSet<TerminalId>,
     known: HashMap<TerminalId, TerminalInfo>,
     last: Option<Instant>,
+    /// Lists read so far.
+    lists: u64,
     pending: Option<Listed>,
 }
 
@@ -30,9 +32,24 @@ impl Infos {
         self.known.get(id)
     }
 
-    /// Every terminal the last list named.
+    /// Every terminal the core last reported.
     pub(super) fn all(&self) -> impl Iterator<Item = &TerminalInfo> {
         self.known.values()
+    }
+
+    /// How many lists have been read; none means nothing is known yet.
+    pub(super) fn lists(&self) -> u64 {
+        self.lists
+    }
+
+    /// Takes `list` as a finished read would.
+    #[cfg(test)]
+    pub(super) fn list_for_test(&mut self, list: Vec<TerminalInfo>) {
+        self.known = list
+            .into_iter()
+            .map(|info| (info.id.clone(), info))
+            .collect();
+        self.lists += 1;
     }
 
     /// Records a terminal just started, until the next list replaces it,
@@ -64,6 +81,7 @@ impl Infos {
                     }
                     changed = known != self.known;
                     self.known = known;
+                    self.lists += 1;
                     self.pending = None;
                 }
                 Ok(Err(error)) => {
