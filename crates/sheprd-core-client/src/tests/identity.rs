@@ -79,3 +79,23 @@ fn an_unknown_program_that_reports_a_status_is_named_by_its_report() {
         None
     );
 }
+
+#[test]
+fn a_program_that_is_gone_is_no_agent() {
+    let mut value = terminal("t1");
+    value["status"] = json!({"state": "idle", "app": "claude-code"});
+    let running = info(&record(value)).unwrap();
+    assert_eq!(crate::agent_kind(&running), Some(AgentKind::Claude));
+    // The core keeps the last report once the program is lost or exits.
+    for state in [
+        sheprd_backend::RunState::Lost,
+        sheprd_backend::RunState::Exited(sheprd_backend::Exit::default()),
+    ] {
+        let gone = sheprd_backend::TerminalInfo {
+            state,
+            ..running.clone()
+        };
+        assert_eq!(crate::agent_kind(&gone), None, "{state:?}");
+        assert_eq!(crate::agent_name(&gone), None, "{state:?}");
+    }
+}
