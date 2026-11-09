@@ -19,7 +19,6 @@
 use crate::config::Theme;
 use gpui::{Div, ParentElement, Styled, div, px, rgb};
 use serde::Deserialize;
-use sheprd_client::protocol::ClientShellSnapshot;
 
 #[cfg(test)]
 mod tests;
@@ -124,14 +123,15 @@ pub(crate) fn is_linked(workspace: &sheprd_session::Workspace) -> bool {
     workspace.worktree.as_ref().is_some_and(|tree| tree.linked)
 }
 
-/// Whether the workspace `snapshot` shows is a linked worktree.
-pub(crate) fn focused_is_linked(snapshot: &ClientShellSnapshot) -> bool {
-    snapshot
-        .workspaces
-        .iter()
-        .find(|workspace| Some(&workspace.workspace_id) == snapshot.focused_workspace_id.as_ref())
-        .and_then(|workspace| workspace.worktree.as_ref())
-        .is_some_and(|tree| tree.is_linked_worktree)
+/// Whether `front`, the workspace in front among `sessions`, Herdr 1's or
+/// one the app keeps for Herdr 2, is a linked worktree.
+pub(crate) fn front_is_linked(
+    sessions: &crate::session_model::Sessions,
+    front: Option<&str>,
+) -> bool {
+    front
+        .and_then(|front| sessions.workspace(front))
+        .is_some_and(is_linked)
 }
 
 /// A group's strip with its rule, along the strip's edge that meets the

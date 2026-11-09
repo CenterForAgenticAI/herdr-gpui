@@ -33,7 +33,14 @@ it lists Herdr 2 work beside Herdr 1's.
 | Window title | Yes |
 | Tab strip | Herdr 1's tabs only while its workspace is in front (`herdr_workspace_in_front`) |
 | Palette Go To and jump list | Kept workspaces added beside Herdr 1's rows |
-| Workspace menu | Kept workspaces: rename and close |
+| Workspace menu | Kept workspaces: rename, close, and a note once Git names the checkout |
+| Git status, pull request prefetch, worktree rule, notes | Kept workspaces whose folder Git names (`core_terminals::checkouts`) |
+| Agent checkpoints | Yes: `sheprd_vcs::checkpoint::Checkpoints::observe` takes a `Session`; Herdr 2's is watched as its own endpoint |
+| Mods state: workspaces, agents, focus | Yes |
+
+herdr-core reports no Git facts, so the app asks Git for each kept workspace's
+folder on a worker (`sheprd_vcs::git::identity`): its branch, its repository's
+common directory as the worktree key, and whether it is a linked worktree.
 
 The app still reads `ClientShell*` types directly in about 67 files. That is the
 work left.

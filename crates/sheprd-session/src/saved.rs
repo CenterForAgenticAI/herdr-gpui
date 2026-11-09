@@ -29,6 +29,12 @@ pub struct SavedTabs {
 pub struct SavedWorkspace {
     /// Where its new terminals start.
     pub cwd: String,
+    /// Whether the user named it; otherwise the app named it after its
+    /// folder, and a linked worktree's row shows its branch instead. Always
+    /// written, so a record without it is from before it was, and keeps the
+    /// name it has.
+    #[serde(default = "named")]
+    pub custom: bool,
     /// Unique among the app's workspaces; its tabs name it.
     pub id: String,
     pub label: String,
@@ -45,6 +51,10 @@ impl SavedWorkspace {
             && self.label.chars().count() <= MAX_LABEL_CHARS
             && self.cwd.len() <= MAX_CWD_BYTES
     }
+}
+
+fn named() -> bool {
+    true
 }
 
 /// The saved workspaces that read, each on its own, so one damaged record
