@@ -104,8 +104,8 @@ pub(crate) struct CoreTerminalView {
     copy_mode: Option<copy_mode::CopyModeState>,
     /// The history read whose text goes to the clipboard.
     copying: Option<history::Reading>,
-    /// A selection's copy landed, to be said on the next poll.
-    copied: bool,
+    /// The selection whose copy landed, to be said on the next poll.
+    copied: Option<Selection>,
     /// Something typed while the connection was away, for the window to
     /// say it was not sent.
     dropped: std::cell::Cell<bool>,
@@ -191,7 +191,7 @@ impl CoreTerminalView {
             bounds: None,
             copy_mode: None,
             copying: None,
-            copied: false,
+            copied: None,
             dropped: std::cell::Cell::new(false),
             cwd: None,
             effects: Effects::default(),
@@ -387,8 +387,8 @@ impl CoreTerminalView {
             cx.notify();
         }
         self.take_answers(answers, cx);
-        if std::mem::take(&mut self.copied) {
-            self.finish_copy(window, cx);
+        if let Some(copied) = self.copied.take() {
+            self.finish_copy(copied, window, cx);
         }
         if self.find.is_some() {
             self.poll_find();

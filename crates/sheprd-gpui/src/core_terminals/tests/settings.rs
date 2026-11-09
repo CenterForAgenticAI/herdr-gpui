@@ -234,3 +234,26 @@ fn the_passthrough_modifier_reaches_the_program_without_it(cx: &mut TestAppConte
         ]
     );
 }
+
+#[gpui::test]
+fn a_copy_landing_late_leaves_a_selection_begun_since(cx: &mut TestAppContext) {
+    let (view, cx, backend, asked) = shown(cx, &["hello world"], false);
+    set_look(
+        &view,
+        cx,
+        Look {
+            keep_selection: false,
+            ..look()
+        },
+    );
+    answers(&backend, "hello");
+    drag(&view, cx, 0, 4);
+    // Another drag begins before the first copy's text lands.
+    let (start, end) = (at(&view, cx, 6, 0), at(&view, cx, 10, 0));
+    cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::none());
+    assert_eq!(landed(&view, cx).as_deref(), Some("hello"));
+    assert_eq!(copied(&asked), 1);
+    // The copy drops only its own selection: the new one stays.
+    cx.update(|_, cx| assert!(!view.read(cx).highlights().is_empty()));
+}

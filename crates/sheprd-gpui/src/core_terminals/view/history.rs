@@ -4,7 +4,7 @@
 
 use super::CoreTerminalView;
 pub(super) use crate::core_terminals::worker::Answer;
-use crate::core_terminals::{Error, worker::Command};
+use crate::core_terminals::{Error, selection::Selection, worker::Command};
 use gpui::Context;
 use sheprd_backend::{History, HistoryAnswer, Matches, TextRange};
 use sheprd_client::{
@@ -29,9 +29,9 @@ pub(super) struct Reading {
     /// The history lines above the screen when asked; fewer since means a
     /// clear dropped lines the rows were counted from.
     history: usize,
-    /// Whether the copy is said and its selection settled once its text
-    /// reaches the clipboard, as a selection's copy is.
-    announce: bool,
+    /// The selection this copies, said and settled once its text reaches
+    /// the clipboard; none for copy mode's copies, which say nothing.
+    announce: Option<Selection>,
 }
 
 impl CoreTerminalView {
@@ -53,7 +53,7 @@ impl CoreTerminalView {
             exact,
             grid: self.screen.grid(),
             history: self.screen.history.history,
-            announce: false,
+            announce: None,
         }
     }
 
@@ -75,7 +75,7 @@ impl CoreTerminalView {
     /// it is asked for: the read may still be refused or fail.
     pub(super) fn announce_copy(&mut self) {
         if let Some(reading) = &mut self.copying {
-            reading.announce = true;
+            reading.announce = self.selection;
         }
     }
 
@@ -112,7 +112,9 @@ impl CoreTerminalView {
                     }
                     Ok(HistoryAnswer::Text(text)) => {
                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
-                        self.copied |= reading.announce;
+                        if let Some(selection) = reading.announce {
+                            self.copied = Some(selection);
+                        }
                     }
                     Ok(_) => tracing::warn!("A herdr-core history read answered no text"),
                     Err(error) => tracing::warn!(%error, "Could not read a herdr-core history"),

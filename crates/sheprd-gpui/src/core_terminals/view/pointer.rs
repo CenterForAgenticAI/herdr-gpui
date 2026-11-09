@@ -301,10 +301,16 @@ impl CoreTerminalView {
         self.report(kind, cell, event.modifiers, lines);
     }
 
-    /// Ends a copy: the copied flash, and the highlight dropped unless
-    /// `keep_selection_after_copy` keeps it.
-    pub(super) fn finish_copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.look.keep_selection {
+    /// Ends the copy of `copied`: the copied flash, and its highlight
+    /// dropped unless `keep_selection_after_copy` keeps it. A selection
+    /// begun since the copy was asked for is not the copy's to drop.
+    pub(super) fn finish_copy(
+        &mut self,
+        copied: Selection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.look.keep_selection && self.selection == Some(copied) {
             self.selection = None;
         }
         cx.notify();
