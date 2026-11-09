@@ -28,20 +28,27 @@ impl Names {
     }
 }
 
+/// A repository's name from its common Git folder: the folder holding a
+/// `.git`, or a bare repository's own, without `.git`.
+pub(in crate::hub::core) fn repository_name(common: &Path) -> Option<String> {
+    let root = if common.file_name().is_some_and(|name| name == ".git") {
+        common.parent().unwrap_or(common)
+    } else {
+        common
+    };
+    let name = root.file_name()?.to_str()?;
+    Some(name.strip_suffix(".git").unwrap_or(name).to_owned())
+}
+
 fn name(folder: &str) -> String {
     let path = Path::new(folder);
     if !folder.is_empty()
         && let Ok(repo) = gix::discover(path)
+        // A linked worktree names the shared folder through its own.
+        && let Ok(common) = std::fs::canonicalize(repo.common_dir())
+        && let Some(name) = repository_name(&common)
     {
-        let common = repo.common_dir();
-        let root = if common.file_name().is_some_and(|name| name == ".git") {
-            common.parent().unwrap_or(common)
-        } else {
-            common
-        };
-        if let Some(name) = root.file_name().and_then(|name| name.to_str()) {
-            return name.strip_suffix(".git").unwrap_or(name).to_owned();
-        }
+        return name;
     }
     let home = sheprd_client::login_env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
     if folder.is_empty() || home.as_ref().is_some_and(|home| path == Path::new(home)) {

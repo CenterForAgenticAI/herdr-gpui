@@ -48,6 +48,7 @@ fn a_steps_output_keeps_its_end() {
         log_tail: format!("{}\nlast line\u{1b}[0m", "x".repeat(100_000)),
         worktree: None,
         pane: Some("p\u{1}1".into()),
+        terminals: sheprd_automation::report::Terminals::Herdr,
         usage: Usage::default(),
     };
     let detail = clean::detail(RunDetail {

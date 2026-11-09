@@ -110,6 +110,7 @@ An agent on a saved SSH host cannot reach this machine directly. Sheprd puts a s
 - An address on the host's own loopback (`localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0`) is forwarded to this machine first.
 - Only `browser open` and `browser reload` work from a host; every other command exits 8. Files on the host are not shown: serve their folder (for example `python3 -m http.server 8000`) and open its port.
 - Notes you send on such a page are typed into the agent's pane once it is idle; `browser feedback` cannot reach the app from the host.
+- In a Herdr 2 terminal on the host, the shim leaves the request as labels on that terminal, and a window showing the terminal opens the page in the tab's workspace and removes the labels. `browser open` works there; `browser reload` exits 8, and notes do not return to the agent. Requests left while no window showed the terminal are not opened later.
 
 ### The agent skill
 

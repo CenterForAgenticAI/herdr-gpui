@@ -9043,6 +9043,7 @@ dependencies = [
  "sha2 0.11.1",
  "sheprd-automation",
  "sheprd-client",
+ "sheprd-core-client",
  "sysinfo 0.39.6",
  "tempfile",
  "thiserror 2.0.21",

@@ -1,6 +1,7 @@
-//! Why a phone's question about a workspace has no answer.
+//! Why a phone's question about a workspace, or its change to a Herdr 2
+//! tab's layout, has no answer.
 
-use crate::control::changes::Failure;
+use crate::control::{changes::Failure, layout};
 use axum::http::StatusCode;
 
 #[derive(Debug, thiserror::Error)]
@@ -10,6 +11,8 @@ pub(crate) enum Error {
     Busy,
     #[error(transparent)]
     Failed(#[from] Failure),
+    #[error(transparent)]
+    Layout(#[from] layout::Failure),
     #[error("Sheprd is not open on this computer")]
     NoDesktop,
     #[error("Sheprd did not answer in time")]
@@ -26,6 +29,10 @@ impl Error {
                 Failure::LogTooLong | Failure::NoBase | Failure::NoLog | Failure::NoRepository,
             ) => StatusCode::CONFLICT,
             Self::Failed(Failure::Unreadable) => StatusCode::BAD_GATEWAY,
+            Self::Layout(layout::Failure::Busy) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Layout(layout::Failure::Gone) => StatusCode::NOT_FOUND,
+            Self::Layout(layout::Failure::Watching) => StatusCode::CONFLICT,
+            Self::Layout(layout::Failure::Refused) => StatusCode::BAD_GATEWAY,
             Self::NoDesktop => StatusCode::SERVICE_UNAVAILABLE,
             Self::TimedOut => StatusCode::GATEWAY_TIMEOUT,
         }
