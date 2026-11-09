@@ -30,9 +30,11 @@ fn info(name: &str, cwd: &str) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: Some(PathBuf::from(cwd)),
+        foreground: None,
         id: id(name),
         labels: Default::default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }
