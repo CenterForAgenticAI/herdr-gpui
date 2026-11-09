@@ -108,6 +108,7 @@ impl SheprdWindow {
         &mut self,
         agent: Agent,
         tab: TabId,
+        cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         if !self.config.features.acp_chats {
             return Err(super::StartError::Disabled);
@@ -134,6 +135,7 @@ impl SheprdWindow {
                 axis: crate::core_terminals::panes::Axis::Row,
             },
             spawn,
+            cx,
         );
         Ok(())
     }

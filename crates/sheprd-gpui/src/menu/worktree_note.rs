@@ -57,12 +57,8 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(id) = self
-            .live
-            .snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.focused_workspace_id.clone())
-        else {
+        // The workspace in front, Herdr 1's or one the app keeps.
+        let Some((_, id)) = self.browser_key() else {
             return;
         };
         self.open_workspace_menu(&id, Point::default(), window, cx);

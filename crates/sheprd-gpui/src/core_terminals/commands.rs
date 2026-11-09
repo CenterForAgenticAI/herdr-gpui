@@ -61,6 +61,7 @@ impl SheprdWindow {
                         axis,
                     },
                     sheprd_backend::Spawn::default(),
+                    cx,
                 );
             }
             Command::FocusLeft

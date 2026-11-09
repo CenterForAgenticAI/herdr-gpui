@@ -189,7 +189,7 @@ impl SheprdWindow {
                 Some(Answer::Done)
             }
             Change::Split(purpose) => {
-                self.start_core_program(purpose, Spawn::default());
+                self.start_core_program(purpose, Spawn::default(), cx);
                 None
             }
         };
