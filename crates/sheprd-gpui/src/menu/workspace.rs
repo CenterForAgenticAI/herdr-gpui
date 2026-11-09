@@ -650,6 +650,7 @@ impl SheprdWindow {
         if target.keeper == sheprd_session::Keeper::App {
             return kept::items(
                 target,
+                !self.selected_is_remote(),
                 self.note_checkout().is_some(),
                 self.checkpoint_checkout().is_some(),
                 self.fan_out_item(),

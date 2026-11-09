@@ -152,7 +152,11 @@ fn carry_out(checkout: &str, ask: &Ask) -> crate::Result<String> {
 impl SheprdWindow {
     /// The folder of the kept workspace the menu is for, which its
     /// repository is read and branched through.
+    /// `None` for a workspace kept on another host, whose folder is there.
     pub(in crate::menu) fn kept_checkout(&self) -> Option<String> {
+        if self.selected_is_remote() {
+            return None;
+        }
         let target = self
             .menu
             .target

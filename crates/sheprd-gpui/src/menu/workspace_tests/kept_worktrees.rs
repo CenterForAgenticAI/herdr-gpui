@@ -299,4 +299,36 @@ fn work_finishing_together_all_lands(cx: &mut TestAppContext) {
     });
 }
 
+#[gpui::test]
+fn another_hosts_kept_workspace_offers_no_local_git(cx: &mut TestAppContext) {
+    let (view, cx, id) = window(cx, LINKED, Some(true));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_workspace_menu(&id, gpui::Point::default(), window, cx);
+            // Shown as if kept on an SSH host: its folder is that host's,
+            // which Git on this computer must never touch.
+            view.endpoints.push(crate::endpoint::Endpoint::new(
+                "ssh:box".into(),
+                "Box".into(),
+                sheprd_client::ConnectTarget::Ssh {
+                    target: "box".into(),
+                    session: "work".into(),
+                },
+                true,
+            ));
+            view.selected_endpoint = view.endpoints.len() - 1;
+            assert!(view.kept_checkout().is_none());
+            let rows: Vec<_> = view
+                .workspace_items()
+                .into_iter()
+                .map(|(action, _)| action)
+                .collect();
+            assert!(!rows.contains(&WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree)));
+            assert!(!rows.contains(&WorkspaceMenuAction::Dialog(
+                WorkspaceAction::DeleteWorktree
+            )));
+        })
+    });
+}
+
 mod workflows;
