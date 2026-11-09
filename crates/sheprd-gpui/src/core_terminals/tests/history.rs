@@ -53,6 +53,13 @@ pub(super) fn shown(
         },
     ]);
     let (view, cx, _) = open_on(cx, backend.clone(), false);
+    // Releasing a selection copies nothing here, so a test's history reads
+    // are only the ones it asks for.
+    let quiet = crate::core_terminals::Look {
+        copy_on_select: false,
+        ..super::accessibility::look()
+    };
+    cx.update(|_, cx| view.update(cx, |view, cx| view.set_look(quiet, cx)));
     until(|| {
         cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx)))
             .then_some(())
