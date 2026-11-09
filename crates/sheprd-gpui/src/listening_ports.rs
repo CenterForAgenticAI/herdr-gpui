@@ -9,6 +9,7 @@
 // i18n: migrated
 
 mod core;
+pub(crate) use core::Place;
 mod error;
 mod render;
 mod scan;
@@ -78,6 +79,17 @@ impl Daemon {
             None => target.socket_path().ok().map(Identity::Client),
         };
         Some(Self { host, identity })
+    }
+
+    /// How browser tabs name this daemon, for one on this computer whose
+    /// client socket is known: its herdr-core tabs' workspaces are its own.
+    pub(crate) fn scope(&self) -> Option<crate::browser::Scope> {
+        match (&self.host, &self.identity) {
+            (Host::Local, Some(Identity::Client(socket))) => {
+                Some(crate::browser::Scope::local(socket))
+            }
+            _ => None,
+        }
     }
 
     #[cfg(test)]
@@ -292,11 +304,7 @@ impl ListeningPorts {
                     origin: &reading.origin,
                 })
         });
-        herdr.or_else(|| {
-            (daemon.host == Host::Local)
-                .then(|| self.core_ports(workspace))
-                .flatten()
-        })
+        herdr.or_else(|| self.core_ports(&daemon.scope()?, workspace))
     }
 
     /// The workspace of `daemon` whose pane started the listening process
@@ -309,7 +317,7 @@ impl ListeningPorts {
                 .then_some(owner.workspace.as_str()),
             // Started in a herdr-core terminal of this computer: the
             // workspace whose tab shows it.
-            None if daemon.host == Host::Local => self.core_workspace_of(pid),
+            None if daemon.host == Host::Local => self.core_workspace_of(daemon, pid),
             None => None,
         }
     }

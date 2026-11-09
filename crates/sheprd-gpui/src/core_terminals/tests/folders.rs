@@ -84,7 +84,7 @@ fn only_this_computers_terminals_are_placed_for_its_port_scan() {
     terminals.tabs.insert(TabId::test(1), remote);
     // t1 on the saved host would name an unrelated local terminal t1.
     assert_eq!(
-        terminals.terminal_workspaces(),
-        [("t0".to_owned(), "w".to_owned())]
+        terminals.terminal_workspaces(None),
+        [("t0".to_owned(), (Scope::endpoint("local"), "w".to_owned()))]
     );
 }

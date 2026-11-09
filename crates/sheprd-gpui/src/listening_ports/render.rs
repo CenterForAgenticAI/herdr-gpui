@@ -49,16 +49,17 @@ impl SheprdWindow {
             return None;
         }
         let endpoint = self.endpoints.get(self.selected_endpoint)?;
+        let scope = crate::browser::scope(endpoint);
         // A workspace the app keeps for Herdr 2 in front, as `browser_key`
         // picks it, rather than Herdr's focused one behind it.
         if let Some(kept) = self.kept_in_front() {
-            let listed = self.listening_ports.core_ports(kept)?;
+            let listed = self.listening_ports.core_ports(&scope, kept)?;
             return Some((endpoint.id.as_str(), kept, listed));
         }
         let Some(snapshot) = self.live.snapshot.as_ref() else {
             // A workspace of herdr-core tabs alone, on this computer.
             let workspace = self.core_ports_workspace()?;
-            let listed = self.listening_ports.core_ports(workspace)?;
+            let listed = self.listening_ports.core_ports(&scope, workspace)?;
             return Some((endpoint.id.as_str(), workspace, listed));
         };
         let workspace = snapshot.focused_workspace_id.as_deref()?;
