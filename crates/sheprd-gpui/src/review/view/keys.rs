@@ -111,6 +111,7 @@ impl SheprdWindow {
             return;
         };
         let beside = review.agent.as_ref().map(|agent| agent.pane_id.clone());
+        let core = review.core.clone();
         let found = cx.background_executor().spawn({
             let path = path.clone();
             async move { path.is_file() }
@@ -120,7 +121,14 @@ impl SheprdWindow {
             let _ = this.update(cx, |this, cx| {
                 if found {
                     let target = EditorTarget { path, line };
-                    this.open_in_editor_from(&target, beside.as_deref(), Some(id), cx);
+                    match core {
+                        // The pane the review came from, while its tab
+                        // still holds it.
+                        Some((tab, at)) if this.core_terminals.tab_of(&at) == Some(tab) => {
+                            this.open_in_core_editor(&target, tab, at, cx);
+                        }
+                        _ => this.open_in_editor_from(&target, beside.as_deref(), Some(id), cx),
+                    }
                 } else {
                     let path = path.display().to_string();
                     this.show_flash(Flash::warning(fl!("review-file-gone", path = path)), cx);

@@ -34,7 +34,10 @@ pub enum Error {
     NoRun(i64),
     #[error("no script {} is known; is its repository added with `repo add`?", .0.display())]
     NoScript(PathBuf),
-    #[error("the state database has schema {found}; this herdr-automate reads schema 1")]
+    #[error(
+        "the state database has schema {found}; this herdr-automate reads schema {} and older",
+        crate::store::SCHEMA_VERSION
+    )]
     Schema { found: i64 },
     #[error(transparent)]
     Service(#[from] crate::service::Error),

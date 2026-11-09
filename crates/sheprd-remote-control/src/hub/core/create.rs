@@ -64,7 +64,8 @@ impl Source {
     ) -> Result<String> {
         let root = root.ok_or(worktree::Error::NoHome).map_err(Error::from)?;
         let repository = Path::new(cwd);
-        let checkout = worktree::add(repository, branch, root).map_err(Error::from)?;
+        let checkout =
+            worktree::add(repository, branch, "HEAD", root, || false).map_err(Error::from)?;
         let started = self.open_chat(agent, program, &checkout.to_string_lossy());
         if let Err(error) = &started {
             // A retry must find the branch free, but only a start that

@@ -4,7 +4,7 @@
 //! `origin`, the pane of the agent its notes go to. The review's state lives
 //! in the window: made when the tab is opened or first seen after a restart,
 //! and read off the UI thread from the window's tick, never from drawing.
-use super::{Agent, Layout, Review, State, agent_in, pick_agent, rows, search};
+use super::{Agent, Layout, Review, State, agent_in, review_recipient, rows, search};
 use crate::{
     SheprdWindow,
     browser::{Location, ReviewCheckout, Slot, Store, Tab, TabId},
@@ -31,22 +31,30 @@ impl SheprdWindow {
             self.show_flash(Flash::warning(fl!("review-no-checkout")), cx);
             return;
         };
-        // The workspace whose checkout the Git chip tracks, found the same way.
-        let workspace = self.live.snapshot.as_deref().and_then(|snapshot| {
-            snapshot.focused_workspace_id.clone().or_else(|| {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .find(|workspace| workspace.focused)
-                    .map(|workspace| workspace.workspace_id.clone())
+        // The workspace whose checkout the Git chip tracks, found the same
+        // way; a workspace of herdr-core tabs alone has no Herdr snapshot.
+        let workspace = self
+            .live
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| {
+                snapshot.focused_workspace_id.clone().or_else(|| {
+                    snapshot
+                        .workspaces
+                        .iter()
+                        .find(|workspace| workspace.focused)
+                        .map(|workspace| workspace.workspace_id.clone())
+                })
             })
-        });
+            .or_else(|| self.browser_key().map(|(_, workspace)| workspace));
         let Some(workspace) = workspace else {
             self.show_flash(Flash::warning(fl!("review-no-workspace")), cx);
             return;
         };
         let scope = crate::browser::scope(&self.endpoints[self.selected_endpoint]);
-        let agent = self.live.snapshot.as_deref().and_then(pick_agent);
+        // Read before the review replaces the pane in the active group.
+        let core = self.shown_core_pane(cx);
+        let agent = review_recipient(self.live.snapshot.as_deref(), core.is_some());
         let existing = cx.try_global::<Store>().and_then(|store| {
             store
                 .in_workspace(&scope, &workspace)
@@ -72,11 +80,29 @@ impl SheprdWindow {
         };
         self.dismiss_menu(window, cx);
         self.ensure_review(id, agent, cx);
+        self.aim_review(id, core);
         self.load_review(id, cx);
         self.show_browser_tab(id, window, cx);
         if let Some(review) = self.reviews.get(&id) {
             window.focus(&review.focus, cx);
         }
+    }
+
+    /// Points `id`'s review at the pane it was opened from: the herdr-core
+    /// pane `core`, whose agent Herdr does not know, or with none, Herdr's
+    /// agent, so its editor opens beside whichever opened it last.
+    pub(super) fn aim_review(
+        &mut self,
+        id: TabId,
+        core: Option<(TabId, sheprd_backend::TerminalId)>,
+    ) {
+        let Some(review) = self.reviews.get_mut(&id) else {
+            return;
+        };
+        if core.is_some() {
+            review.agent = None;
+        }
+        review.core = core;
     }
 
     /// Makes `id`'s review from its tab, if the window has none yet; a newly
@@ -259,6 +285,7 @@ impl SheprdWindow {
             base_menu: None,
             split_ratio: rows::EVEN_SPLIT,
             agent,
+            core: None,
             origin: crate::agent_notes::Origin::of(self),
             state: State::Loading,
             starts: vec![0],

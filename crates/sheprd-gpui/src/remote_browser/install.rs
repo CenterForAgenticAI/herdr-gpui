@@ -1,5 +1,5 @@
 //! Puts the `herdr-gpui` shim, and the agent skill naming it, on each saved
-//! SSH host a window connects to, once per run and only when the user chose
+//! SSH host a window connects to, through its Herdr or its herdr-core, once per run and only when the user chose
 //! to install the skill; once they remove it, takes both off again. Like the
 //! local skill, a file is written or removed only where it is missing or
 //! carries this app's marker: a file of the same name the user wrote is left
@@ -112,7 +112,14 @@ impl SheprdWindow {
             let Some((target, _)) = endpoint.saved_ssh() else {
                 continue;
             };
-            if !endpoint.enabled || live.snapshot.is_none() {
+            // Connected to its Herdr, or to its herdr-core alone.
+            let connected = live.snapshot.is_some()
+                || self
+                    .core_terminals
+                    .is_connected(&crate::core_terminals::Host::of(&crate::browser::scope(
+                        endpoint,
+                    )));
+            if !endpoint.enabled || !connected {
                 continue;
             }
             let key = (target.to_owned(), choice);
