@@ -15,7 +15,7 @@ A Herdr daemon owns every terminal, so closing Sheprd leaves your terminals and 
 - **Herdr 1** (`herdr server`) runs terminal tabs and sends Sheprd their cells to draw.
 - **Herdr 2** (herdr-core) streams each terminal's raw output, which Sheprd emulates and draws with the same painter. Every release bundles a pinned herdr-core.
 
-Nothing moves from one to the other: Herdr 1 tabs stay Herdr 1 tabs.
+Nothing moves from one to the other on its own: Herdr 1 tabs stay Herdr 1 tabs. [Teleport](teleport.md) moves a worktree's tabs into another host's Herdr 2 when new terminals use Herdr 2.
 
 To open a Herdr 2 terminal, run **New Herdr 2 Terminal** in the command palette, or `sheprd run new_core_terminal`. To make every new tab a Herdr 2 terminal, turn on **Settings > Tabs > New terminals use Herdr 2**:
 
