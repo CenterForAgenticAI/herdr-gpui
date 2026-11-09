@@ -129,6 +129,7 @@ impl SheprdWindow {
         if let Location::CoreTerminal {
             panes,
             observe: false,
+            ..
         } = location
         {
             for terminal in panes.terminals() {

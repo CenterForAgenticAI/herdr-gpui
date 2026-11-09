@@ -255,10 +255,9 @@ impl CoreTerminals {
 
 impl SheprdWindow {
     /// Takes each hub's outcome. A lost connection ended the workers of its
-    /// host's panes: their views go, so the next sync joins that core again
-    /// and attaches each terminal anew; nothing is started or replayed. A
-    /// pane that held the keyboard has its tab take it back once the new
-    /// view is there.
+    /// host's panes: their views stay with their last frame dimmed, and drop
+    /// what is typed until that core answers again and each terminal is
+    /// attached anew; nothing is started or replayed.
     pub(super) fn poll_core_hubs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = self.forget_stale_core_hosts();
         for host in self.core_terminals.hosts() {
@@ -271,16 +270,23 @@ impl SheprdWindow {
             }
             changed = true;
             if connected && self.core_terminals.backend_of(&host).is_none() {
-                if let Some((tab, _)) = self.core_terminals.focused_pane(window, cx)
-                    && self.core_terminals.host_of(tab) == host
-                {
-                    self.core_terminals.focus_wanted = Some(tab);
-                }
-                let terminals = &mut self.core_terminals;
-                let tabs = &terminals.tabs;
-                terminals
+                let terminals = &self.core_terminals;
+                let fallback = (host == Host::Local)
+                    .then(|| match &terminals.fallback {
+                        super::fallback::Fallback::Shown(view) => Some(view.clone()),
+                        _ => None,
+                    })
+                    .flatten();
+                let views: Vec<_> = terminals
                     .views
-                    .retain(|(tab, _), _| tabs.get(tab).is_none_or(|shown| shown.host != host));
+                    .iter()
+                    .filter(|((tab, _), _)| terminals.host_of(*tab) == host)
+                    .map(|(_, view)| view.clone())
+                    .chain(fallback)
+                    .collect();
+                for view in views {
+                    view.update(cx, |view, cx| view.set_stale(cx));
+                }
             }
             let failed = match self.core_terminals.hub_of(&host).map(Hub::state) {
                 Some(State::Unavailable(error)) => Some(std::sync::Arc::clone(error)),

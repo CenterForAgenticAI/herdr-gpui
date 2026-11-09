@@ -60,13 +60,24 @@ pub(super) fn project(
             .filter_map(|id| records.iter().find(|record| record.address == id.as_str()))
             .filter(|record| assigned.insert(record.address.as_str()))
             .collect();
-        if let Some(terminal) = terminal(
+        if let Some(mut terminal) = terminal(
             boot,
             &format!("{}{}", super::saved::SAVED_TAB, tab.id),
             tab.title,
             &members,
             urgency,
         ) {
+            // A pane the user named shows that name, a chat's included.
+            let names = saved
+                .zip(scope)
+                .and_then(|(saved, scope)| saved.pane_names(scope, tab.id));
+            if let Some(names) = names {
+                for (pane, record) in terminal.panes.iter_mut().zip(&members) {
+                    if let Some(name) = names.get(&record.address) {
+                        pane.label = Some(name.clone());
+                    }
+                }
+            }
             add(&mut layout, tab.workspace_id, terminal);
         }
     }

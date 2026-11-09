@@ -227,6 +227,100 @@ impl Node {
         }
     }
 
+    /// Puts `b` where `a` was and `a` where `b` was.
+    fn swap(&mut self, a: &TerminalId, b: &TerminalId) {
+        match self {
+            Self::Leaf(leaf) if leaf == a => *leaf = b.clone(),
+            Self::Leaf(leaf) if leaf == b => *leaf = a.clone(),
+            Self::Leaf(_) => {}
+            Self::Split { first, second, .. } => {
+                first.swap(a, b);
+                second.swap(a, b);
+            }
+        }
+    }
+
+    /// How many panes lie side by side along `axis`: a split along it adds
+    /// its sides up, anything else counts once.
+    fn span(&self, axis: Axis) -> u16 {
+        match self {
+            Self::Split {
+                axis: own,
+                first,
+                second,
+                ..
+            } if *own == axis => first.span(axis).saturating_add(second.span(axis)),
+            _ => 1,
+        }
+    }
+
+    /// Gives every pane along each split an equal part; true when anything
+    /// changed. A run of splits along one axis is rebuilt as a balanced
+    /// tree, keeping its panes in order, so that each split's share stays
+    /// within the bounds even with every pane in one row.
+    fn equalize(&mut self) -> bool {
+        let Self::Split { axis, .. } = *self else {
+            return false;
+        };
+        let mut run = Vec::new();
+        self.run(axis, &mut run);
+        let Some(balanced) = Self::balanced(axis, run) else {
+            return false;
+        };
+        let changed = *self != balanced;
+        *self = balanced;
+        changed
+    }
+
+    /// The parts side by side along `axis`, in order: splits along it are
+    /// opened up, anything else is one part.
+    fn run(&self, axis: Axis, out: &mut Vec<Self>) {
+        match self {
+            Self::Split {
+                axis: own,
+                first,
+                second,
+                ..
+            } if *own == axis => {
+                first.run(axis, out);
+                second.run(axis, out);
+            }
+            _ => out.push(self.clone()),
+        }
+    }
+
+    /// `parts` side by side along `axis`, each as wide as the panes across
+    /// it, cut where the two halves come closest to even.
+    fn balanced(axis: Axis, mut parts: Vec<Self>) -> Option<Self> {
+        if parts.len() < 2 {
+            let mut part = parts.pop()?;
+            part.equalize();
+            return Some(part);
+        }
+        let spans: Vec<u32> = parts
+            .iter()
+            .map(|part| u32::from(part.span(axis)))
+            .collect();
+        let total: u32 = spans.iter().sum();
+        let (mut cut, mut before, mut best) = (1, 0, u32::MAX);
+        let mut prefix = 0;
+        for (index, span) in spans.iter().enumerate().take(spans.len() - 1) {
+            prefix += span;
+            let gap = (2 * prefix).abs_diff(total);
+            if gap < best {
+                (cut, before, best) = (index + 1, prefix, gap);
+            }
+        }
+        let second = parts.split_off(cut);
+        let share = u16::try_from(before * 1000 / total.max(1)).unwrap_or(HALF);
+        Some(Self::Split {
+            axis,
+            share: Share::from(share),
+            first: Box::new(Self::balanced(axis, parts)?),
+            second: Box::new(Self::balanced(axis, second)?),
+        })
+    }
+
     fn rects(&self, rect: Rect, out: &mut Vec<(TerminalId, Rect)>) {
         match self {
             Self::Leaf(id) => out.push((id.clone(), rect)),
@@ -427,6 +521,36 @@ impl Panes {
         let changed = moved != *share;
         *share = moved;
         changed
+    }
+
+    /// Trades the places of panes `a` and `b`; false unless both are here
+    /// and differ.
+    pub fn swap(&mut self, a: &TerminalId, b: &TerminalId) -> bool {
+        if a == b || !self.contains(a) || !self.contains(b) {
+            return false;
+        }
+        self.root.swap(a, b);
+        true
+    }
+
+    /// Sizes the panes so those side by side along a split share it
+    /// equally; true when anything moved.
+    pub fn equalize(&mut self) -> bool {
+        self.root.equalize()
+    }
+
+    /// The pane after `id` in layout order, or before it when not
+    /// `forward`, wrapping around at either end.
+    pub fn cycle(&self, id: &TerminalId, forward: bool) -> Option<TerminalId> {
+        let terminals = self.terminals();
+        let index = terminals.iter().position(|pane| *pane == id)?;
+        let count = terminals.len();
+        let next = if forward {
+            (index + 1) % count
+        } else {
+            (index + count - 1) % count
+        };
+        Some(terminals[next].clone())
     }
 
     /// Each pane's part of the unit square.
