@@ -24,12 +24,14 @@ impl SheprdWindow {
             .position(|endpoint| !endpoint.connection.target.is_remote())
     }
 
-    /// Rebuilds the herdr-core session of this computer's host from the
-    /// store's workspaces and tabs, the shell shown in place of Herdr 1, and
-    /// what the core last reported. Whether it changed.
+    /// Rebuilds the herdr-core sessions from the store's workspaces and
+    /// tabs, the shell shown in place of Herdr 1, and what each core last
+    /// reported: this computer's, and each saved host's whose workspaces
+    /// the app keeps there. Whether any changed.
     pub(crate) fn refresh_core_session(&mut self, cx: &mut App) -> bool {
         let mut checkouts_changed = false;
-        let built = self.core_host().map(|index| {
+        let mut built = Vec::new();
+        if let Some(index) = self.core_host() {
             let scope = scope(&self.endpoints[index]);
             self.keep_default_workspace(self.live_at(index).missing_installation, &scope, cx);
             let mut folders: Vec<String> =
@@ -52,23 +54,37 @@ impl SheprdWindow {
                 .poll(folders, std::time::Instant::now());
             let session = cx
                 .try_global::<Store>()
-                .map(|store| self.core_session_of(index, store, &scope, cx))
+                .map(|store| self.core_session_of(Some(index), store, &scope, cx))
                 .unwrap_or_default();
-            (scope, Arc::new(session))
-        });
-        let unchanged = match (&self.core_terminals.session, &built) {
-            (Some((old_scope, old)), Some((scope, new))) => old_scope == scope && old == new,
-            (None, None) => true,
-            _ => false,
-        };
+            built.push((scope, Arc::new(session)));
+        }
+        if let Some(store) = cx.try_global::<Store>() {
+            for scope in self.remote_core_scopes(store) {
+                let session = self.core_session_of(None, store, &scope, cx);
+                built.push((scope, Arc::new(session)));
+            }
+        }
+        let unchanged = self.core_terminals.sessions == built;
         if !unchanged {
             let agents = built.iter().flat_map(|(_, session)| &session.agents);
             self.core_terminals
                 .recency
                 .observe(agents.map(|agent| (agent.pane.as_str(), agent.status)));
-            self.core_terminals.session = built;
+            self.core_terminals.sessions = built;
         }
         !unchanged || checkouts_changed
+    }
+
+    /// The saved hosts whose workspaces the app keeps for their herdr-core,
+    /// in the window's order. Their sessions are built whether or not the
+    /// host is shown, so the device tree lists them too.
+    fn remote_core_scopes(&self, store: &Store) -> Vec<Scope> {
+        self.endpoints
+            .iter()
+            .filter(|endpoint| endpoint.connection.target.is_remote())
+            .map(scope)
+            .filter(|scope| store.kept_workspaces(scope).next().is_some())
+            .collect()
     }
 
     pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {
@@ -79,11 +95,23 @@ impl SheprdWindow {
         }
     }
 
-    fn core_session_of(&self, index: usize, store: &Store, scope: &Scope, cx: &App) -> Session {
+    /// The session over the core `scope`'s workspaces start in. `local` is
+    /// this computer's host, whose folders Git reads here and whose shell
+    /// may stand in for Herdr 1; a saved host's has neither.
+    fn core_session_of(
+        &self,
+        local: Option<usize>,
+        store: &Store,
+        scope: &Scope,
+        cx: &App,
+    ) -> Session {
         let checkouts = &self.core_terminals.checkouts;
+        let host = super::Host::of(scope);
         let workspaces = store.kept_workspaces(scope).map(|saved| {
             let mut workspace = CoreWorkspace::from(saved);
-            if let Some(checkout) = checkouts.get(&saved.cwd) {
+            if local.is_some()
+                && let Some(checkout) = checkouts.get(&saved.cwd)
+            {
                 workspace.branch = checkout.branch.as_deref();
                 workspace.worktree = Some(Worktree {
                     key: checkout.key.clone(),
@@ -94,11 +122,9 @@ impl SheprdWindow {
             workspace
         });
         // The shell shown in place of Herdr 1 is no tab, but runs agents too.
-        let shell = self
-            .live_at(index)
-            .missing_installation
-            .then(|| self.core_fallback_view())
-            .flatten()
+        let shell = local
+            .filter(|index| self.live_at(*index).missing_installation)
+            .and_then(|_| self.core_fallback_view())
             .map(|view| Panes::single(view.read(cx).terminal().clone()));
         let tabs = store
             .in_scope(scope)
@@ -128,14 +154,14 @@ impl SheprdWindow {
             .filter(|(front, _)| front == scope)
             .map(|(_, id)| id.as_str());
         let mut session = Session::core(workspaces, tabs, focused, |terminal| {
-            self.core_terminals.reported(terminal)
+            self.core_terminals.reported(&host, terminal)
         });
         // Which agent each is, and what to call it, by the policy the
         // Overview and the attention service name agents with.
         for agent in &mut session.agents {
             let Some(info) = TerminalId::new(agent.pane.as_str())
                 .ok()
-                .and_then(|terminal| self.core_terminals.reported(&terminal))
+                .and_then(|terminal| self.core_terminals.reported(&host, &terminal))
             else {
                 continue;
             };
@@ -173,7 +199,9 @@ impl SheprdWindow {
             return;
         };
         let scope = scope(&self.endpoints[index]);
-        self.core_terminals.session = Some((scope, Arc::new(session)));
+        let sessions = &mut self.core_terminals.sessions;
+        sessions.retain(|(known, _)| *known != scope);
+        sessions.insert(0, (scope, Arc::new(session)));
     }
 
     /// The Herdr 2 terminal the user is in, for the agent steps to start
@@ -210,16 +238,15 @@ impl SheprdWindow {
         self.core_terminals.views.clear();
     }
 
-    /// This computer's Herdr 2 agents as the sidebar lists them, while the
-    /// host of its herdr-core session is the one at `index`.
+    /// The Herdr 2 agents of the host at `index` as the sidebar lists them,
+    /// while the app keeps a session over that host's core.
     pub(crate) fn listed_core_agents(
         &self,
         index: usize,
     ) -> Option<crate::sidebar::CoreAgents<'_>> {
-        let (core_scope, session) = self.core_terminals.session.as_ref()?;
-        if *core_scope != scope(self.endpoints.get(index)?) {
-            return None;
-        }
+        let scope = scope(self.endpoints.get(index)?);
+        let session = self.core_terminals.session_of(&scope)?;
+        let host = super::Host::of(&scope);
         let shown = self
             .core_terminals
             .shown
@@ -235,35 +262,35 @@ impl SheprdWindow {
                 snapshot,
                 info: TerminalId::new(agent.pane.as_str())
                     .ok()
-                    .and_then(|terminal| self.core_terminals.reported(&terminal)),
+                    .and_then(|terminal| self.core_terminals.reported(&host, &terminal)),
                 focused: shown == Some(agent.pane.as_str()),
             })
             .collect();
         Some(crate::sidebar::CoreAgents {
             index,
-            answers: self.core_terminals.hub.backend().is_some(),
+            answers: self.core_terminals.backend_of(&host).is_some(),
             agents,
             recency: &self.core_terminals.recency,
         })
     }
 
     /// The sessions of the host at `index`: Herdr 1's, and herdr-core's
-    /// when the host is this computer.
+    /// when the app keeps a session over that host's core.
     pub(crate) fn sessions(&self, index: usize) -> Sessions {
         let live = if index == self.selected_endpoint {
             &self.live
         } else {
             &self.endpoints[index].live
         };
-        let core = self
+        let scope = scope(&self.endpoints[index]);
+        let core = self.core_terminals.session_of(&scope).cloned();
+        let core_answers = self
             .core_terminals
-            .session
-            .as_ref()
-            .filter(|(core_scope, _)| *core_scope == scope(&self.endpoints[index]))
-            .map(|(_, session)| session.clone());
+            .backend_of(&super::Host::of(&scope))
+            .is_some();
         Sessions {
             core,
-            core_answers: self.core_terminals.hub.backend().is_some(),
+            core_answers,
             herdr_1: live.session(),
         }
     }
