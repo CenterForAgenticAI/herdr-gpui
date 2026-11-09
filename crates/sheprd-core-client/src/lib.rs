@@ -5,6 +5,7 @@
 pub mod agent;
 mod backend;
 mod connection;
+pub mod convert;
 mod endpoint;
 mod error;
 pub mod event;
@@ -12,6 +13,7 @@ pub mod frame;
 pub mod hello;
 mod identity;
 mod method;
+pub mod reply;
 mod start;
 mod stream;
 pub mod wire;

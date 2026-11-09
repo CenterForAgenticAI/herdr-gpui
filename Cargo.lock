@@ -9141,6 +9141,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sheprd-backend",
+ "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-protocol",
  "sheprd-terminal",
