@@ -43,3 +43,27 @@ async fn a_follower_without_a_signal_still_reads_on_the_timer() {
         .await
         .expect("the regular read");
 }
+
+#[tokio::test]
+async fn a_follower_hears_only_its_own_device_type() {
+    let typed = Typed::default();
+    let phone = DeviceId("phone".to_owned());
+    let other = DeviceId("other".to_owned());
+    let mut mine = typed.pace_for("p1", &phone);
+    let mut theirs = typed.pace_for("p1", &other);
+    let mut web = typed.pace("p1");
+    typed.typed_by("p1", &phone);
+    for pace in [&mut mine, &mut theirs, &mut web] {
+        timeout(SOONER, pace.wait())
+            .await
+            .expect("an echo read for every follower");
+    }
+    assert!(mine.typed_here());
+    assert!(!mine.typed_here(), "told once");
+    assert!(!theirs.typed_here());
+    assert!(!web.typed_here());
+    // A read the daemon asks for itself is nobody's typing.
+    typed.typed("p1");
+    timeout(SOONER, mine.wait()).await.expect("the read");
+    assert!(!mine.typed_here());
+}
