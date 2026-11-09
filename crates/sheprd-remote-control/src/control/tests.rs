@@ -3,6 +3,7 @@ use serde_json::json;
 
 mod addresses;
 mod changes;
+mod layout;
 mod pull_requests;
 
 #[test]

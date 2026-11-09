@@ -61,30 +61,22 @@ impl SheprdWindow {
         let mut missing: Vec<(TabId, TerminalId, Role, Host)> = Vec::new();
         let mut overflow = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
-            let Some(
-                location @ Location::CoreTerminal {
-                    panes,
-                    observe,
-                    active,
-                    zoomed,
-                },
-            ) = &tab.location
-            else {
+            let Some(location) = &tab.location else {
                 continue;
             };
-            let shown = self.core_terminals.tabs.entry(tab.id).or_insert_with(|| {
-                let mut shown = TabPanes::restore(
-                    Host::of(&tab.scope),
-                    panes.clone(),
-                    *observe,
-                    active.as_ref(),
-                    zoomed.as_ref(),
-                );
-                shown.saved = Some(location.clone());
-                shown
-            });
+            let shown = match self.core_terminals.tabs.entry(tab.id) {
+                std::collections::hash_map::Entry::Occupied(shown) => shown.into_mut(),
+                std::collections::hash_map::Entry::Vacant(place) => {
+                    let Some(mut restored) = TabPanes::restore(Host::of(&tab.scope), location)
+                    else {
+                        continue;
+                    };
+                    restored.saved = Some(location.clone());
+                    place.insert(restored)
+                }
+            };
             // Each window holds its own copy: one another window saved over
-            // is read again before this one can save.
+            // is read again, names and all, before this one can save.
             if shown.saved.as_ref() != Some(location) {
                 overflow.extend(shown.refresh(location));
             }
@@ -283,11 +275,21 @@ impl SheprdWindow {
             .tabs
             .iter()
             .filter_map(|(tab, shown)| {
+                // A name the user gave stands over the program's title.
+                if let Some(name) = &shown.name {
+                    return Some((*tab, name.clone()));
+                }
                 let view = self
                     .core_terminals
                     .views
                     .get(&(*tab, shown.active.clone()))?;
-                Some((*tab, view.read(cx).title()?.to_owned()))
+                // Without a title of its program's, the tab's default stands,
+                // so a name the user cleared does not linger.
+                let title = view
+                    .read(cx)
+                    .title()
+                    .map_or_else(|| shown.location().default_title(), str::to_owned);
+                Some((*tab, title))
             })
             .collect();
         for (tab, title) in titles {

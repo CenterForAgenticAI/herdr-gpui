@@ -103,6 +103,8 @@ impl CoreTerminalView {
                 });
                 let modifiers = reported(event.modifiers, bare);
                 self.report(ClientMouseKind::Down(pressed), cell, modifiers, 1);
+                // The program took the click, so the pane's menu stays shut.
+                cx.stop_propagation();
             }
             return;
         }

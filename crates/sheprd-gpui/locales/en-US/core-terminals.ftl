@@ -25,6 +25,8 @@ core-terminals-state-done = done
 core-terminals-state-idle = idle
 core-terminals-state-working = working
 core-terminals-mirror-needs-pane = Click a Herdr 2 pane to mirror first
+# The pane menu's row that opens a watch-only view of the pane in a new tab.
+core-terminals-menu-mirror = Mirror in New Tab
 # A pane or tab command a Herdr 2 pane cannot run.
 core-terminals-unsupported = Herdr 2 panes cannot do this yet
 # Shown on a watch-only view of a terminal another view types into.

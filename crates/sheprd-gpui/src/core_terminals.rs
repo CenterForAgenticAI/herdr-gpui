@@ -24,6 +24,7 @@ mod hosts;
 mod hub;
 mod infos;
 pub(crate) mod install;
+pub(crate) mod menu;
 mod phone;
 mod requests;
 mod screen;
@@ -56,6 +57,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use panes::{Axis, Panes};
 use sheprd_backend::{Backend as _, Spawn, TerminalId, TerminalInfo};
+use sheprd_client::protocol::AgentStatus;
 use std::collections::{HashMap, VecDeque};
 
 /// The workspace of a window with no Herdr 1 installed. herdr-core has no
@@ -92,6 +94,11 @@ struct TabPanes {
     /// A mirror tab only watches: it neither types nor splits.
     observe: bool,
     panes: Panes,
+    /// The name the user gave the tab, which its program's title does not
+    /// replace.
+    name: Option<String>,
+    /// Names the user gave panes.
+    names: std::collections::BTreeMap<TerminalId, String>,
     /// The pane in use before the current one, which Last Pane goes back to.
     previous: Option<TerminalId>,
     /// The folder the tab's first pane was first seen in, kept when its
@@ -123,6 +130,8 @@ impl TabPanes {
     fn new(host: Host, panes: Panes, observe: bool) -> Self {
         Self {
             active: panes.first().clone(),
+            name: None,
+            names: Default::default(),
             host,
             observe,
             panes,
@@ -136,27 +145,43 @@ impl TabPanes {
         }
     }
 
-    /// The tab as it was saved: its pane in use, and the pane filling it
-    /// already zoomed rather than growing as the window opens. A pane the
-    /// layout no longer holds is ignored.
-    fn restore(
-        host: Host,
-        panes: Panes,
-        observe: bool,
-        active: Option<&TerminalId>,
-        zoomed: Option<&TerminalId>,
-    ) -> Self {
-        let mut shown = Self::new(host, panes, observe);
-        if let Some(active) = active.filter(|active| shown.panes.contains(active)) {
+    /// The tab as it was saved: its pane in use, the pane filling it
+    /// already zoomed rather than growing as the window opens, and the names
+    /// the user gave. A pane the layout no longer holds is ignored.
+    fn restore(host: Host, location: &Location) -> Option<Self> {
+        let Location::CoreTerminal {
+            panes,
+            observe,
+            active,
+            zoomed,
+            name,
+            names,
+        } = location
+        else {
+            return None;
+        };
+        let mut shown = Self::new(host, panes.clone(), *observe);
+        shown.name.clone_from(name);
+        shown.names = names
+            .iter()
+            .filter(|(terminal, _)| shown.panes.contains(terminal))
+            .map(|(terminal, name)| (terminal.clone(), name.clone()))
+            .collect();
+        if let Some(active) = active
+            .as_ref()
+            .filter(|active| shown.panes.contains(active))
+        {
             shown.active = active.clone();
         }
-        if let Some(zoomed) = zoomed.filter(|zoomed| shown.panes.contains(zoomed))
+        if let Some(zoomed) = zoomed
+            .as_ref()
+            .filter(|zoomed| shown.panes.contains(zoomed))
             && shown.panes.count() > 1
         {
             shown.zoomed = Some(zoomed.clone());
             shown.zoom.set(true, crate::motion::now(), true);
         }
-        shown
+        Some(shown)
     }
 
     /// Takes `location`, saved by another window since this one last read
@@ -169,41 +194,50 @@ impl TabPanes {
     /// is kept. The pane in use is this window's, where the keyboard is;
     /// a zoom stands only on that pane, so commands never reach a pane
     /// hidden behind another.
+    ///
     /// Returns the other window's new panes this tab had no room left for.
     #[must_use]
     fn refresh(&mut self, location: &Location) -> Vec<TerminalId> {
-        let Location::CoreTerminal {
-            panes,
-            observe,
-            active,
-            zoomed,
-        } = location
-        else {
+        let Some(mut fresh) = Self::restore(self.host.clone(), location) else {
             return Vec::new();
         };
-        let base = match &self.saved {
-            Some(Location::CoreTerminal { panes, .. }) => Some(panes.clone()),
-            _ => None,
+        let Some(Location::CoreTerminal {
+            panes: base,
+            name: base_name,
+            names: base_names,
+            ..
+        }) = &self.saved
+        else {
+            *self = fresh;
+            return Vec::new();
         };
-        let mut fresh = Self::restore(
-            self.host.clone(),
-            panes.clone(),
-            *observe,
-            active.as_ref(),
-            zoomed.as_ref(),
-        );
         let mut overflow = Vec::new();
-        if let Some(base) = base
-            && self.panes != base
-        {
-            fresh.panes = if *panes == base {
+        if self.panes != *base {
+            fresh.panes = if fresh.panes == *base {
                 self.panes.clone()
             } else {
-                let (panes, left) = merged(&self.panes, &base, panes, &self.active);
+                let (panes, left) = merged(&self.panes, base, &fresh.panes, &self.active);
                 overflow = left;
                 panes
             };
         }
+        // Names this window changed since it last read the tab stand too,
+        // pane by pane, so a name given here and one given there both do.
+        if self.name != *base_name {
+            fresh.name = self.name.take();
+        }
+        let touched = (self.names.keys())
+            .chain(base_names.keys())
+            .filter(|terminal| self.names.get(*terminal) != base_names.get(*terminal));
+        for terminal in touched.cloned().collect::<Vec<_>>() {
+            match self.names.get(&terminal) {
+                Some(name) => fresh.names.insert(terminal, name.clone()),
+                None => fresh.names.remove(&terminal),
+            };
+        }
+        fresh
+            .names
+            .retain(|terminal, _| fresh.panes.contains(terminal));
         if fresh.panes.contains(&self.active) {
             fresh.active = self.active.clone();
         } else if !fresh.panes.contains(&fresh.active) {
@@ -246,6 +280,13 @@ impl TabPanes {
             observe: self.observe,
             active: Some(self.active.clone()),
             zoomed: self.zoomed.clone().filter(|_| self.zoom.is_open()),
+            name: self.name.clone(),
+            names: self
+                .names
+                .iter()
+                .filter(|(terminal, _)| self.panes.contains(terminal))
+                .map(|(terminal, name)| (terminal.clone(), name.clone()))
+                .collect(),
         }
     }
 
@@ -443,6 +484,22 @@ impl CoreTerminals {
             .iter()
             .find(|(_, shown)| shown.holds_chats() && shown.panes.contains(terminal))
             .map(|(id, _)| *id)
+    }
+
+    /// How the agents in `panes` on `host` are doing, as their tab's mark
+    /// shows it: the status that most wants attention, or unknown with no
+    /// agent. Terminal ids are only unique within a host.
+    pub(crate) fn tab_status(&self, host: &Host, panes: &Panes) -> AgentStatus {
+        let Some(infos) = self.infos_of(host) else {
+            return AgentStatus::Unknown;
+        };
+        panes
+            .terminals()
+            .into_iter()
+            .filter_map(|terminal| infos.get(terminal))
+            .map(|info| info.agent)
+            .max_by_key(|status| crate::sidebar::status_priority(*status))
+            .unwrap_or(AgentStatus::Unknown)
     }
 
     /// Whether a tab on this computer's core shows `terminal`, a mirror

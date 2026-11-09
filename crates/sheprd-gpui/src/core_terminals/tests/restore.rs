@@ -29,22 +29,7 @@ fn the_pane_in_use_and_the_zoom_save_and_come_back() {
     let saved = serde_json::to_string(&location).unwrap();
     let read: Location = serde_json::from_str(&saved).unwrap();
     assert_eq!(read, location);
-    let Location::CoreTerminal {
-        panes,
-        observe,
-        active,
-        zoomed,
-    } = read
-    else {
-        panic!("a terminal tab");
-    };
-    let restored = TabPanes::restore(
-        Host::Local,
-        panes,
-        observe,
-        active.as_ref(),
-        zoomed.as_ref(),
-    );
+    let restored = TabPanes::restore(Host::Local, &read).unwrap();
     assert_eq!(restored.active, id("t2"));
     assert_eq!(restored.zoomed, Some(id("t2")));
     // Already zoomed as the window opens, not growing.
@@ -64,47 +49,60 @@ fn an_unzoomed_tab_saves_no_zoom() {
     assert_eq!(zoomed, None);
 }
 
+fn saved(panes: Panes, active: Option<&str>, zoomed: Option<&str>) -> Location {
+    let Location::CoreTerminal {
+        panes,
+        observe,
+        name,
+        names,
+        ..
+    } = Location::core_terminal(panes, false)
+    else {
+        unreachable!();
+    };
+    Location::CoreTerminal {
+        panes,
+        observe,
+        active: active.map(id),
+        zoomed: zoomed.map(id),
+        name,
+        names,
+    }
+}
+
 #[test]
 fn panes_the_layout_no_longer_holds_are_ignored() {
-    let restored = TabPanes::restore(
-        Host::Local,
-        split(),
-        false,
-        Some(&id("t9")),
-        Some(&id("t9")),
-    );
+    let restored = TabPanes::restore(Host::Local, &saved(split(), Some("t9"), Some("t9"))).unwrap();
     assert_eq!(restored.active, id("t1"));
     assert!(!restored.zoom.is_open());
     // One pane has nothing to zoom over.
     let single = TabPanes::restore(
         Host::Local,
-        Panes::single(id("t1")),
-        false,
-        None,
-        Some(&id("t1")),
-    );
+        &saved(Panes::single(id("t1")), None, Some("t1")),
+    )
+    .unwrap();
     assert!(!single.zoom.is_open());
+}
+
+#[test]
+fn names_save_and_come_back_for_panes_still_there() {
+    let mut shown = TabPanes::new(Host::Local, split(), false);
+    shown.name = Some("build".into());
+    shown.names.insert(id("t2"), "tests".into());
+    shown.names.insert(id("t9"), "gone".into());
+    let location = shown.location();
+    let read: Location = serde_json::from_str(&serde_json::to_string(&location).unwrap()).unwrap();
+    let restored = TabPanes::restore(Host::Local, &read).unwrap();
+    assert_eq!(restored.name.as_deref(), Some("build"));
+    assert_eq!(restored.names.len(), 1);
+    assert_eq!(restored.names[&id("t2")], "tests");
 }
 
 #[test]
 fn a_tab_saved_without_them_starts_on_its_first_pane() {
     let saved = r#"{"kind":"core_terminal","panes":{"axis":"row","first":"t1","second":"t2"}}"#;
-    let Location::CoreTerminal {
-        panes,
-        observe,
-        active,
-        zoomed,
-    } = serde_json::from_str(saved).unwrap()
-    else {
-        panic!("a terminal tab");
-    };
-    let restored = TabPanes::restore(
-        Host::Local,
-        panes,
-        observe,
-        active.as_ref(),
-        zoomed.as_ref(),
-    );
+    let restored = TabPanes::restore(Host::Local, &serde_json::from_str(saved).unwrap()).unwrap();
+    assert!(restored.name.is_none() && restored.names.is_empty());
     assert_eq!(restored.active, id("t1"));
     assert!(!restored.zoom.is_open());
 }

@@ -137,15 +137,16 @@ impl SheprdWindow {
             Command::MirrorCorePane => self.mirror_core_pane(tab, terminal, window, cx),
             // The last pane closes as its tab does: the window's own close.
             Command::ClosePane if shown.panes.count() > 1 => {
-                // A mirror's pane stops watching; the terminal runs on.
-                let (mirror, host) = (shown.observe, shown.host.clone());
-                if self.remove_core_pane(tab, &terminal, window, cx) && !mirror {
-                    self.end_core_terminal(&host, terminal);
-                }
+                self.close_core_pane(tab, terminal, window, cx)
+            }
+            Command::RenameTab => self.rename_core(super::menu::Target::Tab(tab), window, cx),
+            // A mirror's pane is named where it types.
+            Command::RenamePane if !shown.observe => {
+                self.rename_core(super::menu::Target::Pane { tab, terminal }, window, cx)
             }
             // Pane and tab commands herdr-core panes cannot run yet say so,
             // rather than reaching the Herdr pane behind them.
-            Command::RenamePane | Command::RenameTab | Command::MovePane => {
+            Command::RenamePane | Command::MovePane => {
                 self.show_flash(Flash::warning(fl!("core-terminals-unsupported")), cx);
             }
             _ => return false,
@@ -155,7 +156,7 @@ impl SheprdWindow {
 
     /// Opens a watch-only view of `terminal` in a new tab of `tab`'s
     /// workspace, which a second group can show beside the first.
-    fn mirror_core_pane(
+    pub(super) fn mirror_core_pane(
         &mut self,
         tab: TabId,
         terminal: TerminalId,
