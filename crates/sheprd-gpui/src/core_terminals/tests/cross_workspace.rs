@@ -173,3 +173,23 @@ fn a_mirror_tab_stays_where_it_is(cx: &mut gpui::TestAppContext) {
     let moves = cx.update(|_, cx| view.read(cx).core_tab_moves(tab));
     assert!(moves.is_empty());
 }
+
+#[gpui::test]
+fn a_tab_another_window_moved_reads_its_new_workspace(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = window(cx, true);
+    let tab = kept_tab(&view, cx, &["t1"]);
+    let before = view.read_with(cx, |view, _| {
+        view.core_terminals.tab_workspace(tab).cloned().unwrap()
+    });
+    // Another window moved it: only the shared store says so.
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            assert!(Store::update(cx, |store| store.move_to_workspace(tab, "w1")));
+            view.sync_core_views(cx);
+        })
+    });
+    let after = view.read_with(cx, |view, _| {
+        view.core_terminals.tab_workspace(tab).cloned().unwrap()
+    });
+    assert_eq!(after, (before.0, "w1".to_owned()));
+}
