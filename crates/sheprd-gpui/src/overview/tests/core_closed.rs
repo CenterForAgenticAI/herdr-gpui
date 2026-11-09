@@ -120,7 +120,11 @@ fn a_herdr_2_agent_being_reopened_stays_listed_until_it_is_back() {
     closed.observe_core(Vec::new(), at(20), |_| false);
     // The older of the two is reopened.
     let id = closed.agents().last().unwrap().id;
-    closed.reopening(id);
+    let asked = std::time::Instant::now();
+    closed.reopening(id, asked);
+    // Another Reopen waits for this start, but not forever.
+    assert!(closed.is_reopening(id, asked));
+    assert!(!closed.is_reopening(id, asked + Duration::from_secs(60)));
     // Its start failed: nothing turns up, and it can be tried again.
     closed.observe_core(Vec::new(), at(30), |_| false);
     assert!(closed.get(id).is_some());

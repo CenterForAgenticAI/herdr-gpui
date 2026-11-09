@@ -246,12 +246,17 @@ fn agent_left(terminal: &Terminal) -> bool {
     if sheprd_client::herdr::AgentKind::identify(Some(status.app.trim()), "", &[]).is_none() {
         return false;
     }
-    let own_program_in_front = terminal
-        .pid
-        .zip(terminal.foreground.as_ref())
-        .is_some_and(|(pid, front)| front.pid == pid);
+    let Some(front) = terminal
+        .foreground
+        .as_ref()
+        .filter(|front| terminal.pid == Some(front.pid))
+    else {
+        return false;
+    };
+    // The process in front may be an agent the shell became (`exec claude`),
+    // which keeps the shell's pid.
     let program = terminal.argv.first().map_or("", String::as_str);
-    own_program_in_front
+    sheprd_client::herdr::AgentKind::identify(None, &front.name, &front.argv).is_none()
         && sheprd_client::herdr::AgentKind::identify(None, program, &terminal.argv).is_none()
 }
 

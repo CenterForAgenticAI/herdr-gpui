@@ -203,6 +203,10 @@ impl SheprdWindow {
         let Some(agent) = self.overview.closed.get(id) else {
             return;
         };
+        if self.overview.closed.is_reopening(id, Instant::now()) {
+            self.show_flash(Flash::warning(fl!("overview-tab-opening")), cx);
+            return;
+        }
         let (Some(kind), Some(workspace)) = (kind(agent), agent.workspace.clone()) else {
             return;
         };
@@ -238,7 +242,7 @@ impl SheprdWindow {
         );
         // The start is only queued and may fail, as in a folder since
         // removed: the entry stays for another try until the agent is back.
-        self.overview.closed.reopening(id);
+        self.overview.closed.reopening(id, Instant::now());
         cx.notify();
     }
 

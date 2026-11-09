@@ -119,6 +119,12 @@ fn an_agent_that_quit_to_its_shell_is_no_agent() {
     value["foreground"] = json!({"pid": 100, "name": "claude", "argv": ["claude"], "cwd": ""});
     let own = info(&record(value.clone())).unwrap();
     assert_eq!(crate::agent_kind(&own), Some(AgentKind::Claude));
+    // The shell became the agent (`exec claude`): same pid, the agent in front.
+    value["argv"] = json!(["zsh"]);
+    value["foreground"] = json!({"pid": 100, "name": "claude", "argv": ["claude"], "cwd": ""});
+    let exec = info(&record(value.clone())).unwrap();
+    assert_eq!(crate::agent_kind(&exec), Some(AgentKind::Claude));
+    assert_eq!(exec.agent, sheprd_backend::AgentStatus::Idle);
     // A report from a program Sheprd does not know stands.
     value["argv"] = json!(["zsh"]);
     value["foreground"] = json!({"pid": 100, "name": "zsh", "argv": ["zsh"], "cwd": ""});
