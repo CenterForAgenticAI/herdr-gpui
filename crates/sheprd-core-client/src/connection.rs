@@ -32,7 +32,7 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 /// The longest handshake reply accepted.
 const MAX_HELLO: usize = 64 << 10;
 /// How long a call waits for its answer.
-const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// Calls waiting for answers at once.
 const MAX_IN_FLIGHT: usize = 64;
 /// Frames queued for the worker to write.
@@ -205,6 +205,21 @@ impl Core {
 
     pub fn run(&self, run: &wire::Run<'_>) -> Result<Terminal> {
         self.typed(Method::TerminalRun, run)
+    }
+
+    /// Pastes text into a terminal and presses Enter, as `hc send` does.
+    pub fn send(&self, send: &wire::SendText<'_>) -> Result<wire::Sent> {
+        self.typed(Method::TerminalSend, send)
+    }
+
+    /// Waits until `terminal`'s program is not working, it ends, or
+    /// `timeout` passes, which the core answers as a check-in. Keep
+    /// `timeout` well under a call's own limit.
+    pub fn wait(&self, terminal: &str, timeout: Duration) -> Result<wire::Waited> {
+        self.typed(
+            Method::TerminalWait,
+            &json!({"terminal": terminal, "timeout": timeout.as_secs_f64()}),
+        )
     }
 
     pub fn kill(&self, terminal: &str) -> Result<Terminal> {

@@ -5,6 +5,7 @@ mod focus;
 mod kept_checkouts;
 mod kept_workspaces;
 mod keys;
+mod open_terminal;
 mod paste;
 mod requests;
 mod saved_tabs;
