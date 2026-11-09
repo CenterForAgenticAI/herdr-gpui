@@ -96,14 +96,14 @@ fn a_split_is_answered_once_its_pane_is_in_the_tab() {
     ));
     // The window starts the shell: until it lands, nothing is answered,
     // and a second split waits its turn.
-    terminals.wanted = Some((
+    terminals.wanted = std::collections::VecDeque::from([(
         Purpose::Tab {
             scope: crate::browser::Scope::endpoint("mac"),
             workspace: "w".into(),
         },
         Host::Local,
         Spawn::default(),
-    ));
+    )]);
     assert!(terminals.settled_phone_split(now).is_none());
     assert!(matches!(
         terminals.phone_change(&ask(1, "t1", Op::SplitDown)),
@@ -135,14 +135,14 @@ fn a_split_that_never_lands_is_refused() {
         Some((AskId(1), Answer::Failed(Failure::Refused)))
     );
     terminals.phone_change(&ask(1, "t1", Op::SplitRight));
-    terminals.wanted = Some((
+    terminals.wanted = std::collections::VecDeque::from([(
         Purpose::Tab {
             scope: crate::browser::Scope::endpoint("mac"),
             workspace: "w".into(),
         },
         Host::Local,
         Spawn::default(),
-    ));
+    )]);
     assert!(terminals.settled_phone_split(now).is_none());
     assert_eq!(
         terminals.settled_phone_split(now + std::time::Duration::from_secs(60)),
