@@ -143,6 +143,9 @@ fn herdr_2_agents_count_on_a_computer_without_herdr_1() {
     let panes = Panes::single(terminal);
     let core = Session::core(
         [CoreWorkspace {
+            branch: None,
+            custom_label: false,
+            worktree: None,
             cwd: "",
             id: "herdr-2",
             label: "Herdr 2",
