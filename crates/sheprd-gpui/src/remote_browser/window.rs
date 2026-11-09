@@ -73,11 +73,12 @@ impl SheprdWindow {
                 self.serve_remote_request(index, workspace, request, window, cx);
             }
         }
+        self.poll_core_browser_requests(window, cx);
         self.poll_remote_forwards(window, cx);
         self.install_remote_agent_tools(cx);
     }
 
-    fn serve_remote_request(
+    pub(super) fn serve_remote_request(
         &mut self,
         index: usize,
         workspace: String,

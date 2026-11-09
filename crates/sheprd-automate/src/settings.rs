@@ -2,7 +2,7 @@
 //! caps for every script together, and which Herdr to drive.
 
 use serde::Deserialize;
-use sheprd_automation::report::HostCaps;
+use sheprd_automation::report::{HostCaps, Terminals};
 use std::{fs, io, path::Path};
 
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +28,11 @@ pub struct Settings {
     pub herdr_session: Option<String>,
     /// The `herdr` binary; found on the usual paths when `None`.
     pub herdr: Option<std::path::PathBuf>,
+    /// The `herdr-core` binary started when no core runs; found on the
+    /// usual paths when `None`.
+    pub herdr_core: Option<std::path::PathBuf>,
+    /// Which Herdr runs the agents; see `Drive::new` for the default.
+    pub terminals: Option<Terminals>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -37,6 +42,8 @@ struct File {
     max_tokens_per_day: Option<u64>,
     herdr_session: Option<String>,
     herdr: Option<std::path::PathBuf>,
+    herdr_core: Option<std::path::PathBuf>,
+    terminals: Option<Terminals>,
 }
 
 impl Settings {
@@ -66,6 +73,8 @@ impl Settings {
             },
             herdr_session: file.herdr_session.filter(|session| !session.is_empty()),
             herdr: file.herdr,
+            herdr_core: file.herdr_core,
+            terminals: file.terminals,
         })
     }
 }

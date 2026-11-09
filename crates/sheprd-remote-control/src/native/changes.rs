@@ -10,8 +10,9 @@ pub(crate) use error::Error;
 pub(crate) use mailbox::Mailbox;
 
 use crate::{
-    control::changes::{
-        Answer, CheckLog, Checks, Failure, FileDiff, FileList, MAX_PATH, Scope, Wanted,
+    control::{
+        changes::{Answer, CheckLog, Checks, Failure, FileDiff, FileList, MAX_PATH, Scope, Wanted},
+        layout,
     },
     web::{ApiError, Device, Shared},
 };
@@ -55,6 +56,33 @@ async fn ask(state: &Shared, workspace: String, wanted: Wanted) -> Result<Answer
     match tokio::time::timeout(ANSWER_WAIT, pending.answer()).await {
         Ok(Some(Answer::Failed(failure))) => Err(Error::Failed(failure).into()),
         Ok(Some(answer)) => Ok(answer),
+        Ok(None) | Err(_) => Err(Error::TimedOut.into()),
+    }
+}
+
+/// How long a phone's change to a Herdr 2 tab waits for Sheprd, which
+/// makes it at once.
+const LAYOUT_WAIT: Duration = Duration::from_secs(10);
+
+/// Asks Sheprd to make `op` at the pane of `terminal` in its saved Herdr 2
+/// tab `tab`, and waits until it has.
+pub(crate) async fn change_layout(
+    state: &Shared,
+    tab: u64,
+    terminal: String,
+    op: layout::Op,
+) -> Result<Option<String>, ApiError> {
+    let mut pending = state
+        .changes
+        .ask_layout(tab, terminal, op, Instant::now())
+        .map_err(ApiError::from)?;
+    match tokio::time::timeout(LAYOUT_WAIT, pending.answer()).await {
+        Ok(Some(layout::Answer::Done)) => Ok(None),
+        Ok(Some(layout::Answer::Split(created))) if created.len() <= layout::MAX_TERMINAL => {
+            Ok(Some(created))
+        }
+        Ok(Some(layout::Answer::Split(_))) => Err(mismatch()),
+        Ok(Some(layout::Answer::Failed(failure))) => Err(Error::Layout(failure).into()),
         Ok(None) | Err(_) => Err(Error::TimedOut.into()),
     }
 }

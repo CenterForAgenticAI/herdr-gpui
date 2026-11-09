@@ -109,10 +109,7 @@ impl Hub {
         if agent != expected {
             return Err(convert::Error::Moved.into());
         }
-        let program = self
-            .program()
-            .ok_or(super::Error::ProgramMissing)?
-            .to_owned();
+        let program = self.program().ok_or(super::Error::ProgramMissing)?;
         let claim = self.moving.claim(pane)?;
         let found: PaneAnswer = parse(self.call(ApiMethod::PaneGet, params.clone()).await?)?;
         convert::settled(&found.pane, agent)?;

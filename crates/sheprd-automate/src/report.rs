@@ -157,6 +157,7 @@ pub fn run_detail(store: &Store, id: i64) -> Result<RunDetail> {
                 log_tail: step.log_tail,
                 worktree: step.worktree,
                 pane: step.pane,
+                terminals: step.terminals,
                 usage: agent.map(usage_of).unwrap_or(Usage {
                     tokens: None,
                     cpu_ms: step.cpu_ms,

@@ -3,6 +3,7 @@
 // i18n: migrated
 
 use super::Page;
+use crate::browser::{Location, Scope, Store, TabId};
 use crate::{
     SheprdWindow,
     teleport::{
@@ -10,7 +11,7 @@ use crate::{
         open_repositories,
     },
 };
-use gpui::{Context, Window};
+use gpui::{App, Context, Window};
 use std::collections::HashMap;
 
 impl SheprdWindow {
@@ -130,6 +131,8 @@ impl SheprdWindow {
             .filter(|tab| tab.workspace_id == target.id && tab.custom_label)
             .map(|tab| (tab.tab_id.clone(), tab.label.clone()))
             .collect();
+        // The workspace's Herdr 2 tabs, whose terminals the host's core runs.
+        let moving = core_tabs(cx, &crate::browser::scope(selected), &target.id);
         let source = Source {
             place: Place {
                 endpoint_id: selected.id.clone(),
@@ -144,6 +147,8 @@ impl SheprdWindow {
             repo_label: worktree.label.clone(),
             branch: target.branch.clone(),
             tab_labels,
+            core_tabs: moving.iter().map(|(_, panes)| panes.clone()).collect(),
+            core_preferred: self.config.herdr_2_terminals,
         };
         // Every enabled host, connected or not: Teleport reaches each over its
         // own SSH. A connected host's snapshot saves a round trip; the others
@@ -197,10 +202,33 @@ impl SheprdWindow {
         let label = target.label.clone();
         self.menu.page = Some(Page::Teleport);
         self.menu.error = None;
-        self.teleport = Some(Teleport::start(source, label, hosts));
+        self.teleport = Some(Teleport::start(source, label, hosts).closing(moving));
         window.focus(&self.menu.focus, cx);
         cx.notify();
     }
+}
+
+/// The Herdr 2 tabs of `workspace` that drive their terminals, and their
+/// panes. A mirror only watches a terminal listed where it types.
+pub(crate) fn core_tabs(
+    cx: &App,
+    scope: &Scope,
+    workspace: &str,
+) -> Vec<(TabId, sheprd_session::panes::Panes)> {
+    let Some(store) = cx.try_global::<Store>() else {
+        return Vec::new();
+    };
+    store
+        .in_workspace(scope, workspace)
+        .filter_map(|tab| match &tab.location {
+            Some(Location::CoreTerminal {
+                panes,
+                observe: false,
+                ..
+            }) => Some((tab.id, panes.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]

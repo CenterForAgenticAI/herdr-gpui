@@ -255,30 +255,42 @@ impl SheprdWindow {
             if multi && endpoint.collapsed {
                 continue;
             }
-            let live = if selected { &self.live } else { &endpoint.live };
-            let Some(snapshot) = &live.snapshot else {
-                continue;
-            };
+            let sessions = self.sessions(endpoint_index);
             let collapsed_repos = if endpoint_index == 0 {
                 &self.collapsed_repos
             } else {
                 &endpoint.collapsed_repos
             };
             let host = multi.then_some(endpoint.label.as_str());
-            for (index, indented, _) in
-                visible_workspace_entries(&snapshot.workspaces, collapsed_repos)
-            {
-                let workspace = &snapshot.workspaces[index];
-                let id = workspace.workspace_id.clone();
+            let kept_front = self.kept_in_front();
+            // Herdr 1 numbers its workspaces in its own order; those the app
+            // keeps for Herdr 2 count on after them.
+            let rows: Vec<(&sheprd_session::Workspace, bool, bool)> = sessions
+                .keyed()
+                .flat_map(|(keeper, session)| {
+                    let front = selected
+                        .then(|| {
+                            crate::session_model::Sessions::front_of(keeper, session, kept_front)
+                        })
+                        .flatten();
+                    visible_workspace_entries(&session.workspaces, collapsed_repos)
+                        .into_iter()
+                        .map(move |(index, indented, _)| {
+                            let workspace = &session.workspaces[index];
+                            (workspace, indented, front == Some(workspace.id.as_str()))
+                        })
+                })
+                .collect();
+            for (position, (workspace, indented, focused)) in rows.into_iter().enumerate() {
+                let id = workspace.id.clone();
                 let key = format!("rail-workspace-{endpoint_id}-{id}");
                 let navigate_endpoint = endpoint_id.clone();
                 let context_endpoint = endpoint_id.clone();
                 let context_id = id.clone();
-                let focused = selected && workspace.focused;
-                let number = workspace.number.to_string();
-                let muted = silenced.get(&endpoint_index).is_some_and(|silenced| {
-                    silenced.host() || silenced.workspace(&workspace.workspace_id)
-                });
+                let number = (position + 1).to_string();
+                let muted = silenced
+                    .get(&endpoint_index)
+                    .is_some_and(|silenced| silenced.host() || silenced.workspace(&workspace.id));
                 let marks = div()
                     .row()
                     .items_center()
@@ -323,7 +335,7 @@ impl SheprdWindow {
                         format!("rail-dot-{key}"),
                         columns.dot,
                         columns.height,
-                        indicator(workspace.agent_status, font, indicators),
+                        indicator(workspace.status, font, indicators),
                     ));
                 spaces = spaces.child(
                     aligned_row(
@@ -345,7 +357,7 @@ impl SheprdWindow {
                         host,
                         workspace_label(workspace, indented),
                         None,
-                        muted_word(status_word(workspace.agent_status), muted).as_deref(),
+                        muted_word(status_word(workspace.status), muted).as_deref(),
                     )))
                     .on_mouse_down(
                         MouseButton::Right,

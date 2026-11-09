@@ -93,6 +93,10 @@ A failing step stops the run. With `{ check = false }` a step returns
 `{ ok, log_tail }` (and `run_id` for `agent`) and the script decides. Steps
 take `{ timeout = "30m" }`.
 
+`agent` types its prompt only once the agent says it is ready. One that does
+not within 90 seconds, such as an agent asking whether to trust its new
+worktree, fails the step with nothing typed; it stays open for the user.
+
 ## What scripts cannot do
 
 - No `os`, `io`, `require`, `print`, `pcall`, `math.random`, clock or files:
