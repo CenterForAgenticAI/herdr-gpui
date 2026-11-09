@@ -1,28 +1,30 @@
 //! Where the daemon looks for `sheprd-acp`: beside itself first, then where
 //! Sheprd looks on an SSH host, then `PATH`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[test]
 fn a_chat_program_is_found_beside_the_daemon_then_where_sheprd_looks() {
-    let path = std::env::join_paths(["/usr/bin", "relative/bin"]).unwrap();
+    // An absolute root on every platform: `/home` has no drive on Windows.
+    let root = std::env::temp_dir();
+    let home = root.join("home/me");
+    let bin = root.join("usr/bin");
+    let path = std::env::join_paths([bin.as_path(), Path::new("relative/bin")]).unwrap();
+    let beside = home.join(".local/share/herdr-remote-control/bin/1.0");
     let dirs = crate::hub::program_dirs(
-        Some(Path::new(
-            "/home/me/.local/share/herdr-remote-control/bin/1.0/herdr-remote-control",
-        )),
-        Some(Path::new("/home/me")),
+        Some(&beside.join("herdr-remote-control")),
+        Some(&home),
         Some(&path),
     );
     assert_eq!(
         dirs,
         [
-            "/home/me/.local/share/herdr-remote-control/bin/1.0",
-            "/home/me/.herdr/bin",
-            "/home/me/.cargo/bin",
-            "/home/me/.local/bin",
-            "/usr/bin",
+            beside,
+            home.join(".herdr/bin"),
+            home.join(".cargo/bin"),
+            home.join(".local/bin"),
+            bin,
         ]
-        .map(PathBuf::from)
     );
     // A relative home names no folder.
     let dirs = crate::hub::program_dirs(None, Some(Path::new("me")), None);
