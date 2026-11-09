@@ -5,12 +5,18 @@
 // i18n: migrated
 mod dispatch;
 mod kept;
+mod kept_worktrees;
 pub(super) mod popover;
 mod render;
 mod requests;
 #[cfg(feature = "cloud")]
 mod sandbox_images;
 mod scripts;
+
+pub(super) use kept_worktrees::Ask;
+pub(crate) use kept_worktrees::KeptDone;
+#[cfg(test)]
+pub(crate) use kept_worktrees::Landing as KeptLanding;
 
 use super::{Page, WorkspaceAction, WorkspaceMenuAction, state::Deletion};
 use crate::{SheprdWindow, dialog_input::DialogInput, i18n::fl};
@@ -523,6 +529,22 @@ impl SheprdWindow {
     /// "New worktree" row would. When there is no source for one, a flash says
     /// why rather than the shortcut doing nothing visible.
     pub(crate) fn open_new_worktree(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(kept) = self.kept_in_front().map(str::to_owned) {
+            self.open_workspace_menu(&kept, Point::default(), window, cx);
+            let offered = self.workspace_items().iter().any(|(action, _)| {
+                *action == WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree)
+            });
+            if !offered {
+                self.dismiss_menu(window, cx);
+                self.show_flash(
+                    crate::window::Flash::warning(NewWorktreeUnavailable::NotGit.message()),
+                    cx,
+                );
+                return;
+            }
+            self.open_workspace_dialog(WorkspaceAction::NewWorktree, window, cx);
+            return;
+        }
         let source = match &self.live.snapshot {
             Some(snapshot) if self.live.status.is_connected() => new_worktree_source(snapshot),
             _ => Err(NewWorktreeUnavailable::Disconnected),
@@ -627,6 +649,7 @@ impl SheprdWindow {
         };
         if target.keeper == sheprd_session::Keeper::App {
             return kept::items(
+                target,
                 self.note_checkout().is_some(),
                 self.checkpoint_checkout().is_some(),
             );
@@ -808,19 +831,22 @@ impl SheprdWindow {
             | WorkspaceAction::OpenWorktree => None,
         };
         self.menu.page = Some(Page::Dialog(action));
-        self.menu.dispatch = matches!(
+        // Another host's checkouts come through Herdr 1; a kept workspace's
+        // dialog makes them here.
+        let kept = target.keeper == sheprd_session::Keeper::App;
+        self.menu.dispatch = (matches!(
             action,
             WorkspaceAction::NewWorktree | WorkspaceAction::NewWorkspace
-        )
-        .then(|| self.menu.dispatch_repo())
-        .flatten()
-        .and_then(|repo| {
-            crate::dispatch::Picker::opened(
-                &self.endpoints[self.selected_endpoint].id,
-                self.dispatch_candidates(&repo, cx),
-                self.dispatch_sandboxes(),
-            )
-        });
+        ) && !kept)
+            .then(|| self.menu.dispatch_repo())
+            .flatten()
+            .and_then(|repo| {
+                crate::dispatch::Picker::opened(
+                    &self.endpoints[self.selected_endpoint].id,
+                    self.dispatch_candidates(&repo, cx),
+                    self.dispatch_sandboxes(),
+                )
+            });
         self.menu.pr.clear();
         self.menu.pr_connection = None;
         self.menu.error = None;
@@ -845,7 +871,10 @@ impl SheprdWindow {
                 cx,
             ));
         }
-        if action == WorkspaceAction::DeleteWorktree {
+        if action == WorkspaceAction::DeleteWorktree && target.keeper == sheprd_session::Keeper::App
+        {
+            self.open_kept_deletion(cx);
+        } else if action == WorkspaceAction::DeleteWorktree {
             let result = self.endpoints[self.selected_endpoint]
                 .connection
                 .request_dialog(

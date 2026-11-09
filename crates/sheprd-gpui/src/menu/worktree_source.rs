@@ -409,7 +409,7 @@ impl SheprdWindow {
         // opened; GitHub waits for its tab or the first search. Without a
         // GitHub account the listing starts now: a GitLab project lists its
         // issues without one, and its tab can only open once that is known.
-        self.list_checkouts();
+        self.list_checkouts(cx);
         self.list_branches(cx);
         if self.pr_profile().is_none() {
             self.list_repo_items();
@@ -484,7 +484,7 @@ impl SheprdWindow {
             .flatten();
         if searching {
             if !source.checkouts.listed {
-                self.list_checkouts();
+                self.list_checkouts(cx);
             }
             if self.pr_profile().is_some() || self.worktree_on_gitlab() {
                 self.list_repo_items();
@@ -522,7 +522,7 @@ impl SheprdWindow {
             Tab::New => window.focus(&self.menu.focus, cx),
             Tab::Existing => {
                 if list_checkouts {
-                    self.list_checkouts();
+                    self.list_checkouts(cx);
                 }
                 window.focus(&search.read(cx).focus.clone(), cx);
             }
@@ -543,7 +543,12 @@ impl SheprdWindow {
     /// Ask the daemon for the repository's checkouts. The answer comes through
     /// the window's one correlated dialog slot, so nothing is asked while a
     /// creation or a removal is still waiting on it.
-    fn list_checkouts(&mut self) {
+    fn list_checkouts(&mut self, cx: &mut Context<Self>) {
+        // Git keeps a kept workspace's checkouts; the app lists them itself.
+        if self.kept_checkout().is_some() {
+            self.list_kept_checkouts(cx);
+            return;
+        }
         if self.menu.creation.is_some()
             || self
                 .removal
@@ -670,7 +675,10 @@ impl SheprdWindow {
         if self.menu.target.is_none() || !self.menu_target_current() {
             return Err(crate::Error::StaleWorkspace);
         }
-        if self.selected_endpoint != 0 || !self.live.local_daemon_peer {
+        // A kept workspace is in a folder on this computer.
+        if self.kept_checkout().is_none()
+            && (self.selected_endpoint != 0 || !self.live.local_daemon_peer)
+        {
             return Err(sheprd_github::pull_request::Error::UntrustedEndpoint.into());
         }
         self.menu_target_input(&crate::pull_request::Origin::Local)
@@ -685,7 +693,8 @@ impl SheprdWindow {
         if !self.menu_target_current() {
             return Err(crate::Error::StaleWorkspace);
         }
-        if !self.live.status.is_connected() {
+        // A kept workspace needs no daemon: its repository is read here.
+        if self.kept_checkout().is_none() && !self.live.status.is_connected() {
             return Err(crate::Error::NotConnected);
         }
         let host = self
@@ -759,6 +768,26 @@ impl SheprdWindow {
     /// Queue the daemon request for a picked row, under the same fences a
     /// typed branch submission uses.
     fn submit_pick(&mut self, pending: &Pending, cx: &mut Context<Self>) {
+        if self.kept_checkout().is_some() {
+            let ask = self
+                .menu
+                .target
+                .as_ref()
+                .ok_or(crate::Error::StaleWorkspace)
+                .and_then(|target| target.base_ref())
+                .and_then(|base| super::workspace::Ask::of(pending, base));
+            match ask {
+                Ok(ask) => self.submit_kept_checkout(ask, cx),
+                Err(error) => {
+                    if let Some(source) = &mut self.menu.worktree {
+                        source.pending = None;
+                    }
+                    self.menu.error = Some(error.to_string());
+                    cx.notify();
+                }
+            }
+            return;
+        }
         let result = (|| {
             if !self.menu_target_current() {
                 return Err(crate::Error::StaleConnection);
@@ -855,6 +884,26 @@ impl SheprdWindow {
         response: &serde_json::Value,
         cx: &mut Context<Self>,
     ) {
+        if let Some(checkout) = response["workspace"]["worktree"]["checkout_path"].as_str() {
+            self.write_worktree_note_at(checkout.to_owned(), cx);
+            return;
+        }
+        let item = self.menu.worktree.as_mut().and_then(|source| {
+            source
+                .lookup
+                .origin
+                .as_ref()
+                .and(source.pending.take())
+                .filter(|pending| matches!(pending, Pending::Item(_)))
+        });
+        if item.is_some() && self.pr_origin().is_some() {
+            self.local_error = Some(fl!("worktree-source-no-checkout-path"));
+        }
+    }
+
+    /// Writes the note naming the pull request or issue the dialog's pending
+    /// row is for into the new checkout at `checkout`, off the UI thread.
+    pub(super) fn write_worktree_note_at(&mut self, checkout: String, cx: &mut Context<Self>) {
         let Some(host) = self.pr_origin() else {
             return;
         };
@@ -864,13 +913,6 @@ impl SheprdWindow {
         let (Some(Pending::Item(item)), Some(origin)) =
             (source.pending.take(), source.lookup.origin.clone())
         else {
-            return;
-        };
-        let Some(checkout) = response["workspace"]["worktree"]["checkout_path"]
-            .as_str()
-            .map(str::to_owned)
-        else {
-            self.local_error = Some(fl!("worktree-source-no-checkout-path"));
             return;
         };
         let write = cx
