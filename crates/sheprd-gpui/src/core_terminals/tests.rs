@@ -2,6 +2,7 @@ mod accessibility;
 mod chats;
 mod context;
 mod effects;
+mod fallback_bells;
 mod focus;
 mod kept_checkouts;
 mod kept_workspaces;
