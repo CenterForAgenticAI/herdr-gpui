@@ -25,12 +25,28 @@ pub use error::Error;
 
 /// The core's install locations, searched the way the Herdr 1 bridge searches
 /// for `herdr`: PATH first, then the known roots. Paths stay in shell
-/// variables; nothing discovered is eval'd.
-const CANDIDATES: &str = r#"candidate=$(command -v herdr-core 2>/dev/null || :)
+/// variables; nothing discovered is eval'd. It opens a `for path in ...; do`
+/// loop, which the script using it closes, so an installer checks the same
+/// places the bridge runs from.
+pub const CANDIDATES: &str = r#"candidate=$(command -v herdr-core 2>/dev/null || :)
 case "$candidate" in /*) ;; *) candidate=;; esac
 linuxbrew=
 case "$(PATH=/usr/bin:/bin uname -s)" in Linux) linuxbrew=/home/linuxbrew/.linuxbrew/bin/herdr-core;; esac
 for path in "$candidate" "$HOME/.local/bin/herdr-core" /opt/homebrew/bin/herdr-core /usr/local/bin/herdr-core "$linuxbrew" "$HOME/.nix-profile/bin/herdr-core" "/etc/profiles/per-user/$USER/bin/herdr-core" /nix/var/nix/profiles/default/bin/herdr-core /run/current-system/sw/bin/herdr-core; do"#;
+
+/// Sets `herdr_core` to the first installed core, searched as the bridge
+/// searches, or leaves it empty; for scripts that run the core's CLI.
+pub fn locate_script() -> String {
+    format!(
+        r#"herdr_core=
+{CANDIDATES}
+    if [ -n "$path" ] && [ -x "$path" ]; then
+        herdr_core=$path
+        break
+    fi
+done"#
+    )
+}
 
 /// The bridge as a script for `/bin/sh -c`: the first installed core, run as
 /// `connect` after the ready banner.

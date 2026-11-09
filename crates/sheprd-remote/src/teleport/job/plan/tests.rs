@@ -3,6 +3,8 @@ use super::*;
 use crate::teleport::launch::{AgentKind, handoff_path};
 use crate::teleport::snapshot::{AgentSession, SessionKind};
 
+mod generations;
+
 fn installed(programs: &[&str]) -> Vec<String> {
     programs.iter().map(|p| (*p).to_owned()).collect()
 }

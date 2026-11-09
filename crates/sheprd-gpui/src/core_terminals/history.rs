@@ -126,7 +126,7 @@ impl SheprdWindow {
             let _ = this.update(cx, |this, cx| match saved {
                 Ok(file) => {
                     let spawn = editor_spawn(&file);
-                    this.start_core_program_with(purpose, spawn, Some(file));
+                    this.start_core_program_with(purpose, spawn, Some(file), cx);
                 }
                 Err(error) => this.core_edit_failed(&error, cx),
             });
