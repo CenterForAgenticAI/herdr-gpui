@@ -165,6 +165,9 @@ pub struct KeyReporting {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SurfaceUpdate {
     Bell,
+    /// The program set the clipboard (OSC 52): bounded UTF-8 text, never
+    /// bytes or files. Only the latest of a burst is reported.
+    Clipboard(String),
     /// The program ended; no further updates follow.
     Ended(Exit),
     /// The whole visible screen.

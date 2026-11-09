@@ -91,7 +91,7 @@ keybindings = "server"
 
 Only keybindings follow the server. Themes, the sidebar, and toasts stay local, and Sheprd never reads a remote host's `config.toml` for them. Pane borders, gaps, and scrollbars are drawn by each daemon, so they follow that host's own Herdr config.
 
-One exception: **Settings > General > Session restore** lists a switch per connected SSH host. It edits only `[experimental] pane_history` in that host's Herdr config, keeping comments and other keys, then asks that host's daemons to reload.
+One exception: **Settings > General > Session restore** lists a switch per connected SSH host. It edits only `[experimental] pane_history` in that host's Herdr config, keeping comments and other keys, then asks that host's daemons to reload. It applies to the host's Herdr tabs: a Herdr 2 terminal's output stays in the host's herdr-core while it runs, whatever the switch says, so a host reached only through herdr-core has no switch.
 
 ## Ports and forwarding
 

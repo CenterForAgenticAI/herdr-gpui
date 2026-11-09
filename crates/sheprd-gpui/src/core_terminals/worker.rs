@@ -85,13 +85,14 @@ impl Mailbox {
         self.changed.load(Ordering::Acquire)
     }
 
-    /// The screen, when it changed since the last take.
+    /// The screen, when it changed since the last take. Its bells and
+    /// clipboard write are handed over once.
     pub(crate) fn take(&self) -> Option<Screen> {
         self.changed.swap(false, Ordering::AcqRel).then(|| {
             self.screen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .clone()
+                .take()
         })
     }
 }

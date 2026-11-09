@@ -65,8 +65,10 @@ impl AgentTimes {
             .workspaces
             .iter_mut()
             .flat_map(|workspace| workspace.terminals.iter_mut());
-        for agent in terminals.filter_map(|terminal| terminal.agent.as_mut()) {
-            agent.changed_ms = self.changed_ms(&agent.pane);
+        for terminal in terminals {
+            for agent in terminal.agent.iter_mut().chain(&mut terminal.agents) {
+                agent.changed_ms = self.changed_ms(&agent.pane);
+            }
         }
     }
 }

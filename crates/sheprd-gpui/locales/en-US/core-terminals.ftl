@@ -5,7 +5,7 @@ core-terminals-open-workspace = Open a workspace first
 core-terminals-workspaces-local-only = Herdr 2 workspaces are only on this computer
 # A new tab on an SSH host, cloud machine, or WSL distribution without
 # herdr-core runs in the host's Herdr instead.
-core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr
+core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr. Choose Install Herdr 2 in the host's menu to add it
 core-terminals-too-many-tabs = Too many tabs are open
 # An automation's agent runs in this computer's Herdr 2, not on the host shown.
 core-terminals-this-computer = This agent runs on this computer; show it to open the agent
@@ -29,3 +29,12 @@ core-terminals-edit-failed = Could not open the history in an editor
 # Editing scrollback saves it on this computer, so it is refused for a pane
 # running on another machine's Herdr 2.
 core-terminals-edit-remote = Editing scrollback works only for panes on this computer
+# Installing herdr-core (Herdr 2) on a saved device, from its menu.
+# $device is the device's name; $version is herdr-core's version.
+core-terminals-install-started = Installing Herdr 2 on { $device }...
+core-terminals-install-installed = Herdr 2 (herdr-core { $version }) is installed on { $device }
+core-terminals-install-present = { $device } already has Herdr 2
+core-terminals-install-running = Herdr 2 is already being installed on { $device }
+# $reason is why, in English or from the device.
+core-terminals-install-failed = Could not install Herdr 2 on { $device }: { $reason }
+core-terminals-install-local = this computer runs the herdr-core bundled with Sheprd

@@ -162,10 +162,9 @@ pub(super) fn terminal(
             pane: pane_id(boot, &record.address),
         })
         .collect();
-    let agent = records
+    let agents: Vec<TerminalAgent> = records
         .iter()
         .filter(|record| record.status.is_some())
-        .max_by_key(|record| urgency(status(record)))
         .map(|record| TerminalAgent {
             name: record
                 .status
@@ -181,9 +180,15 @@ pub(super) fn terminal(
                 .filter(|title| !title.is_empty())
                 .or_else(|| record.title.clone()),
             changed_ms: None,
-        });
+        })
+        .collect();
+    let agent = agents
+        .iter()
+        .max_by_key(|agent| urgency(agent.status))
+        .cloned();
     Some(Terminal {
         agent,
+        agents,
         // A core reports no agent sessions or process info to move with.
         convert: None,
         cwd: cwd(first),

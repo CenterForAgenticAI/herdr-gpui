@@ -28,7 +28,7 @@ pub(super) struct Scripted {
 }
 
 impl Scripted {
-    /// Hands `batch` to the terminal's next `next`.
+    /// Hands `batch` out after the batches already queued.
     pub(super) fn push(&self, batch: Vec<SurfaceUpdate>) {
         self.updates.lock().unwrap().insert(0, batch);
     }

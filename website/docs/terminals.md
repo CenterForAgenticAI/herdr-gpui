@@ -25,7 +25,7 @@ herdr_2_terminals = true
 
 On this computer, Sheprd joins a herdr-core that is already running, or starts your own `herdr-core` or the bundled one when a Herdr 2 terminal is first needed. `herdr-core ls` lists its terminals.
 
-A Herdr 2 terminal in a workspace on an SSH host, cloud machine, or WSL distribution runs in that host's herdr-core. Sheprd opens the connection itself, the same way it reaches the host's Herdr, and runs `herdr-core connect` there, which starts the host's core when none is running. Sheprd looks for `herdr-core` on the host's `PATH`, then in `~/.local/bin` and the usual Homebrew and Nix locations. A host without herdr-core keeps its new tabs in its Herdr. If Herdr 1 is not installed, the window opens a herdr-core shell instead of asking you to install Herdr.
+A Herdr 2 terminal in a workspace on an SSH host, cloud machine, or WSL distribution runs in that host's herdr-core. Sheprd opens the connection itself, the same way it reaches the host's Herdr, and runs `herdr-core connect` there, which starts the host's core when none is running. Sheprd looks for `herdr-core` on the host's `PATH`, then in `~/.local/bin` and the usual Homebrew and Nix locations. A host without herdr-core keeps its new tabs in its Herdr. To add one, choose **Install Herdr 2** in the host's menu (right-click its header in the sidebar): Sheprd downloads the herdr-core it bundles there, checks it against its pinned checksum, and puts it in `~/.local/bin`, leaving a host's own herdr-core as it is. If Herdr 1 is not installed, the window opens a herdr-core shell instead of asking you to install Herdr.
 
 **Mirror Herdr 2 Pane** opens a watch-only view of the focused pane in a new tab. In the sidebar, a Herdr 2 list under the agents shows each pane of the workspace's Herdr 2 tabs with its status.
 
@@ -62,7 +62,7 @@ Drag across the terminal to select. Releasing the button copies the selection an
 
 Programs that read the mouse, such as many agent TUIs, receive your clicks and drags. **Hold Shift** to select text there instead. The first time such a program takes a drag, Sheprd shows a short reminder.
 
-Programs that copy with OSC 52 put their text on your clipboard too, with the same flash. Only bounded UTF-8 text is accepted.
+Programs that copy with OSC 52 put their text on your clipboard too, with the same flash, in Herdr 1 and Herdr 2 panes. Only bounded UTF-8 text (up to 2 MiB) is accepted, and programs can never read the clipboard this way.
 
 **Paste** is Cmd-V on macOS, Ctrl-Shift-V on Linux, and Ctrl-V (while the clipboard holds text) or Ctrl-Shift-V on Windows.
 

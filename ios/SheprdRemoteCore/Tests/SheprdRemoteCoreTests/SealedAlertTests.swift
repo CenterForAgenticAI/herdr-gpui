@@ -41,6 +41,14 @@ import Testing
         #expect(failed.category == nil && failed.actions.isEmpty)
     }
 
+    @Test func aTerminalAgentHasNoChatToAnswerOrReplyIn() throws {
+        for kind in ["terminal_asking", "terminal_done"] {
+            let alert = try Self.alert(#"{"kind":"\#(kind)","computer":"AB","pane":"p","title":"t","body":"b"}"#)
+            #expect(alert.kind.rawValue == kind)
+            #expect(alert.presentation.category == nil && alert.presentation.actions.isEmpty)
+        }
+    }
+
     @Test func actionsBecomeChatCommands() {
         #expect(AlertPresentation.command(action: "answer:allow", permission: 7, text: nil) == .answer(permission: 7, option: "allow"))
         #expect(AlertPresentation.command(action: "answer:allow", permission: nil, text: nil) == nil)

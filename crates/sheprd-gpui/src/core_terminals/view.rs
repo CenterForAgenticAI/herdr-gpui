@@ -10,6 +10,7 @@ pub(super) mod paste;
 mod pointer;
 
 use super::{
+    effects::Effects,
     screen::Screen,
     selection::{Cell, Selection},
     worker::{Command, Link},
@@ -63,6 +64,8 @@ pub(crate) struct PaneLook {
 pub(crate) struct CoreTerminalView {
     /// Where the cells were last painted, for the IME's candidate window.
     bounds: Option<Bounds<Pixels>>,
+    /// Bells and clipboard writes the window has not taken yet.
+    effects: Effects,
     /// The history text asked for an editor, once it arrived.
     edit_ready: Option<Result<String, super::Error>>,
     /// The history request whose text goes to an editor.
@@ -117,6 +120,7 @@ impl CoreTerminalView {
     ) -> Self {
         Self {
             bounds: None,
+            effects: Effects::default(),
             edit_ready: None,
             editing: None,
             find: None,
@@ -201,7 +205,15 @@ impl CoreTerminalView {
     pub(crate) fn poll(&mut self, cx: &mut Context<Self>) -> bool {
         let screen = self.link.mailbox.take();
         let changed = screen.is_some();
-        if let Some(screen) = screen {
+        if let Some(mut screen) = screen {
+            // A mirror only watches; the tab driving the terminal rings and
+            // copies.
+            if !self.observe {
+                self.effects.merge(Effects {
+                    bells: screen.bells,
+                    clipboard: screen.clipboard.take(),
+                });
+            }
             self.screen = screen;
             cx.notify();
         }
@@ -210,6 +222,11 @@ impl CoreTerminalView {
             self.poll_find();
         }
         changed
+    }
+
+    /// Bells and the clipboard write found since the last take.
+    pub(crate) fn take_effects(&mut self) -> Effects {
+        std::mem::take(&mut self.effects)
     }
 
     pub(crate) fn set_look(&mut self, look: Look, cx: &mut Context<Self>) {
