@@ -61,6 +61,7 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
         }
     }
     let caller = &request.caller;
+    holders_first(&mut windows, caller.terminal_id.as_deref(), cx);
     let target = super::target(caller);
     // First the window connected to the caller's own daemon; then, when the
     // socket paths are spelled differently, any window showing its workspace.
@@ -99,6 +100,25 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
             None => "No Sheprd window shows a workspace".into(),
         },
     )
+}
+
+/// Puts the windows holding the caller's herdr-core `terminal` first, keeping
+/// the frontmost order otherwise: several windows may show the workspace of
+/// a terminal in a Herdr workspace, and only the one holding its tab can
+/// place a page beside it.
+pub(super) fn holders_first(
+    windows: &mut [gpui::WindowHandle<crate::SheprdWindow>],
+    terminal: Option<&str>,
+    cx: &App,
+) {
+    let Some(terminal) = terminal else {
+        return;
+    };
+    windows.sort_by_cached_key(|handle| {
+        !handle
+            .read_with(cx, |view, _| view.holds_core_terminal(terminal))
+            .unwrap_or(false)
+    });
 }
 
 /// Reloads every page the calling pane opened, in every window.
@@ -223,8 +243,12 @@ pub(super) fn feedback(
         ));
         return;
     };
+    // A herdr-core terminal's notes are kept under the daemon of the tab
+    // holding it, where its pages opened, which need not be the session
+    // whose socket the terminal inherited.
+    let scope = core_scope(&request.pane_id, cx).unwrap_or_else(|| Scope::local(Path::new(daemon)));
     let target = FeedbackKey {
-        scope: Scope::local(Path::new(daemon)),
+        scope,
         pane_id: request.pane_id.clone(),
     };
     let kept = take_feedback(&target, cx);
@@ -252,6 +276,27 @@ pub(super) fn feedback(
             + std::time::Duration::from_secs(request.wait_seconds.min(MAX_WAIT_SECONDS)),
         incoming,
     });
+}
+
+/// The daemon whose tab holds the herdr-core terminal `pane_id` names, as
+/// browser tabs name it, in the first window holding it.
+pub(super) fn core_scope(pane_id: &str, cx: &App) -> Option<Scope> {
+    let terminal = crate::chat::core_pane::terminal_of(pane_id)?;
+    let target = Target {
+        daemon: None,
+        workspace: None,
+        pane: None,
+        terminal: Some(terminal.as_str()),
+    };
+    main_windows(cx).into_iter().find_map(|handle| {
+        handle
+            .read_with(cx, |view, _| {
+                let (index, _) = view.control_target(&target, false)?;
+                Some(crate::browser::scope(&view.endpoints[index]))
+            })
+            .ok()
+            .flatten()
+    })
 }
 
 /// Takes what is kept for `target`. A tab shows its batch as kept until an
