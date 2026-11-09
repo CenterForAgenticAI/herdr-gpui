@@ -253,3 +253,46 @@ fn a_terminal_asked_for_while_herdr_core_installs_waits_for_it(cx: &mut gpui::Te
     });
     drop(release);
 }
+
+#[gpui::test]
+fn the_window_that_installed_dials_the_host_once(cx: &mut gpui::TestAppContext) {
+    fn installed(
+        _: &ConnectTarget,
+    ) -> std::result::Result<
+        sheprd_remote::core_install::Outcome,
+        crate::core_terminals::install::Failed,
+    > {
+        Ok(sheprd_remote::core_install::Outcome::Installed)
+    }
+    // The window is the root view, as the app's are, so the install's
+    // pass over every window reaches it.
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    let (mut remote, _server) = connected_endpoint("ssh:fixture");
+    remote.connection.target = ssh();
+    // Every attempt holds until the test ends, as a bridge still dialing.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = Mutex::new(held);
+    let join = move |start| {
+        let _ = held.lock().map(|held| held.recv());
+        missing(start)
+    };
+    let host = Host::Remote(scope());
+    view.update_in(cx, |view, window, cx| {
+        view.endpoints.push(remote);
+        view.selected_endpoint = 1;
+        view.reset_selected(cx);
+        view.config.herdr_2_terminals = true;
+        view.core_terminals
+            .set_remote_hub_for_test(scope(), ssh(), Hub::with_join(join));
+        view.command(Command::NewCoreTerminal, window, cx);
+        view.install_core_with("ssh:fixture", installed, cx);
+    });
+    cx.run_until_parked();
+    view.update(cx, |view, _| {
+        let hub = view.core_terminals.hub_of(&host).unwrap();
+        // The terminal's own attempt, then one for the installed core.
+        assert_eq!(hub.dials(), 2);
+        assert!(view.core_terminals.waits_on_for_test(&host));
+    });
+    drop(release);
+}

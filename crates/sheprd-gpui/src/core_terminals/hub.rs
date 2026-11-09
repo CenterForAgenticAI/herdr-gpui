@@ -50,6 +50,9 @@ type Join = Arc<dyn Fn(Start) -> Result<CoreBackend, Error> + Send + Sync>;
 pub(crate) struct Hub {
     /// What the attempt in flight may do.
     attempt: Option<Start>,
+    /// How many attempts it made, for tests that count dials.
+    #[cfg(test)]
+    dials: usize,
     /// When the last attempt failed.
     failed: Option<Instant>,
     join: Join,
@@ -73,6 +76,8 @@ impl Hub {
     ) -> Self {
         Self {
             attempt: None,
+            #[cfg(test)]
+            dials: 0,
             failed: None,
             join: Arc::new(join),
             retry: JOIN_RETRY,
@@ -88,6 +93,12 @@ impl Hub {
             retry: REMOTE_RETRY,
             ..Self::with_join(move |_| join_remote(&target))
         }
+    }
+
+    /// How many attempts it made.
+    #[cfg(test)]
+    pub(crate) fn dials(&self) -> usize {
+        self.dials
     }
 
     pub(crate) fn state(&self) -> &State {
@@ -122,6 +133,10 @@ impl Hub {
             State::Idle | State::Unavailable(_) => {}
         }
         self.attempt = Some(start);
+        #[cfg(test)]
+        {
+            self.dials += 1;
+        }
         let join = Arc::clone(&self.join);
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let spawned = std::thread::Builder::new()
