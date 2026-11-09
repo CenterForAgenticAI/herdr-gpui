@@ -68,7 +68,7 @@ impl SheprdWindow {
                 continue;
             }
             let scope = scope(endpoint);
-            let missing = self.live_at(index).herdr_1_missing()
+            let missing = self.live_at(index).herdr_1_unavailable()
                 && !self.core_terminals.lacks_core(&super::Host::of(&scope));
             if self.keep_default_workspace(missing, &scope, cx) {
                 let purpose = super::Purpose::Tab {

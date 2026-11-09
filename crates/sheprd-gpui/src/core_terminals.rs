@@ -605,9 +605,9 @@ impl SheprdWindow {
         if self.core_terminals.lacks_core(&host) {
             return false;
         }
-        let herdr_1_missing = self.live.herdr_1_missing()
+        let herdr_1_unavailable = self.live.herdr_1_unavailable()
             || (self.live.snapshot.is_none() && self.core_terminals.backend_of(&host).is_some());
-        self.config.herdr_2_terminals || herdr_1_missing
+        self.config.herdr_2_terminals || herdr_1_unavailable
     }
 
     /// The `new_core_terminal` command: starts a shell in herdr-core and

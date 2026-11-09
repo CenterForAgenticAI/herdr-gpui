@@ -31,7 +31,7 @@ impl SheprdWindow {
             .and_then(|(_, id)| session.workspace(id));
         let chosen = match chosen {
             Some(workspace) => Some(workspace),
-            None if self.live.herdr_1_missing() => session.workspaces.first(),
+            None if self.live.herdr_1_unavailable() => session.workspaces.first(),
             None => None,
         };
         chosen.map(|workspace| workspace.id.as_str())
@@ -375,7 +375,7 @@ impl SheprdWindow {
 
     /// Keeps the workspace a window with no Herdr 1 installed gathers its
     /// tabs in, so it lists, renames, and closes like any other. Whether it
-    /// kept it now.
+    /// kept it now: never once the store is full.
     pub(super) fn keep_default_workspace(
         &self,
         missing_installation: bool,
@@ -390,8 +390,7 @@ impl SheprdWindow {
             return false;
         }
         let label = fl!("core-workspaces-default");
-        Store::update(cx, |store| store.keep_default(scope, WORKSPACE, &label));
-        true
+        Store::update(cx, |store| store.keep_default(scope, WORKSPACE, &label))
     }
 }
 
