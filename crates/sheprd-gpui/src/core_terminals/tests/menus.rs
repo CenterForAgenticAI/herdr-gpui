@@ -126,3 +126,18 @@ fn closing_a_pane_from_its_menu_keeps_the_tab(cx: &mut TestAppContext) {
     let panes = cx.update(|_, cx| view.read(cx).core_terminals.tabs[&tab].panes.count());
     assert_eq!(panes, 1);
 }
+
+#[gpui::test]
+fn closing_a_pane_that_already_exited_leaves_its_tab(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1"]);
+    // The menu named `t2`, which exited while it was open.
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.close_core_pane(tab, id("t2"), window, cx)
+        })
+    });
+    let open = cx.update(|_, cx| cx.global::<Store>().get(tab).is_some());
+    assert!(open, "the tab and its remaining terminal stay");
+    let shown = cx.update(|_, cx| view.read(cx).core_terminals.tabs.contains_key(&tab));
+    assert!(shown);
+}

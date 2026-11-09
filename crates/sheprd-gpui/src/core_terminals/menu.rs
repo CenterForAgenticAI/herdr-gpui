@@ -217,7 +217,14 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(shown) = self.core_terminals.tabs.get(&tab) else {
+        // A menu left open over a pane that has since exited names one
+        // the tab no longer holds: closing it must stop nothing else.
+        let Some(shown) = self
+            .core_terminals
+            .tabs
+            .get(&tab)
+            .filter(|shown| shown.panes.contains(&terminal))
+        else {
             return;
         };
         if shown.panes.count() <= 1 {
