@@ -182,7 +182,9 @@ impl Teleport {
         unclaimed::moved_tabs(std::mem::take(&mut self.closing), now)
     }
 
-    #[cfg(test)]
+    /// The workspace being moved, for the tests that open Teleport, which
+    /// host scripts limit to Linux and macOS.
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
     pub(crate) fn source_for_test(&self) -> &Source {
         &self.source
     }
