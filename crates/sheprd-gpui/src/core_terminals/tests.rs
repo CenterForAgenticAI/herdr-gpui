@@ -18,9 +18,11 @@ mod restore;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod shared_names;
 mod shown_checkout;
 mod split_shown;
 mod stale;
+mod tab_status;
 mod wanted;
 mod worker;
 

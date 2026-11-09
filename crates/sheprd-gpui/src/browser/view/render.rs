@@ -60,7 +60,8 @@ impl SheprdWindow {
                 // Herdr tab does; a page's own icon stands in for the globe.
                 let status = match &tab.location {
                     Some(Location::CoreTerminal { panes, .. }) => {
-                        self.core_terminals.tab_status(panes)
+                        let host = crate::core_terminals::Host::of(&tab.scope);
+                        self.core_terminals.tab_status(&host, panes)
                     }
                     _ => sheprd_client::protocol::AgentStatus::Unknown,
                 };

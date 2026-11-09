@@ -60,7 +60,13 @@ impl SheprdWindow {
                 continue;
             };
             let shown = match self.core_terminals.tabs.entry(tab.id) {
-                std::collections::hash_map::Entry::Occupied(shown) => shown.into_mut(),
+                std::collections::hash_map::Entry::Occupied(shown) => {
+                    let shown = shown.into_mut();
+                    // Names are shared: another window showing the tab may
+                    // have renamed it or its panes.
+                    shown.refresh_names(location);
+                    shown
+                }
                 std::collections::hash_map::Entry::Vacant(place) => {
                     let Some(restored) = TabPanes::restore(Host::of(&tab.scope), location) else {
                         continue;

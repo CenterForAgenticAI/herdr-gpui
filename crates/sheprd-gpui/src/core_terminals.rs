@@ -176,6 +176,23 @@ impl TabPanes {
         Some(shown)
     }
 
+    /// Takes the names saved with the tab, which another window may have
+    /// changed, unless this one has a change of its own still to save.
+    fn refresh_names(&mut self, location: &Location) {
+        let Location::CoreTerminal { name, names, .. } = location else {
+            return;
+        };
+        if self.unsaved {
+            return;
+        }
+        self.name.clone_from(name);
+        self.names = names
+            .iter()
+            .filter(|(terminal, _)| self.panes.contains(terminal))
+            .map(|(terminal, name)| (terminal.clone(), name.clone()))
+            .collect();
+    }
+
     /// The tab's location as it saves: the layout, the pane in use, and the
     /// zoomed pane while the zoom is on.
     fn location(&self) -> Location {
@@ -374,13 +391,17 @@ impl CoreTerminals {
             .map(|(id, _)| *id)
     }
 
-    /// How the agents in `panes` are doing, as their tab's mark shows it:
-    /// the status that most wants attention, or unknown with no agent.
-    pub(crate) fn tab_status(&self, panes: &Panes) -> AgentStatus {
+    /// How the agents in `panes` on `host` are doing, as their tab's mark
+    /// shows it: the status that most wants attention, or unknown with no
+    /// agent. Terminal ids are only unique within a host.
+    pub(crate) fn tab_status(&self, host: &Host, panes: &Panes) -> AgentStatus {
+        let Some(infos) = self.infos_of(host) else {
+            return AgentStatus::Unknown;
+        };
         panes
             .terminals()
             .into_iter()
-            .filter_map(|terminal| self.infos.get(terminal))
+            .filter_map(|terminal| infos.get(terminal))
             .map(|info| info.agent)
             .max_by_key(|status| crate::sidebar::status_priority(*status))
             .unwrap_or(AgentStatus::Unknown)
