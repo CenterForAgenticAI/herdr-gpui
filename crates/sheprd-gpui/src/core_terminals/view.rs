@@ -528,6 +528,12 @@ impl Render for CoreTerminalView {
                     this.hover_link(window.mouse_position(), event.modifiers, cx);
                 }),
             )
+            // Moves off the pane reach it no more, so leaving drops the hover.
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !*hovered {
+                    this.leave_link(cx);
+                }
+            }))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up(MouseButton::Right, cx.listener(Self::mouse_up))
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::mouse_up))

@@ -83,16 +83,19 @@ impl CoreTerminalView {
             .unwrap_or_default()
     }
 
-    /// Follows the pointer and the link modifier, as over a Herdr pane.
+    /// Follows the pointer and the link modifier, as over a Herdr pane. A
+    /// pointer off the pane, over another one, hovers nothing here: the
+    /// cell lookup would hold it on this pane's edge.
     pub(super) fn hover_link(
         &mut self,
         position: Point<Pixels>,
         modifiers: Modifiers,
         cx: &mut Context<Self>,
     ) {
-        self.links.pointer = Some((position, modifiers));
+        let inside = self.bounds.is_some_and(|bounds| bounds.contains(&position));
+        self.links.pointer = inside.then_some((position, modifiers));
         let mut examined = false;
-        let link = crate::keymap::secondary(&modifiers)
+        let link = (inside && crate::keymap::secondary(&modifiers))
             .then(|| self.cell_at(position))
             .flatten()
             .and_then(|cell| self.link_at(cell))
@@ -111,6 +114,27 @@ impl CoreTerminalView {
         }
         if link != self.links.hovered {
             self.links.hovered = link;
+            cx.notify();
+        }
+    }
+
+    /// Follows the pointer at `position` with `modifiers` held, as a move or
+    /// a modifier change over the window would.
+    #[cfg(test)]
+    pub(crate) fn hover_at(
+        &mut self,
+        position: Point<Pixels>,
+        modifiers: Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        self.hover_link(position, modifiers, cx);
+    }
+
+    /// Forgets the hover once the pointer left the pane.
+    pub(super) fn leave_link(&mut self, cx: &mut Context<Self>) {
+        self.links.pointer = None;
+        self.links.checked = None;
+        if self.links.hovered.take().is_some() {
             cx.notify();
         }
     }
