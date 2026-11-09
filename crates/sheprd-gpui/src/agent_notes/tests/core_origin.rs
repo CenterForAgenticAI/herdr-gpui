@@ -22,10 +22,7 @@ fn notes_for_a_core_terminal_wait_for_it_without_herdr(cx: &mut TestAppContext) 
     let (delivered, gone, key) = view.update(cx, |view, cx| {
         let scope = crate::browser::scope(&view.endpoints[0]);
         let t1 = TerminalId::new("t1").unwrap();
-        let location = Location::CoreTerminal {
-            panes: Panes::single(t1.clone()),
-            observe: false,
-        };
+        let location = Location::core_terminal(Panes::single(t1.clone()), false);
         let tab = Store::update(cx, |store| {
             store.open(scope.clone(), WORKSPACE, Some(location), None)
         })
@@ -56,10 +53,7 @@ fn notes_for_a_core_terminal_are_kept_under_its_tabs_daemon(cx: &mut TestAppCont
         // the one the window shows.
         let other = crate::browser::Scope::local(std::path::Path::new("/run/b/herdr-client.sock"));
         let t1 = TerminalId::new("t1").unwrap();
-        let location = Location::CoreTerminal {
-            panes: Panes::single(t1.clone()),
-            observe: false,
-        };
+        let location = Location::core_terminal(Panes::single(t1.clone()), false);
         let tab = Store::update(cx, |store| {
             store.open(other.clone(), "kept-1", Some(location), None)
         })

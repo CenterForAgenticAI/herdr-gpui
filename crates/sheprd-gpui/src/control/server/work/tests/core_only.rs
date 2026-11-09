@@ -18,10 +18,7 @@ fn a_core_only_workspace_beside_herdr_is_unsupported(cx: &mut gpui::TestAppConte
     view.update(cx, |view, cx| {
         let scope = crate::browser::scope(&view.endpoints[0]);
         let id = TerminalId::new("t1").unwrap();
-        let location = Location::CoreTerminal {
-            panes: Panes::single(id.clone()),
-            observe: false,
-        };
+        let location = Location::core_terminal(Panes::single(id.clone()), false);
         // A workspace the app keeps, which Herdr does not list.
         let tab = Store::update(cx, |store| {
             store.open(scope.clone(), "kept-1", Some(location), None)
