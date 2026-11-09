@@ -242,3 +242,26 @@ fn serials_tell_deliveries_of_one_key_apart() {
         second.published().get(&a).unwrap().serial()
     );
 }
+
+#[test]
+fn a_shown_scene_frees_what_it_replaced_before_keeping_its_own() {
+    let mut store = ImageStore::default();
+    let keys: Vec<_> = (0..MAX_IMAGES as u32)
+        .map(|id| key(id, SurfaceGraphicsFormat::Rgba))
+        .collect();
+    let mut full = placed(&keys.iter().collect::<Vec<_>>(), true).graphics;
+    store.receive_shown_scene(&mut full);
+    assert_eq!(store.published().len(), MAX_IMAGES);
+    // The program replaces the last image's pixels while every slot is in
+    // use: the new bytes are sent once, and must be kept.
+    let mut replaced = keys.clone();
+    let new = key(MAX_IMAGES as u32 + 1, SurfaceGraphicsFormat::Rgba);
+    *replaced.last_mut().unwrap() = new.clone();
+    let mut scene = placed(&replaced.iter().collect::<Vec<_>>(), false).graphics;
+    scene.assets = vec![asset(&new)];
+    assert!(store.receive_shown_scene(&mut scene));
+    let images = store.published();
+    assert_eq!(images.len(), MAX_IMAGES);
+    assert!(images.get(&new).is_some());
+    assert!(images.get(keys.last().unwrap()).is_none());
+}

@@ -446,26 +446,16 @@ impl Graphics {
                 pixels_wide.div_ceil(cell_width),
                 pixels_high.div_ceil(cell_height),
             ),
-            (cols, 0) => {
-                let high = u64::from(cols)
-                    .saturating_mul(u64::from(cell_width))
-                    .saturating_mul(u64::from(shown_height))
-                    / u64::from(shown_width.max(1));
-                (
-                    cols,
-                    u32::try_from(high.div_ceil(u64::from(cell_height))).ok()?,
-                )
-            }
-            (0, rows) => {
-                let wide = u64::from(rows)
-                    .saturating_mul(u64::from(cell_height))
-                    .saturating_mul(u64::from(shown_width))
-                    / u64::from(shown_height.max(1));
-                (
-                    u32::try_from(wide.div_ceil(u64::from(cell_width))).ok()?,
-                    rows,
-                )
-            }
+            // One rounding, up, of the whole ratio: a fraction of a pixel
+            // dropped first can cost the image a row it reaches into.
+            (cols, 0) => (
+                cols,
+                cells_for(cols, cell_width, shown_height, shown_width, cell_height)?,
+            ),
+            (0, rows) => (
+                cells_for(rows, cell_height, shown_width, shown_height, cell_width)?,
+                rows,
+            ),
             sized => sized,
         };
         let (cols, rows) = (cols.clamp(1, MAX_SIDE), rows.clamp(1, MAX_SIDE));
@@ -658,6 +648,16 @@ fn png_size(data: &[u8]) -> Option<(u32, u32)> {
     }
     let side = |bytes: &[u8]| Some(u32::from_be_bytes(bytes.try_into().ok()?));
     Some((side(&header[16..20])?, side(&header[20..24])?))
+}
+
+/// The cells along one side for an image given `cells` along the other:
+/// `cells * cell * side / (other_side * other_cell)`, rounded up once.
+fn cells_for(cells: u32, cell: u32, side: u32, other_side: u32, other_cell: u32) -> Option<u32> {
+    let pixels = u64::from(cells)
+        .saturating_mul(u64::from(cell))
+        .saturating_mul(u64::from(side));
+    let per_cell = u64::from(other_side.max(1)).saturating_mul(u64::from(other_cell.max(1)));
+    u32::try_from(pixels.div_ceil(per_cell)).ok()
 }
 
 fn fingerprint(data: &[u8]) -> u64 {

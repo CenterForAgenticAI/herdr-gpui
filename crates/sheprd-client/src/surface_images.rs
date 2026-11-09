@@ -173,6 +173,18 @@ impl ImageStore {
         changed
     }
 
+    /// Takes `scene` as the one shown from now on, for a viewer that paints
+    /// each scene as it comes and keeps the images it published until the
+    /// next. What the last scene showed and this one does not is freed
+    /// before this one's images are kept, so a replaced image's new bytes
+    /// fit even when every slot was in use. Returns whether the published
+    /// set changed.
+    pub fn receive_shown_scene(&mut self, scene: &mut SurfaceGraphicsScene) -> bool {
+        self.shown.clear();
+        let received = self.receive_scene(scene);
+        self.show() || received
+    }
+
     /// Records that the newest received surface was emitted. Returns whether
     /// the published set changed.
     pub fn show(&mut self) -> bool {

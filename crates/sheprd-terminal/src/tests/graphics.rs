@@ -268,3 +268,19 @@ fn a_tall_image_scrolls_its_whole_height_past_a_short_screen() {
     };
     assert_eq!((placement.y, placement.rows), (0, 40));
 }
+
+#[test]
+fn a_size_from_one_side_rounds_the_other_up_whole() {
+    let mut emulator = emulator(40, 10);
+    emulator.set_cell_pixels(10, 20);
+    // 1 column of 10 px makes 49x100 about 20.4 px tall: 2 rows of 20.
+    emulator.feed(&command("a=T,f=100,c=1", &png(49, 100)));
+    let tall = placements(&mut emulator);
+    assert_eq!((tall[0].cols, tall[0].rows), (1, 2));
+    // 1 row of 20 px makes 100x49 about 40.8 px wide: 5 columns of 10.
+    let mut emulator = super::emulator(40, 10);
+    emulator.set_cell_pixels(10, 20);
+    emulator.feed(&command("a=T,f=100,r=1", &png(100, 49)));
+    let wide = placements(&mut emulator);
+    assert_eq!((wide[0].cols, wide[0].rows), (5, 1));
+}

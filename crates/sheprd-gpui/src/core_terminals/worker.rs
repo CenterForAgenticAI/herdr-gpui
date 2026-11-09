@@ -135,8 +135,7 @@ fn run<B: Backend>(
                 let mut pictures = false;
                 for update in &mut updates {
                     if let SurfaceUpdate::Graphics(scene) = update {
-                        images.receive_scene(scene);
-                        images.show();
+                        images.receive_shown_scene(scene);
                         pictures = true;
                     }
                 }
