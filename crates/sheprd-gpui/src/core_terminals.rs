@@ -40,6 +40,7 @@ mod workspaces;
 mod tests;
 
 pub(crate) use error::Error;
+pub(crate) use fallback::Holder;
 pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
@@ -254,6 +255,14 @@ impl CoreTerminals {
         }
         shown.keep_root(&self.infos);
         self.tabs.insert(tab, shown);
+    }
+
+    /// Places `tab` in `workspace` of `scope`, as showing the workspace does.
+    #[cfg(test)]
+    pub(crate) fn place_for_test(&mut self, tab: TabId, scope: Scope, workspace: &str) {
+        if let Some(shown) = self.tabs.get_mut(&tab) {
+            shown.workspace = Some((scope, workspace.to_owned()));
+        }
     }
 
     /// Whether `tab` is a herdr-core tab that holds chats: it drives its

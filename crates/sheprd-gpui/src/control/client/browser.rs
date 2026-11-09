@@ -37,8 +37,9 @@ fn page(target: &str) -> crate::Result<(Page, String)> {
 /// so the user reads it and the agent's replies together. Web addresses, and
 /// files opened from outside a Herdr pane, take a tab.
 pub(super) fn default_placement(page: &Page, caller: &Caller) -> Placement {
-    match (page, &caller.pane_id) {
-        (Page::File(_), Some(_)) => Placement::Beside,
+    let in_pane = caller.pane_id.is_some() || caller.terminal_id.is_some();
+    match page {
+        Page::File(_) if in_pane => Placement::Beside,
         _ => Placement::Tab,
     }
 }
@@ -112,10 +113,13 @@ fn reload() -> crate::Result<Output> {
 /// The user's notes for this pane: page, review, and terminal notes alike
 /// are kept for it whenever they could not be typed into the pane.
 pub(super) fn feedback(wait: u64, _: &Context) -> crate::Result<Output> {
-    let pane_id = super::env_id("HERDR_PANE_ID").ok_or(crate::control::Error::Rejected {
-        code: ErrorCode::InvalidRequest,
-        message: "feedback runs in the Herdr pane that should receive the notes".into(),
-    })?;
+    let caller = super::caller_from(None, super::env_id, None);
+    let pane_id = crate::control::origin(caller.pane_id.as_deref(), caller.terminal_id.as_deref())
+        .map(std::borrow::Cow::into_owned)
+        .ok_or(crate::control::Error::Rejected {
+            code: ErrorCode::InvalidRequest,
+            message: "feedback runs in the pane that should receive the notes".into(),
+        })?;
     let request = Request::Feedback(FeedbackRequest {
         pane_id,
         daemon_socket: Some(notes_daemon()?),

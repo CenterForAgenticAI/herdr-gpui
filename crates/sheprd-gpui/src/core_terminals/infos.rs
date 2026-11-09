@@ -32,6 +32,13 @@ impl Infos {
         self.known.get(id)
     }
 
+    /// The terminal herdr-core knows by `name`.
+    pub(super) fn by_name(&self, name: &str) -> Option<&TerminalInfo> {
+        self.known
+            .values()
+            .find(|info| info.name.as_deref() == Some(name))
+    }
+
     /// The terminal `id` names: its address, or else its name, as a terminal
     /// found by name is shown under it.
     pub(super) fn named(&self, id: &TerminalId) -> Option<&TerminalInfo> {
