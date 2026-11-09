@@ -2,6 +2,7 @@
 //! A screen keeps the terminal's recent history, so a phone scrolls back
 //! through it, and holds the terminal at a phone's size while one asks.
 
+use super::lines::Lines;
 use crate::hub::{ApiMethod, Error, Result};
 use serde_json::{Value, json};
 use sheprd_client::protocol::{CellData, ClientKeyCode, ClientKeyKind, ClientPaneInputEvent};
@@ -35,10 +36,14 @@ pub(super) struct Screen {
     /// since it was set. After that, a listing at another size is a
     /// driver that took the terminal back, which the emulator follows.
     hold_listed: bool,
-    /// Lines pushed into history since the screen opened: where a scrolled
-    /// view's lines went as output arrived.
-    lines: u64,
+    /// Where a scrolled view's lines went as output arrived and as the
+    /// screen rewrapped.
+    lines: Lines,
     lost: bool,
+    /// Whether a driver took the terminal back from the holds: the latest
+    /// hold then no longer sets its size, and closing a view leaves it
+    /// alone. A phone that asks for its size again takes it back.
+    taken_back: bool,
     sync_since: Option<Instant>,
     touched: Instant,
 }
@@ -65,9 +70,10 @@ impl Screen {
             emulator: Emulator::new(size, HISTORY as usize),
             holds: Vec::new(),
             hold_listed: false,
-            lines: 0,
+            lines: Lines::default(),
             lost: false,
             sync_since: None,
+            taken_back: false,
             touched: Instant::now(),
         };
         screen.settle()?;
@@ -138,7 +144,8 @@ impl Screen {
         self.holds.retain(|(id, _)| *id != hold);
         self.holds.push((hold, size));
         self.hold_listed = false;
-        self.emulator.resize(size);
+        self.taken_back = false;
+        self.resize(size);
         Ok(())
     }
 
@@ -152,9 +159,14 @@ impl Screen {
             return Ok(());
         }
         if let Some((_, size)) = self.holds.last().copied() {
+            // Resizing would make the screen the latest driver again, over
+            // the size the desktop took back.
+            if self.taken_back {
+                return Ok(());
+            }
             self.hold_listed = false;
             self.attachment.resize(size.cols(), size.rows())?;
-            self.emulator.resize(size);
+            self.resize(size);
             return Ok(());
         }
         if !self.driving {
@@ -222,19 +234,28 @@ impl Screen {
                 self.hold_listed = listed == *held;
                 *held
             }
-            _ => listed,
+            Some((_, held)) => {
+                self.taken_back |= listed != *held;
+                listed
+            }
+            None => listed,
         };
-        if size != self.emulator.size() {
-            self.emulator.resize(size);
-        }
+        self.resize(size);
         Ok(())
+    }
+
+    /// Resizes the emulator, keeping where a scrolled view's lines went as
+    /// the screen rewraps into history or out of it.
+    fn resize(&mut self, size: Size) {
+        self.lines
+            .resize(&mut self.emulator, size, HISTORY as usize);
     }
 
     pub(super) fn call(&mut self, core: &Core, method: ApiMethod, params: &Value) -> Result<Value> {
         self.touched = Instant::now();
         self.drain()?;
         match method {
-            ApiMethod::PaneRead => Ok(read(&mut self.emulator, params, self.lines)),
+            ApiMethod::PaneRead => Ok(read(&mut self.emulator, params, &self.lines)),
             ApiMethod::PaneSendText => {
                 let text = params["text"].as_str().ok_or(Error::Response)?;
                 self.drive(core)?;
@@ -262,7 +283,7 @@ impl Screen {
     }
 
     fn feed(&mut self, bytes: &[u8]) {
-        self.lines += feed(&mut self.emulator, bytes);
+        self.lines.pushed(feed(&mut self.emulator, bytes));
     }
 
     fn drain(&mut self) -> Result<()> {
@@ -320,10 +341,10 @@ pub(super) fn feed(emulator: &mut Emulator, bytes: &[u8]) -> u64 {
 /// The screen, scrolled up `scroll` lines into history, or with
 /// `source: recent` the last `lines` of history above it. `history` says
 /// how far a view can scroll. A view that read at `since` (the `lines`
-/// pushed into history then, as each read answers) stays on the lines it
-/// showed: its `scroll` grows by the lines pushed since, and the answer's
-/// `scroll` is where it is now.
-pub(super) fn read(emulator: &mut Emulator, params: &Value, lines: u64) -> Value {
+/// token each read answers) stays on the lines it showed as output pushes
+/// them up and resizes rewrap them, and the answer's `scroll` is where it
+/// is now.
+pub(super) fn read(emulator: &mut Emulator, params: &Value, lines: &Lines) -> Value {
     let cols = emulator.size().cols();
     let history = emulator.scroll_metrics().history;
     let count = |key: &str| {
@@ -339,15 +360,14 @@ pub(super) fn read(emulator: &mut Emulator, params: &Value, lines: u64) -> Value
     if up > 0
         && let Some(since) = params["since"].as_u64()
     {
-        let pushed = usize::try_from(lines.saturating_sub(since)).unwrap_or(usize::MAX);
-        up = up.saturating_add(pushed);
+        up = lines.place(up, since);
     }
     let up = up.min(history);
     let cells = scrolled(emulator, up);
     json!({"read": {
         "text": ansi(&cells, cols),
         "history": history,
-        "lines": lines,
+        "lines": lines.token(),
         "scroll": up,
     }})
 }

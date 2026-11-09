@@ -138,6 +138,52 @@ fn a_driver_that_takes_the_size_back_is_followed() {
 }
 
 #[test]
+fn closing_a_view_leaves_a_size_the_desktop_took_back() {
+    let (source, fake) = fake();
+    source.poll().unwrap();
+    let older = source.hold(&id("t1"), 46, 30).unwrap();
+    next(&fake);
+    next(&fake);
+    let newer = source.hold(&id("t1"), 60, 40).unwrap();
+    assert_eq!(
+        fake.resizes.recv_timeout(Duration::from_secs(2)).unwrap(),
+        (60, 40)
+    );
+    let screen = lock(&source.state).screens["t1"].clone();
+    let listed = |cols: u16, rows: u16| {
+        let mut record: Terminal = serde_json::from_value(record("t1")).unwrap();
+        record.cols = cols;
+        record.rows = rows;
+        record
+    };
+    {
+        let mut screen = lock(&screen);
+        screen.follow_size(&listed(60, 40)).unwrap();
+        // The desktop resized its pane after the phones' holds.
+        screen.follow_size(&listed(120, 40)).unwrap();
+    }
+    drop(older);
+    assert!(
+        fake.resizes
+            .recv_timeout(Duration::from_millis(200))
+            .is_err(),
+        "the desktop keeps its size"
+    );
+    assert_eq!(lock(&screen).size().cols(), 120);
+    // A phone asking for its size again takes it back.
+    let again = source.hold(&id("t1"), 60, 40).unwrap();
+    assert_eq!(
+        fake.resizes.recv_timeout(Duration::from_secs(2)).unwrap(),
+        (60, 40)
+    );
+    drop(again);
+    drop(newer);
+    drop(screen);
+    drop(source);
+    fake.server.join().unwrap();
+}
+
+#[test]
 fn a_hold_on_a_screen_that_was_replaced_counts_as_lost_and_lets_the_new_one_be() {
     let (source, fake) = fake();
     source.poll().unwrap();
