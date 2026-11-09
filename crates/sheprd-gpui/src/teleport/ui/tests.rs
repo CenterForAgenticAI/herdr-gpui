@@ -45,7 +45,7 @@ fn candidate() -> Candidate {
             reason: MatchReason::Name,
         },
         origin: None,
-        lands_in: sheprd_session::Keeper::Herdr1,
+        lands_in: Keeper::Herdr1,
     }
 }
 
@@ -103,13 +103,13 @@ pub(super) fn stages() -> Vec<(&'static str, Teleport)> {
             place: place("buildbox"),
             repositories: Some(Vec::new()),
             retired: Vec::new(),
-            lands_in: sheprd_session::Keeper::Herdr1,
+            lands_in: Keeper::Herdr1,
         },
         HostRepositories {
             place: place("nas"),
             repositories: None,
             retired: Vec::new(),
-            lands_in: sheprd_session::Keeper::Herdr1,
+            lands_in: Keeper::Herdr1,
         },
     ];
     vec![

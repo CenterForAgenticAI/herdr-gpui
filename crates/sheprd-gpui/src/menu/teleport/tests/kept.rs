@@ -121,11 +121,12 @@ fn this_computer_lands_work_in_a_kept_workspace(cx: &mut TestAppContext) {
         );
 
         // With Herdr 1 installed and not chosen for new tabs, new work goes
-        // there, but the checkout work left is still one to come back to.
+        // there, which knows none of the app's workspaces; the checkout work
+        // left is still one to come back to, through its mark.
         view.live.missing_installation = false;
         let herdr_1 = view.teleport_host(0, host);
         assert_eq!(herdr_1.lands_in, Keeper::Herdr1);
         assert_eq!(herdr_1.retired.len(), 1);
-        assert_eq!(herdr_1.repositories.map(|repos| repos.len()), Some(1));
+        assert_eq!(herdr_1.repositories, None);
     });
 }

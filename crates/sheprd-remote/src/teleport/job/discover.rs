@@ -123,8 +123,24 @@ fn discover_host(
         })
         .collect();
     // Going back to a checkout the work left: that checkout is the place.
+    // One the app keeps is named by its mark alone; its repository is no
+    // destination Herdr 1 could open a worktree in.
     let back = branch.and_then(|branch| {
         host.retired.iter().find_map(|retired| {
+            if retired.branch != branch {
+                return None;
+            }
+            if let Keeping::App { .. } = retired.keeping {
+                return Some(Destination::Reclaim {
+                    repository: Repository {
+                        key: retired.repo_key.clone(),
+                        label: identity.name.clone(),
+                        workspace_id: retired.workspace_id.clone(),
+                    },
+                    workspace_id: retired.workspace_id.clone(),
+                    keeping: retired.keeping.clone(),
+                });
+            }
             let repository = open
                 .iter()
                 .find_map(|candidate| match &candidate.destination {

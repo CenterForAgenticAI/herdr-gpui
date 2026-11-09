@@ -269,21 +269,13 @@ impl SheprdWindow {
                 })
             })
             .collect();
-        // The app's workspaces there: every one where new workspaces are
-        // the app's, else only those work left, which it may come back to.
+        // The app's workspaces there open a worktree only where new
+        // workspaces are the app's: Herdr 1 knows none of their IDs. A
+        // checkout work left comes back through its retired mark either way.
         let mut repositories = snapshot.map(|snapshot| open_repositories(snapshot));
-        let back = |workspace: &&sheprd_session::Workspace| {
-            retired
-                .iter()
-                .any(|retired: &Retired| retired.workspace_id == workspace.id)
-        };
-        let reachable: Vec<_> = kept
-            .iter()
-            .filter(|workspace| lands_in == Keeper::App || back(workspace))
-            .collect();
-        if lands_in == Keeper::App || !reachable.is_empty() {
+        if lands_in == Keeper::App {
             let found = repositories.get_or_insert_with(Vec::new);
-            for workspace in reachable {
+            for workspace in kept {
                 let Some(tree) = &workspace.worktree else {
                     continue;
                 };

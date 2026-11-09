@@ -9,7 +9,7 @@
 
 use super::Terminal;
 use crate::teleport::{
-    error::{Result, Step},
+    error::{Error, Result, Step},
     host::Host,
     launch::{AgentKind, Work},
     snapshot::{AgentSession, SessionKind},
@@ -121,6 +121,38 @@ fn parse(output: &str, processes: &[(&str, u32)]) -> HashMap<String, AgentSessio
 /// `text` with its runs of spaces made one, as `ps` pads its columns.
 fn words(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Refuses a move whose Herdr 2 agents no longer run the sessions it
+/// reviewed, `expected` by terminal: one resumed or restarted since would
+/// have its old conversation resumed on the destination. Asked before
+/// anything changes.
+pub(in crate::teleport) fn confirm(
+    host: &Host,
+    expected: &[(String, AgentSession)],
+    cancelled: &AtomicBool,
+) -> Result<()> {
+    if expected.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<String> = expected.iter().map(|(id, _)| id.clone()).collect();
+    let terminals = super::terminals(host, &ids, cancelled)?;
+    let now = sessions(host, &terminals, cancelled)?;
+    unchanged(expected, &now)
+}
+
+fn unchanged(
+    expected: &[(String, AgentSession)],
+    now: &HashMap<String, AgentSession>,
+) -> Result<()> {
+    if expected
+        .iter()
+        .all(|(id, session)| now.get(id) == Some(session))
+    {
+        Ok(())
+    } else {
+        Err(Error::SourceSessionChanged)
+    }
 }
 
 /// What `terminal` runs, resumable when it is an agent whose `session` was

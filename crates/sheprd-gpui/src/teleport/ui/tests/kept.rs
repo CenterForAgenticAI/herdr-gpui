@@ -117,3 +117,33 @@ fn the_window_follows_to_a_kept_workspace(cx: &mut TestAppContext) {
         assert!(view.teleport_follow.is_none());
     });
 }
+
+/// A move into a new kept workspace is refused before it starts while the
+/// app keeps the most workspaces it can: once it ended, its programs would
+/// have no tab.
+#[gpui::test]
+fn a_full_workspace_list_refuses_the_move_before_it_starts(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    cx.update(|window, cx| {
+        let scope = Scope::endpoint("full");
+        Store::update(cx, |store| {
+            while store.kept_room() > 0 {
+                store.keep_workspace(&scope, "w", "/w", false).unwrap();
+            }
+        });
+        view.update(cx, |view, cx| {
+            let candidate = Candidate {
+                lands_in: Keeper::App,
+                ..candidate()
+            };
+            let mut teleport = Teleport::start(source(), "feature".into(), Vec::new());
+            teleport.stage = Stage::Ready(candidate, Box::new(review(GitHubAccess::Direct)));
+            view.teleport = Some(teleport);
+            view.submit_teleport(window, cx);
+            assert!(
+                matches!(view.teleport.as_ref().unwrap().stage, Stage::Ready(..)),
+                "nothing started"
+            );
+        });
+    });
+}

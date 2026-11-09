@@ -19,7 +19,7 @@ use sheprd_session::panes::{Axis, Node as PaneNode, Panes, Share};
 use std::{collections::HashMap, sync::atomic::AtomicBool, time::Duration};
 
 mod sessions;
-pub(super) use sessions::{sessions, work};
+pub(super) use sessions::{confirm, sessions, work};
 
 /// How long past a handoff's own timeout its script may stay quiet.
 const PROMPT_GRACE: Duration = Duration::from_secs(30);

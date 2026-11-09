@@ -10,7 +10,7 @@ use super::{
     provision::{self, Arrival},
     remote::MatchReason,
     sessions::{Route, move_session},
-    snapshot::{PaneInfoResult, TabCreated, WorkspaceCreated},
+    snapshot::{AgentSession, PaneInfoResult, TabCreated, WorkspaceCreated},
     warning::Warning,
 };
 use sheprd_backend::Generation;
@@ -185,6 +185,21 @@ pub(super) fn reference_name() -> String {
     format!("refs/herdr-teleport/{nanos:x}-{:x}", std::process::id())
 }
 
+/// The sessions the review found in Herdr 2 terminals, by terminal, which
+/// must still be running when the move stops them.
+fn core_sessions(review: &Review) -> Vec<(String, AgentSession)> {
+    review
+        .tabs
+        .iter()
+        .filter(|tab| tab.generation == Generation::Herdr2)
+        .flat_map(|tab| &tab.panes)
+        .filter_map(|pane| match &pane.work {
+            Work::Session { session, .. } => Some((pane.pane_id.clone(), session.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Move the workspace. `report` announces each step as it starts.
 pub fn run(
     source: &Source,
@@ -196,6 +211,11 @@ pub fn run(
     let from = &source.place.host;
     let to = &destination.place.host;
     let mut warnings = Vec::new();
+    // Herdr 2 agents' sessions are read from their processes, which may have
+    // moved on to another conversation since the review. Checked before
+    // anything changes, so a refusal leaves nothing behind on either host.
+    let resumed = core_sessions(review);
+    core::confirm(from, &resumed, cancelled)?;
 
     // The repository comes first: if it cannot be put on the destination,
     // nothing on the source has been touched.

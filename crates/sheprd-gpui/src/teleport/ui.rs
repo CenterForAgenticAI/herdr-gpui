@@ -27,6 +27,7 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use sheprd_backend::Generation;
+use sheprd_session::Keeper;
 use std::{
     sync::{
         Arc,
@@ -204,7 +205,7 @@ impl Teleport {
                 path: "/tmp/repo".into(),
             }),
             origin: None,
-            lands_in: sheprd_session::Keeper::Herdr1,
+            lands_in: Keeper::Herdr1,
         };
         self.cancelled.store(true, Ordering::Release);
         self.stage = Stage::Moving(candidate, Some(Step::Fetch));
@@ -513,6 +514,9 @@ impl SheprdWindow {
 
     fn submit_teleport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let room = cx.try_global::<Store>().map_or(usize::MAX, Store::room);
+        let kept_room = cx
+            .try_global::<Store>()
+            .map_or(usize::MAX, Store::kept_room);
         let unclaimed = cx.default_global::<Unclaimed>().clone();
         let destination = match self.teleport.as_ref().map(|teleport| &teleport.stage) {
             Some(Stage::Ready(candidate, _)) => {
@@ -525,10 +529,19 @@ impl SheprdWindow {
         };
         match &teleport.stage {
             Stage::Choosing => teleport.review(),
-            Stage::Ready(_, review) => {
+            Stage::Ready(candidate, review) => {
                 let Some(destination) = destination else {
                     return;
                 };
+                // A move into a new workspace the app keeps must find room
+                // for it before the source stops; once the move ends, a
+                // full list would leave its programs with no tab.
+                let new_kept = candidate.lands_in == Keeper::App
+                    && !matches!(candidate.destination, job::Destination::Reclaim { .. });
+                if new_kept && kept_room == 0 {
+                    self.show_flash(Flash::warning(fl!("core-workspaces-too-many")), cx);
+                    return;
+                }
                 // The tabs rebuilt in Herdr 2 must all open once the move
                 // ends, when the source's own Herdr 2 tabs have closed: a
                 // program without a tab would run unseen.
