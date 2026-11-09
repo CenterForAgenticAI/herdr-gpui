@@ -734,13 +734,21 @@ impl SheprdWindow {
                 .map(|endpoint| endpoint.label.as_str());
             go_to_entries(&source.endpoint, host, snapshot, &mut entries);
         }
-        // This computer's kept workspaces, whichever host is shown.
-        if let Some(index) = self.core_host()
-            && let Some(core) = self.sessions(index).core
-        {
-            let local = &self.endpoints[index];
-            let host = (self.endpoints.len() > 1).then_some(local.label.as_str());
-            kept_go_to_entries(&local.id, host, &core, &mut entries);
+        // The kept workspaces of this computer and of each saved host,
+        // whichever host is shown.
+        let remote = self
+            .endpoints
+            .iter()
+            .enumerate()
+            .filter(|(_, endpoint)| endpoint.connection.target.is_remote())
+            .map(|(index, _)| index);
+        for index in self.core_host().into_iter().chain(remote) {
+            let Some(core) = self.sessions(index).core else {
+                continue;
+            };
+            let endpoint = &self.endpoints[index];
+            let host = (self.endpoints.len() > 1).then_some(endpoint.label.as_str());
+            kept_go_to_entries(&endpoint.id, host, &core, &mut entries);
         }
         // Their rows nest under rows of their own: counted from here.
         let core = self.core_palette_entries(cx);
