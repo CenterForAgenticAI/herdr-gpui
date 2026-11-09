@@ -204,3 +204,28 @@ fn primary_session_work_goes_to_the_primary_whichever_session_is_shown(cx: &mut 
         })
     });
 }
+
+#[test]
+fn an_adopted_terminal_loses_what_adopts_it_and_keeps_its_chat() {
+    use sheprd_session::{NEW_WORKSPACE_LABEL, SESSION_LABEL, WORKSPACE_LABEL};
+    let mut labels: std::collections::BTreeMap<String, String> = [
+        (WORKSPACE_LABEL, "w1"),
+        (SESSION_LABEL, "dev"),
+        (NEW_WORKSPACE_LABEL, "/code/api"),
+        (sheprd_chat_protocol::TOKEN, "endpoint"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+    .collect();
+    // As herdr-core applies `terminal.label`: an empty value removes one.
+    for (label, value) in crate::core_terminals::adopt::released_labels() {
+        assert!(value.is_empty());
+        labels.remove(label);
+    }
+    assert_eq!(sheprd_session::labelled_workspace(&labels), None);
+    assert_eq!(sheprd_session::new_workspace(&labels), None);
+    assert!(
+        labels.contains_key(sheprd_chat_protocol::TOKEN),
+        "still a chat"
+    );
+}

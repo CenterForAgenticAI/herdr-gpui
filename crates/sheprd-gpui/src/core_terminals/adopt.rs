@@ -3,8 +3,11 @@
 //! and, for a named Herdr 1 session, the session
 //! (`sheprd_session::labelled_workspace`), and the app puts it in a tab of
 //! its own there, once, as if it had started it. A terminal some tab on
-//! this computer already holds is left where it is.
+//! this computer already holds is left where it is. Once in a tab, those
+//! labels are removed from the terminal, so a tab the user closes while
+//! the terminal runs on is not opened again after a restart.
 
+use super::hosts::Host;
 use crate::{
     SheprdWindow,
     browser::{Location, Store, scope},
@@ -106,11 +109,12 @@ impl SheprdWindow {
                 continue;
             }
             opened = true;
-            // Once: a tab the user closes later ends it, and one moved
-            // elsewhere stays there.
+            // Once: one moved elsewhere stays there, and one closed is not
+            // opened again, here or after a restart.
             if self.core_terminals.adopted.len() >= MAX_ADOPTED {
                 self.core_terminals.adopted.clear();
             }
+            self.release_labels(terminal.clone());
             self.core_terminals.adopted.insert(terminal);
         }
         if opened {
@@ -169,6 +173,24 @@ impl SheprdWindow {
 }
 
 impl SheprdWindow {
+    /// Removes the labels that put `terminal` in a tab, on a worker thread
+    /// so herdr-core's answer is never awaited on the UI thread.
+    fn release_labels(&self, terminal: TerminalId) {
+        let Some(backend) = self.core_terminals.backend_of(&Host::Local).cloned() else {
+            return;
+        };
+        let released = std::thread::Builder::new()
+            .name("herdr-core-label".into())
+            .spawn(move || {
+                if let Err(error) = backend.core().label(terminal.as_str(), &released_labels()) {
+                    tracing::warn!(%error, %terminal, "Could not release an adopted terminal");
+                }
+            });
+        if let Err(error) = released {
+            tracing::warn!(%error, "Could not start a herdr-core label worker");
+        }
+    }
+
     /// The endpoint of the session the remote control daemon follows as its
     /// primary: the one at the socket `ConnectTarget::Local` finds, as the
     /// daemon's service is installed with. A window opened on an explicit
@@ -185,6 +207,20 @@ impl SheprdWindow {
             })
             .or_else(|| self.endpoints.iter().position(local))
     }
+}
+
+/// What `terminal.label` takes to remove the labels adoption reads: an
+/// empty value removes a label, and the others, a chat's endpoint among
+/// them, stay.
+pub(super) fn released_labels() -> std::collections::BTreeMap<&'static str, &'static str> {
+    [
+        sheprd_session::NEW_WORKSPACE_LABEL,
+        sheprd_session::SESSION_LABEL,
+        sheprd_session::WORKSPACE_LABEL,
+    ]
+    .into_iter()
+    .map(|label| (label, ""))
+    .collect()
 }
 
 /// Every terminal some tab on this computer holds, mirrors included. A tab
