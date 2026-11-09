@@ -67,6 +67,9 @@ pub(crate) struct CoreMenu {
     selected: Option<usize>,
     /// The name being typed on the rename page.
     input: Option<Entity<SearchInput>>,
+    /// What held the keyboard as the menu opened: a pane of another tab, or
+    /// a chat's composer over the target's pane, still takes the keys back.
+    return_focus: Option<FocusHandle>,
 }
 
 impl CoreMenu {
@@ -123,6 +126,8 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Read before the menu takes the keyboard.
+        let return_focus = window.focused(cx);
         if !self.core_terminals.tabs.contains_key(&target.tab()) || !self.open_menu(window, cx) {
             return;
         }
@@ -132,6 +137,7 @@ impl SheprdWindow {
             target,
             selected: None,
             input: None,
+            return_focus,
         });
     }
 
@@ -225,12 +231,20 @@ impl SheprdWindow {
         }
     }
 
-    /// Where the keyboard goes back to as a herdr-core menu closes: the
-    /// pane in use of its tab, which held it before, rather than the
-    /// window, whose keys a Herdr pane would take.
+    /// Where the keyboard goes back to as a herdr-core menu closes: what
+    /// held it as the menu opened, else the pane in use of the menu's tab,
+    /// rather than the window, whose keys a Herdr pane would take.
     pub(crate) fn core_menu_return_focus(&self, cx: &App) -> Option<FocusHandle> {
-        let tab = self.menu.core.as_ref()?.target.tab();
-        Some(self.core_pane_view(tab)?.read(cx).focus_handle().clone())
+        let menu = self.menu.core.as_ref()?;
+        if let Some(focus) = &menu.return_focus {
+            return Some(focus.clone());
+        }
+        Some(
+            self.core_pane_view(menu.target.tab())?
+                .read(cx)
+                .focus_handle()
+                .clone(),
+        )
     }
 
     /// Closes a pane: its terminal ends, unless the tab only mirrors it. The
