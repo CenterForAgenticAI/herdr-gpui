@@ -384,6 +384,9 @@ pub(crate) struct CoreTerminals {
     look: Option<Look>,
     /// The kept workspace the user brought to the front, by its host.
     in_front: Option<(Scope, String)>,
+    /// When each agent of `session` last changed state, to order it among
+    /// Herdr 1's agents.
+    pub(crate) recency: crate::state::StatusRecency,
     /// A kept workspace just came to the front: show one of its tabs.
     reveal: bool,
     /// The session over herdr-core of the selected host, by its scope,

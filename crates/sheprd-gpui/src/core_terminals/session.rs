@@ -7,6 +7,7 @@ use crate::{
     session_model::Sessions,
 };
 use gpui::App;
+use sheprd_backend::TerminalId;
 use sheprd_session::{CoreTab, CoreWorkspace, Session, Worktree, panes::Panes};
 use std::sync::Arc;
 
@@ -61,6 +62,10 @@ impl SheprdWindow {
             _ => false,
         };
         if !unchanged {
+            let agents = built.iter().flat_map(|(_, session)| &session.agents);
+            self.core_terminals
+                .recency
+                .observe(agents.map(|agent| (agent.pane.as_str(), agent.status)));
             self.core_terminals.session = built;
         }
         !unchanged || checkouts_changed
@@ -122,9 +127,25 @@ impl SheprdWindow {
             .as_ref()
             .filter(|(front, _)| front == scope)
             .map(|(_, id)| id.as_str());
-        Session::core(workspaces, tabs, focused, |terminal| {
+        let mut session = Session::core(workspaces, tabs, focused, |terminal| {
             self.core_terminals.reported(terminal)
-        })
+        });
+        // Which agent each is, and what to call it, by the policy the
+        // Overview and the attention service name agents with.
+        for agent in &mut session.agents {
+            let Some(info) = TerminalId::new(agent.pane.as_str())
+                .ok()
+                .and_then(|terminal| self.core_terminals.reported(&terminal))
+            else {
+                continue;
+            };
+            agent.identity =
+                sheprd_core_client::agent_kind(info).map(|kind| kind.name().to_owned());
+            if let Some(name) = sheprd_core_client::agent_name(info) {
+                agent.name = name;
+            }
+        }
+        session
     }
 
     /// The pull request and Git status lookup of each kept workspace on the
@@ -142,6 +163,54 @@ impl SheprdWindow {
                 Some((workspace.id.clone(), input))
             })
             .collect()
+    }
+
+    /// Puts `session` in place of the herdr-core session of this computer's
+    /// host, as a core reporting its agents would.
+    #[cfg(test)]
+    pub(crate) fn set_core_session_for_test(&mut self, session: Session) {
+        let Some(index) = self.core_host() else {
+            return;
+        };
+        let scope = scope(&self.endpoints[index]);
+        self.core_terminals.session = Some((scope, Arc::new(session)));
+    }
+
+    /// This computer's Herdr 2 agents as the sidebar lists them, while the
+    /// host of its herdr-core session is the one at `index`.
+    pub(crate) fn listed_core_agents(
+        &self,
+        index: usize,
+    ) -> Option<crate::sidebar::CoreAgents<'_>> {
+        let (core_scope, session) = self.core_terminals.session.as_ref()?;
+        if *core_scope != scope(self.endpoints.get(index)?) {
+            return None;
+        }
+        let shown = self
+            .core_terminals
+            .shown
+            .as_ref()
+            .map(|(_, terminal)| terminal.as_str());
+        let snapshot = self.live_at(index).snapshot.as_deref();
+        let agents = session
+            .agents
+            .iter()
+            .map(|agent| crate::sidebar::CoreAgent {
+                agent,
+                session,
+                snapshot,
+                info: TerminalId::new(agent.pane.as_str())
+                    .ok()
+                    .and_then(|terminal| self.core_terminals.reported(&terminal)),
+                focused: shown == Some(agent.pane.as_str()),
+            })
+            .collect();
+        Some(crate::sidebar::CoreAgents {
+            index,
+            answers: self.core_terminals.hub.backend().is_some(),
+            agents,
+            recency: &self.core_terminals.recency,
+        })
     }
 
     /// The sessions of the host at `index`: Herdr 1's, and herdr-core's
