@@ -302,9 +302,10 @@ fn heredoc_end(instruction: &str) -> Option<(String, bool)> {
     (!word.is_empty()).then_some((word, strip_tabs))
 }
 
-/// The layer this app adds to every image: Herdr, installed where the bridge
-/// finds it, so a new machine skips the installer. It runs as root, then
-/// gives the image back the user its own last stage chose.
+/// The layer this app adds to every image: Herdr and the pinned herdr-core,
+/// installed where the bridges find them, so a new machine skips the
+/// installers. It runs as root, then gives the image back the user its own
+/// last stage chose.
 pub fn layer(user: Option<&str>) -> String {
     let mut layer = format!(
         "\n# Added by Sheprd: install Herdr so new sandboxes start ready.\n\
@@ -312,10 +313,29 @@ pub fn layer(user: Option<&str>) -> String {
          RUN command -v curl >/dev/null 2>&1 || {{ echo 'Sheprd needs curl in the image to install Herdr' >&2; exit 4; }}; \\\n    \
          curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR={INSTALL_DIR} sh\n"
     );
+    layer.push_str(&core_layer());
     if let Some(user) = user {
         layer.push_str(&format!("USER {user}\n"));
     }
     layer
+}
+
+/// The pinned herdr-core, fed to `sh` one line per word since a `RUN` line
+/// holds no newline. An image the core cannot go in still builds: its
+/// machines keep their new tabs in Herdr.
+fn core_layer() -> String {
+    let script = match crate::core_install::script(crate::core_install::Dir::At(INSTALL_DIR)) {
+        Ok(script) => script,
+        Err(error) => {
+            tracing::warn!(%error, "No herdr-core to add to sandbox images");
+            return String::new();
+        }
+    };
+    let lines: Vec<String> = script.lines().map(sheprd_client::shell_quote).collect();
+    format!(
+        "RUN printf '%s\\n' {} | sh || echo 'Sheprd could not add herdr-core to the image' >&2\n",
+        lines.join(" ")
+    )
 }
 
 /// The Dockerfile a build runs: the project's own, then [`layer`].
