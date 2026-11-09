@@ -110,15 +110,15 @@ impl Hub {
 /// installed here. Blocking: it may read the login shell's environment.
 fn core_program() -> Option<PathBuf> {
     let login = sheprd_client::login_env::path();
-    if installed(HERDR, login.as_deref()) {
+    if find(HERDR, login.as_deref()).is_some() {
         return None;
     }
-    locate(sheprd_core_client::PROGRAM)
+    find(sheprd_core_client::PROGRAM, login.as_deref())
 }
 
-/// Whether `program` is where the daemon looks, or on the login shell's
-/// `login` PATH: a service's own PATH can leave out a directory the user's
-/// shell adds, such as Homebrew's, and Herdr 1 there is still installed.
-pub(super) fn installed(program: &str, login: Option<&OsStr>) -> bool {
-    locate(program).is_some() || login.is_some_and(|path| locate_on(program, Some(path)).is_some())
+/// `program` where the daemon looks, else on the login shell's `login`
+/// PATH: a service's own PATH can leave out a directory the user's shell
+/// adds, such as Homebrew's, and a program there is still installed.
+pub(super) fn find(program: &str, login: Option<&OsStr>) -> Option<PathBuf> {
+    locate(program).or_else(|| login.and_then(|path| locate_on(program, Some(path))))
 }

@@ -1,6 +1,6 @@
-//! Herdr 1 counts as installed when the login shell's PATH has it, though
-//! the service's own PATH leaves that directory out: a phone then does not
-//! start Herdr 2 in its place.
+//! A program on the login shell's PATH is found, though the service's own
+//! PATH leaves that directory out: Herdr 1 there counts as installed, so a
+//! phone does not start Herdr 2 in its place, and herdr-core there starts.
 
 use std::path::Path;
 
@@ -22,8 +22,9 @@ fn a_program_only_on_the_login_shells_path_is_installed() {
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     let login = std::env::join_paths([dir.path(), Path::new("/nowhere")]).unwrap();
-    assert!(crate::hub::wake::installed(PROGRAM, Some(&login)));
-    assert!(!crate::hub::wake::installed(PROGRAM, None));
+    // Herdr 1 counts as installed, and herdr-core is found to start.
+    assert_eq!(crate::hub::wake::find(PROGRAM, Some(&login)), Some(program));
+    assert_eq!(crate::hub::wake::find(PROGRAM, None), None);
     let elsewhere = std::env::join_paths([Path::new("/nowhere")]).unwrap();
-    assert!(!crate::hub::wake::installed(PROGRAM, Some(&elsewhere)));
+    assert_eq!(crate::hub::wake::find(PROGRAM, Some(&elsewhere)), None);
 }
