@@ -2,6 +2,14 @@
 
 use super::*;
 
+/// The folder a phone asks a new workspace for: absolute on this platform,
+/// as a new workspace's label must be.
+const FOLDER: &str = if cfg!(windows) {
+    r"C:\code\api"
+} else {
+    "/code/api"
+};
+
 #[test]
 fn kept_workspaces_lead_in_their_order_with_their_names_even_when_empty() {
     let saved = serde_json::from_value(json!({
@@ -114,14 +122,6 @@ fn a_terminal_started_for_a_named_sessions_workspace_is_listed_under_its_phone_i
     let layout = projection::project("fake-core", &records, None, None);
     assert_eq!(layout.workspaces[0].id, "herdr:dev:w1");
 }
-
-/// The folder a phone asks a new workspace for: absolute on this platform,
-/// as a new workspace's label must be.
-const FOLDER: &str = if cfg!(windows) {
-    r"C:\code\api"
-} else {
-    "/code/api"
-};
 
 #[test]
 fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
