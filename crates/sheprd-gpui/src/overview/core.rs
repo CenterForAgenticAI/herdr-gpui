@@ -169,7 +169,9 @@ impl SheprdWindow {
                 let Open::Core { tab, terminal } = &row.open else {
                     return None;
                 };
-                let info = self.core_terminals.reported(terminal);
+                let info = self
+                    .core_terminals
+                    .reported(&crate::core_terminals::Host::Local, terminal);
                 Some(closed::Listed {
                     row: row.clone(),
                     cwd: info
@@ -189,9 +191,11 @@ impl SheprdWindow {
             let Open::Core { terminal, .. } = &row.open else {
                 return false;
             };
-            let runs = terminals.reported(terminal).is_some_and(|info| {
-                sheprd_core_client::agent_name(info).as_deref() == row.identity.as_deref()
-            });
+            let runs = terminals
+                .reported(&crate::core_terminals::Host::Local, terminal)
+                .is_some_and(|info| {
+                    sheprd_core_client::agent_name(info).as_deref() == row.identity.as_deref()
+                });
             runs && store.is_some_and(|store| {
                 store.tabs().filter(|tab| tab.scope.is_local()).any(|tab| {
                     matches!(

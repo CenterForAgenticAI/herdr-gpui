@@ -112,7 +112,7 @@ impl SheprdWindow {
             && fallback == *view
         {
             let terminal = view.read(cx).terminal().clone();
-            let info = terminals.reported(&terminal)?;
+            let info = terminals.reported(&Host::Local, &terminal)?;
             return Some(CoreAgent {
                 host: Host::Local,
                 agent: sheprd_core_client::agent_name(info)?,

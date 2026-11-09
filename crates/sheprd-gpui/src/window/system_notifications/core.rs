@@ -146,7 +146,10 @@ impl SheprdWindow {
                 let fallback = self.core_fallback_view()?;
                 let shown = fallback.read(cx).terminal();
                 (shown == terminal)
-                    .then(|| self.core_terminals.reported(shown))
+                    .then(|| {
+                        self.core_terminals
+                            .reported(&crate::core_terminals::Host::Local, shown)
+                    })
                     .flatten()
             })
     }
