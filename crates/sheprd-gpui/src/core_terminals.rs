@@ -618,6 +618,28 @@ impl SheprdWindow {
 
     /// Runs every window tick: connects for restored tabs, places a started
     /// terminal, gives each shown pane its view, and takes new screens.
+    /// Syncs the tabs' views, and keeps the keyboard in a tab whose pane
+    /// that held it another window closed: the pane now in use there takes
+    /// it. Only a pane that held it hands it on, so a control the user is
+    /// in elsewhere keeps it.
+    pub(super) fn sync_core_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focused = self.core_terminals.focused_pane(window, cx);
+        self.sync_core_views(cx);
+        let Some((tab, terminal)) = focused else {
+            return;
+        };
+        let gone = (self.core_terminals.tabs.get(&tab))
+            .is_some_and(|shown| !shown.panes.contains(&terminal));
+        if !gone {
+            return;
+        }
+        if self.core_pane_view(tab).is_some() {
+            self.focus_core_terminal(tab, window, cx);
+        } else {
+            self.core_terminals.focus_wanted = Some(tab);
+        }
+    }
+
     pub(crate) fn poll_core_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_core_hubs(window, cx);
         self.place_started_core_terminal(window, cx);
@@ -625,7 +647,7 @@ impl SheprdWindow {
         self.relink_stale_core_views(cx);
         // The next terminal waiting starts once the last one answered.
         self.start_core_shell();
-        self.sync_core_views(cx);
+        self.sync_core_tabs(window, cx);
         if let Some(tab) = self.core_terminals.focus_wanted
             && self.core_pane_view(tab).is_some()
         {
