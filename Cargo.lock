@@ -9583,6 +9583,7 @@ dependencies = [
  "serde_json",
  "sheprd-client",
  "sheprd-github",
+ "sheprd-session",
  "sheprd-usage",
  "tempfile",
  "thiserror 2.0.21",

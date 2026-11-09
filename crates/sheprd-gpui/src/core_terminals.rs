@@ -11,7 +11,9 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod checkouts;
 mod commands;
+mod context;
 mod error;
 mod fallback;
 mod hosts;
@@ -25,6 +27,7 @@ mod split;
 mod tabs;
 mod view;
 mod worker;
+mod workspaces;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -45,7 +48,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use panes::{Axis, Panes};
 use sheprd_backend::{Backend as _, Spawn, TerminalId, TerminalInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// The workspace of a window with no Herdr 1 installed. herdr-core has no
 /// workspaces of its own, so its tabs gather here until the app keeps them.
@@ -130,9 +133,14 @@ impl TabPanes {
     }
 }
 
+/// The most terminals waiting to start at once.
+const MAX_WANTED: usize = 16;
+
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// The Git checkout of each kept workspace's folder.
+    checkouts: checkouts::Checkouts,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view
@@ -142,6 +150,10 @@ pub(crate) struct CoreTerminals {
     infos: infos::Infos,
     /// How the views draw now, to tell when the window's look changed.
     look: Option<Look>,
+    /// The kept workspace the user brought to the front, by its host.
+    in_front: Option<(Scope, String)>,
+    /// A kept workspace just came to the front: show one of its tabs.
+    reveal: bool,
     /// The session over herdr-core of the selected host, by its scope,
     /// while that host is this computer.
     session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
@@ -151,9 +163,11 @@ pub(crate) struct CoreTerminals {
     starting: Option<(Purpose, Host, Started)>,
     tabs: HashMap<TabId, TabPanes>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
-    /// A terminal to start once the hub connects: a shell, or the program
-    /// its spawn names.
-    wanted: Option<(Purpose, Host, Spawn)>,
+    /// Terminals to start, one after another, once the hub of each one's
+    /// host connects: a shell, or the program its spawn names. Several
+    /// workspaces made in a row each wait their turn rather than replace one
+    /// another.
+    wanted: VecDeque<(Purpose, Host, Spawn)>,
 }
 
 impl CoreTerminals {
@@ -284,7 +298,17 @@ impl SheprdWindow {
         let host = Host::of(&crate::browser::scope(
             &self.endpoints[self.selected_endpoint],
         ));
-        self.config.herdr_2_terminals && !self.core_terminals.lacks_core(&host)
+        (self.config.herdr_2_terminals && !self.core_terminals.lacks_core(&host))
+            || self.new_workspaces_use_core()
+            || self.kept_in_front().is_some()
+    }
+
+    /// Whether a new workspace is one the app keeps for Herdr 2: with Herdr
+    /// 2 chosen for new terminals, or with no Herdr 1 installed, on this
+    /// computer.
+    pub(crate) fn new_workspaces_use_core(&self) -> bool {
+        (self.config.herdr_2_terminals || self.live.missing_installation)
+            && !self.selected_is_remote()
     }
 
     /// The `new_core_terminal` command: starts a shell in herdr-core and
@@ -297,18 +321,32 @@ impl SheprdWindow {
             return;
         };
         self.dismiss_menu(window, cx);
-        self.start_core_program(Purpose::Tab { scope, workspace }, Spawn::default());
+        // A kept workspace's folder is the app's to give: herdr-core knows
+        // no workspaces to start a shell in.
+        let spawn = Spawn {
+            cwd: self
+                .kept_in_front()
+                .and_then(|_| self.front_workspace_cwd()),
+            ..Spawn::default()
+        };
+        self.start_core_program(Purpose::Tab { scope, workspace }, spawn, cx);
     }
 
     /// Starts `spawn` in herdr-core for `purpose`, once the hub of its
-    /// host's core connects.
-    pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn) {
+    /// host's core connects, in the folder and with the Herdr variables of
+    /// where it opens.
+    pub(crate) fn start_core_program(&mut self, purpose: Purpose, mut spawn: Spawn, cx: &App) {
+        if self.core_terminals.wanted.len() >= MAX_WANTED {
+            tracing::warn!("Too many herdr-core terminals waiting to start; dropped one");
+            return;
+        }
         let host = self.purpose_host(&purpose);
         let Some(hub) = self.core_hub(&host) else {
             return;
         };
         hub.connect(Start::IfMissing);
-        self.core_terminals.wanted = Some((purpose, host, spawn));
+        self.give_core_context(&purpose, &host, &mut spawn, cx);
+        self.core_terminals.wanted.push_back((purpose, host, spawn));
         self.start_core_shell();
     }
 
@@ -322,30 +360,21 @@ impl SheprdWindow {
         }
     }
 
-    /// Starts the wanted shell once the hub is connected, in the folder of
-    /// the pane it splits when herdr-core knows it.
+    /// Starts the wanted shell once the hub is connected.
     fn start_core_shell(&mut self) {
         if self.core_terminals.starting.is_some() {
             return;
         }
         let terminals = &mut self.core_terminals;
-        let Some((_, host, _)) = &terminals.wanted else {
+        let Some((_, host, _)) = terminals.wanted.front() else {
             return;
         };
         let Some(backend) = terminals.backend_of(host).cloned() else {
             return;
         };
-        let Some((purpose, host, mut spawn)) = terminals.wanted.take() else {
+        let Some((purpose, host, spawn)) = terminals.wanted.pop_front() else {
             return;
         };
-        if spawn.cwd.is_none()
-            && let Purpose::Split { at, .. } = &purpose
-        {
-            spawn.cwd = terminals
-                .infos_of(&host)
-                .and_then(|infos| infos.get(at))
-                .and_then(|info| info.cwd.clone());
-        }
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let spawned = std::thread::Builder::new()
             .name("herdr-core-spawn".into())
@@ -363,6 +392,8 @@ impl SheprdWindow {
     pub(crate) fn poll_core_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_core_hubs(window, cx);
         self.place_started_core_terminal(window, cx);
+        // The next terminal waiting starts once the last one answered.
+        self.start_core_shell();
         self.sync_core_views(cx);
         if let Some(tab) = self.core_terminals.focus_wanted
             && self.core_pane_view(tab).is_some()
@@ -387,7 +418,10 @@ impl SheprdWindow {
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
-        self.refresh_core_session(cx);
+        if self.refresh_core_session(cx) {
+            cx.notify();
+        }
+        self.reveal_kept_workspace(window, cx);
         // A zoom in motion draws a frame each tick until it lands.
         let now = crate::motion::now();
         if self
@@ -432,6 +466,13 @@ impl SheprdWindow {
             }
         };
         match purpose {
+            // The kept workspace it was for closed while it started: end it
+            // rather than leave a shell no tab shows.
+            Purpose::Tab { scope, workspace }
+                if self.kept_workspace_gone(&scope, &workspace, cx) =>
+            {
+                self.end_core_terminal(&host, info.id);
+            }
             Purpose::Tab { scope, workspace } => {
                 let location = Location::CoreTerminal {
                     panes: Panes::single(info.id),
