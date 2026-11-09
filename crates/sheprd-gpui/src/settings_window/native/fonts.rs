@@ -1,7 +1,8 @@
 //! Native font section checks: inline role rows, picker, and size editing.
-#[cfg(feature = "mockup")]
 use super::super::themes;
 use super::*;
+#[cfg(feature = "mockup")]
+use crate::window::main_window::MainWindow;
 use crate::{config::FontFace, font_picker::FontTarget};
 
 fn inside(inner: Bounds<Pixels>, outer: Bounds<Pixels>) -> Result<()> {
@@ -49,7 +50,7 @@ async fn font_click(
 
 pub(super) async fn verify_fonts(
     settings: WindowHandle<SettingsWindow>,
-    source: WindowHandle<SheprdWindow>,
+    source: MainWindow,
     expected: Size<Pixels>,
     cx: &mut AsyncApp,
 ) -> Result<()> {

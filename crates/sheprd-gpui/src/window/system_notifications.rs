@@ -19,8 +19,9 @@ mod freedesktop;
 mod toast;
 
 use super::SheprdWindow;
+use crate::window::main_window::MainWindow;
 use crate::{notifications::SystemPost, state::LiveState};
-use gpui::{App, Context, Global, SharedString, SystemNotification, Window, WindowHandle};
+use gpui::{App, Context, Global, SharedString, SystemNotification, Window};
 use std::{
     collections::VecDeque,
     sync::{Mutex, Weak},
@@ -37,7 +38,7 @@ const PREVIEW_DELAY: Duration = Duration::from_secs(3);
 
 struct Posted {
     tag: SharedString,
-    window: WindowHandle<SheprdWindow>,
+    window: MainWindow,
     endpoint: String,
     generation: u64,
     inbox: Weak<Mutex<LiveState>>,
@@ -67,10 +68,10 @@ impl Global for Registry {}
 
 impl Registry {
     /// Whether another window already posted this tag just now.
-    fn duplicate(&self, tag: &str, window: WindowHandle<SheprdWindow>, now: Instant) -> bool {
+    fn duplicate(&self, tag: &str, window: &MainWindow, now: Instant) -> bool {
         self.posted.iter().any(|posted| {
             posted.tag == tag
-                && posted.window != window
+                && posted.window != *window
                 && now.saturating_duration_since(posted.at) < DUPLICATE_WINDOW
         })
     }
@@ -144,7 +145,7 @@ pub(crate) fn open(tag: &str, cx: &mut App) -> bool {
         cx.try_global::<Registry>().and_then(|registry| {
             let posted = registry.find(tag)?;
             Some((
-                posted.window,
+                posted.window.clone(),
                 posted.endpoint.clone(),
                 posted.generation,
                 posted.inbox.clone(),
@@ -183,18 +184,18 @@ impl SheprdWindow {
         if posts.is_empty() {
             return;
         }
-        let Some(handle) = window.window_handle().downcast::<SheprdWindow>() else {
+        let Some(handle) = MainWindow::of(window, cx) else {
             return;
         };
         let now = Instant::now();
         for post in posts {
             if cx
                 .try_global::<Registry>()
-                .is_some_and(|registry| registry.duplicate(&post.tag, handle, now))
+                .is_some_and(|registry| registry.duplicate(&post.tag, &handle, now))
             {
                 continue;
             }
-            self.show_system_notification(handle, post, now, cx);
+            self.show_system_notification(handle.clone(), post, now, cx);
         }
     }
 
@@ -202,7 +203,7 @@ impl SheprdWindow {
     /// without the registry, which only normal launches install.
     fn show_system_notification(
         &self,
-        handle: WindowHandle<SheprdWindow>,
+        handle: MainWindow,
         post: SystemPost,
         now: Instant,
         cx: &mut Context<Self>,
@@ -280,7 +281,7 @@ impl SheprdWindow {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(handle) = window.window_handle().downcast::<SheprdWindow>() else {
+        let Some(handle) = MainWindow::of(window, cx) else {
             return;
         };
         let timer = cx.background_executor().timer(PREVIEW_DELAY);
@@ -293,11 +294,7 @@ impl SheprdWindow {
         .detach();
     }
 
-    fn post_system_notification_preview(
-        &mut self,
-        handle: WindowHandle<SheprdWindow>,
-        cx: &mut Context<Self>,
-    ) {
+    fn post_system_notification_preview(&mut self, handle: MainWindow, cx: &mut Context<Self>) {
         let index = self.selected_endpoint;
         let snapshot = self.endpoints[index].live.snapshot.clone();
         let title = crate::i18n::fl!("notifications-preview-attention");

@@ -1,10 +1,11 @@
 //! Runs only in the existing isolated, daemon-free native menu fixture.
 use super::*;
+use crate::window::main_window::MainWindow;
 use anyhow::{Result, ensure};
 use gpui::{AsyncApp, WindowHandle, size};
 use std::time::{Duration, Instant};
 
-pub(crate) async fn verify(handle: WindowHandle<SheprdWindow>, cx: &mut AsyncApp) -> Result<()> {
+pub(crate) async fn verify(handle: MainWindow, cx: &mut AsyncApp) -> Result<()> {
     let info = crate::controls::COMMANDS
         .iter()
         .find(|info| info.name == "new_tab")

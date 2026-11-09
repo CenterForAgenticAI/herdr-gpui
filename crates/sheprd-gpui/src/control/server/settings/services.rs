@@ -4,6 +4,7 @@ use super::{
     super::{main_windows, window_for},
     Watches, socket,
 };
+use crate::window::main_window::MainWindow;
 use crate::{
     SheprdWindow,
     control::protocol::{
@@ -12,7 +13,7 @@ use crate::{
     },
     updater::{State, Updater},
 };
-use gpui::{App, WindowHandle};
+use gpui::App;
 use std::time::Duration;
 
 /// The state's short name, its detail, and the version it names. The
@@ -49,17 +50,20 @@ fn reply(updater: &Updater) -> Response {
 
 /// The window that runs the app's updater: the only one whose updater is
 /// not disabled, or else the first opened, whose reason is the real one.
-fn updater_window(cx: &mut App) -> Option<WindowHandle<SheprdWindow>> {
+fn updater_window(cx: &mut App) -> Option<MainWindow> {
     let mut windows = main_windows(cx);
     windows.sort_by_key(|handle| handle.window_id().as_u64());
-    let running = windows.iter().copied().find(|handle| {
-        handle
-            .read_with(cx, |view, _| {
-                !matches!(view.updater.state(), State::Disabled(_))
-            })
-            .unwrap_or(false)
-    });
-    running.or_else(|| windows.first().copied())
+    let running = windows
+        .iter()
+        .find(|handle| {
+            handle
+                .read_with(cx, |view, _| {
+                    !matches!(view.updater.state(), State::Disabled(_))
+                })
+                .unwrap_or(false)
+        })
+        .cloned();
+    running.or_else(|| windows.first().cloned())
 }
 
 fn no_window() -> Response {

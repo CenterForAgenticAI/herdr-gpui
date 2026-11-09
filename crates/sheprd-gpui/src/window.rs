@@ -32,6 +32,7 @@ mod input;
 mod layout_save;
 pub(crate) use layout_save::LayoutSaves;
 mod lifecycle;
+pub(crate) mod main_window;
 pub(crate) use lifecycle::reasserts;
 mod links;
 mod monitors;
