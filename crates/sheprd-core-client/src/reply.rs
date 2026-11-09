@@ -110,12 +110,18 @@ pub fn agent_in_front(record: &Terminal, agent: &str) -> bool {
     if agent_name(&now).as_deref() != Some(agent) {
         return false;
     }
-    let own_program_in_front = record
-        .pid
-        .zip(record.foreground.as_ref())
-        .is_some_and(|(pid, front)| front.pid == pid);
+    let Some(front) = record
+        .foreground
+        .as_ref()
+        .filter(|front| record.pid == Some(front.pid))
+    else {
+        return true;
+    };
+    // The terminal's own program is in front: the agent is still there if
+    // that program is the agent, started as it or `exec`ed by its shell.
     let program = record.argv.first().map_or("", String::as_str);
-    !own_program_in_front || AgentKind::identify(None, program, &record.argv).is_some()
+    AgentKind::identify(None, &front.name, &front.argv).is_some()
+        || AgentKind::identify(None, program, &record.argv).is_some()
 }
 
 #[cfg(test)]
