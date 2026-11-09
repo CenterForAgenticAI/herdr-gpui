@@ -176,8 +176,10 @@ fn listed(core: &HerdrCore) -> Option<Vec<Terminal>> {
     core.terminals().ok()
 }
 
-/// A herdr-core terminal: removed or finished is gone. herdr-core reports no
-/// agent session, so tokens come from the agent's recent files in its folder.
+/// A herdr-core terminal: removed, finished, or lost is gone. An agent's
+/// terminal is kept, so a program that dies leaves it live with no process
+/// and the reason it was lost. herdr-core reports no agent session, so
+/// tokens come from the agent's recent files in its folder.
 fn look_core(terminals: &[Terminal], address: &str) -> Look {
     let Some(terminal) = terminals
         .iter()
@@ -189,7 +191,8 @@ fn look_core(terminals: &[Terminal], address: &str) -> Look {
         };
     };
     Look {
-        gone: terminal.state == TerminalState::Finished,
+        gone: terminal.state == TerminalState::Finished
+            || (terminal.pid.is_none() && terminal.reason.is_some()),
         quiet: terminal
             .status
             .as_ref()

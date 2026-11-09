@@ -61,6 +61,15 @@ fn a_core_terminal_gone_or_finished_ends_its_agent() {
 }
 
 #[test]
+fn a_kept_core_terminal_whose_agent_was_lost_ends_its_agent() {
+    let lost: Terminal = serde_json::from_value(serde_json::json!({
+        "address": "t1", "state": "live", "reason": "the program was killed",
+    }))
+    .unwrap();
+    assert!(look_core(&[lost], "t1").gone);
+}
+
+#[test]
 fn a_herdr_1_agent_outlives_a_switch_to_herdr_core_until_its_day_ends() {
     let fixture = Fixture::new();
     let store = fixture.store();

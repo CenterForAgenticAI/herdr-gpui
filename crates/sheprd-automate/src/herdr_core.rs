@@ -142,7 +142,7 @@ impl HerdrCore {
         let run = Run {
             argv: &argv,
             cwd: Some(&cwd),
-            // A lost agent leaves a shell in its checkout, as a Herdr pane does.
+            // A lost agent's terminal stays with its output, for the user to read.
             keep: true,
             labels: BTreeMap::from([(RUN_LABEL, start.label)]),
             ..Run::default()
