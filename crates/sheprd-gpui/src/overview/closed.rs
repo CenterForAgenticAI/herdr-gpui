@@ -3,6 +3,8 @@
 //! last row it drew of each, with the folder it ran in, to list under Closed
 //! and to start again (`reopen`). The window keeps them while it is open. A
 //! daemon restart is not a close: a new boot id starts the host afresh.
+//! Herdr 2 agents are noted the same way under [`super::core::ENDPOINT`],
+//! from the window's herdr-core tabs, with the workspace their tab was in.
 
 use super::model::{Key, Open, Row};
 use sheprd_client::protocol::ClientShellSnapshot;
@@ -16,25 +18,38 @@ const MAX_CLOSED: usize = 32;
 pub(crate) struct Agent {
     /// The daemon boot that owns the saved workspace and pane IDs.
     pub boot: String,
+    /// The host it was seen on, by endpoint id, or [`super::core::ENDPOINT`].
+    pub host: String,
     /// Tells apart agents that share a key, such as two of one kind in one
     /// checkout, for Reopen and Forget.
     pub id: u64,
     pub row: Row,
     /// The folder its pane last ran in, for the tab that reopens it.
     pub cwd: Option<String>,
+    /// The workspace a Herdr 2 agent's tab was in, which the tab that
+    /// reopens it opens in. A Herdr 1 row names its own.
+    pub workspace: Option<String>,
     pub closed: SystemTime,
+}
+
+/// An agent as a report listed it, with where it ran.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Listed {
+    pub row: Row,
+    pub cwd: Option<String>,
+    pub workspace: Option<String>,
 }
 
 /// One host's agents as its last report listed them.
 #[derive(Debug)]
 struct Seen {
     boot: String,
-    agents: Vec<(Row, Option<String>)>,
+    agents: Vec<Listed>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct Closed {
-    /// By endpoint id.
+    /// By endpoint id, and herdr-core's under its own.
     seen: HashMap<String, Seen>,
     /// Oldest first.
     agents: Vec<Agent>,
@@ -47,11 +62,12 @@ pub(crate) struct Closed {
     reopened: Vec<(String, Key)>,
 }
 
-/// The pane an agent row stands in.
+/// The pane, or herdr-core terminal, an agent row stands in.
 fn pane(row: &Row) -> Option<&str> {
     match &row.open {
         Open::Pane { pane, .. } => Some(pane),
-        Open::Run(_) | Open::Core { .. } => None,
+        Open::Core { terminal, .. } => Some(terminal.as_str()),
+        Open::Run(_) => None,
     }
 }
 
@@ -81,24 +97,53 @@ impl Closed {
         rows: impl IntoIterator<Item = &'a Row>,
         now: SystemTime,
     ) {
-        let current: Vec<(Row, Option<String>)> = rows
+        let current = rows
             .into_iter()
-            .filter(|row| row.endpoint == endpoint && pane(row).is_some())
-            .map(|row| (row.clone(), cwd(snapshot, row)))
+            .filter(|row| row.endpoint == endpoint && matches!(row.open, Open::Pane { .. }))
+            .map(|row| Listed {
+                row: row.clone(),
+                cwd: cwd(snapshot, row),
+                workspace: None,
+            })
             .collect();
+        self.note(endpoint, &snapshot.boot_id, current, now, |_| false);
+    }
+
+    /// Notes the herdr-core agents the window's tabs hold now, `listed`.
+    /// The core has no boot: it never reuses a terminal's address while the
+    /// terminal is listed. An agent gone from the window's tabs while
+    /// `elsewhere` says it still runs, such as in a tab moved to another
+    /// window, did not close.
+    pub(crate) fn observe_core(
+        &mut self,
+        listed: Vec<Listed>,
+        now: SystemTime,
+        elsewhere: impl Fn(&Row) -> bool,
+    ) {
+        self.note(super::core::ENDPOINT, "", listed, now, elsewhere);
+    }
+
+    fn note(
+        &mut self,
+        endpoint: &str,
+        boot: &str,
+        current: Vec<Listed>,
+        now: SystemTime,
+        elsewhere: impl Fn(&Row) -> bool,
+    ) {
         let seen = Seen {
-            boot: snapshot.boot_id.clone(),
+            boot: boot.to_owned(),
             agents: current,
         };
         let previous = self.seen.insert(endpoint.to_owned(), seen);
         if previous
             .as_ref()
-            .is_some_and(|previous| previous.boot != snapshot.boot_id)
+            .is_some_and(|previous| previous.boot != boot)
         {
             self.reopened.retain(|(host, _)| host != endpoint);
         }
         let previous = previous
-            .filter(|previous| previous.boot == snapshot.boot_id)
+            .filter(|previous| previous.boot == boot)
             .map(|previous| previous.agents)
             .unwrap_or_default();
         let Some(current) = self.seen.get(endpoint).map(|seen| &seen.agents) else {
@@ -109,32 +154,27 @@ impl Closed {
         // of a key new on this report brings back one closed agent of it,
         // the latest closed.
         let mut counted: Vec<&Key> = Vec::new();
-        for (row, _) in current {
-            if counted.contains(&&row.key) {
+        for listed in current {
+            let key = &listed.row.key;
+            if counted.contains(&key) {
                 continue;
             }
-            counted.push(&row.key);
-            let count = |agents: &[(Row, Option<String>)]| {
-                agents
-                    .iter()
-                    .filter(|(shown, _)| shown.key == row.key)
-                    .count()
-            };
+            counted.push(key);
+            let count =
+                |agents: &[Listed]| agents.iter().filter(|shown| shown.row.key == *key).count();
             let mut back = count(current).saturating_sub(count(&previous));
             while back > 0
                 && let Some(index) = self
                     .reopened
                     .iter()
-                    .position(|(host, key)| host == endpoint && *key == row.key)
+                    .position(|(host, reopened)| host == endpoint && reopened == key)
             {
                 self.reopened.remove(index);
                 back -= 1;
             }
             while back > 0
                 && let Some(index) = self.agents.iter().rposition(|agent| {
-                    agent.boot == snapshot.boot_id
-                        && agent.row.endpoint == endpoint
-                        && agent.row.key == row.key
+                    agent.boot == boot && agent.host == endpoint && agent.row.key == *key
                 })
             {
                 self.agents.remove(index);
@@ -144,10 +184,16 @@ impl Closed {
         let mut changed = self.agents.len() != before;
         // Another agent started in the pane, between two reports, still
         // closed the one before it.
-        for (row, cwd) in previous {
+        for Listed {
+            row,
+            cwd,
+            workspace,
+        } in previous
+        {
             if current
                 .iter()
-                .any(|(shown, _)| pane(shown) == pane(&row) && shown.identity == row.identity)
+                .any(|shown| pane(&shown.row) == pane(&row) && shown.row.identity == row.identity)
+                || elsewhere(&row)
             {
                 continue;
             }
@@ -155,10 +201,12 @@ impl Closed {
                 self.agents.remove(0);
             }
             self.agents.push(Agent {
-                boot: snapshot.boot_id.clone(),
+                boot: boot.to_owned(),
+                host: endpoint.to_owned(),
                 id: self.next,
                 row,
                 cwd,
+                workspace,
                 closed: now,
             });
             self.next += 1;
@@ -174,7 +222,7 @@ impl Closed {
         self.seen.retain(|endpoint, _| kept(endpoint));
         self.reopened.retain(|(endpoint, _)| kept(endpoint));
         let before = self.agents.len();
-        self.agents.retain(|agent| kept(&agent.row.endpoint));
+        self.agents.retain(|agent| kept(&agent.host));
         if self.agents.len() != before {
             self.revision += 1;
         }
@@ -210,7 +258,7 @@ impl Closed {
     pub(crate) fn reopened(&mut self, id: u64) {
         let Some(reopened) = self
             .get(id)
-            .map(|agent| (agent.row.endpoint.clone(), agent.row.key.clone()))
+            .map(|agent| (agent.host.clone(), agent.row.key.clone()))
         else {
             return;
         };
