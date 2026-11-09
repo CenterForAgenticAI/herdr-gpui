@@ -1,6 +1,5 @@
 mod accessibility;
 mod chats;
-mod checkout;
 mod context;
 mod focus;
 mod folders;
@@ -11,6 +10,7 @@ mod paste;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod shown_checkout;
 mod split_shown;
 mod wanted;
 mod worker;

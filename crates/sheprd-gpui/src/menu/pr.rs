@@ -260,14 +260,17 @@ impl SheprdWindow {
                     // The shown herdr-core pane's checkout is asked first, as
                     // the workspace being looked at is.
                     let kept = kept.iter().map(|(_, input)| input.clone());
-                    self.menu.pr_cache.schedule(
-                        core.clone().into_iter().chain(inputs).chain(kept),
-                        now,
-                    );
+                    self.menu
+                        .pr_cache
+                        .schedule(core.clone().into_iter().chain(inputs).chain(kept), now);
                 }
             } else if self.menu.pr_cache.scan_due(now) {
                 // Only the workspaces the app keeps for Herdr 2, and the
-                // checkout of the herdr-core pane the window shows.
+                // checkout of the herdr-core pane the window shows, which is
+                // asked again while it is looked at.
+                if let Some(input) = &core {
+                    self.menu.pr_cache.expire_viewed(input, now);
+                }
                 let kept = kept.into_iter().map(|(_, input)| input);
                 self.menu
                     .pr_cache

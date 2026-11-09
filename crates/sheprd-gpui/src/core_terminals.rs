@@ -11,7 +11,6 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
-mod checkout;
 mod checkouts;
 mod commands;
 mod context;
@@ -148,9 +147,8 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
-    /// The branch checked out where the shown pane is.
-    checkout: checkout::Checkout,
-    /// The Git checkout of each kept workspace's folder.
+    /// The Git checkout of each kept workspace's folder and of the shown
+    /// pane's.
     checkouts: checkouts::Checkouts,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
@@ -431,18 +429,6 @@ impl SheprdWindow {
             cx.notify();
         }
         self.core_terminals.shown = self.shown_core_pane(cx);
-        let folder = self
-            .core_terminals
-            .shown
-            .as_ref()
-            .and_then(|(tab, terminal)| self.core_folder(*tab, terminal));
-        if self
-            .core_terminals
-            .checkout
-            .poll(folder.as_deref(), std::time::Instant::now())
-        {
-            cx.notify();
-        }
         if !cx.has_active_drag() {
             self.save_core_panes(cx);
         }
