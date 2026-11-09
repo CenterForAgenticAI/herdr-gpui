@@ -122,6 +122,27 @@ fn runtime_options_and_their_values_are_not_the_script() {
 }
 
 #[test]
+fn bun_and_deno_run_is_looked_past_to_the_script() {
+    for line in [
+        &["bun", "run", "/a/opencode.js"][..],
+        &["deno", "run", "/a/opencode.js"],
+        &["deno", "run", "-A", "/a/opencode.js"],
+        &["/usr/local/bin/bun", "--smol", "run", "/a/opencode.js"],
+    ] {
+        assert_eq!(
+            AgentKind::identify(None, line[0], &argv(line)),
+            Some(AgentKind::Opencode),
+            "{line:?}"
+        );
+    }
+    // To `node`, `run` is the script itself.
+    assert_eq!(
+        AgentKind::identify(None, "node", &argv(&["node", "run", "/a/opencode.js"])),
+        None
+    );
+}
+
+#[test]
 fn shells_and_other_programs_are_not_agents() {
     for program in ["zsh", "-bash", "vim", "python3", "cargo", "node"] {
         assert_eq!(
