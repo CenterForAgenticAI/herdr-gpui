@@ -21,7 +21,7 @@ fn core_tabs(cx: &gpui::App, terminal: &TerminalId) -> Vec<(String, bool)> {
     cx.global::<Store>()
         .tabs()
         .filter_map(|tab| match &tab.location {
-            Some(Location::CoreTerminal { panes, observe }) if panes.contains(terminal) => {
+            Some(Location::CoreTerminal { panes, observe, .. }) if panes.contains(terminal) => {
                 Some((tab.workspace_id.clone(), *observe))
             }
             _ => None,
@@ -60,10 +60,7 @@ fn a_terminal_another_workspace_drives_opens_watch_only(cx: &mut gpui::TestAppCo
         Store::default().install(cx);
         view.update(cx, |view, cx| {
             let (scope, workspace) = view.browser_key().unwrap();
-            let location = Location::CoreTerminal {
-                panes: Panes::single(terminal.clone()),
-                observe: false,
-            };
+            let location = Location::core_terminal(Panes::single(terminal.clone()), false);
             Store::update(cx, |store| {
                 store.open(scope, "elsewhere", Some(location), None)
             })
@@ -97,10 +94,7 @@ fn a_split_tab_holding_the_terminal_shows_it_as_the_pane_in_use(cx: &mut gpui::T
                 )
                 .unwrap();
             // A watch-only tab counts too: asking again must not add one.
-            let location = Location::CoreTerminal {
-                panes,
-                observe: true,
-            };
+            let location = Location::core_terminal(panes, true);
             let tab = Store::update(cx, |store| {
                 store.open(scope, &workspace, Some(location), None)
             })

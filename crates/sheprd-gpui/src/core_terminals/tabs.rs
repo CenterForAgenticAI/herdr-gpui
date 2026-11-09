@@ -25,24 +25,54 @@ impl SheprdWindow {
             return;
         };
         let terminals = &mut self.core_terminals;
-        terminals.tabs.retain(|id, _| store.get(*id).is_some());
+        // A tab closed before its layout was saved holds panes its saved
+        // layout does not list yet: they end with it too.
+        let mut closed = Vec::new();
+        terminals.tabs.retain(|id, shown| {
+            let open = store.get(*id).is_some();
+            if !open && !shown.observe {
+                let host = &shown.host;
+                closed.extend(
+                    (shown.panes.terminals().into_iter())
+                        .map(|terminal| (host.clone(), terminal.clone())),
+                );
+            }
+            open
+        });
         let tabs = &terminals.tabs;
         terminals.views.retain(|(tab, terminal), _| {
             tabs.get(tab)
                 .is_some_and(|shown| shown.panes.contains(terminal))
         });
+        if !closed.is_empty() {
+            Store::update(cx, |store| store.end_terminals(closed));
+        }
+        let Some(store) = cx.try_global::<Store>() else {
+            return;
+        };
         let Some((scope, workspace)) = self.browser_key() else {
             return;
         };
         let mut missing: Vec<(TabId, TerminalId, Role, Host)> = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
-            let Some(Location::CoreTerminal { panes, observe }) = &tab.location else {
+            let Some(location) = &tab.location else {
                 continue;
             };
-            let shown =
-                self.core_terminals.tabs.entry(tab.id).or_insert_with(|| {
-                    TabPanes::new(Host::of(&tab.scope), panes.clone(), *observe)
-                });
+            let shown = match self.core_terminals.tabs.entry(tab.id) {
+                std::collections::hash_map::Entry::Occupied(shown) => {
+                    let shown = shown.into_mut();
+                    // Names are shared: another window showing the tab may
+                    // have renamed it or its panes.
+                    shown.refresh_names(location);
+                    shown
+                }
+                std::collections::hash_map::Entry::Vacant(place) => {
+                    let Some(restored) = TabPanes::restore(Host::of(&tab.scope), location) else {
+                        continue;
+                    };
+                    place.insert(restored)
+                }
+            };
             if shown.workspace.is_none() {
                 shown.workspace = Some((scope.clone(), workspace.clone()));
             }
@@ -108,15 +138,60 @@ impl SheprdWindow {
         cx.notify();
     }
 
+    /// Attaches the terminals of views left stale by a dropped connection
+    /// once the core answers again, joining it meanwhile.
+    pub(super) fn relink_stale_core_views(&mut self, cx: &mut Context<Self>) {
+        // The stand-in shell has no tab and always types.
+        let fallback = self.core_fallback_view().map(|view| (None, view));
+        let stale: Vec<(Option<TabId>, Entity<CoreTerminalView>)> = self
+            .core_terminals
+            .views
+            .iter()
+            .map(|((tab, _), view)| (Some(*tab), view.clone()))
+            .chain(fallback)
+            .filter(|(_, view)| view.read(cx).is_stale())
+            .collect();
+        for (tab, view) in stale {
+            let host = tab.map_or(Host::Local, |tab| self.core_terminals.host_of(tab));
+            let Some(backend) = self.core_terminals.backend_of(&host).cloned() else {
+                if let Some(hub) = self.core_hub(&host) {
+                    hub.connect(Start::Join);
+                }
+                continue;
+            };
+            let observe = tab
+                .and_then(|tab| self.core_terminals.tabs.get(&tab))
+                .is_some_and(|shown| shown.observe);
+            let role = if observe {
+                Role::Observer
+            } else {
+                Role::Active
+            };
+            let terminal = view.read(cx).terminal().clone();
+            let size = view
+                .read(cx)
+                .size()
+                .or_else(|| Size::new(FIRST_SIZE.0, FIRST_SIZE.1).ok());
+            let Some(size) = size else {
+                continue;
+            };
+            match worker::spawn(backend.clone(), terminal, size, role) {
+                Ok(link) => view.update(cx, |view, cx| view.relink(link, cx)),
+                Err(error) => {
+                    tracing::warn!(%error, "Could not start a herdr-core terminal worker")
+                }
+            }
+        }
+    }
+
     /// Takes every pane's new screen, follows the pane the keyboard moved
     /// to, closes panes whose program ended in a split, and titles each tab
     /// after its pane in use, as a Herdr tab is titled after its program.
     pub(super) fn poll_core_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((tab, terminal)) = self.core_terminals.focused_pane(window, cx)
             && let Some(shown) = self.core_terminals.tabs.get_mut(&tab)
-            && shown.active != terminal
+            && shown.activate(terminal)
         {
-            shown.active = terminal;
             cx.notify();
         }
         let views: Vec<((TabId, TerminalId), Entity<CoreTerminalView>)> = self
@@ -177,11 +252,21 @@ impl SheprdWindow {
             .tabs
             .iter()
             .filter_map(|(tab, shown)| {
+                // A name the user gave stands over the program's title.
+                if let Some(name) = &shown.name {
+                    return Some((*tab, name.clone()));
+                }
                 let view = self
                     .core_terminals
                     .views
                     .get(&(*tab, shown.active.clone()))?;
-                Some((*tab, view.read(cx).title()?.to_owned()))
+                // Without a title of its program's, the tab's default stands,
+                // so a name the user cleared does not linger.
+                let title = view
+                    .read(cx)
+                    .title()
+                    .map_or_else(|| shown.location().default_title(), str::to_owned);
+                Some((*tab, title))
             })
             .collect();
         for (tab, title) in titles {
@@ -210,7 +295,7 @@ impl SheprdWindow {
         let placed = match self.core_terminals.tabs.get_mut(&tab) {
             Some(shown) if shown.host == host => {
                 shown.panes.split(at, axis, new.clone()).map(|()| {
-                    shown.active = new.clone();
+                    shown.activate(new.clone());
                     shown.set_zoom(None);
                     shown.unsaved = true;
                 })
@@ -270,6 +355,9 @@ impl SheprdWindow {
         if &shown.active == terminal {
             shown.active = next.unwrap_or_else(|| shown.panes.first().clone());
         }
+        if shown.previous.as_ref() == Some(terminal) {
+            shown.previous = None;
+        }
         shown.unsaved = true;
         self.core_terminals.views.remove(&(tab, terminal.clone()));
         if had_focus {
@@ -297,6 +385,33 @@ impl SheprdWindow {
         }
     }
 
+    /// Ends the terminals of closed tabs, joining the core to do it when
+    /// the window is not connected yet.
+    pub(super) fn end_closed_core_terminals(&mut self, cx: &mut Context<Self>) {
+        if !cx
+            .try_global::<Store>()
+            .is_some_and(|store| store.has_ending())
+        {
+            return;
+        }
+        // A core not reached yet is joined, and its terminals wait for a
+        // window that reaches it, this one or another; a failed join is
+        // retried after a pause. A host no longer saved cannot be reached,
+        // so its terminals are left to it.
+        let mut waiting = Vec::new();
+        for (host, terminal) in Store::update(cx, Store::take_ending) {
+            if self.core_terminals.backend_of(&host).is_some() {
+                self.end_core_terminal(&host, terminal);
+            } else if let Some(hub) = self.core_hub(&host) {
+                hub.connect(Start::Join);
+                waiting.push((host, terminal));
+            }
+        }
+        if !waiting.is_empty() {
+            Store::update(cx, |store| store.end_terminals(waiting));
+        }
+    }
+
     /// Writes changed layouts into their tabs, which saves them.
     pub(super) fn save_core_panes(&mut self, cx: &mut Context<Self>) {
         let changed: Vec<(TabId, Location)> = self
@@ -304,13 +419,7 @@ impl SheprdWindow {
             .tabs
             .iter_mut()
             .filter_map(|(tab, shown)| {
-                std::mem::take(&mut shown.unsaved).then(|| {
-                    let location = Location::CoreTerminal {
-                        panes: shown.panes.clone(),
-                        observe: shown.observe,
-                    };
-                    (*tab, location)
-                })
+                std::mem::take(&mut shown.unsaved).then(|| (*tab, shown.location()))
             })
             .collect();
         for (tab, location) in changed {

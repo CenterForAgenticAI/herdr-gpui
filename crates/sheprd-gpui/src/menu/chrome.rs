@@ -746,7 +746,7 @@ impl SheprdWindow {
             panel = panel.child(self.render_host_menu(cx));
         } else if page == Page::MoveTab {
             panel = self.render_tab_move_picker(panel, cx);
-        } else if matches!(page, Page::Tab | Page::RenameTab) {
+        } else if page.is_tab_menu() {
             panel = panel.child(self.render_tab_menu(cx));
         } else if page == Page::Group {
             panel = self.render_group_menu(panel, cx);

@@ -28,10 +28,7 @@ fn core_panes_share_the_budget_without_a_herdr_surface_and_skip_hidden_tabs(
         install(view, targets);
         let (scope, workspace) = view.browser_key().unwrap();
         let mut add = |observe| {
-            let location = Location::CoreTerminal {
-                panes: panes.clone(),
-                observe,
-            };
+            let location = Location::core_terminal(panes.clone(), observe);
             let tab = Store::update(cx, |store| {
                 store.open(scope.clone(), &workspace, Some(location), None)
             })

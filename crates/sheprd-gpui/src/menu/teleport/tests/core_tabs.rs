@@ -14,10 +14,7 @@ fn the_workspaces_herdr_2_tabs_move_with_it(cx: &mut gpui::TestAppContext) {
         let scope = Scope::endpoint("laptop");
         let mut split = Panes::single(id("t1"));
         split.split(&id("t1"), Axis::Row, id("t2")).unwrap();
-        let core = |panes: &Panes, observe| Location::CoreTerminal {
-            panes: panes.clone(),
-            observe,
-        };
+        let core = |panes: &Panes, observe| Location::core_terminal(panes.clone(), observe);
         let (moving, _) = Store::update(cx, |store| {
             let moving = store
                 .open(scope.clone(), "w4", Some(core(&split, false)), None)

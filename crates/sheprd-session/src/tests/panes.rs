@@ -131,3 +131,77 @@ fn saved_panes_with_a_terminal_twice_are_refused() {
     assert!(serde_json::from_str::<Panes>(&saved).is_err());
     assert_eq!(Panes::try_from(twice), Err(Error::Duplicate(id("t1"))));
 }
+
+#[test]
+fn swap_trades_two_panes_places_and_keeps_the_layout() {
+    let mut panes = three();
+    let before = panes.rects();
+    assert!(panes.swap(&id("t1"), &id("t3")));
+    assert_eq!(panes.terminals(), [&id("t3"), &id("t2"), &id("t1")]);
+    let after = panes.rects();
+    assert_eq!(after[0].1, before[0].1);
+    assert_eq!(after[2].1, before[2].1);
+    assert!(!panes.swap(&id("t1"), &id("t1")));
+    assert!(!panes.swap(&id("t1"), &id("t9")));
+}
+
+#[test]
+fn equalize_gives_panes_side_by_side_equal_parts() {
+    // t1 | t2 | t3, split as t1 | (t2 | t3).
+    let mut panes = Panes::single(id("t1"));
+    panes.split(&id("t1"), Axis::Row, id("t2")).unwrap();
+    panes.split(&id("t2"), Axis::Row, id("t3")).unwrap();
+    assert!(panes.equalize());
+    let widths: Vec<f32> = panes.rects().iter().map(|(_, rect)| rect.width).collect();
+    for width in widths {
+        assert!((width - 1. / 3.).abs() < 0.01, "{width}");
+    }
+    assert!(!panes.equalize(), "already equal");
+    // A pane stacked beside others counts once across.
+    let mut panes = three();
+    assert!(panes.resize(&id("t1"), Direction::Right));
+    assert!(panes.resize(&id("t2"), Direction::Down));
+    assert!(panes.equalize());
+    assert_eq!(panes, three());
+}
+
+#[test]
+fn equalize_evens_out_a_full_row() {
+    // Sixteen panes in one row, each split off the last: a chain whose
+    // outer shares would fall below the smallest a split may take.
+    let mut panes = Panes::single(id("p0"));
+    for index in 1..16 {
+        let at = id(&format!("p{}", index - 1));
+        panes
+            .split(&at, Axis::Row, id(&format!("p{index}")))
+            .unwrap();
+    }
+    let order = panes.terminals().into_iter().cloned().collect::<Vec<_>>();
+    assert!(panes.equalize());
+    let rects = panes.rects();
+    for (pane, rect) in &rects {
+        assert!(
+            (rect.width - 1. / 16.).abs() < 0.01,
+            "{pane}: {}",
+            rect.width
+        );
+    }
+    assert_eq!(
+        panes.terminals().into_iter().cloned().collect::<Vec<_>>(),
+        order
+    );
+    assert!(!panes.equalize(), "already equal");
+}
+
+#[test]
+fn cycle_steps_through_panes_in_layout_order_and_wraps() {
+    let panes = three();
+    assert_eq!(panes.cycle(&id("t1"), true), Some(id("t2")));
+    assert_eq!(panes.cycle(&id("t3"), true), Some(id("t1")));
+    assert_eq!(panes.cycle(&id("t1"), false), Some(id("t3")));
+    assert_eq!(panes.cycle(&id("t9"), true), None);
+    assert_eq!(
+        Panes::single(id("t1")).cycle(&id("t1"), true),
+        Some(id("t1"))
+    );
+}

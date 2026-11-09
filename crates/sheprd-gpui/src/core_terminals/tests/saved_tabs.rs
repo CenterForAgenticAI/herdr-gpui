@@ -12,10 +12,7 @@ fn a_tab_saved_before_splits_reads_back_as_one_pane() {
     let location: Location = serde_json::from_str(saved).unwrap();
     assert_eq!(
         location,
-        Location::CoreTerminal {
-            panes: Panes::single(id("t4")),
-            observe: false,
-        }
+        Location::core_terminal(Panes::single(id("t4")), false)
     );
     let again = serde_json::to_string(&location).unwrap();
     assert_eq!(serde_json::from_str::<Location>(&again).unwrap(), location);
@@ -36,18 +33,12 @@ fn every_tab_layout_draws_split_panes() {
 #[test]
 fn a_mirror_tab_saves_that_it_only_watches() {
     use crate::browser::Location;
-    let mirror = Location::CoreTerminal {
-        panes: Panes::single(id("t4")),
-        observe: true,
-    };
+    let mirror = Location::core_terminal(Panes::single(id("t4")), true);
     let saved = serde_json::to_string(&mirror).unwrap();
     assert!(saved.contains("\"observe\":true"), "{saved}");
     assert_eq!(serde_json::from_str::<Location>(&saved).unwrap(), mirror);
     // A tab that types saves no flag at all.
-    let typing = Location::CoreTerminal {
-        panes: Panes::single(id("t4")),
-        observe: false,
-    };
+    let typing = Location::core_terminal(Panes::single(id("t4")), false);
     assert!(!serde_json::to_string(&typing).unwrap().contains("observe"));
 }
 
@@ -62,10 +53,7 @@ fn the_phone_reads_the_tabs_the_app_saves() {
         .unwrap();
     let tab = |number, observe| Tab {
         id: TabId::test(number),
-        location: Some(Location::CoreTerminal {
-            observe,
-            panes: panes.clone(),
-        }),
+        location: Some(Location::core_terminal(panes.clone(), observe)),
         origin: None,
         place: Default::default(),
         scope: Scope::endpoint("mac"),
