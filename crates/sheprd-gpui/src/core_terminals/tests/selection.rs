@@ -159,3 +159,18 @@ fn a_selection_keeps_its_history_rows_as_the_view_scrolls() {
         Some((10, 11))
     );
 }
+
+#[test]
+fn concealed_text_is_copied_as_the_blanks_it_shows() {
+    let mut shown = frame(12, &["pw: secret o"]);
+    for cell in &mut shown.cells[4..10] {
+        cell.modifier |= crate::terminal::HIDDEN;
+    }
+    let mut selection = Selection::at(point(0, 0));
+    selection.extend(point(0, 11));
+    assert_eq!(selection.text(&shown, 0).unwrap(), "pw:        o");
+    // A selection of hidden cells alone copies nothing.
+    let mut hidden = Selection::at(point(0, 4));
+    hidden.extend(point(0, 9));
+    assert_eq!(hidden.text(&shown, 0).unwrap(), "");
+}

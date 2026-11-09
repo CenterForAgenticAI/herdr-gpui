@@ -51,10 +51,7 @@ fn listed(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext) -> Vec<String
 }
 
 fn core_tab(id: &str) -> Location {
-    Location::CoreTerminal {
-        panes: Panes::single(TerminalId::new(id).unwrap()),
-        observe: false,
-    }
+    Location::core_terminal(Panes::single(TerminalId::new(id).unwrap()), false)
 }
 
 #[gpui::test]

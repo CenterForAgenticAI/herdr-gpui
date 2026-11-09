@@ -84,3 +84,40 @@ fn sampling_waits_for_measured_cpu_or_returns_the_latest() {
         }))
     ));
 }
+
+fn env<'a>(vars: &'a [(&str, &str)]) -> impl Fn(&str) -> Option<String> + 'a {
+    |name| {
+        vars.iter()
+            .find(|(known, _)| *known == name)
+            .map(|(_, value)| (*value).to_owned())
+    }
+}
+
+#[test]
+fn the_callers_pane_is_its_core_terminal_before_an_inherited_herdr_pane() {
+    let both = [("HC_TERMINAL_ID", "t7"), ("HERDR_PANE_ID", "w1:p2")];
+    assert_eq!(
+        chosen(None, None, env(&both)).unwrap(),
+        Pane::Core("t7".into())
+    );
+    let herdr = [("HERDR_PANE_ID", "w1:p2")];
+    assert_eq!(
+        chosen(None, None, env(&herdr)).unwrap(),
+        Pane::Herdr("w1:p2".into())
+    );
+    assert!(chosen(None, None, env(&[])).is_err());
+}
+
+#[test]
+fn a_named_pane_or_terminal_wins_and_both_are_refused() {
+    let both = [("HC_TERMINAL_ID", "t7")];
+    assert_eq!(
+        chosen(Some("w1:p1"), None, env(&both)).unwrap(),
+        Pane::Herdr("w1:p1".into())
+    );
+    assert_eq!(
+        chosen(None, Some("t3"), env(&[])).unwrap(),
+        Pane::Core("t3".into())
+    );
+    assert!(chosen(Some("w1:p1"), Some("t3"), env(&[])).is_err());
+}

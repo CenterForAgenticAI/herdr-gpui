@@ -35,6 +35,8 @@ pub struct CoreTerminal {
     sizing: Option<(Arc<Core>, Instant)>,
     /// When the synchronized update the emulator holds began.
     sync_since: Option<Instant>,
+    /// The rows the view was last told wrap onto the next.
+    wraps: Vec<bool>,
 }
 
 impl CoreTerminal {
@@ -45,8 +47,12 @@ impl CoreTerminal {
         role: Role,
         scrollback: usize,
     ) -> Result<Self> {
+        // The core keeps each terminal's recent history and paints what it
+        // has of it first, so a view attached anew (the app restarted, the
+        // core reconnected) starts with the output it missed.
         let attachment = core.attach(&Attach {
             cols: size.cols(),
+            history: u32::try_from(scrollback).unwrap_or(u32::MAX),
             observe: role == Role::Observer,
             rows: size.rows(),
             terminal: id.as_str(),
@@ -69,6 +75,7 @@ impl CoreTerminal {
             scroll: None,
             sizing: (role == Role::Observer).then(|| (Arc::clone(core), Instant::now())),
             sync_since: None,
+            wraps: Vec::new(),
         })
     }
 
@@ -117,10 +124,27 @@ impl CoreTerminal {
                 revision: scroll.1,
             });
         }
-        match self.emulator.take_damage() {
-            Damage::Full(frame) => updates.push(SurfaceUpdate::Frame(frame)),
-            damage if damage.is_empty() => {}
-            Damage::Rows { rows, cursor } => updates.push(SurfaceUpdate::Rows { cursor, rows }),
+        let damaged = match self.emulator.take_damage() {
+            Damage::Full(frame) => {
+                updates.push(SurfaceUpdate::Frame(frame));
+                true
+            }
+            damage if damage.is_empty() => false,
+            Damage::Rows { rows, cursor } => {
+                updates.push(SurfaceUpdate::Rows { cursor, rows });
+                true
+            }
+        };
+        if damaged {
+            let wraps = self.emulator.wrapped_rows();
+            if wraps != self.wraps {
+                self.wraps = wraps.clone();
+                updates.push(SurfaceUpdate::Wraps(wraps));
+            }
+        }
+        // After the cells, so the images land on the screen they belong to.
+        if let Some(scene) = self.emulator.take_graphics() {
+            updates.push(SurfaceUpdate::Graphics(scene));
         }
     }
 
@@ -175,6 +199,20 @@ impl sheprd_backend::Terminal for CoreTerminal {
         }
         self.emulator.resize(size);
         self.attachment.resize(size.cols(), size.rows())
+    }
+
+    /// The emulator sizes images by it; an active view tells the core too,
+    /// which answers the program's questions about it.
+    fn cell_pixels(&mut self, width: u16, height: u16) -> Result<()> {
+        self.emulator
+            .set_cell_pixels(u32::from(width), u32::from(height));
+        if !self.drives() {
+            return Ok(());
+        }
+        self.attachment.facts(&crate::wire::Display {
+            cell: Some([u32::from(width), u32::from(height)]),
+            ..crate::wire::Display::default()
+        })
     }
 
     /// The core reports focus to programs that asked for it.

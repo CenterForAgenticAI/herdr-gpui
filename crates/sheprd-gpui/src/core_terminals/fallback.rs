@@ -22,6 +22,43 @@ pub(crate) enum Fallback {
     Shown(Entity<CoreTerminalView>),
 }
 
+impl super::CoreTerminals {
+    /// The address of the shell shown in place of Herdr 1, such as `t3`,
+    /// once herdr-core has listed it.
+    pub(super) fn fallback_terminal(&self) -> Option<&TerminalId> {
+        matches!(self.fallback, Fallback::Shown(_))
+            .then(|| self.infos.by_name(SHELL))
+            .flatten()
+            .map(|info| &info.id)
+    }
+
+    /// What in this window holds herdr-core `terminal`, for control
+    /// requests from it: a tab whose panes hold it, or the shell shown in
+    /// place of Herdr 1.
+    pub(crate) fn holder(&self, terminal: &TerminalId) -> Option<Holder> {
+        Holder::of(self.tab_of(terminal), self.fallback_terminal(), terminal)
+    }
+}
+
+/// What holds the herdr-core terminal a control request comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Holder {
+    /// The shell shown in place of Herdr 1, in its stand-in workspace.
+    Fallback,
+    Tab(crate::browser::TabId),
+}
+
+impl Holder {
+    pub(super) fn of(
+        tab: Option<crate::browser::TabId>,
+        fallback: Option<&TerminalId>,
+        terminal: &TerminalId,
+    ) -> Option<Self> {
+        tab.map(Self::Tab)
+            .or_else(|| (fallback == Some(terminal)).then_some(Self::Fallback))
+    }
+}
+
 impl SheprdWindow {
     /// Runs every tick: while Herdr 1 is missing, connects and shows the
     /// shell; once Herdr 1 answers again, gives the window back to it.
@@ -111,12 +148,20 @@ impl SheprdWindow {
             }
         };
         let (look, painter) = (self.core_look(), self.painter.clone());
-        let view = cx.new(|cx| CoreTerminalView::new(terminal, link, look, painter, false, cx));
+        let to_window = super::asks::window_call(cx);
+        let view = cx.new(|cx| {
+            CoreTerminalView::new(terminal, link, look, painter, false, cx).with_window(to_window)
+        });
         self.core_terminals.fallback = Fallback::Shown(view);
         cx.notify();
     }
 
     /// The shell shown in place of Herdr 1's terminal, while it is.
+    /// The terminal of the shell shown in place of Herdr 1.
+    pub(super) fn core_fallback_terminal(&self, cx: &App) -> Option<TerminalId> {
+        Some(self.core_fallback_view()?.read(cx).terminal().clone())
+    }
+
     pub(crate) fn core_fallback_view(&self) -> Option<Entity<CoreTerminalView>> {
         match &self.core_terminals.fallback {
             Fallback::Shown(view) => Some(view.clone()),

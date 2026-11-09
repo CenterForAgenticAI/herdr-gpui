@@ -11,6 +11,16 @@ use crate::hub::Layout;
 use serde_json::{Value, json};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN};
 use sheprd_core_client::wire::Run;
+use sheprd_session::{Labelled, NEW_WORKSPACE_LABEL, SESSION_LABEL, WORKSPACE_LABEL};
+
+/// Where new work from a phone belongs, which Sheprd gives it a tab in.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::hub) enum Place<'a> {
+    /// A workspace that exists.
+    Workspace(Labelled<'a>),
+    /// A new workspace in this folder, which Sheprd keeps.
+    New(&'a str),
+}
 use std::{
     collections::{BTreeMap, HashMap},
     path::Path,
@@ -22,11 +32,13 @@ use std::{
 const PANE_ENV: &str = "HERDR_PANE_ID";
 
 impl Source {
-    /// A shell in `cwd`, or the core's default folder when it is empty.
-    pub(in crate::hub) fn open_shell(&self, cwd: &str) -> Result<String> {
+    /// A shell in `cwd`, or the core's default folder when it is empty,
+    /// labelled for `workspace` so Sheprd puts it in a tab there.
+    pub(in crate::hub) fn open_shell(&self, cwd: &str, place: Option<Place<'_>>) -> Result<String> {
         self.run(&Run {
             cwd: Some(cwd).filter(|cwd| !cwd.is_empty()),
             keep: true,
+            labels: place_labels(place),
             ..Run::default()
         })
     }
@@ -37,8 +49,11 @@ impl Source {
         agent: Agent,
         program: &Path,
         cwd: &str,
+        place: Option<Place<'_>>,
     ) -> Result<String> {
         let endpoint = EndpointId::random().to_string();
+        let mut labels = place_labels(place);
+        labels.insert(TOKEN, endpoint.as_str());
         let argv = [program.to_string_lossy().into_owned(), agent.to_string()];
         self.run(&Run {
             argv: &argv,
@@ -47,13 +62,13 @@ impl Source {
             // A recovery shell cannot serve the labelled chat endpoint.
             // Let a lost chat finish instead of advertising a dead chat.
             keep: false,
-            labels: BTreeMap::from([(TOKEN, endpoint.as_str())]),
+            labels,
             ..Run::default()
         })
     }
 
     /// A chat as [`Self::open_chat`], in a new worktree of `cwd` on `branch`
-    /// under `root`.
+    /// under `root`. Answers its pane and the new checkout's folder.
     pub(in crate::hub) fn open_worktree_chat(
         &self,
         agent: Agent,
@@ -61,23 +76,26 @@ impl Source {
         cwd: &str,
         branch: &str,
         root: Option<&Path>,
-    ) -> Result<String> {
+    ) -> Result<(String, String)> {
         let root = root.ok_or(worktree::Error::NoHome).map_err(Error::from)?;
         let repository = Path::new(cwd);
         let checkout =
             worktree::add(repository, branch, "HEAD", root, || false).map_err(Error::from)?;
-        let started = self.open_chat(agent, program, &checkout.to_string_lossy());
+        // A new workspace of its own, in the new checkout.
+        let checkout = checkout.to_string_lossy().into_owned();
+        let started = self.open_chat(agent, program, &checkout, Some(Place::New(&checkout)));
+        let folder = Path::new(&checkout);
         if let Err(error) = &started {
             // A retry must find the branch free, but only a start that
             // surely ran nothing may go: a chat may be working in the
             // checkout after any other failure.
             if !ran_nothing(error) {
                 tracing::warn!(%error, %branch, "A worktree stayed: its chat may have started");
-            } else if let Err(error) = worktree::remove(repository, &checkout, branch) {
+            } else if let Err(error) = worktree::remove(repository, folder, branch) {
                 tracing::warn!(%error, %branch, "A worktree without a chat stayed");
             }
         }
-        started
+        started.map(|pane| (pane, checkout))
     }
 
     fn run(&self, run: &Run<'_>) -> Result<String> {
@@ -154,4 +172,22 @@ pub(super) fn tab_panes(layout: &Layout) -> HashMap<String, Vec<String>> {
         }
     }
     tabs
+}
+
+/// The labels naming where `place` is, when it is somewhere Sheprd could
+/// keep a tab.
+fn place_labels(place: Option<Place<'_>>) -> BTreeMap<&'static str, &str> {
+    match place {
+        Some(Place::Workspace(workspace)) if sheprd_session::tab_workspace(workspace.id) => {
+            let mut labels = BTreeMap::from([(WORKSPACE_LABEL, workspace.id)]);
+            if let Some(session) = workspace.session {
+                labels.insert(SESSION_LABEL, session);
+            }
+            labels
+        }
+        Some(Place::New(cwd)) if Path::new(cwd).is_absolute() => {
+            BTreeMap::from([(NEW_WORKSPACE_LABEL, cwd)])
+        }
+        _ => BTreeMap::new(),
+    }
 }

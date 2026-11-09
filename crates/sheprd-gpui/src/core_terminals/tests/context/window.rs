@@ -109,10 +109,7 @@ fn a_split_starts_where_the_pane_it_splits_is(cx: &mut TestAppContext) {
     let (view, cx) = window(cx);
     let tab = view.update(cx, |view, cx| {
         let scope = crate::browser::scope(&view.endpoints[0]);
-        let location = Location::CoreTerminal {
-            panes: Panes::single(id("t1")),
-            observe: false,
-        };
+        let location = Location::core_terminal(Panes::single(id("t1")), false);
         let tab = Store::update(cx, |store| store.open(scope, "w0", Some(location), None)).unwrap();
         view.core_terminals.show_for_test(
             tab,
@@ -143,10 +140,7 @@ fn without_herdr_a_tab_starts_where_the_shown_core_pane_is(cx: &mut TestAppConte
         view.live.snapshot = None;
         view.live.missing_installation = true;
         let scope = crate::browser::scope(&view.endpoints[0]);
-        let location = Location::CoreTerminal {
-            panes: Panes::single(id("t1")),
-            observe: false,
-        };
+        let location = Location::core_terminal(Panes::single(id("t1")), false);
         let tab: TabId = Store::update(cx, |store| {
             store.open(scope.clone(), WORKSPACE, Some(location), None)
         })

@@ -188,12 +188,30 @@ pub(super) fn env_id(name: &str) -> Option<String> {
 }
 
 fn caller(workspace: Option<String>) -> crate::Result<Caller> {
-    Ok(Caller {
-        pane_id: env_id("HERDR_PANE_ID"),
-        workspace_id: workspace.or_else(|| env_id("HERDR_WORKSPACE_ID")),
-        daemon_socket: caller_daemon()?,
+    Ok(caller_from(workspace, env_id, caller_daemon()?))
+}
+
+/// The caller as the variables `var` reads describe it. A herdr-core
+/// terminal names itself in `HC_TERMINAL_ID`; one started from a Herdr pane
+/// also inherits that pane's `HERDR_PANE_ID` while running elsewhere, so the
+/// pane is left out. Its workspace stays: a terminal the app opened in a
+/// Herdr workspace names that workspace.
+pub(super) fn caller_from(
+    workspace: Option<String>,
+    var: impl Fn(&str) -> Option<String>,
+    daemon_socket: Option<String>,
+) -> Caller {
+    let terminal_id = var("HC_TERMINAL_ID");
+    Caller {
+        pane_id: terminal_id
+            .is_none()
+            .then(|| var("HERDR_PANE_ID"))
+            .flatten(),
+        workspace_id: workspace.or_else(|| var("HERDR_WORKSPACE_ID")),
+        daemon_socket,
         window: None,
-    })
+        terminal_id,
+    }
 }
 
 fn send(request: &Request) -> crate::Result<Response> {
@@ -457,7 +475,9 @@ pub(crate) fn run(invocation: Invocation) -> ExitCode {
         ControlCommand::Host(command) => hosts::host(command, &context),
         ControlCommand::Cloud(command) => hosts::cloud(command, &context),
         ControlCommand::Ports(command) => hosts::ports(command, &context),
-        ControlCommand::Processes { pane } => local::processes(pane.as_deref()),
+        ControlCommand::Processes { pane, terminal } => {
+            local::processes(pane.as_deref(), terminal.as_deref())
+        }
         ControlCommand::Usage => hosts::usage(&context),
         ControlCommand::System => hosts::system(&context),
         ControlCommand::Security(command) => hosts::security(command, &context),

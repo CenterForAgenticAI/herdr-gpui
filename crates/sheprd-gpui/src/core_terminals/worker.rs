@@ -36,6 +36,8 @@ pub(crate) type Answer = Result<HistoryAnswer, Arc<dyn std::error::Error + Send 
 /// What the view asks of its terminal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
+    /// The view's cell size in whole pixels.
+    CellPixels(u16, u16),
     Focus(bool),
     /// A question about, or change to, the view's history, answered under
     /// `id` in the mailbox.
@@ -170,6 +172,9 @@ fn run<B: Backend>(
         Ok(terminal) => terminal,
         Err(error) => return fail(&error),
     };
+    // Every scene passes through here in order, so image bytes sent once
+    // are kept even when the window takes only the latest screen.
+    let mut images = sheprd_client::ImageStore::default();
     while !mailbox.stop.load(Ordering::Acquire) {
         let mut wait = POLL;
         for command in queue.try_iter() {
@@ -178,6 +183,7 @@ fn run<B: Backend>(
             // never names rows of a text the view has not seen.
             let resized = matches!(command, Command::Resize(_));
             let applied = match command {
+                Command::CellPixels(width, height) => terminal.cell_pixels(width, height),
                 Command::Focus(focused) => terminal.focus(focused),
                 Command::History { id, request } => {
                     answer(&mut terminal, id, &request, mailbox);
@@ -196,12 +202,24 @@ fn run<B: Backend>(
         }
         match terminal.next(wait) {
             Ok(updates) if updates.is_empty() => {}
-            Ok(updates) => {
+            Ok(mut updates) => {
                 let ended = updates
                     .iter()
                     .any(|update| matches!(update, SurfaceUpdate::Ended(_)));
-                mailbox
-                    .update(|screen| updates.into_iter().for_each(|update| screen.apply(update)));
+                let mut pictures = false;
+                for update in &mut updates {
+                    if let SurfaceUpdate::Graphics(scene) = update {
+                        images.receive_shown_scene(scene);
+                        pictures = true;
+                    }
+                }
+                let published = pictures.then(|| images.published());
+                mailbox.update(|screen| {
+                    updates.into_iter().for_each(|update| screen.apply(update));
+                    if let Some(published) = published {
+                        screen.images = super::screen::Images(published);
+                    }
+                });
                 // An ended terminal's last screen stays shown; its stream
                 // answers at once from here on, so waiting again would spin.
                 if ended {
@@ -246,7 +264,7 @@ fn after_end<T: Terminal>(
                     tracing::debug!(%error, "Input to an ended herdr-core terminal dropped");
                 }
             }
-            Command::Focus(_) | Command::Resize(_) => continue,
+            Command::CellPixels(..) | Command::Focus(_) | Command::Resize(_) => continue,
         }
         match terminal.next(Duration::ZERO) {
             Ok(updates) if updates.is_empty() => {}

@@ -17,7 +17,7 @@
 
 mod chats;
 mod convert;
-mod core_pane;
+pub(crate) mod core_pane;
 mod discovery;
 mod existing;
 mod glide;

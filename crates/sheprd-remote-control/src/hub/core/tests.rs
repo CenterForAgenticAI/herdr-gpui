@@ -444,6 +444,7 @@ mod empty_core;
 mod kept_workspaces;
 mod pane_agents;
 mod poller;
+mod renames;
 mod saved_beside_spaces;
 mod screen_history;
 

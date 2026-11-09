@@ -506,6 +506,16 @@ impl SheprdWindow {
             {
                 Shown::Terminal
             }
+            // With no Herdr 1 installed, no Herdr tab is ever focused: the
+            // group holding the window's connection shows the herdr-core
+            // shell standing in for it, split or not.
+            Shown::Empty
+                if self.live.missing_installation
+                    && Some(group) == self.primary_group()
+                    && self.group_pick(group).is_none() =>
+            {
+                Shown::Terminal
+            }
             _ => shown,
         }
     }

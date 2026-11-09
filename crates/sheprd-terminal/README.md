@@ -11,6 +11,8 @@ give the same frame however they are split across `Emulator::feed` calls.
 It never answers terminal queries (herdr-core does), writes to the
 clipboard, or opens hyperlinks. An OSC 52 clipboard write comes out as an
 event with its decoded UTF-8 text for the caller to apply; reads are refused.
+Images a program sends with the kitty graphics protocol come out as Herdr's
+graphics scene for the app's painter.
 
 ## Use
 
@@ -33,6 +35,16 @@ event with its decoded UTF-8 text for the caller to apply; reads are refused.
   app's semantic input into PTY bytes: xterm keys, the kitty keyboard
   protocol, Win32 input records (DECSET 9001), mouse reports, and bracketed
   paste.
+- `take_graphics()` returns the kitty graphics placements on screen when
+  they changed, as a `SurfaceGraphicsScene` carrying the bytes of each image
+  the previous one did not show; `set_cell_pixels()` sizes images placed
+  without a size in cells. Only images sent in the stream are read (`t=d`,
+  PNG or raw RGB/RGBA, zlib or not, chunked or not), never a file, shared
+  memory, or temporary path the program names. Each placement marks its
+  top-left cell with a zero-width private-use character the frame never
+  shows, so it scrolls, reflows, and clears with its text. Deletion by
+  image and of all placements is read; by cell, row, column, or z is not,
+  nor are animation and Unicode placeholders.
 - `sync_pending()` and `end_sync()` let the caller time out a synchronized
   update (DECSET 2026) with its own clock.
 
@@ -40,7 +52,9 @@ Everything is bounded: sizes (`Size` from herdr-backend, with `MAX_SIDE`
 and `MAX_CELLS`), history
 (`MAX_SCROLLBACK_LINES`, `MAX_SCROLLBACK_CELLS`), OSC strings
 (`MAX_OSC_BYTES`, longer ones are dropped whole; an OSC 52 write may carry
-up to `MAX_CLIPBOARD_BYTES` of text), and repeats
+up to `MAX_CLIPBOARD_BYTES` of text), graphics commands
+(`MAX_GRAPHICS_COMMAND_BYTES`), images (count, bytes, sides) and placements,
+and repeats
 (`input::MAX_REPEAT`).
 
 ## Cell contract
