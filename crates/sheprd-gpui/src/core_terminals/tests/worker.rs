@@ -25,9 +25,9 @@ pub(super) struct Scripted {
 }
 
 impl Scripted {
-    /// Queues one batch of updates for the terminal to hand out.
+    /// Hands `batch` out after the batches already queued.
     pub(super) fn push(&self, batch: Vec<SurfaceUpdate>) {
-        self.updates.lock().unwrap().push(batch);
+        self.updates.lock().unwrap().insert(0, batch);
     }
 
     /// A backend whose terminals never attach.

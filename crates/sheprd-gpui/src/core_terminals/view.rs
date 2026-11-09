@@ -8,6 +8,7 @@ pub(super) mod paste;
 mod pointer;
 
 use super::{
+    effects::Effects,
     screen::Screen,
     selection::{Cell, Selection},
     worker::{Command, Link},
@@ -59,6 +60,8 @@ pub(crate) struct CoreTerminalView {
     /// Something typed while the connection was away, for the window to
     /// say it was not sent.
     dropped: std::cell::Cell<bool>,
+    /// Bells and clipboard writes the window has not taken yet.
+    effects: Effects,
     focus: FocusHandle,
     /// Releases for keys pressed while the program asked for them.
     held_keys: HeldKeys,
@@ -108,6 +111,7 @@ impl CoreTerminalView {
         Self {
             bounds: None,
             dropped: std::cell::Cell::new(false),
+            effects: Effects::default(),
             focus: cx.focus_handle(),
             held_keys: HeldKeys::default(),
             hovered: None,
@@ -224,9 +228,22 @@ impl CoreTerminalView {
         if screen.frame.is_none() {
             screen.frame = self.screen.frame.take();
         }
+        // A mirror only watches; the tab driving the terminal rings and
+        // copies.
+        if !self.observe {
+            self.effects.merge(Effects {
+                bells: screen.bells,
+                clipboard: screen.clipboard.take(),
+            });
+        }
         self.screen = screen;
         cx.notify();
         true
+    }
+
+    /// Bells and the clipboard write found since the last take.
+    pub(crate) fn take_effects(&mut self) -> Effects {
+        std::mem::take(&mut self.effects)
     }
 
     pub(crate) fn set_look(&mut self, look: Look, cx: &mut Context<Self>) {

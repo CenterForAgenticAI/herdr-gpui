@@ -2,7 +2,11 @@
 //! the pane in use, panes whose program ended, and the layout saved with the
 //! tab once a change settles.
 
-use super::{CoreTerminalView, Host, Start, TabPanes, panes::Axis, worker};
+use super::{
+    CoreTerminalView, Host, Start, TabPanes,
+    panes::{Axis, Panes},
+    worker,
+};
 use crate::{
     SheprdWindow,
     browser::{Location, Store, TabId},
@@ -55,6 +59,7 @@ impl SheprdWindow {
             return;
         };
         let mut missing: Vec<(TabId, TerminalId, Role, Host)> = Vec::new();
+        let mut overflow = Vec::new();
         for tab in store.in_workspace(&scope, &workspace) {
             let Some(location) = &tab.location else {
                 continue;
@@ -73,7 +78,7 @@ impl SheprdWindow {
             // Each window holds its own copy: one another window saved over
             // is read again before this one can save.
             if shown.saved.as_ref() != Some(location) {
-                shown.refresh(location);
+                overflow.extend(shown.refresh(location));
             }
             if shown.workspace.is_none() {
                 shown.workspace = Some((scope.clone(), workspace.clone()));
@@ -102,6 +107,22 @@ impl SheprdWindow {
                         (tab.id, terminal.clone(), role, shown.host.clone())
                     }),
             );
+        }
+        // Panes another window opened in a tab this one filled meanwhile
+        // run on in a tab of their own rather than in none.
+        for terminal in overflow {
+            let location = Location::core_terminal(Panes::single(terminal.clone()), false);
+            let opened = Store::update(cx, |store| {
+                store.open(scope.clone(), &workspace, Some(location), None)
+            });
+            let said = match opened {
+                Some(_) => fl!("core-terminals-pane-own-tab"),
+                None => {
+                    tracing::warn!(%terminal, "No room for a herdr-core pane's own tab");
+                    fl!("core-terminals-too-many-tabs")
+                }
+            };
+            self.show_flash(Flash::warning(said), cx);
         }
         if missing.is_empty() {
             return;
@@ -200,11 +221,28 @@ impl SheprdWindow {
             .iter()
             .map(|(key, view)| (key.clone(), view.clone()))
             .collect();
+        let in_sight: std::collections::HashSet<TabId> = self
+            .browser_key()
+            .zip(cx.try_global::<Store>())
+            .map(|((scope, workspace), store)| {
+                store
+                    .in_workspace(&scope, &workspace)
+                    .map(|tab| tab.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let polled = views
+            .iter()
+            .map(|((tab, _), view)| {
+                let host = in_sight
+                    .contains(tab)
+                    .then(|| self.core_terminals.host_of(*tab));
+                (view.clone(), host)
+            })
+            .collect::<Vec<_>>();
+        self.poll_core_views(polled, window, cx);
         let mut ended = Vec::new();
-        let mut dropped = false;
         for ((tab, terminal), view) in views {
-            view.update(cx, |view, cx| view.poll(cx));
-            dropped |= view.read(cx).take_dropped();
             let split = self
                 .core_terminals
                 .tabs
@@ -213,9 +251,6 @@ impl SheprdWindow {
             if split && view.read(cx).ended() {
                 ended.push((tab, terminal));
             }
-        }
-        if dropped {
-            self.show_flash(Flash::warning(fl!("core-terminals-input-dropped")), cx);
         }
         for (tab, terminal) in ended {
             self.remove_core_pane(tab, &terminal, window, cx);

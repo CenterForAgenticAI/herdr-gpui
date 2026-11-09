@@ -14,6 +14,7 @@
 mod checkouts;
 mod commands;
 mod context;
+mod effects;
 mod error;
 mod fallback;
 mod folders;
@@ -191,9 +192,12 @@ impl TabPanes {
     /// is kept. The pane in use is this window's, where the keyboard is;
     /// a zoom stands only on that pane, so commands never reach a pane
     /// hidden behind another.
-    fn refresh(&mut self, location: &Location) {
+    ///
+    /// Returns the other window's new panes this tab had no room left for.
+    #[must_use]
+    fn refresh(&mut self, location: &Location) -> Vec<TerminalId> {
         let Some(mut fresh) = Self::restore(self.host.clone(), location) else {
-            return;
+            return Vec::new();
         };
         let Some(Location::CoreTerminal {
             panes: base,
@@ -203,13 +207,16 @@ impl TabPanes {
         }) = &self.saved
         else {
             *self = fresh;
-            return;
+            return Vec::new();
         };
+        let mut overflow = Vec::new();
         if self.panes != *base {
             fresh.panes = if fresh.panes == *base {
                 self.panes.clone()
             } else {
-                merged(&self.panes, base, &fresh.panes, &self.active)
+                let (panes, left) = merged(&self.panes, base, &fresh.panes, &self.active);
+                overflow = left;
+                panes
             };
         }
         // Names this window changed since it last read the tab stand too.
@@ -221,6 +228,10 @@ impl TabPanes {
         }
         if fresh.panes.contains(&self.active) {
             fresh.active = self.active.clone();
+        } else if !fresh.panes.contains(&fresh.active) {
+            // Both windows closed a pane, and the merge holds neither one
+            // in use: the keyboard goes to a pane that is still there.
+            fresh.active = fresh.panes.first().clone();
         }
         let zoomed = if self.unsaved {
             self.zoomed.clone().filter(|_| self.zoom.is_open())
@@ -246,6 +257,7 @@ impl TabPanes {
         fresh.unsaved = self.unsaved;
         fresh.saved = Some(location.clone());
         *self = fresh;
+        overflow
     }
 
     /// The tab's location as it saves: the layout, the pane in use, and the
@@ -605,12 +617,15 @@ impl SheprdWindow {
         }
         self.poll_core_fallback(cx);
         self.refresh_core_looks(cx);
-        if let Some(view) = self.core_fallback_view() {
-            view.update(cx, |view, cx| view.poll(cx));
-            if view.read(cx).take_dropped() {
-                self.show_flash(Flash::warning(fl!("core-terminals-input-dropped")), cx);
-            }
-        }
+        // The stand-in shell rings only while its workspace is shown, as a
+        // tab does; its clipboard writes land either way.
+        let fallback_shown = self.default_workspace_shown();
+        self.poll_core_views(
+            self.core_fallback_view()
+                .map(|view| (view, fallback_shown.then_some(Host::Local))),
+            window,
+            cx,
+        );
         self.poll_core_panes(window, cx);
         self.answer_phone_split(cx);
         if self.core_terminals.poll_infos(std::time::Instant::now()) {
@@ -753,9 +768,16 @@ impl SheprdWindow {
 
 /// `here`, a layout changed since `base`, with the changes `there` made to
 /// `base` too: its closed panes go, and its new ones split off `active`
-/// while there is room.
-fn merged(here: &Panes, base: &Panes, there: &Panes, active: &TerminalId) -> Panes {
+/// while there is room. The new ones a full layout cannot take come back
+/// beside it, for the caller to give a tab of their own.
+fn merged(
+    here: &Panes,
+    base: &Panes,
+    there: &Panes,
+    active: &TerminalId,
+) -> (Panes, Vec<TerminalId>) {
     let mut panes = here.clone();
+    let mut overflow = Vec::new();
     for gone in base.terminals() {
         if !there.contains(gone) {
             panes.remove(gone);
@@ -768,12 +790,12 @@ fn merged(here: &Panes, base: &Panes, there: &Panes, active: &TerminalId) -> Pan
             } else {
                 panes.first().clone()
             };
-            // A full layout leaves it to the other window's tab, which the
-            // next save replaces; nothing better is open to it.
-            let _ = panes.split(&at, Axis::Row, new.clone());
+            if panes.split(&at, Axis::Row, new.clone()).is_err() {
+                overflow.push(new.clone());
+            }
         }
     }
-    panes
+    (panes, overflow)
 }
 
 /// Whether a pane waiting for the keyboard may take it: nothing holds it, or

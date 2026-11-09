@@ -3,6 +3,8 @@ mod chats;
 mod close;
 mod commands;
 mod context;
+mod effects;
+mod fallback_bells;
 mod focus;
 mod folders;
 mod kept_checkouts;
