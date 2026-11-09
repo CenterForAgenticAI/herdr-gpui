@@ -7,6 +7,7 @@ mod endpoint;
 mod event;
 mod frame;
 mod hello;
+mod identity;
 mod labels;
 mod live;
 #[cfg(unix)]

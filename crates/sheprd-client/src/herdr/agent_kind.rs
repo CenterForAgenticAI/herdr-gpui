@@ -2,6 +2,8 @@
 //! Herdr's integrations report for them, and the command lines that start
 //! or resume them.
 
+mod identify;
+
 use super::snapshot::{AgentSession, SessionKind};
 
 /// Agents Herdr's integrations report resumable sessions for. Resume commands

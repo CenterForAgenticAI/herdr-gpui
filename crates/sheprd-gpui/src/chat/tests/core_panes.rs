@@ -20,6 +20,7 @@ fn info(name: &str, endpoint: Option<&str>) -> TerminalInfo {
     TerminalInfo {
         agent: AgentStatus::Unknown,
         cwd: None,
+        foreground: None,
         id: id(name),
         labels: endpoint
             .map(|endpoint| {
@@ -27,6 +28,7 @@ fn info(name: &str, endpoint: Option<&str>) -> TerminalInfo {
             })
             .unwrap_or_default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }

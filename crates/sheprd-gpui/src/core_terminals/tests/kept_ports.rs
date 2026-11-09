@@ -44,10 +44,8 @@ fn window(
 fn kept_chips(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext) -> (String, Vec<String>) {
     let id = cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            let location = Location::CoreTerminal {
-                panes: Panes::single(TerminalId::new("t1").unwrap()),
-                observe: false,
-            };
+            let location =
+                Location::core_terminal(Panes::single(TerminalId::new("t1").unwrap()), false);
             view.open_kept_workspace(None, Path::new("/src/api"), location, window, cx)
         })
     });
