@@ -245,7 +245,13 @@ impl SheprdWindow {
                     .core_terminals
                     .views
                     .get(&(*tab, shown.active.clone()))?;
-                Some((*tab, view.read(cx).title()?.to_owned()))
+                // Without a title of its program's, the tab's default stands,
+                // so a name the user cleared does not linger.
+                let title = view
+                    .read(cx)
+                    .title()
+                    .map_or_else(|| shown.location().default_title(), str::to_owned);
+                Some((*tab, title))
             })
             .collect();
         for (tab, title) in titles {

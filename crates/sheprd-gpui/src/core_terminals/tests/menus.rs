@@ -159,3 +159,26 @@ fn zooming_a_pane_that_already_exited_changes_nothing(cx: &mut TestAppContext) {
         })
     });
 }
+
+#[gpui::test]
+fn a_cleared_name_gives_way_to_the_default_title(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1"]);
+    let title = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| cx.global::<Store>().get(tab).unwrap().title.clone())
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&Target::Tab(tab), clean_name("build"), cx);
+            view.poll_core_panes(window, cx);
+        })
+    });
+    assert_eq!(title(cx), "build");
+    // The program never set a title of its own.
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&Target::Tab(tab), clean_name(""), cx);
+            view.poll_core_panes(window, cx);
+        })
+    });
+    assert_eq!(title(cx), "Terminal");
+}
