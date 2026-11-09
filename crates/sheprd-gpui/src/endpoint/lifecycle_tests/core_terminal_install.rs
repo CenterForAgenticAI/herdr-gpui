@@ -31,9 +31,11 @@ fn agent(id: &str, agent: AgentStatus) -> TerminalInfo {
     TerminalInfo {
         agent,
         cwd: None,
+        foreground: None,
         id: TerminalId::new(id).unwrap(),
         labels: Default::default(),
         name: None,
+        reporter: None,
         state: RunState::Running,
         title: None,
     }

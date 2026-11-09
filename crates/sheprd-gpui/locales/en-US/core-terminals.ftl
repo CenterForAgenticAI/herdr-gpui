@@ -33,6 +33,10 @@ core-terminals-unsupported = Herdr 2 panes cannot do this yet
 core-terminals-watching = Watching
 # The sidebar's list of herdr-core panes, under the agents.
 core-terminals-sidebar = Herdr 2
+core-terminals-edit-failed = Could not open the history in an editor
+# Editing scrollback saves it on this computer, so it is refused for a pane
+# running on another machine's Herdr 2.
+core-terminals-edit-remote = Editing scrollback works only for panes on this computer
 # Installing herdr-core (Herdr 2) on a saved device, from its menu.
 # $device is the device's name; $version is herdr-core's version.
 core-terminals-install-started = Installing Herdr 2 on { $device }...

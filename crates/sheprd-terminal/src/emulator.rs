@@ -3,6 +3,8 @@
 //! clipboard: an OSC 52 write comes out as an [`Event`] for the caller to
 //! apply. herdr-core answers terminal queries itself.
 
+mod history;
+
 use crate::{
     MAX_SCROLLBACK_CELLS, MAX_SCROLLBACK_LINES, Size, cells,
     damage::{Damage, Tracker},
@@ -21,6 +23,7 @@ use alacritty_terminal::{
     },
     vte::ansi::{CursorShape, CursorStyle, Processor, Timeout},
 };
+use sheprd_backend::ScrollMetrics;
 use sheprd_protocol::{ClientPaneInputEvent, FrameData, SurfaceGraphicsScene};
 use std::{fmt, time::Duration};
 
@@ -60,17 +63,6 @@ impl From<Scroll> for grid::Scroll {
             Scroll::Bottom => Self::Bottom,
         }
     }
-}
-
-/// Where the view is in history.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ScrollMetrics {
-    /// Lines the view is scrolled up from the live screen; 0 is live.
-    pub offset: usize,
-    /// History lines above the live screen.
-    pub history: usize,
-    /// Rows the view shows.
-    pub rows: u16,
 }
 
 /// Synchronized updates (DECSET 2026) without a clock: the parser buffers
@@ -116,6 +108,8 @@ pub struct Emulator {
     graphics: Graphics,
     listener: Listener,
     processor: Processor<SyncPending>,
+    /// Counts changes to the text, which history coordinates hold for.
+    revision: u64,
     scanner: Scanner,
     scrollback_lines: usize,
     size: Size,
@@ -147,6 +141,7 @@ impl Emulator {
             graphics: Graphics::default(),
             listener,
             processor: Processor::new(),
+            revision: 0,
             scanner: Scanner::default(),
             scrollback_lines,
             size,
@@ -183,6 +178,7 @@ impl Emulator {
             }
         });
         self.damage.fed = true;
+        self.revision = self.revision.wrapping_add(1);
         self.drain_events();
     }
 
@@ -199,6 +195,7 @@ impl Emulator {
         }
         self.processor.stop_sync(&mut self.term);
         self.damage.fed = true;
+        self.revision = self.revision.wrapping_add(1);
         self.drain_events();
     }
 
@@ -214,6 +211,13 @@ impl Emulator {
         self.term.resize(Dims(size));
         self.term.set_options(config(size, self.scrollback_lines));
         self.damage.full = true;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// How many times the text changed: output, a resize's rewrap, or a
+    /// clear. History coordinates read at one revision hold until the next.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// The visible viewport, scrolled as [`Self::scroll`] left it. It does not
@@ -262,6 +266,7 @@ impl Emulator {
             offset: grid.display_offset(),
             history: grid.history_size(),
             rows: self.size.rows(),
+            full: grid.history_size() >= history_limit(self.size, self.scrollback_lines),
         }
     }
 
@@ -473,10 +478,16 @@ fn sweep(cell: &mut Cell, live: impl Fn(u32) -> bool) -> Vec<u32> {
     kept
 }
 
-fn config(size: Size, scrollback_lines: usize) -> Config {
+/// The history lines a terminal `size` keeps when asked for
+/// `scrollback_lines`.
+fn history_limit(size: Size, scrollback_lines: usize) -> usize {
     let cell_limit = MAX_SCROLLBACK_CELLS / usize::from(size.cols());
+    scrollback_lines.min(MAX_SCROLLBACK_LINES).min(cell_limit)
+}
+
+fn config(size: Size, scrollback_lines: usize) -> Config {
     Config {
-        scrolling_history: scrollback_lines.min(MAX_SCROLLBACK_LINES).min(cell_limit),
+        scrolling_history: history_limit(size, scrollback_lines),
         // Stands for "no program chose a style" (see `cells::cursor`).
         default_cursor_style: CursorStyle {
             shape: CursorShape::HollowBlock,
@@ -484,6 +495,7 @@ fn config(size: Size, scrollback_lines: usize) -> Config {
         },
         kitty_keyboard: true,
         osc52: Osc52::OnlyCopy,
+        semantic_escape_chars: history::WORD_SEPARATORS.to_owned(),
         ..Config::default()
     }
 }
