@@ -3,9 +3,10 @@ default:
 
 # Sheprd in a Moonframe window (the `moonframe` feature), on your settings and
 # daemon: quit Sheprd first. `just run-moonframe --check` checks the Luau.
-# Built in its own target directory, so it never replaces `target/release/sheprd`.
+# Built in its own target directory, so it never replaces `target/release/sheprd`;
+# the helpers the app finds beside itself (`sheprd-acp`, `sheprd-automate`) too.
 run-moonframe *args:
-    cargo build --locked --release -p sheprd-acp -p sheprd-automate
+    cargo build --locked --release -p sheprd-acp -p sheprd-automate --target-dir target/moonframe
     cargo run --locked --release -p sheprd-gpui --features moonframe --target-dir target/moonframe -- {{args}}
 
 # Launch the bundle so macOS reads Sheprd's identity and privacy declarations.
