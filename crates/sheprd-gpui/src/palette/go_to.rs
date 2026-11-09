@@ -38,6 +38,35 @@ pub(super) fn destination_exists(
     }
 }
 
+/// The Go To rows of the workspaces the app keeps for Herdr 2 on a host.
+/// They have no daemon boot to check against, so they carry none.
+pub(super) fn kept_go_to_entries(
+    endpoint: &str,
+    host: Option<&str>,
+    session: &sheprd_session::Session,
+    entries: &mut Vec<Entry>,
+) {
+    for workspace in &session.workspaces {
+        let detail = [host, Some(workspace.cwd.as_str())]
+            .into_iter()
+            .flatten()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("  ");
+        entries.push(Entry::new(
+            workspace.label.clone(),
+            detail,
+            fl!("palette-go-to-workspace"),
+            Action::Go {
+                endpoint: endpoint.to_owned(),
+                boot: String::new(),
+                target: NavigationTarget::Workspace(workspace.id.clone()),
+            },
+            None,
+        ));
+    }
+}
+
 /// An agent's status word, searched for in English whatever the language.
 fn status_keyword(status: AgentStatus) -> &'static str {
     match status {
