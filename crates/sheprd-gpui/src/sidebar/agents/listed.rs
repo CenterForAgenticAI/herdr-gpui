@@ -236,46 +236,45 @@ pub(crate) struct CoreAgents<'a> {
 }
 
 /// Every listed host's agents in the order the panel paints them, as
-/// [`super::panel_agents`] orders Herdr 1's, with this computer's Herdr 2
-/// agents among them: grouped, after its host's own; by priority, merged
-/// with every host's by attention and then the latest change, the core
-/// counted as connected while it answers. `hosts` are in sidebar order;
-/// with the core's host not among them, its agents are not listed.
+/// [`super::panel_agents`] orders Herdr 1's, with each host's Herdr 2 agents,
+/// `cores`, among them: grouped, after their host's own; by priority,
+/// merged with every host's by attention and then the latest change, a core
+/// counted as connected while it answers. `hosts` are in sidebar order; a
+/// core whose host is not among them lists nothing.
 pub(crate) fn listed_agents<'a>(
     hosts: Vec<(usize, &'a LiveState)>,
-    core: Option<CoreAgents<'a>>,
+    cores: impl IntoIterator<Item = CoreAgents<'a>>,
     sort: AgentSort,
 ) -> Vec<(usize, Listed<'a>)> {
     let lives = hosts.clone();
     let herdr_1 = super::panel_agents(hosts, sort);
     let order = |index: usize| lives.iter().position(|(host, _)| *host == index);
-    let core = core.filter(|core| !core.agents.is_empty() && order(core.index).is_some());
-    let Some(core) = core else {
-        return herdr_1
-            .into_iter()
-            .filter_map(|(index, agent)| herdr_1_row(&lives, index, agent))
-            .collect();
-    };
-    let core_rows = core
-        .agents
-        .iter()
-        .map(|agent| (core.index, Listed::Core(*agent)));
-    // Grouped lists one host after another: the core's agents go after the
-    // last of its host's own, before the next host's.
-    let split = herdr_1
-        .iter()
-        .position(|(index, _)| order(*index) > order(core.index))
-        .unwrap_or(herdr_1.len());
-    let mut rows: Vec<(usize, Listed<'a>)> = Vec::with_capacity(herdr_1.len() + core.agents.len());
-    let mut herdr_1 = herdr_1.into_iter();
-    rows.extend(
-        herdr_1
-            .by_ref()
-            .take(split)
-            .filter_map(|(index, agent)| herdr_1_row(&lives, index, agent)),
-    );
-    rows.extend(core_rows);
-    rows.extend(herdr_1.filter_map(|(index, agent)| herdr_1_row(&lives, index, agent)));
+    let mut cores: Vec<CoreAgents<'a>> = cores
+        .into_iter()
+        .filter(|core| !core.agents.is_empty() && order(core.index).is_some())
+        .collect();
+    let mut rows: Vec<(usize, Listed<'a>)> = herdr_1
+        .into_iter()
+        .filter_map(|(index, agent)| herdr_1_row(&lives, index, agent))
+        .collect();
+    if cores.is_empty() {
+        return rows;
+    }
+    // Grouped lists one host after another: a core's agents go after the
+    // last of its host's own, before the next host's. The later hosts go
+    // in first, so an earlier one's place does not move.
+    cores.sort_by_key(|core| std::cmp::Reverse(order(core.index)));
+    for core in &cores {
+        let split = rows
+            .iter()
+            .position(|(index, _)| order(*index) > order(core.index))
+            .unwrap_or(rows.len());
+        let core_rows = core
+            .agents
+            .iter()
+            .map(|agent| (core.index, Listed::Core(*agent)));
+        rows.splice(split..split, core_rows);
+    }
     // A plugin view orders its own host's agents, so then each keeps its
     // order, as Herdr 1's hosts do.
     let viewed = lives.iter().any(|(_, live)| {
@@ -290,6 +289,7 @@ pub(crate) fn listed_agents<'a>(
                 .find(|(host, _)| *host == index)
                 .map(|(_, live)| *live)
         };
+        let core_of = |index: usize| cores.iter().find(|core| core.index == index);
         rows.sort_by_key(|(index, listed)| {
             let (connected, recency) = match listed {
                 Listed::Herdr1 { agent, .. } => live(*index).map_or((false, 0), |live| {
@@ -298,11 +298,13 @@ pub(crate) fn listed_agents<'a>(
                         live.agent_recency.of(&agent.pane_id),
                     )
                 }),
-                Listed::Core(agent) => (
-                    core.answers,
-                    core.recency
-                        .map_or(0, |recency| recency.of(&agent.agent.pane)),
-                ),
+                Listed::Core(agent) => core_of(*index).map_or((false, 0), |core| {
+                    (
+                        core.answers,
+                        core.recency
+                            .map_or(0, |recency| recency.of(&agent.agent.pane)),
+                    )
+                }),
             };
             (
                 !connected,

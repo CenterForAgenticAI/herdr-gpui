@@ -236,3 +236,35 @@ fn a_herdr_2_agent_changes_on_the_shared_clock() {
     assert!(recency.of("t1") > t2);
     assert_eq!(recency.of("t2"), 0);
 }
+
+#[test]
+fn every_hosts_herdr_2_agents_are_listed_with_their_host() {
+    let local = host(&[("p1", AgentStatus::Idle)]);
+    let remote = host(&[("r1", AgentStatus::Idle)]);
+    let here = session(vec![agent("t1", AgentStatus::Working, "1")], &["1"]);
+    // A saved host's core numbers its terminals on its own: IDs repeat.
+    let there = session(vec![agent("t1", AgentStatus::Blocked, "1")], &["1"]);
+    let (near, far) = (StatusRecency::default(), StatusRecency::default());
+    let rows = listed_agents(
+        vec![(0, &local), (1, &remote)],
+        vec![core(0, &here, &near, true), core(1, &there, &far, true)],
+        AgentSort::Grouped,
+    );
+    assert_eq!(
+        ids(&rows),
+        [
+            (0, "p1".into()),
+            (0, "t1".into()),
+            (1, "r1".into()),
+            (1, "t1".into())
+        ]
+    );
+    let rows = listed_agents(
+        vec![(0, &local), (1, &remote)],
+        vec![core(0, &here, &near, true), core(1, &there, &far, true)],
+        AgentSort::Priority,
+    );
+    // The remote host's blocked agent leads.
+    assert_eq!(rows[0].0, 1);
+    assert_eq!(rows[0].1.status(), AgentStatus::Blocked);
+}

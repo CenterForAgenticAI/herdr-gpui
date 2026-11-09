@@ -71,17 +71,20 @@ impl SheprdWindow {
     }
 
     /// The agents the panel paints, by host index, in its order: every
-    /// listed host's Herdr 1 agents and this computer's Herdr 2 agents.
+    /// listed host's Herdr 1 and Herdr 2 agents.
     /// Painting and stepping both read it, so a shortcut lands on the row
     /// below. A picked coordinator group narrows it for both to its Herdr 1
     /// agents, which alone name coordinators.
     pub(crate) fn panel_agents(&self) -> Vec<(usize, Listed<'_>)> {
-        let core = self
-            .core_host()
-            .and_then(|index| self.listed_core_agents(index));
         let lives: Vec<_> = self.listed_lives().collect();
         let (Some(groups), Some(group)) = (self.agent_groups(), self.agent_group_filter()) else {
-            return listed_agents(lives, core, self.agent_sort);
+            // Every listed host's Herdr 2 agents: this computer's, and those
+            // of saved hosts whose workspaces the app keeps.
+            let cores: Vec<_> = lives
+                .iter()
+                .filter_map(|(index, _)| self.listed_core_agents(*index))
+                .collect();
+            return listed_agents(lives, cores, self.agent_sort);
         };
         let rows = panel_agents(lives, self.agent_sort);
         let hosts: Vec<_> = self.listed_hosts().collect();
