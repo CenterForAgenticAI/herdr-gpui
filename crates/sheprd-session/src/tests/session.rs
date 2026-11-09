@@ -10,9 +10,11 @@ fn info(id: &str, agent: AgentStatus) -> TerminalInfo {
     TerminalInfo {
         agent,
         cwd: None,
+        foreground: None,
         id: terminal(id),
         labels: BTreeMap::new(),
         name: Some(format!("{id} name")),
+        reporter: None,
         state: RunState::Running,
         title: None,
     }
