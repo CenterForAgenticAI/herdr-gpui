@@ -194,6 +194,10 @@ impl SheprdWindow {
                     let mut launch =
                         self.kept_script_launch(kind, id.clone(), deletion.path.clone())?;
                     launch.force = deletion.force;
+                    // Read from Git with the script, as Herdr 1 names it.
+                    if let Some(checkout) = &mut launch.checkout {
+                        checkout.root.clone_from(&deletion.root);
+                    }
                     Some((launch, config))
                 });
                 let Some((launch, config)) = archive else {

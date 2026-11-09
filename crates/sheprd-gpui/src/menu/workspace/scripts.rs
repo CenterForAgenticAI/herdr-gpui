@@ -169,15 +169,24 @@ impl SheprdWindow {
             .target
             .clone();
         let (checkout, expected) = (path.clone(), path.clone());
+        // Herdr 1 names the main checkout in the daemon's answer; a kept
+        // checkout's is read from Git here, for the archive's
+        // `HERDR_ROOT_PATH`.
+        let kept = self
+            .menu
+            .target
+            .as_ref()
+            .is_some_and(|target| target.keeper == sheprd_session::Keeper::App);
         let read = cx.background_executor().spawn(async move {
-            crate::worktree_scripts::read_config(
-                &target,
-                &checkout,
-                &std::sync::atomic::AtomicBool::new(false),
-            )
+            let cancelled = std::sync::atomic::AtomicBool::new(false);
+            let root = kept
+                .then(|| crate::worktree_scripts::kept_root(&checkout, &cancelled))
+                .flatten();
+            let config = crate::worktree_scripts::read_config(&target, &checkout, &cancelled);
+            (config, root)
         });
         cx.spawn(async move |this, cx| {
-            let result = read.await;
+            let (result, root) = read.await;
             this.update(cx, |this, cx| {
                 let Some(deletion) = &mut this.menu.deletion else {
                     return;
@@ -185,6 +194,9 @@ impl SheprdWindow {
                 if deletion.path.as_deref() == Some(expected.as_str())
                     && matches!(deletion.archive, ArchiveCheck::Reading)
                 {
+                    if root.is_some() {
+                        deletion.root = root;
+                    }
                     deletion.archive = match result {
                         Ok(config) => ArchiveCheck::Read(config),
                         Err(error) => ArchiveCheck::Failed(error),

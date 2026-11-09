@@ -307,10 +307,9 @@ impl SheprdWindow {
             );
             self.open_kept_workspace_behind(&label, std::path::Path::new(&path), location, cx);
         }
+        // Lanes are this computer's, whichever host is shown now.
         for path in closed {
-            if let Some(id) = self.kept_workspace_at(std::path::Path::new(&path)) {
-                self.close_kept_workspace(&id, window, cx);
-            }
+            self.close_local_kept_folder(std::path::Path::new(&path), window, cx);
         }
     }
 

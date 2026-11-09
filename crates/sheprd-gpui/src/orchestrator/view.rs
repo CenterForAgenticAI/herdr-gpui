@@ -9,6 +9,7 @@
 
 mod browse;
 mod conversation;
+mod core_removal;
 mod detail;
 mod dispatch;
 mod hosts;
@@ -73,6 +74,11 @@ pub(crate) enum Event {
         path: std::path::PathBuf,
         terminal: String,
         label: String,
+    },
+    /// Close the workspace the app keeps at `path` on this machine: a
+    /// removed Herdr 2 run's checkout.
+    CloseCoreRun {
+        path: std::path::PathBuf,
     },
     /// Show a run's Herdr workspace on the host it is on: `None` for this
     /// machine, else an SSH destination.
@@ -246,6 +252,9 @@ pub(crate) struct OrchestratorView {
     hosts: Arc<Vec<crate::dispatch::Candidate>>,
     /// Which Herdr starts a dispatch on this machine.
     local_terminals: super::Terminals,
+    /// Herdr 2 runs being removed here, by ID, with their checkouts, whose
+    /// kept workspaces close once the worker forgot the run.
+    core_removals: Vec<(String, std::path::PathBuf)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -320,6 +329,7 @@ impl OrchestratorView {
             merge_open: false,
             hosts: Arc::default(),
             local_terminals: super::Terminals::default(),
+            core_removals: Vec::new(),
             _subscriptions: vec![subscription],
         }
     }
@@ -396,6 +406,7 @@ impl OrchestratorView {
             self.reconcile_agents();
             self.refresh_rows();
             self.follow_pull_request();
+            self.close_removed_core_runs(cx);
             changed = true;
         }
         if self.pr.poll() {

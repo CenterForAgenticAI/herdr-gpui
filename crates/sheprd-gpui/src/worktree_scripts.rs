@@ -482,6 +482,18 @@ impl SheprdWindow {
         )
     }
 
+    /// The main checkout the script job in hand runs with, if any.
+    #[cfg(test)]
+    pub(crate) fn worktree_script_root(&self) -> Option<&str> {
+        self.worktree_script
+            .as_ref()?
+            .launch
+            .checkout
+            .as_ref()?
+            .root
+            .as_deref()
+    }
+
     /// Ages an open trust question past its arming delay.
     #[cfg(test)]
     pub(crate) fn arm_worktree_script(&mut self) {
@@ -709,7 +721,7 @@ fn script_lines(script: &str) -> Vec<String> {
 
 /// The repository's main checkout, as Git lists it first, for a kept
 /// checkout's `HERDR_ROOT_PATH`. Blocking; `None` when Git cannot say.
-fn kept_root(checkout: &str, cancelled: &AtomicBool) -> Option<String> {
+pub(crate) fn kept_root(checkout: &str, cancelled: &AtomicBool) -> Option<String> {
     let host = sheprd_remote::teleport::Host::new(&sheprd_client::ConnectTarget::Local).ok()?;
     let listed = sheprd_remote::work::list(&host, checkout, cancelled).ok()?;
     listed

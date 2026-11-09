@@ -63,3 +63,5 @@ fn opening_a_herdr_2_run_shows_its_checkout_and_terminal_on_this_machine() {
     let sessions = vec![session];
     assert!(core_run(&Runs::new(&runs, &sessions, &[]), 0).is_none());
 }
+
+mod removal;

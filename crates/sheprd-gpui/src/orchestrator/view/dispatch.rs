@@ -529,6 +529,9 @@ impl OrchestratorView {
                                     this.merge(method, &target, cx)
                                 }
                                 confirm => {
+                                    if let Confirm::Remove { run, .. } = &confirm {
+                                        this.follow_core_removal(run);
+                                    }
                                     if let Some(action) = confirm.action() {
                                         this.act(action);
                                     }

@@ -65,7 +65,12 @@ fn a_fan_out_from_a_kept_checkout_branches_through_its_folder(cx: &mut TestAppCo
     });
 }
 
-fn kept_launch(view: &SheprdWindow, kind: ScriptKind, workspace: &str, path: &str) -> Launch {
+pub(super) fn kept_launch(
+    view: &SheprdWindow,
+    kind: ScriptKind,
+    workspace: &str,
+    path: &str,
+) -> Launch {
     Launch {
         kind,
         endpoint: (view.selection_epoch, view.endpoints[0].generation),
@@ -83,7 +88,7 @@ fn kept_launch(view: &SheprdWindow, kind: ScriptKind, workspace: &str, path: &st
     }
 }
 
-fn write_scripts(dir: &Path, text: &str) {
+pub(super) fn write_scripts(dir: &Path, text: &str) {
     std::fs::create_dir_all(dir.join(".herdr")).unwrap();
     std::fs::write(dir.join(crate::worktree_scripts::CONFIG_PATH), text).unwrap();
 }
@@ -104,7 +109,10 @@ fn a_new_checkouts_setup_waits_for_its_kept_workspace(cx: &mut TestAppContext) {
             let here = kept_launch(view, ScriptKind::Setup, "", &folder);
             view.queue_kept_setup(here);
             view.poll_kept_scripts(cx);
-            assert!(view.queued_kept_setup().is_none());
+            // The ready one started; the one still waiting kept its place.
+            let waiting = view.queued_kept_setups();
+            assert_eq!(waiting.len(), 1);
+            assert_eq!(waiting[0].checkout.as_ref().unwrap().path, NEW);
         })
     });
     cx.run_until_parked();
@@ -147,3 +155,5 @@ fn a_trusted_kept_archive_runs_before_its_checkout_is_removed(cx: &mut TestAppCo
         })
     });
 }
+
+mod followed;

@@ -539,6 +539,10 @@ impl SheprdWindow {
                 terminal,
                 label,
             } => self.open_core_run(id, &label, path, terminal, window, cx),
+            // Removed from this computer, whichever host is shown now.
+            Event::CloseCoreRun { path } => {
+                self.close_local_kept_folder(&path, window, cx);
+            }
             Event::OpenWorkspace {
                 host,
                 session,
