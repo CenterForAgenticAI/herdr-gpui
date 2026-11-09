@@ -109,3 +109,21 @@ fn the_largest_set_of_kept_mutes_fits_in_the_file() {
         crate::notification_mutes::kept::MAX_KEPT
     );
 }
+
+#[test]
+fn a_closed_tabs_mute_is_forgotten_at_launch() {
+    let mut mutes = Mutes::default();
+    let now = SystemTime::now();
+    mutes.set_kept(SCOPE, Scope::Tab, "3", true, now, all);
+    mutes.set_kept(SCOPE, Scope::Tab, "4", true, now, all);
+    mutes.set_kept(SCOPE, Scope::Workspace, "space-1", true, now, all);
+    // Tab 4 closed before the app quit; its ID may come back on a new tab.
+    assert!(mutes.forget_closed_tabs(|_, id| id == "3"));
+    assert!(mutes.kept(SCOPE, Scope::Tab, "3"));
+    assert!(!mutes.kept(SCOPE, Scope::Tab, "4"));
+    assert!(
+        mutes.kept(SCOPE, Scope::Workspace, "space-1"),
+        "workspace IDs are never handed out twice"
+    );
+    assert!(!mutes.forget_closed_tabs(|_, _| true));
+}

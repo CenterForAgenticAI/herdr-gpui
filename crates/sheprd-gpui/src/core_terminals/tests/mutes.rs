@@ -179,3 +179,38 @@ fn a_tab_without_an_agent_keeps_its_terminal_icon(cx: &mut TestAppContext) {
         })
     });
 }
+
+#[gpui::test]
+fn the_stand_in_shell_follows_its_workspaces_mute(cx: &mut TestAppContext) {
+    let (view, cx, _) = window_with_split(cx, &["t1"]);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            assert!(!view.core_fallback_silenced(cx));
+            let scope = crate::browser::scope(&view.endpoints[view.selected_endpoint]);
+            Store::update(cx, |store| {
+                store.keep_default(&scope, crate::core_terminals::WORKSPACE, "Herdr 2")
+            });
+            assert!(crate::core_terminals::mutes::set_kept(
+                cx,
+                scope.as_str(),
+                Scope::Workspace,
+                crate::core_terminals::WORKSPACE,
+                true,
+            ));
+            assert!(view.core_fallback_silenced(cx));
+            Mutes::update(cx, |mutes| {
+                mutes.set_kept(
+                    scope.as_str(),
+                    Scope::Workspace,
+                    crate::core_terminals::WORKSPACE,
+                    false,
+                    std::time::SystemTime::now(),
+                    |_, _, _| true,
+                )
+            });
+            assert!(!view.core_fallback_silenced(cx));
+            Mutes::update(cx, |mutes| mutes.set_host(Host::Local.endpoint(), true));
+            assert!(view.core_fallback_silenced(cx));
+        })
+    });
+}

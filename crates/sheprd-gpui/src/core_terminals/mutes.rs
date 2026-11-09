@@ -43,7 +43,7 @@ impl SheprdWindow {
 
     /// Whether `terminal` on `host`'s core is silent: the device is muted,
     /// or a tab that drives it is. The shell shown in place of Herdr 1's
-    /// follows its device alone.
+    /// follows the workspace it stands in.
     pub(crate) fn core_terminal_silenced(
         &self,
         host: &Host,
@@ -54,6 +54,14 @@ impl SheprdWindow {
             return false;
         };
         if mutes.host(host.endpoint()) {
+            return true;
+        }
+        if *host == Host::Local
+            && self
+                .core_fallback_view()
+                .is_some_and(|view| view.read(cx).terminal() == terminal)
+            && self.core_fallback_silenced(cx)
+        {
             return true;
         }
         let Some(store) = cx.try_global::<Store>() else {
@@ -70,6 +78,22 @@ impl SheprdWindow {
                 )
             })
             .any(|tab| self.core_tab_silenced(tab.id, cx))
+    }
+
+    /// Whether the shell shown in place of Herdr 1's is silent: this
+    /// computer is muted, or the workspace it stands in, which the app
+    /// keeps, is.
+    pub(crate) fn core_fallback_silenced(&self, cx: &App) -> bool {
+        let Some(mutes) = Mutes::any(cx) else {
+            return false;
+        };
+        if mutes.host(Host::Local.endpoint()) {
+            return true;
+        }
+        self.core_host().is_some_and(|index| {
+            let scope = crate::browser::scope(&self.endpoints[index]);
+            mutes.kept(scope.as_str(), Scope::Workspace, super::WORKSPACE)
+        })
     }
 
     /// Whether the workspace `tab` sits in is muted itself.

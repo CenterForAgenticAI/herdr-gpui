@@ -737,7 +737,7 @@ impl SheprdWindow {
         self.refresh_core_looks(cx);
         // The stand-in shell rings only while its workspace is shown, as a
         // tab does; its clipboard writes land either way.
-        let fallback_shown = self.default_workspace_shown();
+        let fallback_shown = self.default_workspace_shown() && !self.core_fallback_silenced(cx);
         self.poll_core_views(
             self.core_fallback_view()
                 .map(|view| (view, fallback_shown.then_some(Host::Local))),
