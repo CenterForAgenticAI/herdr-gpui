@@ -16,6 +16,9 @@ use std::{
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// The pinned herdr-core is a few megabytes; a download stalled longer than
+/// this gives up on the core alone.
+const CORE_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const OUTPUT_LIMIT: usize = 8 * 1024;
 const TAIL_LINES: usize = 6;
 /// The installer script's exit code when the workspace has no `curl`.
@@ -261,6 +264,53 @@ pub fn install(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
             Failure::Output(finished.output)
         })),
     }
+}
+
+/// Add the pinned herdr-core beside Herdr, for a setup that approved
+/// installing, whether Herdr was installed now or was already there. A
+/// machine with a core is left alone. Its own deadline bounds it, and any
+/// failure, a timeout included, only leaves the machine without Herdr 2
+/// terminals: its new tabs stay Herdr tabs. Only cancellation is an error,
+/// so `ssh` comes as it was prepared: a command that could not be made, such
+/// as a gateway token that did not come, is a failure of this step too.
+pub fn add_core<E: std::fmt::Display>(
+    ssh: std::result::Result<Command, E>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<()> {
+    let mut ssh = match ssh {
+        Ok(ssh) => ssh,
+        Err(error) => return core_unprepared(error, cancelled),
+    };
+    let script = match crate::core_install::script(crate::core_install::Dir::UserBin) {
+        Ok(script) => script,
+        Err(error) => {
+            tracing::warn!(%error, "No herdr-core to install beside Herdr");
+            return Ok(());
+        }
+    };
+    ssh.arg(remote(&script));
+    match run(ssh, CORE_TIMEOUT, cancelled) {
+        Err(Error::Cancelled) => Err(Error::Cancelled),
+        Ok(Finished { code: Some(0), .. }) => Ok(()),
+        Ok(Finished { code, .. }) => {
+            tracing::warn!(?code, "herdr-core was not installed beside Herdr");
+            Ok(())
+        }
+        Err(error) => {
+            tracing::warn!(%error, "herdr-core was not installed beside Herdr");
+            Ok(())
+        }
+    }
+}
+
+/// The core step's command could not be made: setup goes on without the
+/// core, unless the user cancelled it.
+pub fn core_unprepared(error: impl std::fmt::Display, cancelled: &impl Fn() -> bool) -> Result<()> {
+    if cancelled() {
+        return Err(Error::Cancelled);
+    }
+    tracing::warn!(%error, "herdr-core was not installed beside Herdr");
+    Ok(())
 }
 
 #[cfg(all(test, unix))]

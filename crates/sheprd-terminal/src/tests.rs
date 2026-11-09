@@ -5,6 +5,7 @@ mod damage;
 mod events;
 mod fragmentation;
 mod graphics;
+mod line_rows;
 mod links;
 mod scroll;
 mod size;
