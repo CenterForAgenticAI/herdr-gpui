@@ -64,6 +64,10 @@ pub enum Error {
     Request(#[from] sheprd_client::Error),
     #[error("Herdr's answer did not have the expected shape")]
     Response,
+    #[error(
+        "new work here starts in Herdr 2, which has no Herdr 1 sessions; start it from a Herdr 2 workspace"
+    )]
+    SessionOnHerdr2,
     #[error("Herdr did not answer in time")]
     Timeout,
     #[error("no such chat")]
@@ -360,6 +364,11 @@ impl Hub {
         let program = self.program().ok_or(Error::ProgramMissing)?;
         let program = program.as_path();
         if let Some(core) = self.core_for_work().await? {
+            // Herdr 2 keeps no Herdr 1 session: asked for a named one, the
+            // workspace could not be where it was asked for.
+            if session.is_some_and(|name| self.sessions.get(name).is_some()) {
+                return Err(Error::SessionOnHerdr2);
+            }
             let (cwd, program) = (cwd.to_owned(), program.to_owned());
             let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
             let (pane, folder) = on_core(move || match branch {

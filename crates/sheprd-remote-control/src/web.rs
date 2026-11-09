@@ -472,7 +472,8 @@ impl IntoResponse for ApiError {
                 crate::hub::ConvertError::AlreadyConverting
                 | crate::hub::ConvertError::Platform
                 | crate::hub::ConvertError::Refused(_),
-            )) => StatusCode::CONFLICT,
+            ))
+            | Self::Hub(crate::hub::Error::SessionOnHerdr2) => StatusCode::CONFLICT,
             Self::Hub(_) | Self::NoPush => StatusCode::SERVICE_UNAVAILABLE,
         };
         // The request line only has the status. A computer without push
