@@ -44,8 +44,12 @@ impl CoreTerminal {
         role: Role,
         scrollback: usize,
     ) -> Result<Self> {
+        // The core keeps each terminal's recent history and paints what it
+        // has of it first, so a view attached anew (the app restarted, the
+        // core reconnected) starts with the output it missed.
         let attachment = core.attach(&Attach {
             cols: size.cols(),
+            history: u32::try_from(scrollback).unwrap_or(u32::MAX),
             observe: role == Role::Observer,
             rows: size.rows(),
             terminal: id.as_str(),

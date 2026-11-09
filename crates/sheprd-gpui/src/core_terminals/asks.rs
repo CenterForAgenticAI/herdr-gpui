@@ -4,7 +4,12 @@
 //! Herdr pane's editor opens in a Herdr split.
 
 use super::{Purpose, view::ToWindow, view::WindowCall};
-use crate::{SheprdWindow, editor::EditorTarget, i18n::Localize as _, window::Flash};
+use crate::{
+    SheprdWindow,
+    editor::EditorTarget,
+    i18n::{Localize as _, fl},
+    window::Flash,
+};
 use gpui::{prelude::*, *};
 use sheprd_backend::{Spawn, TerminalId};
 use std::rc::Rc;
@@ -21,6 +26,10 @@ impl SheprdWindow {
     fn core_view_asks(&mut self, ask: ToWindow, window: &mut Window, cx: &mut Context<Self>) {
         match ask {
             ToWindow::OpenLink(click) => self.open_core_link(click, window, cx),
+            ToWindow::Copied if self.config.clipboard_toast.enabled => {
+                self.show_flash(Flash::success(fl!("window-find-copied")), cx);
+            }
+            ToWindow::Copied => {}
             ToWindow::Refused(error) => self.show_flash(Flash::warning(error.localize()), cx),
         }
     }

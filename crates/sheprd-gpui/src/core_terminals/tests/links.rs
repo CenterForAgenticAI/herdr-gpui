@@ -24,7 +24,7 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc};
 const URL: &str = "https://example.com/a";
 
 /// A frame showing `rows`, each padded with blanks to `width`.
-fn frame(width: u16, rows: &[&str]) -> FrameData {
+pub(super) fn frame(width: u16, rows: &[&str]) -> FrameData {
     let cells = rows
         .iter()
         .flat_map(|row| {
@@ -72,10 +72,10 @@ fn a_whole_frame_reads_addresses_and_paths() {
     assert_eq!(frame_link_at(&shown, 0, 5, &[]), None);
 }
 
-type Asked = Rc<RefCell<Vec<ToWindow>>>;
+pub(super) type Asked = Rc<RefCell<Vec<ToWindow>>>;
 
 /// A view showing `rows`, drawn, and what it asks of its window.
-fn shown<'a>(
+pub(super) fn shown<'a>(
     cx: &'a mut TestAppContext,
     rows: &[&str],
     observe: bool,
@@ -117,7 +117,7 @@ fn shown<'a>(
 }
 
 /// The middle of the cell at `column`, `row`.
-fn at(
+pub(super) fn at(
     view: &Entity<CoreTerminalView>,
     cx: &mut VisualTestContext,
     column: u16,
@@ -132,7 +132,7 @@ fn at(
         )
 }
 
-fn link_modifier() -> Modifiers {
+pub(super) fn link_modifier() -> Modifiers {
     crate::keymap::secondary_key()
 }
 
@@ -142,7 +142,7 @@ fn opened(asked: &Asked) -> Vec<LinkClick> {
         .iter()
         .filter_map(|ask| match ask {
             ToWindow::OpenLink(click) => Some(click.clone()),
-            ToWindow::Refused(_) => None,
+            ToWindow::Copied | ToWindow::Refused(_) => None,
         })
         .collect()
 }

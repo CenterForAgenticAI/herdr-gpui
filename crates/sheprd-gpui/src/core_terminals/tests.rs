@@ -16,6 +16,7 @@ mod requests;
 mod saved_tabs;
 mod screen;
 mod selection;
+mod settings;
 mod shown_checkout;
 mod split_shown;
 mod wanted;
