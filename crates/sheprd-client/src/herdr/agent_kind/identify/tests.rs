@@ -143,6 +143,27 @@ fn bun_and_deno_run_is_looked_past_to_the_script() {
 }
 
 #[test]
+fn nodejs_is_node_by_another_name() {
+    assert_eq!(
+        AgentKind::identify(
+            None,
+            "nodejs",
+            &argv(&["nodejs", "/opt/node_modules/@openai/codex/bin/codex.js"])
+        ),
+        Some(AgentKind::Codex)
+    );
+    assert_eq!(
+        AgentKind::identify(
+            None,
+            "nodejs",
+            &argv(&["/usr/bin/nodejs", "run", "/a/codex.js"])
+        ),
+        None,
+        "to Node, `run` is the script"
+    );
+}
+
+#[test]
 fn shells_and_other_programs_are_not_agents() {
     for program in ["zsh", "-bash", "vim", "python3", "cargo", "node"] {
         assert_eq!(
