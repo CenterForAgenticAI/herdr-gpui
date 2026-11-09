@@ -627,6 +627,7 @@ impl SheprdWindow {
         };
         if target.keeper == sheprd_session::Keeper::App {
             return kept::items(
+                target.muted,
                 self.note_checkout().is_some(),
                 self.checkpoint_checkout().is_some(),
             );

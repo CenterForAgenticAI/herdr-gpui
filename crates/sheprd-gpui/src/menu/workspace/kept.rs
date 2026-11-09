@@ -1,6 +1,6 @@
 //! The menu of a workspace the app keeps for Herdr 2. The app carries out
 //! what it asks, with no daemon to answer, so it offers what the app can do
-//! itself: renaming and closing the workspace.
+//! itself: muting, renaming, and closing the workspace.
 
 use super::{Label, Page, Source, WorkspaceAction, WorkspaceMenuAction, WorkspaceTarget};
 use crate::SheprdWindow;
@@ -10,8 +10,17 @@ use sheprd_session::Keeper;
 
 /// The rows a kept workspace's menu shows: a note and its checkpoints too
 /// once Git says which checkout and branch its folder is.
-pub(super) fn items(checkout: bool, checkpoints: bool) -> Vec<(WorkspaceMenuAction, Label)> {
+pub(super) fn items(
+    muted: bool,
+    checkout: bool,
+    checkpoints: bool,
+) -> Vec<(WorkspaceMenuAction, Label)> {
     let mut items = vec![
+        if muted {
+            (WorkspaceMenuAction::Unmute, Label::UNMUTE)
+        } else {
+            (WorkspaceMenuAction::Mute, Label::MUTE)
+        },
         (
             WorkspaceMenuAction::Dialog(WorkspaceAction::Rename),
             Label::RENAME,
@@ -75,7 +84,11 @@ impl SheprdWindow {
             self.selection_epoch,
             self.endpoints[self.selected_endpoint].generation,
         );
-        self.menu.target = Some(WorkspaceTarget::kept(workspace));
+        let muted = self.muted_on_selected(crate::notification_mutes::Scope::Workspace, id, cx);
+        self.menu.target = Some(WorkspaceTarget {
+            muted,
+            ..WorkspaceTarget::kept(workspace)
+        });
         self.menu.anchor = anchor;
         self.menu.page = Some(Page::Workspace);
         self.discard_composition(cx);

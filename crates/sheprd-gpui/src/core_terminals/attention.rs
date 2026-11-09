@@ -2,8 +2,9 @@
 //! each program's status, so the app hears the changes itself: an agent that
 //! becomes blocked plays the request sound, one whose turn ends plays the done
 //! sound, and either counts on the Dock or taskbar badge. Herdr 1 decides this
-//! in its daemon; the sound settings, their delay, and the rule that a finished
-//! turn in the tab in front stays quiet are the same.
+//! in its daemon; the sound settings, their delay, the rule that a finished
+//! turn in the tab in front stays quiet, and notification mutes
+//! (`mutes.rs`) are the same.
 
 use crate::SheprdWindow;
 use gpui::{prelude::*, *};
@@ -243,6 +244,7 @@ impl SheprdWindow {
                 .agent_terminals(cx)
                 .filter(|_| connected)
                 .filter(|info| matches!(info.agent, AgentStatus::Blocked | AgentStatus::Done))
+                .filter(|info| !self.core_terminal_silenced(&super::Host::Local, &info.id, cx))
                 .map(|info| info.id.clone())
                 .collect();
             crate::app_badge::sync_core(id, attention, cx);
@@ -281,7 +283,12 @@ impl SheprdWindow {
         }
         // Until the settings load, the default delay of a second.
         let delay = Duration::from_secs(self.sound.delay().unwrap_or(1));
-        for (terminal, news, kind) in heard.take_due(Instant::now(), delay) {
+        let due = heard.take_due(Instant::now(), delay);
+        for (terminal, news, kind) in due {
+            // A muted tab's agent plays nothing, as a muted Herdr 1 tab's.
+            if self.core_terminal_silenced(&super::Host::Local, &terminal, cx) {
+                continue;
+            }
             self.sound.play_agent(
                 news.sound(),
                 kind.map(|kind| kind.name()),

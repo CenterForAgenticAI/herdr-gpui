@@ -279,8 +279,8 @@ impl SheprdWindow {
         let polled = views
             .iter()
             .map(|((tab, _), view)| {
-                let host = in_sight
-                    .contains(tab)
+                // A muted tab keeps its screen current but rings nothing.
+                let host = (in_sight.contains(tab) && !self.core_tab_silenced(*tab, cx))
                     .then(|| self.core_terminals.host_of(*tab));
                 (view.clone(), host)
             })
