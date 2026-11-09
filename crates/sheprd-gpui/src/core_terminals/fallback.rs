@@ -31,6 +31,32 @@ impl super::CoreTerminals {
             .flatten()
             .map(|info| &info.id)
     }
+
+    /// What in this window holds herdr-core `terminal`, for control
+    /// requests from it: a tab whose panes hold it, or the shell shown in
+    /// place of Herdr 1.
+    pub(crate) fn holder(&self, terminal: &TerminalId) -> Option<Holder> {
+        Holder::of(self.tab_of(terminal), self.fallback_terminal(), terminal)
+    }
+}
+
+/// What holds the herdr-core terminal a control request comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Holder {
+    /// The shell shown in place of Herdr 1, in its stand-in workspace.
+    Fallback,
+    Tab(crate::browser::TabId),
+}
+
+impl Holder {
+    pub(super) fn of(
+        tab: Option<crate::browser::TabId>,
+        fallback: Option<&TerminalId>,
+        terminal: &TerminalId,
+    ) -> Option<Self> {
+        tab.map(Self::Tab)
+            .or_else(|| (fallback == Some(terminal)).then_some(Self::Fallback))
+    }
 }
 
 impl SheprdWindow {

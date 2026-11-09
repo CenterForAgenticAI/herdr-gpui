@@ -34,6 +34,7 @@ mod worker;
 mod tests;
 
 pub(crate) use error::Error;
+pub(crate) use fallback::Holder;
 pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;

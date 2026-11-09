@@ -8,6 +8,7 @@ use crate::{
         groups::{GroupId, Pick, Shown},
     },
     control::{Opening, Placed, Placement, Target},
+    core_terminals::Holder,
 };
 use gpui::*;
 
@@ -64,10 +65,19 @@ impl SheprdWindow {
     }
 
     /// The endpoint and workspace of the tab whose panes hold herdr-core
-    /// `terminal`, among the tabs this window has shown.
+    /// `terminal`, among the tabs this window has shown, or of the shell
+    /// shown in place of Herdr 1.
     fn core_control_target(&self, terminal: &str) -> Option<(usize, String)> {
         let terminal = sheprd_backend::TerminalId::new(terminal).ok()?;
-        let tab = self.core_terminals.tab_of(&terminal)?;
+        let tab = match self.core_terminals.holder(&terminal)? {
+            Holder::Fallback => {
+                return Some((
+                    self.selected_endpoint,
+                    crate::core_terminals::WORKSPACE.into(),
+                ));
+            }
+            Holder::Tab(tab) => tab,
+        };
         let (scope, workspace) = self.core_terminals.tab_workspace(tab)?;
         let index = self
             .endpoints
@@ -76,11 +86,12 @@ impl SheprdWindow {
         Some((index, workspace.to_owned()))
     }
 
-    /// Whether one of this window's herdr-core tabs holds `terminal`.
+    /// Whether one of this window's herdr-core tabs, or the shell shown in
+    /// place of Herdr 1, holds `terminal`.
     pub(crate) fn holds_core_terminal(&self, terminal: &str) -> bool {
         sheprd_backend::TerminalId::new(terminal)
             .ok()
-            .and_then(|terminal| self.core_terminals.tab_of(&terminal))
+            .and_then(|terminal| self.core_terminals.holder(&terminal))
             .is_some()
     }
 
@@ -153,7 +164,12 @@ impl SheprdWindow {
         {
             // The group showing the herdr-core tab that holds the caller.
             let terminal = sheprd_backend::TerminalId::new(terminal).ok()?;
-            let tab = self.core_terminals.tab_of(&terminal)?;
+            let tab = match self.core_terminals.holder(&terminal)? {
+                // The shell stands in for Herdr's terminal, which the
+                // primary group shows.
+                Holder::Fallback => return self.primary_group(),
+                Holder::Tab(tab) => tab,
+            };
             return self
                 .group_slots()
                 .into_iter()
