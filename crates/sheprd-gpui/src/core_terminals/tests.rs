@@ -9,6 +9,7 @@ mod effects;
 mod fallback_bells;
 mod focus;
 mod folders;
+mod history;
 mod images;
 mod kept_checkouts;
 mod kept_ports;

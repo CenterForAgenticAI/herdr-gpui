@@ -3,6 +3,8 @@
 //! any number may show the same terminal, as observers.
 
 mod accessibility;
+mod find;
+mod history;
 pub(super) mod keys;
 mod links;
 pub(super) mod paste;
@@ -17,7 +19,7 @@ use super::{
     worker::{Command, Link},
 };
 use crate::{
-    config::{OptionAsAlt, Padding},
+    config::{FontConfig, OptionAsAlt, Padding, Theme},
     herdr_settings::RightClickPassthrough,
     i18n::fl,
     terminal::{HeldKeys, key_input, viewport},
@@ -35,6 +37,8 @@ pub(crate) struct Look {
     pub(crate) background: Hsla,
     pub(crate) cell_height: f32,
     pub(crate) cell_width: f32,
+    /// The window's own look, for what the view draws over its cells.
+    pub(crate) chrome: Rc<Chrome>,
     /// Herdr's `ui.copy_on_select`: releasing a selection copies it.
     pub(crate) copy_on_select: bool,
     pub(crate) font: Font,
@@ -48,6 +52,13 @@ pub(crate) struct Look {
     pub(crate) right_click_passthrough: RightClickPassthrough,
     /// Herdr's `ui.mouse_scroll_lines`: lines one wheel notch scrolls.
     pub(crate) scroll_lines: std::num::NonZeroU16,
+}
+
+/// The window's colors and interface font, for the find bar a view draws.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Chrome {
+    pub(crate) theme: Theme,
+    pub(crate) ui: FontConfig,
 }
 
 /// How much of the background covers a stale frame, as Herdr 1's
@@ -92,6 +103,13 @@ pub(crate) struct CoreTerminalView {
     cwd: Option<String>,
     /// Bells and clipboard writes the window has not taken yet.
     effects: Effects,
+    /// The history text asked for an editor, once it arrived.
+    edit_ready: Option<Result<String, super::Error>>,
+    /// The history request whose text goes to an editor.
+    editing: Option<u64>,
+    find: Option<find::Find>,
+    /// The query the find bar last held, for the next one.
+    find_query: String,
     focus: FocusHandle,
     /// Releases for keys pressed while the program asked for them.
     held_keys: HeldKeys,
@@ -105,6 +123,8 @@ pub(crate) struct CoreTerminalView {
     look: Look,
     /// Text an IME is composing; committed text goes to the terminal.
     marked: String,
+    /// The last history request's ID.
+    next_request: u64,
     /// A mirror's view: it watches and never types.
     observe: bool,
     painter: Rc<RefCell<TerminalPainter>>,
@@ -151,6 +171,10 @@ impl CoreTerminalView {
             dropped: std::cell::Cell::new(false),
             cwd: None,
             effects: Effects::default(),
+            edit_ready: None,
+            editing: None,
+            find: None,
+            find_query: String::new(),
             focus: cx.focus_handle(),
             held_keys: HeldKeys::default(),
             hovered: None,
@@ -159,6 +183,7 @@ impl CoreTerminalView {
             links: links::Links::default(),
             look,
             marked: String::new(),
+            next_request: 0,
             observe,
             painter,
             pane: None,
@@ -287,27 +312,34 @@ impl CoreTerminalView {
         self.link.mailbox.changed()
     }
 
-    /// Takes what the worker produced; true when there was something.
+    /// Takes what the worker produced; true when there was a new screen.
+    /// The screen is taken before the answers, so an answer arriving
+    /// between the two wakes the next poll.
     pub(crate) fn poll(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(mut screen) = self.link.mailbox.take() else {
-            return false;
-        };
-        // Attached again, the last frame stays until a new one comes.
-        if screen.frame.is_none() {
-            screen.frame = self.screen.frame.take();
+        let screen = self.link.mailbox.take();
+        let changed = screen.is_some();
+        if let Some(mut screen) = screen {
+            // Attached again, the last frame stays until a new one comes.
+            if screen.frame.is_none() {
+                screen.frame = self.screen.frame.take();
+            }
+            // A mirror only watches; the tab driving the terminal rings and
+            // copies.
+            if !self.observe {
+                self.effects.merge(Effects {
+                    bells: screen.bells,
+                    clipboard: screen.clipboard.take(),
+                });
+            }
+            self.screen = screen;
+            self.rehover_link(cx);
+            cx.notify();
         }
-        // A mirror only watches; the tab driving the terminal rings and
-        // copies.
-        if !self.observe {
-            self.effects.merge(Effects {
-                bells: screen.bells,
-                clipboard: screen.clipboard.take(),
-            });
+        self.take_answers(cx);
+        if self.find.is_some() {
+            self.poll_find();
         }
-        self.screen = screen;
-        self.rehover_link(cx);
-        cx.notify();
-        true
+        changed
     }
 
     /// Bells and the clipboard write found since the last take.
@@ -317,6 +349,7 @@ impl CoreTerminalView {
 
     pub(crate) fn set_look(&mut self, look: Look, cx: &mut Context<Self>) {
         self.look = look;
+        self.restyle_find(cx);
         cx.notify();
     }
 
@@ -357,6 +390,10 @@ impl CoreTerminalView {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Typing in the find bar is the field's, not the terminal's.
+        if self.find_focused(window, cx) {
+            return;
+        }
         let modifiers = event.keystroke.modifiers;
         // Cmd-C copies a selection, as the window's copy does a Herdr pane's.
         // Ctrl-C does too only while `copy_on_select` is off, as in Herdr,
@@ -473,7 +510,9 @@ impl Render for CoreTerminalView {
         let frame = self.frame_to_paint();
         let graphics = self.screen.graphics.clone();
         let images = self.screen.images.0.clone();
-        let highlights = self.highlights();
+        let mut highlights = self.find_highlights();
+        highlights.extend(self.highlights());
+        let find_bar = self.render_find(cx);
         let link_rows = self.link_rows();
         let on_link = !link_rows.is_empty();
         let pane = self.pane;
@@ -542,6 +581,7 @@ impl Render for CoreTerminalView {
                         .bg(background.opacity(f32::from(veil) / 255.)),
                 )
             })
+            .when_some(find_bar, |body, bar| body.child(bar))
             .when_some(status, |body, status| {
                 body.child(
                     div()
@@ -587,15 +627,14 @@ impl Render for CoreTerminalView {
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
             .on_action(cx.listener(|this, _: &crate::actions::Copy, window, cx| {
-                if this.copy_selection(cx) {
+                if !this.find_focused(window, cx) && this.copy_selection(cx) {
                     this.finish_copy(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &crate::actions::Paste, window, cx| {
-                this.paste_clipboard(window, cx);
-            }))
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                this.drop_files(paths, window, cx);
+                if !this.find_focused(window, cx) {
+                    this.paste_clipboard(window, cx);
+                }
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::mouse_down))

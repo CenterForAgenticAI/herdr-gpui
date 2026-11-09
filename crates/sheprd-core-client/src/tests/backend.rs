@@ -433,3 +433,5 @@ fn the_view_is_told_which_rows_the_terminal_wrapped() {
             .any(|update| matches!(update, SurfaceUpdate::Wraps(_)))
     );
 }
+
+mod history;

@@ -1,5 +1,6 @@
 use crate::{
-    AgentStatus, CursorState, Error, FrameData, PaneSurfacePatchRow, Result, SurfaceGraphicsScene,
+    AgentStatus, CursorState, Error, FrameData, PaneSurfacePatchRow, Result, ScrollMetrics,
+    SurfaceGraphicsScene,
 };
 use std::{collections::BTreeMap, fmt, path::PathBuf};
 
@@ -184,6 +185,12 @@ pub enum SurfaceUpdate {
     Rows {
         cursor: Option<CursorState>,
         rows: Vec<PaneSurfacePatchRow>,
+    },
+    /// Where the view is in its history, and its content revision: a count
+    /// of changes to its text, which history coordinates hold for.
+    Scroll {
+        metrics: ScrollMetrics,
+        revision: u64,
     },
     Title(String),
     /// Whether each visible row's line goes on to the next row because the

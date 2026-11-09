@@ -5,9 +5,11 @@
 
 use super::screen::Screen;
 use sheprd_backend::{
-    Backend, ClientPaneInputEvent, Role, Size, SurfaceUpdate, Terminal, TerminalId,
+    Backend, ClientPaneInputEvent, History, HistoryAnswer, Role, Size, SurfaceUpdate, Terminal,
+    TerminalId,
 };
 use std::{
+    collections::VecDeque,
     sync::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -20,6 +22,16 @@ const POLL: Duration = Duration::from_millis(8);
 /// Commands queued for one terminal; typing faster than this drops keys
 /// with a warning rather than growing without bound.
 const MAX_COMMANDS: usize = 256;
+/// How long an ended terminal's worker waits for a request before checking
+/// whether its view is gone.
+const ENDED_WAIT: Duration = Duration::from_millis(250);
+/// History answers the view has not taken. A view keeps a request or two
+/// outstanding, so more than this means it stopped reading; the oldest go.
+const MAX_ANSWERS: usize = 8;
+
+/// A history request's answer, or why the terminal could not give one. The
+/// backend's error type is erased here, where answers cross to the UI.
+pub(crate) type Answer = Result<HistoryAnswer, Arc<dyn std::error::Error + Send + Sync>>;
 
 /// What the view asks of its terminal.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +39,12 @@ pub(crate) enum Command {
     /// The view's cell size in whole pixels.
     CellPixels(u16, u16),
     Focus(bool),
+    /// A question about, or change to, the view's history, answered under
+    /// `id` in the mailbox.
+    History {
+        id: u64,
+        request: History,
+    },
     Input(ClientPaneInputEvent),
     Resize(Size),
 }
@@ -34,6 +52,7 @@ pub(crate) enum Command {
 /// The latest screen, and whether the window has seen it.
 #[derive(Default)]
 pub(crate) struct Mailbox {
+    answers: Mutex<VecDeque<(u64, Answer)>>,
     changed: AtomicBool,
     screen: Mutex<Screen>,
     stop: AtomicBool,
@@ -43,6 +62,25 @@ impl Mailbox {
     fn update(&self, change: impl FnOnce(&mut Screen)) {
         change(&mut self.screen.lock().unwrap_or_else(PoisonError::into_inner));
         self.changed.store(true, Ordering::Release);
+    }
+
+    fn answer(&self, id: u64, answer: Answer) {
+        let mut answers = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
+        if answers.len() == MAX_ANSWERS {
+            answers.pop_front();
+        }
+        answers.push_back((id, answer));
+        drop(answers);
+        self.changed.store(true, Ordering::Release);
+    }
+
+    /// The history answers that arrived since the last take, oldest first.
+    pub(crate) fn take_answers(&self) -> Vec<(u64, Answer)> {
+        self.answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect()
     }
 
     pub(crate) fn changed(&self) -> bool {
@@ -120,6 +158,10 @@ fn run<B: Backend>(
             let applied = match command {
                 Command::CellPixels(width, height) => terminal.cell_pixels(width, height),
                 Command::Focus(focused) => terminal.focus(focused),
+                Command::History { id, request } => {
+                    answer(&mut terminal, id, &request, mailbox);
+                    Ok(())
+                }
                 Command::Input(input) => terminal.input(&input),
                 Command::Resize(size) => terminal.resize(size),
             };
@@ -150,10 +192,55 @@ fn run<B: Backend>(
                 // An ended terminal's last screen stays shown; its stream
                 // answers at once from here on, so waiting again would spin.
                 if ended {
-                    return;
+                    return after_end(&mut terminal, queue, mailbox);
                 }
             }
             Err(error) => return fail(&error),
+        }
+    }
+}
+
+/// Answers `request` into the mailbox. A failed answer is the view's to
+/// show; the terminal goes on.
+fn answer<T: Terminal>(terminal: &mut T, id: u64, request: &History, mailbox: &Mailbox) {
+    let answer = terminal
+        .history(request)
+        .map_err(|error| Arc::new(error) as Arc<_>);
+    mailbox.answer(id, answer);
+}
+
+/// After its program ended, a terminal's history still answers: the worker
+/// waits for the view's history requests and wheel turns, and shows what
+/// they change, until the view goes. Nothing reaches the ended program.
+fn after_end<T: Terminal>(
+    terminal: &mut T,
+    queue: &std::sync::mpsc::Receiver<Command>,
+    mailbox: &Mailbox,
+) {
+    use std::sync::mpsc::RecvTimeoutError;
+    while !mailbox.stop.load(Ordering::Acquire) {
+        let command = match queue.recv_timeout(ENDED_WAIT) {
+            Ok(command) => command,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => return,
+        };
+        match command {
+            Command::History { id, request } => answer(terminal, id, &request, mailbox),
+            // A wheel turn scrolls the history; anything the program would
+            // have read has nowhere to go.
+            Command::Input(input) => {
+                if let Err(error) = terminal.input(&input) {
+                    tracing::debug!(%error, "Input to an ended herdr-core terminal dropped");
+                }
+            }
+            Command::CellPixels(..) | Command::Focus(_) | Command::Resize(_) => continue,
+        }
+        match terminal.next(Duration::ZERO) {
+            Ok(updates) if updates.is_empty() => {}
+            Ok(updates) => {
+                mailbox.update(|screen| updates.into_iter().for_each(|update| screen.apply(update)))
+            }
+            Err(error) => tracing::debug!(%error, "An ended herdr-core terminal did not redraw"),
         }
     }
 }

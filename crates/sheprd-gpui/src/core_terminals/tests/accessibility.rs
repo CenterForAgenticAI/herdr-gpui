@@ -21,6 +21,10 @@ pub(super) fn look() -> Look {
         background: hsla(0., 0., 0., 1.),
         cell_height: 17.,
         cell_width: 8.5,
+        chrome: Rc::new(crate::core_terminals::view::Chrome {
+            theme: Default::default(),
+            ui: crate::config::Config::default().ui,
+        }),
         copy_on_select: true,
         font: gpui::font("Menlo"),
         ground: Default::default(),

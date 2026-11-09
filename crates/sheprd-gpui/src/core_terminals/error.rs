@@ -1,10 +1,16 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
+    #[error("Could not answer from the terminal's history")]
+    Answer,
     #[error(transparent)]
     Bridge(#[from] sheprd_client::Error),
     #[error(transparent)]
     Core(#[from] sheprd_core_client::Error),
+    #[error("Could not save the terminal's history for the editor")]
+    EditFile(#[source] std::io::Error),
+    #[error("Could not read the terminal's history")]
+    History(#[source] std::sync::Arc<dyn std::error::Error + Send + Sync>),
     #[error("This build has no herdr-core beside it; install herdr-core from releases.herdr.dev")]
     NotBundled,
     /// A remote core was asked of a target on this computer.

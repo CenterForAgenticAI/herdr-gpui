@@ -12,10 +12,10 @@ mod modes;
 mod scan;
 
 pub use damage::Damage;
-pub use emulator::{Emulator, Event, Scroll, ScrollMetrics};
+pub use emulator::{Emulator, Event, Scroll};
 pub use error::{Error, Result};
 pub use modes::{Modes, MouseEncoding, MouseReporting};
-pub use sheprd_backend::{MAX_CELLS, MAX_SIDE, Size};
+pub use sheprd_backend::{MAX_CELLS, MAX_SIDE, ScrollMetrics, Size};
 
 // The `CellData::modifier` bits, as the app's painter reads them.
 // keep-sorted start

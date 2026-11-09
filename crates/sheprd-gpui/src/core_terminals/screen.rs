@@ -1,6 +1,6 @@
 //! What one attached terminal shows, built from its backend's updates.
 
-use sheprd_backend::{Exit, FrameData, KeyReporting, SurfaceUpdate};
+use sheprd_backend::{Exit, FrameData, KeyReporting, ScrollMetrics, SurfaceUpdate};
 use sheprd_client::{SurfaceImages, protocol::SurfaceGraphicsPlacement};
 use std::sync::Arc;
 
@@ -33,12 +33,16 @@ pub(crate) struct Screen {
     pub(crate) frame: Option<Arc<FrameData>>,
     /// Where the terminal's images sit on its screen (kitty graphics).
     pub(crate) graphics: Arc<[SurfaceGraphicsPlacement]>,
+    /// Where the view is in its history.
+    pub(crate) history: ScrollMetrics,
     /// The pixels those placements name, kept by the worker.
     pub(crate) images: Images,
     /// The key events the program asked for beyond typed text.
     pub(crate) keys: KeyReporting,
     /// Whether the program reads the mouse, so presses go to it.
     pub(crate) mouse_reporting: bool,
+    /// How often the text changed; history points hold for one revision.
+    pub(crate) revision: u64,
     pub(crate) title: Option<String>,
     /// Whether each row's line goes on to the next, as the terminal
     /// wrapped it: what lets an address be read across rows.
@@ -89,6 +93,10 @@ impl Screen {
                     }
                 }
                 frame.cursor = cursor;
+            }
+            SurfaceUpdate::Scroll { metrics, revision } => {
+                self.history = metrics;
+                self.revision = revision;
             }
             SurfaceUpdate::Title(title) => {
                 self.title = Some(title).filter(|title| !title.is_empty())

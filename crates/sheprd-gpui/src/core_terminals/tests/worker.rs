@@ -3,8 +3,8 @@
 
 use crate::core_terminals::worker::{self, Command};
 use sheprd_backend::{
-    Backend, Changes, ClientPaneInputEvent, FrameData, Generation, Role, Size, Spawn,
-    SurfaceUpdate, Terminal, TerminalId, TerminalInfo,
+    Backend, Changes, ClientPaneInputEvent, FrameData, Generation, History, HistoryAnswer, Role,
+    Size, Spawn, SurfaceUpdate, Terminal, TerminalId, TerminalInfo,
 };
 use std::{
     sync::{Arc, Mutex},
@@ -21,6 +21,9 @@ pub(super) struct Scripted {
     pub(super) received: Arc<Mutex<Vec<Command>>>,
     /// Updates for the terminal to hand out, one batch per `next`.
     updates: Arc<Mutex<Vec<Vec<SurfaceUpdate>>>>,
+    /// Answers to history requests other than a clear, first in first out;
+    /// with none left, a request is done.
+    pub(super) answers: Arc<Mutex<Vec<HistoryAnswer>>>,
     fail_attach: bool,
 }
 
@@ -127,6 +130,23 @@ impl Terminal for ScriptedTerminal {
         }
         Ok(batch.unwrap_or_default())
     }
+
+    /// Clears fail; everything else takes the next scripted answer.
+    fn history(&mut self, request: &History) -> Result<HistoryAnswer, Failure> {
+        self.0.received.lock().unwrap().push(Command::History {
+            id: 0,
+            request: request.clone(),
+        });
+        if *request == History::Clear {
+            return Err(Failure);
+        }
+        let mut answers = self.0.answers.lock().unwrap();
+        Ok(if answers.is_empty() {
+            HistoryAnswer::Done
+        } else {
+            answers.remove(0)
+        })
+    }
 }
 
 pub(super) fn until<T>(mut ready: impl FnMut() -> Option<T>) -> T {
@@ -221,7 +241,7 @@ fn dropping_the_link_stops_the_worker() {
 }
 
 #[test]
-fn an_ended_terminal_keeps_its_screen_and_stops_its_worker() {
+fn an_ended_terminal_keeps_its_screen_and_history_until_its_view_goes() {
     let backend = Scripted::default();
     backend
         .updates
@@ -239,7 +259,16 @@ fn an_ended_terminal_keeps_its_screen_and_stops_its_worker() {
     .unwrap();
     let screen = until(|| link.mailbox.take());
     assert_eq!(screen.ended, Some(sheprd_backend::Exit { code: Some(0) }));
-    // The link is still held: the worker ended on its own.
-    until(|| (Arc::strong_count(&backend.received) == 1).then_some(()));
+    // The program is gone; its history still answers.
+    link.send(Command::History {
+        id: 3,
+        request: History::Text,
+    });
+    let answers = until(|| Some(link.mailbox.take_answers()).filter(|answers| !answers.is_empty()));
+    assert_eq!(answers[0].0, 3);
+    // Only the view going ends the worker.
     drop(link);
+    until(|| (Arc::strong_count(&backend.received) == 1).then_some(()));
 }
+
+mod history;
