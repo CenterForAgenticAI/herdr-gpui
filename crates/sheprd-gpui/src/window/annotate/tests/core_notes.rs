@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::{
-    browser::TabId,
     terminal_notes::Note,
     window::annotate::{Queued, core::CoreAgent},
 };
@@ -16,7 +15,7 @@ fn copied(cx: &mut VisualTestContext) -> Option<String> {
 
 fn queued(terminal: &str, comment: &str, agent: Option<&str>) -> Queued {
     let core = agent.map(|agent| CoreAgent {
-        tab: TabId::test(4),
+        host: crate::core_terminals::Host::Local,
         terminal: TerminalId::new(terminal).unwrap(),
         agent: agent.into(),
     });

@@ -105,9 +105,9 @@ impl CoreTerminals {
         self.infos_of(&self.tabs.get(&tab)?.host)?.get(terminal)
     }
 
-    /// The core `tab`'s terminals run in, while it answers.
-    pub(crate) fn tab_backend(&self, tab: TabId) -> Option<&CoreBackend> {
-        self.backend_of(&self.tabs.get(&tab)?.host)
+    /// The core of `host`, while it answers.
+    pub(crate) fn host_backend(&self, host: &Host) -> Option<&CoreBackend> {
+        self.backend_of(host)
     }
 
     /// Every terminal of `tab`, the panes a zoom hides included.

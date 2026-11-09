@@ -6,6 +6,7 @@
 //! agent left or asks a question, it is copied to the clipboard.
 
 use super::*;
+use crate::core_terminals::Host;
 use sheprd_backend::TerminalId;
 use sheprd_core_client::{
     agent::Until,
@@ -23,7 +24,8 @@ const HOLD: Duration = Duration::from_secs(120);
 /// The Herdr 2 agent a note goes to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CoreAgent {
-    pub(super) tab: crate::browser::TabId,
+    /// The core its terminal runs in.
+    pub(super) host: Host,
     pub(super) terminal: TerminalId,
     /// Its name, so a note never reaches another program that took the
     /// terminal since.
@@ -97,21 +99,38 @@ impl SheprdWindow {
     }
 
     /// The agent a note on `view`'s pane goes to: the pane's own, else the
-    /// first of its tab's panes that runs one.
+    /// first of its tab's panes that runs one. A watch-only mirror types
+    /// into nothing, so its notes are copied. The shell shown in place of
+    /// Herdr 1 is in no tab and runs in this computer's core.
     pub(super) fn core_note_agent(
         &self,
         view: &Entity<CoreTerminalView>,
         cx: &App,
     ) -> Option<CoreAgent> {
         let terminals = &self.core_terminals;
+        if let Some(fallback) = self.core_fallback_view()
+            && fallback == *view
+        {
+            let terminal = view.read(cx).terminal().clone();
+            let info = terminals.reported(&terminal)?;
+            return Some(CoreAgent {
+                host: Host::Local,
+                agent: sheprd_core_client::agent_name(info)?,
+                terminal,
+            });
+        }
         let (tab, terminal) = terminals.view_key(view).or_else(|| {
             let terminal = view.read(cx).terminal().clone();
             Some((terminals.tab_of(&terminal)?, terminal))
         })?;
+        if !terminals.drives(tab) {
+            return None;
+        }
+        let host = terminals.host_of(tab);
         let agent = |terminal: &TerminalId| {
             let info = terminals.info(tab, terminal)?;
             Some(CoreAgent {
-                tab,
+                host: host.clone(),
                 terminal: terminal.clone(),
                 agent: sheprd_core_client::agent_name(info)?,
             })
@@ -140,7 +159,7 @@ impl SheprdWindow {
                 .partition(|queued| queued.core.as_ref() == Some(&agent));
             queued = rest;
             let text = terminal_notes::prompt(batch.iter().map(|queued| &queued.note));
-            let Some(backend) = self.core_terminals.tab_backend(agent.tab).cloned() else {
+            let Some(backend) = self.core_terminals.host_backend(&agent.host).cloned() else {
                 clipboard.extend([text]);
                 self.show_flash(Flash::warning(fl!("window-annotate-core-unreachable")), cx);
                 continue;
