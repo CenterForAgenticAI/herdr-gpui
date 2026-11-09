@@ -6,6 +6,8 @@ enum AlertKeys {
     static let computer = "computer"
     static let pane = "pane"
     static let permission = "permission"
+    /// Set when the pane is a terminal's, which a tap opens.
+    static let terminal = "terminal"
 
     /// A chat's notification thread. Pane ids are only unique on one
     /// computer, so the thread names the computer too.

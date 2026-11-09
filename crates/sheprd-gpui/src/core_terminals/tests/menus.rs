@@ -218,3 +218,59 @@ fn closing_a_pane_from_its_menu_keeps_the_tab(cx: &mut TestAppContext) {
     let panes = cx.update(|_, cx| view.read(cx).core_terminals.tabs[&tab].panes.count());
     assert_eq!(panes, 1);
 }
+
+#[gpui::test]
+fn closing_a_pane_that_already_exited_leaves_its_tab(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1"]);
+    // The menu named `t2`, which exited while it was open.
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.close_core_pane(tab, id("t2"), window, cx)
+        })
+    });
+    let open = cx.update(|_, cx| cx.global::<Store>().get(tab).is_some());
+    assert!(open, "the tab and its remaining terminal stay");
+    let shown = cx.update(|_, cx| view.read(cx).core_terminals.tabs.contains_key(&tab));
+    assert!(shown);
+}
+
+#[gpui::test]
+fn zooming_a_pane_that_already_exited_changes_nothing(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    let gone = Target::Pane {
+        tab,
+        terminal: id("t9"),
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_core_menu(gone, point(px(10.), px(10.)), window, cx);
+            view.activate_core_menu(Action::Zoom, window, cx);
+            let shown = &view.core_terminals.tabs[&tab];
+            assert_eq!(shown.zoomed, None, "the split stays drawn");
+            assert!(view.menu.core.is_none(), "the menu still closes");
+        })
+    });
+}
+
+#[gpui::test]
+fn a_cleared_name_gives_way_to_the_default_title(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1"]);
+    let title = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| cx.global::<Store>().get(tab).unwrap().title.clone())
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&Target::Tab(tab), clean_name("build"), cx);
+            view.poll_core_panes(window, cx);
+        })
+    });
+    assert_eq!(title(cx), "build");
+    // The program never set a title of its own.
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&Target::Tab(tab), clean_name(""), cx);
+            view.poll_core_panes(window, cx);
+        })
+    });
+    assert_eq!(title(cx), "Terminal");
+}

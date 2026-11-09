@@ -37,6 +37,8 @@ pub(super) enum Change {
     Close(TabId, Vec<TerminalId>),
     /// The tab whose zoom moved to the phone's pane.
     Zoomed(TabId),
+    /// A new name for the tab or one of its panes; `None` clears it.
+    Renamed(super::menu::Target, Option<String>),
     /// A new shell to start beside the pane.
     Split(Purpose),
 }
@@ -70,10 +72,24 @@ impl CoreTerminals {
         else {
             return Some(Change::Answered(Answer::Failed(Failure::Gone)));
         };
-        let axis = match ask.op {
+        let axis = match &ask.op {
             Op::SplitRight => Axis::Row,
             Op::SplitDown => Axis::Column,
             Op::Close => return Some(Change::Close(tab, Vec::new())),
+            // Named as the tab's menu names it: one safe, bounded line.
+            Op::RenameTab(name) => {
+                let name = name.as_deref().and_then(super::menu::clean_name);
+                return Some(Change::Renamed(super::menu::Target::Tab(tab), name));
+            }
+            Op::RenamePane(name) => {
+                let name = name.as_deref().and_then(super::menu::clean_name);
+                let target = super::menu::Target::Pane { tab, terminal };
+                return Some(Change::Renamed(target, name));
+            }
+            // Not a tab's: the window answers it before asking here.
+            Op::RenameWorkspace { .. } => {
+                return Some(Change::Answered(Answer::Failed(Failure::Refused)));
+            }
             Op::Zoom => {
                 // One pane already fills its tab, as Herdr leaves it.
                 if shown.panes.count() < 2 {
@@ -143,8 +159,17 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Option<Answer>> {
+        if let Op::RenameWorkspace { workspace, name } = &ask.op {
+            return self
+                .phone_rename_workspace(workspace, name, cx)
+                .then_some(Some(Answer::Done));
+        }
         let answer = match self.core_terminals.phone_change(ask)? {
             Change::Answered(answer) => Some(answer),
+            Change::Renamed(target, name) => {
+                self.set_core_name(&target, name, cx);
+                Some(Answer::Done)
+            }
             Change::Close(tab, left) => {
                 for terminal in left {
                     self.end_core_terminal(&Host::Local, terminal);
@@ -170,6 +195,30 @@ impl SheprdWindow {
         };
         cx.notify();
         Some(answer)
+    }
+
+    /// Renames a workspace this window keeps for Herdr 2 on this computer;
+    /// false when it keeps none by that id, so another window may.
+    fn phone_rename_workspace(
+        &mut self,
+        workspace: &str,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(index) = self.core_host() else {
+            return false;
+        };
+        let scope = crate::browser::scope(&self.endpoints[index]);
+        let kept = cx
+            .try_global::<crate::browser::Store>()
+            .is_some_and(|store| store.kept_workspace(&scope, workspace).is_some());
+        // This computer's, whichever host the window shows.
+        if kept {
+            crate::browser::Store::update(cx, |store| store.rename_kept(&scope, workspace, name));
+            self.refresh_core_session(cx);
+            cx.notify();
+        }
+        kept
     }
 
     /// Tells the daemon how a phone's split went, once it has.

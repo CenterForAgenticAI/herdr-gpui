@@ -9,6 +9,7 @@ use crate::{Error, usage::Host};
 use sheprd_client::ConnectTarget;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+mod core;
 mod en_xa;
 mod process_owner;
 #[cfg(unix)]

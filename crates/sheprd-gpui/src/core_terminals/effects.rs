@@ -7,7 +7,7 @@
 //! it sees is left to the tab that drives the terminal.
 
 use super::{CoreTerminalView, Host};
-use crate::SheprdWindow;
+use crate::{SheprdWindow, i18n::fl, window::Flash};
 use gpui::{Context, Entity, Window};
 
 /// Bells and the latest clipboard write a view collected since the window
@@ -59,12 +59,9 @@ impl SheprdWindow {
             }
             effects.merge(taken);
         }
-        // Keys typed while a core was away were dropped: say so once.
+        // Typing while the connection was away sent nothing: say so once.
         if dropped {
-            self.show_flash(
-                crate::window::Flash::warning(crate::i18n::fl!("core-terminals-input-dropped")),
-                cx,
-            );
+            self.show_flash(Flash::warning(fl!("core-terminals-input-dropped")), cx);
         }
         self.apply_core_effects(effects, window, cx);
     }

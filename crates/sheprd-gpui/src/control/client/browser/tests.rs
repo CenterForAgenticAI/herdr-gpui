@@ -8,6 +8,7 @@ fn caller(pane_id: Option<&str>) -> Caller {
         workspace_id: Some("w_1".into()),
         daemon_socket: None,
         window: None,
+        terminal_id: None,
     }
 }
 
@@ -29,4 +30,16 @@ fn web_addresses_and_files_from_outside_a_pane_take_a_tab() {
     );
     let file = Page::File("/srv/mockup.html".into());
     assert_eq!(default_placement(&file, &caller(None)), Placement::Tab);
+}
+
+#[test]
+fn a_file_from_a_core_terminal_opens_beside_it() {
+    let core = Caller {
+        terminal_id: Some("t7".into()),
+        ..caller(None)
+    };
+    assert_eq!(
+        default_placement(&Page::File("/srv/a.html".into()), &core),
+        Placement::Beside
+    );
 }

@@ -255,7 +255,7 @@ fn parse(bytes: &[u8]) -> crate::Result<Saved> {
 }
 
 impl Store {
-    fn path() -> Option<PathBuf> {
+    pub(crate) fn path() -> Option<PathBuf> {
         crate::preferences::state_dir().map(|dir| dir.join("browser-tabs.json"))
     }
 
