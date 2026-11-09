@@ -13,9 +13,10 @@ mod projection;
 mod saved;
 mod screen;
 mod spaces;
+mod wake;
 
 use super::Error as HubError;
-use super::{ApiMethod, Layout};
+use super::{ApiMethod, Layout, Workspace};
 pub use error::Error;
 pub(super) use hold::Hold;
 use serde_json::Value;
@@ -387,6 +388,25 @@ fn merge(daemon: &Layout, core: &Layout) -> Layout {
         } else {
             merged.workspaces.push(workspace.clone());
         }
+    }
+    // A core with nothing in it, as one just started after a reboot, still
+    // gives a phone a workspace to start a chat in, and a folder to offer
+    // for new ones: the home folder.
+    if !daemon.connected
+        && core.connected
+        && merged.workspaces.is_empty()
+        && let Some(home) = sheprd_client::local_path::home_dir()
+    {
+        merged.workspaces.push(Workspace {
+            branch: None,
+            chats: Vec::new(),
+            cwd: home.to_string_lossy().into_owned(),
+            id: UNLISTED.to_owned(),
+            label: "Herdr 2".to_owned(),
+            session: None,
+            terminals: Vec::new(),
+            worktree: None,
+        });
     }
     merged
 }

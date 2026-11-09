@@ -35,7 +35,7 @@ fn open(
     open_on(cx, Scripted::default(), observe)
 }
 
-fn open_on(
+pub(super) fn open_on(
     cx: &mut TestAppContext,
     backend: Scripted,
     observe: bool,
