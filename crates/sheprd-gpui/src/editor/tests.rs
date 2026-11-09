@@ -219,9 +219,9 @@ fn media_files_are_left_to_the_system() {
     assert!(!EditorTarget::editable(dir.path(), &metadata));
 }
 
-#[cfg(unix)]
-mod argv;
 mod back;
+#[cfg(unix)]
+mod core;
 
 // The editor starts from a Unix shell; see `SUPPORTED`.
 #[cfg(unix)]

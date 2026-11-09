@@ -25,22 +25,12 @@ impl SheprdWindow {
         }
     }
 
-    /// Whether `pane` names a terminal of this computer's core, whose editor
-    /// starts as an argument list rather than a Herdr 1 command line.
-    pub(crate) fn is_core_pane(&self, pane: &str, cx: &App) -> bool {
-        TerminalId::new(pane).is_ok_and(|at| {
-            self.core_terminals.tab_of(&at).is_some()
-                || self.core_terminals.mirrors(&at)
-                || self.core_fallback_terminal(cx).as_ref() == Some(&at)
-        })
-    }
-
     /// Opens `target` in the terminal editor beside `pane` when `pane` is a
     /// herdr-core terminal: in a herdr-core split of its tab, or, for the
     /// shell shown in place of Herdr 1, in a new herdr-core tab. False when
     /// `pane` is no herdr-core terminal, for the caller to open it as it
     /// would for a Herdr pane.
-    pub(crate) fn open_in_core_editor(
+    pub(crate) fn open_link_in_core_editor(
         &mut self,
         target: &EditorTarget,
         pane: &str,
@@ -50,11 +40,10 @@ impl SheprdWindow {
             return false;
         };
         let purpose = match self.core_terminals.tab_of(&at) {
-            Some(tab) => Purpose::Split {
-                tab,
-                at,
-                axis: super::panes::Axis::Row,
-            },
+            Some(tab) => {
+                self.open_in_core_editor(target, tab, at, cx);
+                return true;
+            }
             // The shell shown in place of Herdr 1, or a terminal only a
             // mirror shows, which takes no split: a tab of its own.
             None if self.core_fallback_terminal(cx).as_ref() == Some(&at)

@@ -22,6 +22,7 @@ mod echo;
 mod handoff;
 mod hosts;
 mod indicators;
+mod layout;
 mod nearby;
 mod origins;
 mod pace;
