@@ -27,6 +27,9 @@ const NO_CHECKSUM_TOOL: i32 = 6;
 const CHECKSUM: i32 = 7;
 
 /// A download, checking, and unpacking a few megabytes, may stall this long.
+/// The script bounds its download itself too, below this, so a stalled
+/// server fails the step where no idle deadline watches it, such as an
+/// image's build.
 const IDLE: Duration = Duration::from_secs(120);
 const OUTPUT_LIMIT: u64 = 4 << 10;
 
@@ -131,7 +134,7 @@ elif command -v shasum >/dev/null 2>&1; then check() {{ shasum -a 256 "$1" | cut
 else echo "sha256sum or shasum is required to check herdr-core" >&2; exit {NO_CHECKSUM_TOOL}; fi
 work=$(mktemp -d) || exit 1
 trap 'rm -rf "$work"' EXIT
-curl -fsSL "$url" -o "$work/core.tar.gz" || exit 1
+curl -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 60 --max-time 600 "$url" -o "$work/core.tar.gz" || exit 1
 [ "$(check "$work/core.tar.gz")" = "$sum" ] || {{ echo "herdr-core download does not match its pinned checksum" >&2; exit {CHECKSUM}; }}
 tar -xzf "$work/core.tar.gz" -C "$work" herdr-core || exit 1
 dir={dir}

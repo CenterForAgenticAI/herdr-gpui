@@ -169,7 +169,11 @@ fn ensure_herdr(
         }
     }
     if install {
-        gateway.with_command(|command| install::add_core(command, &cancelled))??;
+        gateway
+            .with_command(|command| {
+                install::add_core(Ok::<_, std::convert::Infallible>(command), &cancelled)
+            })
+            .unwrap_or_else(|error| install::core_unprepared(error, &cancelled))?;
     }
     Ok(())
 }

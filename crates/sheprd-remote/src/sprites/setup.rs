@@ -106,7 +106,7 @@ fn prepare(
         }
     }
     if approved {
-        install::add_core(relay_command(settings, sprite)?, &cancelled)?;
+        install::add_core(relay_command(settings, sprite), &cancelled)?;
     }
     report(cloud::Step::Starting);
     api.serve_herdr(sprite)?;

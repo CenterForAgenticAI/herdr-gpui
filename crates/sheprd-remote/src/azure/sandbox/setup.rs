@@ -108,7 +108,7 @@ pub fn add_device(
             }
         }
         if install {
-            install::add_core(command()?, &cancelled)?;
+            install::add_core(command(), &cancelled)?;
         }
         Ok(())
     };

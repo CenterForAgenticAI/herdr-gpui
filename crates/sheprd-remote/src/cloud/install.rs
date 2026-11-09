@@ -270,8 +270,17 @@ pub fn install(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
 /// installing, whether Herdr was installed now or was already there. A
 /// machine with a core is left alone. Its own deadline bounds it, and any
 /// failure, a timeout included, only leaves the machine without Herdr 2
-/// terminals: its new tabs stay Herdr tabs. Only cancellation is an error.
-pub fn add_core(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
+/// terminals: its new tabs stay Herdr tabs. Only cancellation is an error,
+/// so `ssh` comes as it was prepared: a command that could not be made, such
+/// as a gateway token that did not come, is a failure of this step too.
+pub fn add_core<E: std::fmt::Display>(
+    ssh: std::result::Result<Command, E>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<()> {
+    let mut ssh = match ssh {
+        Ok(ssh) => ssh,
+        Err(error) => return core_unprepared(error, cancelled),
+    };
     let script = match crate::core_install::script(crate::core_install::Dir::UserBin) {
         Ok(script) => script,
         Err(error) => {
@@ -292,6 +301,16 @@ pub fn add_core(mut ssh: Command, cancelled: &impl Fn() -> bool) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// The core step's command could not be made: setup goes on without the
+/// core, unless the user cancelled it.
+pub fn core_unprepared(error: impl std::fmt::Display, cancelled: &impl Fn() -> bool) -> Result<()> {
+    if cancelled() {
+        return Err(Error::Cancelled);
+    }
+    tracing::warn!(%error, "herdr-core was not installed beside Herdr");
+    Ok(())
 }
 
 #[cfg(all(test, unix))]

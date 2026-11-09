@@ -100,7 +100,7 @@ fn prepare(
         }
     }
     if approved {
-        install::add_core(relay_command(settings, id)?, &cancelled)?;
+        install::add_core(relay_command(settings, id), &cancelled)?;
     }
     // Commands such as Teleport's need the server the entrypoint starts.
     let deadline = Instant::now() + SERVER_TIMEOUT;

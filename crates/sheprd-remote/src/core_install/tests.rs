@@ -78,7 +78,14 @@ impl Machine {
     /// The install run by `/bin/sh` here, as a provider's command runs it
     /// there, with only the fake curl and the system's tools on PATH.
     fn install(&self, pinned: &Pinned) -> Result<Outcome, Error> {
+        // Only the fake home is searched: a core installed on the machine
+        // running the tests must not be found.
         let script = render(pinned, Dir::UserBin).unwrap();
+        assert!(script.contains(CANDIDATES));
+        let script = script.replace(
+            CANDIDATES,
+            r#"for path in "$HOME/.local/bin/herdr-core"; do"#,
+        );
         let mut command = Command::new("/bin/sh");
         command.arg("-c").env_clear().env("HOME", self.home()).env(
             "PATH",
