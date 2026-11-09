@@ -92,6 +92,8 @@ Hold **Shift** while selecting text in a pane. When you release, an **Annotate**
 
 For an existing selection, run **Annotate Selection for the Agent** (Cmd-Shift-A on macOS, Ctrl+Alt+Shift+A on Linux and Windows). The whole selection must be on screen. Notes go to the agent in that pane, else to the first agent in its workspace, and are delivered as page notes are (see [Browser tabs](browser.md#sending-notes)). With no agent, they are copied to the clipboard.
 
+In a Herdr 2 pane, select text (it may reach into the scrollback) and run **Annotate Selection for the Agent**. Herdr 2 agents do not take notes yet, so the note is copied to the clipboard.
+
 ## Terminal links
 
 Cmd-click (Ctrl-click on Linux and Windows) a link in a pane to open it. A click without the modifier only selects or goes to the program.

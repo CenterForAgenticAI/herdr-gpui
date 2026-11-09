@@ -10,6 +10,7 @@ pub(super) mod keys;
 mod links;
 pub(super) mod paste;
 mod pointer;
+mod quote;
 mod slide;
 
 pub(crate) use links::LinkClick;
@@ -131,6 +132,10 @@ pub(crate) struct CoreTerminalView {
     /// The link under the pointer and the one a press went down on.
     links: links::Links,
     look: Look,
+    /// The history read whose text a note quotes.
+    quoting: Option<history::Reading>,
+    /// The text a note quotes, once read from the history.
+    quote_ready: Option<Result<String, super::Error>>,
     /// Text an IME is composing; committed text goes to the terminal.
     marked: String,
     /// The last history request's ID.
@@ -199,6 +204,8 @@ impl CoreTerminalView {
             link,
             links: links::Links::default(),
             look,
+            quoting: None,
+            quote_ready: None,
             marked: String::new(),
             next_request: 0,
             observe,

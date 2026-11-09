@@ -24,6 +24,7 @@ mod open_terminal;
 mod pane_keys;
 mod paste;
 mod phone;
+mod quote;
 mod requests;
 mod resize;
 mod restore;
@@ -39,6 +40,7 @@ mod stale;
 mod tab_status;
 mod wanted;
 mod worker;
+mod zoom_drawn;
 
 impl crate::SheprdWindow {
     /// Stands in for the herdr-core session the window builds each tick.

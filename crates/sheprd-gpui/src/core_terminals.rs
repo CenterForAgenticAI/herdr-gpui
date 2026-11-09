@@ -248,6 +248,14 @@ impl TabPanes {
         let zoomed = self.zoomed.as_ref()?;
         (self.zoom.is_open() || self.zoom.moving(now)).then(|| (zoomed, self.zoom.shown(now)))
     }
+
+    /// The panes drawn at `now`: a zoom that has landed hides the others.
+    fn drawn_at(&self, now: std::time::Instant) -> Vec<&TerminalId> {
+        match self.zoom_at(now) {
+            Some((zoomed, shown)) if shown >= 1. => vec![zoomed],
+            _ => self.panes.terminals(),
+        }
+    }
 }
 
 /// The most terminals waiting to start at once.
@@ -264,6 +272,9 @@ pub(crate) struct CoreTerminals {
     /// The Git checkout of each kept workspace's folder and of the shown
     /// pane's.
     checkouts: checkouts::Checkouts,
+    /// The views the window drew in its last frame: a cached view of a tab
+    /// no group shows is not among them.
+    drawn: Vec<EntityId>,
     /// The shell shown when no Herdr 1 is installed.
     fallback: fallback::Fallback,
     /// A shown tab whose active pane should take the keyboard once its view
