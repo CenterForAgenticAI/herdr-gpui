@@ -178,9 +178,7 @@ fn the_focused_row_means_a_rescroll_and_other_rows_mean_navigation(
                 pane: PANE.into()
             })
         );
-        // Another host's row still means navigate while local is selected.
         assert_eq!(view.agent_row_action("ssh:test", PANE), AgentRowAction::Navigate);
-        // So does a pane the snapshot does not focus.
         assert_eq!(view.agent_row_action("local", "p1"), AgentRowAction::Navigate);
     });
 }
@@ -189,7 +187,7 @@ fn the_focused_row_means_a_rescroll_and_other_rows_mean_navigation(
 fn an_unready_or_covered_pane_keeps_navigating(cx: &mut gpui::TestAppContext) {
     let (view, _peer, cx) = rescroll_fixture(cx);
     // Without its surface the window is not ready, so the click keeps
-    // today's queueing (R5).
+    // the existing queueing.
     let held = view.update(cx, |view, _| {
         let held = view.live.surface.take();
         assert!(!view.input_ready());
@@ -248,7 +246,6 @@ fn a_second_click_supersedes_a_queued_navigation_and_scrolls(cx: &mut gpui::Test
     cx.simulate_click(row.center(), Modifiers::default());
     cx.run_until_parked();
     view.read_with(cx, |view, _| {
-        // The row click supersedes what an earlier click queued.
         assert!(view.pending_navigation.is_none());
     });
     let scroll = next_pane_request(&mut peer);
@@ -259,7 +256,7 @@ fn a_second_click_supersedes_a_queued_navigation_and_scrolls(cx: &mut gpui::Test
     );
     let id = scroll["id"].as_str().unwrap().to_owned();
     peer.respond(&boot, &id, &serde_json::json!({"id": id, "result": {"type": "ok"}}));
-    // No focus follows: the pane is already the shown one (R2).
+    // No focus follows: the pane is already the shown one.
     assert_wire_quiet(&mut peer, &boot, cx);
 }
 

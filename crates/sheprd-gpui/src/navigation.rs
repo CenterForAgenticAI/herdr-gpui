@@ -40,9 +40,8 @@ impl<T: AsRef<str>> From<&NavigationTarget<T>> for OwnedNavigationTarget {
     }
 }
 
-/// What a click on an agents-list row means now. `Navigate` is today's path
-/// unchanged; `Rescroll` names the pane already on screen, which instead
-/// goes to its live bottom.
+/// What a click on an agents-list row means: open the pane it names, or,
+/// when that pane is already on screen, scroll it to its live bottom.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AgentRowAction {
     Navigate,
@@ -50,8 +49,7 @@ pub(crate) enum AgentRowAction {
 }
 
 /// Where the pane a row names lives, which decides who scrolls it to the
-/// bottom. Each variant carries what its sender needs, so a target can
-/// always be performed and never needs a parallel parameter.
+/// bottom.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RescrollTarget {
     /// A Herdr 1 pane: the daemon scrolls it (`pane.scroll`, offset 0).
@@ -60,8 +58,6 @@ pub(crate) enum RescrollTarget {
     /// follows its end, client-locally.
     Chat { pane: String },
     /// A herdr-core terminal: its view scrolls its own history (offset 0).
-    /// No sidebar agent row names one today; the devices overview's agent
-    /// rows do, and take this arm when they adopt the resolver.
     // Callers come with the devices overview's agent rows adopting the
     // resolver.
     #[cfg_attr(not(test), allow(dead_code))]
@@ -69,7 +65,7 @@ pub(crate) enum RescrollTarget {
 }
 
 impl SheprdWindow {
-    /// What clicking the agents-list row of `pane` on `endpoint` means now:
+    /// What clicking the agents-list row of `pane` on `endpoint` means:
     /// open it, or, when it is already the pane on screen, scroll it to the
     /// live bottom. Pure over prepared state — reads the snapshot, the
     /// chats, and readiness; writes nothing — so tests assert the decision
@@ -117,13 +113,13 @@ impl SheprdWindow {
         }
     }
 
-    /// Scrolls the pane `target` names to its live bottom, by the sender of
-    /// the Herdr that runs it. Total over the enum; every arm no-ops safely
-    /// when its pane, chat, or view is gone. Idempotent: the target state is
-    /// "at the bottom", so a second dispatch is harmless.
+    /// Scrolls the pane `target` names to its live bottom. Idempotent:
+    /// offset 0 is absolute — "at the bottom" — so a second dispatch is
+    /// harmless.
     pub(crate) fn scroll_to_bottom(&mut self, target: RescrollTarget, cx: &mut Context<Self>) {
         match target {
             RescrollTarget::HerdrPane { pane } => {
+                // The classifier mints HerdrPane only from a snapshot it read.
                 let Some(boot) = self
                     .live
                     .snapshot
@@ -144,10 +140,9 @@ impl SheprdWindow {
         }
     }
 
-    /// Whether `pane` of `endpoint` is the pane on screen now: the row's own
-    /// host is selected, its live snapshot focuses the pane, and nothing
-    /// covers or defers it. The daemon's pane-level focus is the one truth,
-    /// not the row's `agent.focused` styling flag.
+    /// Whether `pane` of `endpoint` is the pane on screen now. The daemon's
+    /// pane-level focus is the one truth, not the row's `agent.focused`
+    /// styling flag.
     fn herdr_pane_shown(&self, endpoint: &str, pane: &str) -> bool {
         self.endpoints
             .get(self.selected_endpoint)
@@ -155,7 +150,7 @@ impl SheprdWindow {
             // A kept herdr-core workspace in front makes the click a real
             // navigation, whose dispatch leaves the workspace.
             && self.kept_in_front().is_none()
-            // An unready connection keeps today's queueing.
+            // An unready connection keeps the existing queueing.
             && self.input_ready()
             && self
                 .live

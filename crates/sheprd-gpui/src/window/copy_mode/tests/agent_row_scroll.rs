@@ -44,8 +44,6 @@ fn a_row_rescroll_sends_one_scroll_per_click_and_no_focus(cx: &mut TestAppContex
     let mut peer = MockPeer::advertising(&["pane.focus", "pane.scroll"]);
     let view = shown(cx, &peer);
     view.update(cx, |view, cx| {
-        // Both clicks find the pane already shown: each sends one
-        // scroll, and no focus goes out for either (R2).
         assert!(view.open_agent_row("local", "w1:p1", cx));
         assert!(view.open_agent_row("local", "w1:p1", cx));
     });

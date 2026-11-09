@@ -409,8 +409,7 @@ impl SheprdWindow {
     }
 
     /// Sends the daemon's pane scroll request, a plain request answered
-    /// outside the scrollback mailbox. The caller reports a failure under
-    /// its own label. No connection, nothing to scroll.
+    /// outside the scrollback mailbox.
     fn send_pane_scroll(
         &mut self,
         boot_id: &str,
