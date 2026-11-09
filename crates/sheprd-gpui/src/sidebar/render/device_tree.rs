@@ -68,12 +68,11 @@ impl SheprdWindow {
         if !connected && core.as_ref().is_none_or(|core| core.agents.is_empty()) {
             return (list, 0, None);
         }
-        let hosts = if connected {
-            vec![(index, live)]
-        } else {
-            Vec::new()
-        };
-        let agents = listed_agents(hosts, core, self.agent_sort);
+        // A disconnected Herdr 1 lists no agents of its own, but its host
+        // stays listed for the core's.
+        let offline = crate::state::LiveState::default();
+        let host = if connected { live } else { &offline };
+        let agents = listed_agents(vec![(index, host)], core, self.agent_sort);
         let theme = &self.theme;
         let row_cx = RowContext {
             indicators,

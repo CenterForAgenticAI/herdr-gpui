@@ -13,7 +13,6 @@ use crate::{
     },
 };
 use gpui::{prelude::*, *};
-use sheprd_backend::TerminalId;
 
 impl SheprdWindow {
     /// Appends a row for each agent `panel_agents` lists, in that order, and
@@ -208,12 +207,12 @@ impl SheprdWindow {
                 pane: agent.pane_id.clone(),
             }),
             Listed::Core(core) => {
-                let terminal = TerminalId::new(core.agent.pane.as_str()).ok()?;
-                let tab = self.core_terminals.tab_of(&terminal)?;
-                Some(AgentMenu::Core(crate::core_terminals::menu::Target::Pane {
-                    tab,
-                    terminal,
-                }))
+                // The shell shown in place of Herdr 1 is in no tab.
+                let tab = core.agent.tab.parse::<u64>().ok()?;
+                (tab != crate::core_terminals::SHELL_TAB).then(|| AgentMenu::Core {
+                    endpoint: endpoint.to_owned(),
+                    target: agent.target(),
+                })
             }
         }
     }
@@ -229,7 +228,9 @@ impl SheprdWindow {
             AgentMenu::Herdr1 { endpoint, pane } => {
                 self.open_agent_menu(endpoint, pane, position, window, cx);
             }
-            AgentMenu::Core(target) => self.open_core_menu(target.clone(), position, window, cx),
+            AgentMenu::Core { endpoint, target } => {
+                self.open_core_agent_menu(endpoint, target, position, window, cx);
+            }
         }
     }
 }
@@ -237,6 +238,12 @@ impl SheprdWindow {
 /// The menu a listed agent's right-click opens.
 #[derive(Clone)]
 enum AgentMenu {
-    Herdr1 { endpoint: String, pane: String },
-    Core(crate::core_terminals::menu::Target),
+    Herdr1 {
+        endpoint: String,
+        pane: String,
+    },
+    Core {
+        endpoint: String,
+        target: crate::sidebar::AgentTarget,
+    },
 }

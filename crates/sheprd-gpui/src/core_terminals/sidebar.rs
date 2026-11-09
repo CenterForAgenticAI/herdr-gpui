@@ -90,4 +90,44 @@ impl SheprdWindow {
         self.show_browser_tab(tab, window, cx);
         cx.notify();
     }
+
+    /// Opens the pane menu of a Herdr 2 agent the sidebar lists. An agent
+    /// in a workspace not shown since the app started has no tab state yet,
+    /// so its workspace comes forward first, as a click would bring it.
+    pub(crate) fn open_core_agent_menu(
+        &mut self,
+        endpoint: &str,
+        target: &crate::sidebar::AgentTarget,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let crate::sidebar::AgentTarget::Core {
+            workspace,
+            tab,
+            terminal,
+        } = target
+        else {
+            return;
+        };
+        let (Ok(number), Ok(terminal_id)) =
+            (tab.parse::<u64>(), TerminalId::new(terminal.as_str()))
+        else {
+            return;
+        };
+        let tab_id = TabId::from(number);
+        if !self.core_terminals.tabs.contains_key(&tab_id) {
+            self.show_core_agent(endpoint, workspace, tab, terminal, window, cx);
+            self.sync_core_views(cx);
+        }
+        self.open_core_menu(
+            super::menu::Target::Pane {
+                tab: tab_id,
+                terminal: terminal_id,
+            },
+            position,
+            window,
+            cx,
+        );
+    }
 }

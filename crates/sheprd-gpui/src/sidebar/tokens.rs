@@ -179,9 +179,11 @@ fn resolve_agent(
         AgentStatus::Unknown => AgentStatus::Idle,
         status => status,
     };
+    // An integration may name `unknown` itself: its labels are looked up
+    // by the status the agent reports, only the fallback by the mapped one.
     let fallback = status_text(status);
-    let state_text = state_label_in(agent.state_labels, status, &fallback);
-    let state_rule = state_label_in(agent.state_labels, status, status_key(status));
+    let state_text = state_label_in(agent.state_labels, agent.status, &fallback);
+    let state_rule = state_label_in(agent.state_labels, agent.status, status_key(status));
     let mut strings = HashMap::new();
     let mut text = |value, role| TokenKind::Text(shared_text(&mut strings, value), role);
     let mut rows = resolve_rows(layout.rows_for(agent.identity), &state_rule, |token| {

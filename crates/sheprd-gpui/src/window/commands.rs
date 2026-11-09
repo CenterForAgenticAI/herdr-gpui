@@ -852,9 +852,9 @@ impl SheprdWindow {
             .map(|(host, agent)| (*host, agent.id()))
             .collect();
         let selected = self.selected_endpoint;
-        let core_focus = self.core_terminals.focused_pane(window, cx);
+        let core_focus = self.current_core_terminal(window, cx);
         let focused = match &core_focus {
-            Some((_, terminal)) => Some(terminal.as_str()),
+            Some(terminal) => Some(terminal.as_str()),
             None => self
                 .live
                 .snapshot

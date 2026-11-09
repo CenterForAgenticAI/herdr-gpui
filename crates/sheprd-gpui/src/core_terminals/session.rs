@@ -176,6 +176,32 @@ impl SheprdWindow {
         self.core_terminals.session = Some((scope, Arc::new(session)));
     }
 
+    /// The Herdr 2 terminal the user is in, for the agent steps to start
+    /// from: the pane holding the keyboard, the stand-in shell when it does,
+    /// else, unless a Herdr 1 pane has it, the pane in use of the Herdr 2
+    /// tab shown, such as one whose native chat holds the keyboard.
+    pub(crate) fn current_core_terminal(
+        &self,
+        window: &gpui::Window,
+        cx: &App,
+    ) -> Option<TerminalId> {
+        if let Some((_, terminal)) = self.core_terminals.focused_pane(window, cx) {
+            return Some(terminal);
+        }
+        if let Some(view) = self.core_fallback_view()
+            && view.read(cx).focus_handle().contains_focused(window, cx)
+        {
+            return Some(view.read(cx).terminal().clone());
+        }
+        if self.focus.is_focused(window) {
+            return None;
+        }
+        self.core_terminals
+            .shown
+            .as_ref()
+            .map(|(_, terminal)| terminal.clone())
+    }
+
     /// This computer's Herdr 2 agents as the sidebar lists them, while the
     /// host of its herdr-core session is the one at `index`.
     pub(crate) fn listed_core_agents(
