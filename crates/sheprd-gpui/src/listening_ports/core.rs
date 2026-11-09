@@ -23,9 +23,11 @@ pub(super) struct Placed {
 
 impl ListeningPorts {
     /// Tells which workspace each herdr-core terminal of this computer is in,
-    /// by its address such as `t7`; whether the ports listed changed.
+    /// by its address such as `t7`, the first given for each when several
+    /// are; whether the ports listed changed.
     pub fn place_terminals(&mut self, mut places: Vec<(String, Place)>) -> bool {
-        places.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        // Stable, so a terminal keeps the first workspace it was given.
+        places.sort_by(|a, b| a.0.cmp(&b.0));
         places.dedup_by(|a, b| a.0 == b.0);
         let empty = HashMap::new();
         let scanned = self

@@ -62,19 +62,28 @@ impl CoreTerminals {
                     (scope, super::WORKSPACE.to_owned()),
                 )
             });
-        self.tabs
-            .values()
-            .filter(|shown| shown.host == super::Host::Local)
-            .filter_map(|shown| Some((shown, shown.workspace.as_ref()?)))
-            .flat_map(|(shown, place)| {
-                shown
-                    .panes
-                    .terminals()
-                    .into_iter()
-                    .map(move |terminal| (terminal.as_str().to_owned(), place.clone()))
-            })
-            .chain(fallback)
-            .collect()
+        // A terminal opened to watch in another workspace stays in the one
+        // whose tab drives it: driving tabs come first, oldest first, and the
+        // port lookups keep a terminal's first workspace.
+        let mut tabs: Vec<_> = self
+            .tabs
+            .iter()
+            .filter(|(_, shown)| shown.host == super::Host::Local)
+            .filter_map(|(id, shown)| Some((shown.observe, *id, shown, shown.workspace.as_ref()?)))
+            .collect();
+        tabs.sort_unstable_by_key(|(observe, id, ..)| (*observe, *id));
+        let mut places = Vec::new();
+        let mut fallback = fallback;
+        for (observe, _, shown, place) in tabs {
+            if observe && let Some(shell) = fallback.take() {
+                places.push(shell);
+            }
+            for terminal in shown.panes.terminals() {
+                places.push((terminal.as_str().to_owned(), place.clone()));
+            }
+        }
+        places.extend(fallback);
+        places
     }
 }
 

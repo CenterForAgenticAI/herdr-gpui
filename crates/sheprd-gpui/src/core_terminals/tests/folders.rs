@@ -88,3 +88,23 @@ fn only_this_computers_terminals_are_placed_for_its_port_scan() {
         [("t0".to_owned(), (Scope::endpoint("local"), "w".to_owned()))]
     );
 }
+
+#[test]
+fn a_watched_terminal_keeps_its_ports_in_the_workspace_driving_it() {
+    let mut terminals = CoreTerminals::default();
+    // The watching tab is older, so neither map nor id order alone picks the
+    // driving one.
+    tab(&mut terminals, 0, "t1", "watching", true);
+    tab(&mut terminals, 1, "t1", "driving", false);
+    let places = terminals.terminal_workspaces(None);
+    assert_eq!(places[0].1.1, "driving");
+    let mut ports = crate::listening_ports::ListeningPorts::default();
+    ports.seed(
+        crate::usage::Host::Local,
+        crate::listening_ports::parse("L 10 *:5173 node\nC 10 t1\n").unwrap(),
+    );
+    ports.place_terminals(places);
+    let scope = Scope::endpoint("local");
+    assert!(ports.core_ports(&scope, "driving").is_some());
+    assert!(ports.core_ports(&scope, "watching").is_none());
+}
