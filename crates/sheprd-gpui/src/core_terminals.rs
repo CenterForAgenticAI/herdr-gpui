@@ -446,7 +446,7 @@ impl CoreTerminals {
     /// What herdr-core last reported of `terminal`, while it answers. A
     /// lost core's last list may name agents that have since stopped, so
     /// none is reported until it answers again.
-    pub(super) fn reported(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
+    pub(crate) fn reported(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
         self.hub.backend()?;
         self.infos.get(terminal)
     }

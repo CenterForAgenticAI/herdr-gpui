@@ -1,7 +1,8 @@
 //! Herdr 2 agents asking for the user. herdr-core sends no notifications, only
 //! each program's status, so the app hears the changes itself: an agent that
 //! becomes blocked plays the request sound, one whose turn ends plays the done
-//! sound, and either counts on the Dock or taskbar badge. Herdr 1 decides this
+//! sound, and either counts on the Dock or taskbar badge and posts a system
+//! notification when notices go to the OS. Herdr 1 decides this
 //! in its daemon; the sound settings, their delay, and the rule that a finished
 //! turn in the tab in front stays quiet are the same.
 
@@ -9,7 +10,7 @@ use crate::SheprdWindow;
 use gpui::{prelude::*, *};
 use sheprd_backend::{AgentStatus, TerminalId, TerminalInfo};
 use sheprd_client::herdr::AgentKind;
-use sheprd_client::protocol::SemanticNotificationSound;
+use sheprd_client::protocol::{SemanticNotificationKind, SemanticNotificationSound};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
@@ -41,6 +42,14 @@ impl News {
         match self {
             Self::NeedsYou => status == AgentStatus::Blocked,
             Self::Finished => matches!(status, AgentStatus::Done | AgentStatus::Idle),
+        }
+    }
+
+    /// The notice it is, for the system notification it posts.
+    fn kind(self) -> SemanticNotificationKind {
+        match self {
+            Self::NeedsYou => SemanticNotificationKind::NeedsAttention,
+            Self::Finished => SemanticNotificationKind::Finished,
         }
     }
 
@@ -281,12 +290,17 @@ impl SheprdWindow {
         }
         // Until the settings load, the default delay of a second.
         let delay = Duration::from_secs(self.sound.delay().unwrap_or(1));
-        for (terminal, news, kind) in heard.take_due(Instant::now(), delay) {
+        let due = heard.take_due(Instant::now(), delay);
+        let handle = window.window_handle().downcast::<SheprdWindow>();
+        for (terminal, news, kind) in due {
             self.sound.play_agent(
                 news.sound(),
                 kind.map(|kind| kind.name()),
                 terminal.as_str(),
             );
+            if let Some(handle) = handle {
+                self.post_core_notification(handle, &terminal, news.kind(), cx);
+            }
         }
     }
 }
