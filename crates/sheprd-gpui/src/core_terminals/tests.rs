@@ -5,6 +5,7 @@ mod control_holder;
 mod focus;
 mod folders;
 mod kept_checkouts;
+mod kept_ports;
 mod kept_workspaces;
 mod keys;
 mod paste;
