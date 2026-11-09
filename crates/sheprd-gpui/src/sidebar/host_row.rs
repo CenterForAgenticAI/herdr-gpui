@@ -424,7 +424,7 @@ impl SheprdWindow {
         } else {
             &endpoint.live
         };
-        let tally = crate::devices_overview::online_tally(endpoint, live)?;
+        let tally = crate::devices_overview::online_tally(endpoint, live, &self.sessions(index))?;
         Some(format!("{}/{}", tally.working, tally.total()))
     }
 
