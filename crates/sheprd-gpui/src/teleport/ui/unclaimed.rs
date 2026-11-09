@@ -139,10 +139,7 @@ impl SheprdWindow {
                 .core_tabs
                 .iter()
                 .filter(|panes| {
-                    let location = Location::CoreTerminal {
-                        panes: (*panes).clone(),
-                        observe: false,
-                    };
+                    let location = Location::core_terminal((*panes).clone(), false);
                     store
                         .open(scope.clone(), &outcome.workspace_id, Some(location), None)
                         .is_none()

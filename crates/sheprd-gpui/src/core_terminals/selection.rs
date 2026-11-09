@@ -140,12 +140,19 @@ impl Selection {
 }
 
 /// What a cell shows. A wide character's second cell shows nothing, so
-/// the character is read once.
+/// the character is read once, and a concealed cell reads as the blank
+/// it is drawn as, never its hidden text.
 pub(super) fn symbol(frame: &FrameData, row: u16, column: u16) -> &str {
     let index = usize::from(row) * usize::from(frame.width) + usize::from(column);
     frame
         .cells
         .get(index)
         .filter(|cell| !cell.skip)
-        .map_or("", |cell| cell.symbol.as_str())
+        .map_or("", |cell| {
+            if cell.modifier & crate::terminal::HIDDEN != 0 {
+                " "
+            } else {
+                cell.symbol.as_str()
+            }
+        })
 }

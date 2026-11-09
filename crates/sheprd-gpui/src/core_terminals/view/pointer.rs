@@ -6,17 +6,14 @@
 use super::CoreTerminalView;
 use crate::{
     core_terminals::selection::{Cell, Selection},
-    terminal::{PLATFORM_NOTCH_LINES, wheel_rows},
+    terminal::wheel_rows,
     terminal_painter::{Highlight, Tint},
 };
 use gpui::{prelude::*, *};
 use sheprd_backend::{
     ClientMouseButton, ClientMouseKind, ClientMousePosition, ClientPaneInputEvent,
 };
-use std::{
-    num::NonZeroU16,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 /// How often a drag held past the top or bottom edge scrolls a row.
 const AUTOSCROLL: Duration = Duration::from_millis(50);
@@ -24,7 +21,13 @@ const AUTOSCROLL: Duration = Duration::from_millis(50);
 /// Where a press is going: to the program, or into a selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Press {
-    Reported(ClientMouseButton),
+    /// A press the program reads; `bare` when it was a passthrough
+    /// right-click, whose whole gesture reaches the program without the
+    /// modifier, as Herdr strips it.
+    Reported {
+        button: ClientMouseButton,
+        bare: bool,
+    },
     Selecting,
 }
 
@@ -35,6 +38,14 @@ fn button(button: MouseButton) -> Option<ClientMouseButton> {
         MouseButton::Middle => Some(ClientMouseButton::Middle),
         _ => None,
     }
+}
+
+/// The modifiers a gesture reports: none for a passthrough right-click,
+/// which reaches the program without Herdr's
+/// `right_click_passthrough_modifier`. A herdr-core pane has no pane menu
+/// yet, so its other right-clicks reach the program as they are.
+fn reported(held: Modifiers, bare: bool) -> Modifiers {
+    if bare { Modifiers::default() } else { held }
 }
 
 fn modifier_bits(modifiers: Modifiers) -> u8 {
@@ -52,7 +63,7 @@ impl CoreTerminalView {
     }
 
     /// The cell under `position`, held inside the screen.
-    fn cell_at(&self, position: Point<Pixels>) -> Option<Cell> {
+    pub(super) fn cell_at(&self, position: Point<Pixels>) -> Option<Cell> {
         self.cell_at_when(position, crate::motion::now())
     }
 
@@ -98,13 +109,24 @@ impl CoreTerminalView {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus, cx);
+        if self.press_link(event) {
+            return;
+        }
         let Some(cell) = self.cell_at(event.position) else {
             return;
         };
         if self.screen.mouse_reporting && !event.modifiers.shift {
             if let Some(pressed) = button(event.button) {
-                self.press = Some(Press::Reported(pressed));
-                self.report(ClientMouseKind::Down(pressed), cell, event.modifiers, 1);
+                let bare = event.button == MouseButton::Right
+                    && self.look.right_click_passthrough.matches(event.modifiers);
+                self.press = Some(Press::Reported {
+                    button: pressed,
+                    bare,
+                });
+                let modifiers = reported(event.modifiers, bare);
+                self.report(ClientMouseKind::Down(pressed), cell, modifiers, 1);
+                // The program took the click, so the pane's menu stays shut.
+                cx.stop_propagation();
             }
             return;
         }
@@ -131,12 +153,14 @@ impl CoreTerminalView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.hover_link(event.position, event.modifiers, cx);
         let Some(cell) = self.cell_at(event.position) else {
             return;
         };
         match self.press {
-            Some(Press::Reported(pressed)) if event.pressed_button.is_some() => {
-                self.report(ClientMouseKind::Drag(pressed), cell, event.modifiers, 1);
+            Some(Press::Reported { button, bare }) if event.pressed_button.is_some() => {
+                let modifiers = reported(event.modifiers, bare);
+                self.report(ClientMouseKind::Drag(button), cell, modifiers, 1);
             }
             Some(Press::Selecting) if event.pressed_button == Some(MouseButton::Left) => {
                 self.dragged_to = Some(event.position);
@@ -160,13 +184,33 @@ impl CoreTerminalView {
         }
     }
 
-    pub(super) fn mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
-        if let Some(Press::Reported(pressed)) = self.press
-            && let Some(cell) = self.cell_at(event.position)
-        {
-            self.report(ClientMouseKind::Up(pressed), cell, event.modifiers, 1);
+    pub(super) fn mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.release_link(event, window, cx) {
+            return;
         }
-        self.press = None;
+        match self.press.take() {
+            Some(Press::Reported { button, bare }) => {
+                if let Some(cell) = self.cell_at(event.position) {
+                    let modifiers = reported(event.modifiers, bare);
+                    self.report(ClientMouseKind::Up(button), cell, modifiers, 1);
+                }
+            }
+            // Releasing a selection copies it while `copy_on_select` is on;
+            // otherwise it stays highlighted for Cmd-C or Ctrl-C.
+            Some(Press::Selecting)
+                if self.look.copy_on_select
+                    && event.button == MouseButton::Left
+                    && self.copy_selection() =>
+            {
+                self.finish_copy(window, cx);
+            }
+            Some(Press::Selecting) | None => {}
+        }
         self.dragged_to = None;
     }
 
@@ -241,8 +285,7 @@ impl CoreTerminalView {
         let Some(cell) = self.cell_at(event.position) else {
             return;
         };
-        let notch = NonZeroU16::new(PLATFORM_NOTCH_LINES).unwrap_or(NonZeroU16::MIN);
-        self.wheel_rest += wheel_rows(event, self.look.cell_height, notch);
+        self.wheel_rest += wheel_rows(event, self.look.cell_height, self.look.scroll_lines);
         let steps = self.wheel_rest.trunc();
         self.wheel_rest -= steps;
         if steps == 0. {
@@ -258,6 +301,18 @@ impl CoreTerminalView {
         self.report(kind, cell, event.modifiers, lines);
     }
 
+    /// Ends a copy: the copied flash, and the highlight dropped unless
+    /// `keep_selection_after_copy` keeps it.
+    pub(super) fn finish_copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.look.keep_selection {
+            self.selection = None;
+        }
+        cx.notify();
+        if let Some(to_window) = &self.to_window {
+            to_window(super::ToWindow::Copied, window, cx);
+        }
+    }
+
     /// Copies the selection; false when nothing is selected. The text is
     /// read from the history, shown or not, so wrapped rows are joined the
     /// same way however far the view has scrolled, and copied when it
@@ -271,7 +326,7 @@ impl CoreTerminalView {
     }
 
     /// The selection as the painter tints it.
-    pub(super) fn highlights(&self) -> Vec<Highlight> {
+    pub(crate) fn highlights(&self) -> Vec<Highlight> {
         let (width, height) = self
             .screen
             .frame

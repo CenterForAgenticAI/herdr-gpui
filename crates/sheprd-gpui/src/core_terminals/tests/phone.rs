@@ -188,3 +188,29 @@ fn a_tab_on_another_host_is_not_the_phones() {
     );
     assert!(terminals.phone_change(&ask(3, "t1", Op::Close)).is_none());
 }
+
+#[test]
+fn a_rename_names_the_tab_or_the_pane_as_its_menu_does() {
+    use crate::core_terminals::menu::Target;
+    let mut terminals = terminals();
+    let tab = TabId::test(1);
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t2", Op::RenameTab(Some("  build\n".into())))),
+        Some(Change::Renamed(Target::Tab(named), Some(name))) if named == tab && name == "build"
+    ));
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t2", Op::RenamePane(None))),
+        Some(Change::Renamed(Target::Pane { tab: named, terminal }, None))
+            if named == tab && terminal == id("t2")
+    ));
+    // A blank name gives the title back, as clearing it in the menu does.
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t1", Op::RenameTab(Some("   ".into())))),
+        Some(Change::Renamed(Target::Tab(_), None))
+    ));
+    // A pane the tab no longer has is gone.
+    assert!(matches!(
+        terminals.phone_change(&ask(1, "t9", Op::RenamePane(Some("x".into())))),
+        Some(Change::Answered(Answer::Failed(Failure::Gone)))
+    ));
+}

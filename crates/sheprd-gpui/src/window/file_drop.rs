@@ -286,7 +286,7 @@ impl SheprdWindow {
 /// native macOS terminals, a path stays bare and readable, with a backslash
 /// before each character the shell would otherwise interpret. Validate the
 /// whole drop before allocating its output so failures never paste a prefix.
-pub(super) fn quote_paths(paths: &[PathBuf]) -> Result<String> {
+pub(crate) fn quote_paths(paths: &[PathBuf]) -> Result<String> {
     if paths.len() > MAX_PATHS {
         return Err(Error::Size.into());
     }

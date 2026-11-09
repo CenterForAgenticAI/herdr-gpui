@@ -24,6 +24,7 @@ impl SheprdWindow {
                 Some(Location::CoreTerminal {
                     panes,
                     observe: false,
+                    ..
                 }) => Some((tab.id, panes.terminals())),
                 _ => None,
             })
@@ -143,7 +144,7 @@ impl SheprdWindow {
             if shown.zoom.is_open() && shown.zoomed.as_ref() != Some(terminal) {
                 shown.set_zoom(None);
             }
-            shown.active = terminal.clone();
+            shown.activate(terminal.clone());
         }
         self.show_browser_tab(tab, window, cx);
         cx.notify();

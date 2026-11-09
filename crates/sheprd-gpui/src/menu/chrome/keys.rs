@@ -143,6 +143,10 @@ impl SheprdWindow {
             self.tab_menu_key(event, window, cx);
             return;
         }
+        if matches!(self.menu.page, Some(Page::CoreMenu | Page::RenameCore)) {
+            self.core_menu_key(event, window, cx);
+            return;
+        }
         if self.menu.page == Some(Page::Group) {
             self.group_menu_key(event, window, cx);
             return;

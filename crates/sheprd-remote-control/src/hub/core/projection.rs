@@ -60,13 +60,24 @@ pub(super) fn project(
             .filter_map(|id| records.iter().find(|record| record.address == id.as_str()))
             .filter(|record| assigned.insert(record.address.as_str()))
             .collect();
-        if let Some(terminal) = terminal(
+        if let Some(mut terminal) = terminal(
             boot,
             &format!("{}{}", super::saved::SAVED_TAB, tab.id),
             tab.title,
             &members,
             urgency,
         ) {
+            // A pane the user named shows that name, a chat's included.
+            let names = saved
+                .zip(scope)
+                .and_then(|(saved, scope)| saved.pane_names(scope, tab.id));
+            if let Some(names) = names {
+                for (pane, record) in terminal.panes.iter_mut().zip(&members) {
+                    if let Some(name) = names.get(&record.address) {
+                        pane.label = Some(name.clone());
+                    }
+                }
+            }
             add(&mut layout, tab.workspace_id, terminal);
         }
     }
@@ -75,8 +86,21 @@ pub(super) fn project(
         .filter(|record| !assigned.contains(record.address.as_str()))
     {
         let tab = pane_id(boot, &record.address);
+        // Started for a workspace, as by a phone: listed there before Sheprd
+        // puts it in a tab of its own.
+        if let Some(cwd) = sheprd_session::new_workspace(&record.labels) {
+            // A phone's new workspace, until Sheprd keeps one for it.
+            if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
+                add_new_workspace(&mut layout, cwd, terminal);
+            }
+            continue;
+        }
+        let workspace = sheprd_session::labelled_workspace(&record.labels).map_or_else(
+            || super::UNLISTED.to_owned(),
+            |labelled| crate::hub::sessions::join_id(labelled.session, labelled.id),
+        );
         if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
-            add(&mut layout, super::UNLISTED, terminal);
+            add(&mut layout, &workspace, terminal);
         }
     }
     layout
@@ -95,6 +119,31 @@ pub(super) fn lead_kept(layout: &mut Layout, saved: Option<&SavedTabs>, scope: O
         kept.iter()
             .position(|id| *id == workspace.id)
             .unwrap_or(kept.len())
+    });
+}
+
+/// A phone's new workspace in `cwd`, named for its folder, listed apart.
+/// More work there, labelled with the same folder, joins it.
+fn add_new_workspace(layout: &mut Layout, cwd: &str, terminal: Terminal) {
+    let id = super::new_workspace_id(cwd);
+    if let Some(row) = layout.workspaces.iter_mut().find(|row| row.id == id) {
+        row.terminals.push(terminal);
+        return;
+    }
+    let label = Path::new(cwd)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(cwd)
+        .to_owned();
+    layout.workspaces.push(Workspace {
+        branch: None,
+        chats: Vec::new(),
+        cwd: cwd.to_owned(),
+        id,
+        label,
+        session: None,
+        terminals: vec![terminal],
+        worktree: None,
     });
 }
 

@@ -10,14 +10,17 @@ use serde::{Deserialize, Serialize};
 
 /// The longest terminal address sent.
 pub const MAX_TERMINAL: usize = 256;
+/// The longest name a rename sends, in bytes; Sheprd trims it further.
+pub const MAX_NAME: usize = 1024;
 
 /// One change to one of Sheprd's Herdr 2 tabs.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Ask {
     pub id: AskId,
-    /// The saved tab, by the id Sheprd gave it.
+    /// The saved tab, by the id Sheprd gave it; 0 for a workspace's rename.
     pub tab: u64,
-    /// The pane's terminal, by its herdr-core address.
+    /// The pane's terminal, by its herdr-core address; empty for a
+    /// workspace's rename.
     pub terminal: String,
     pub op: Op,
 }
@@ -25,11 +28,23 @@ pub struct Ask {
 impl Ask {
     /// Whether it stays within this module's bounds.
     pub fn valid(&self) -> bool {
-        !self.terminal.is_empty() && self.terminal.len() <= MAX_TERMINAL
+        let names_pane = !self.terminal.is_empty() && self.terminal.len() <= MAX_TERMINAL;
+        match &self.op {
+            Op::RenameWorkspace { workspace, name } => {
+                !workspace.is_empty()
+                    && workspace.len() <= MAX_TERMINAL
+                    && !name.trim().is_empty()
+                    && name.len() <= MAX_NAME
+            }
+            Op::RenamePane(name) | Op::RenameTab(name) => {
+                names_pane && name.as_ref().is_none_or(|name| name.len() <= MAX_NAME)
+            }
+            Op::Close | Op::SplitDown | Op::SplitRight | Op::Zoom => names_pane,
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Op {
     /// A new shell beside the pane, as Split Right does on the desktop.
@@ -41,6 +56,12 @@ pub enum Op {
     /// The tab goes. The daemon ends its terminals; Sheprd drops the tab,
     /// which would otherwise keep its last pane, ended.
     Close,
+    /// Names the pane, as a chat's label; `None` gives back its title.
+    RenamePane(Option<String>),
+    /// Names the tab; `None` gives back its program's title.
+    RenameTab(Option<String>),
+    /// Names a workspace Sheprd keeps for Herdr 2, which has no tab here.
+    RenameWorkspace { workspace: String, name: String },
 }
 
 /// Sheprd's answer to an [`Ask`].
