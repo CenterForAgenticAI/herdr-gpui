@@ -242,9 +242,16 @@ impl<'a> Area<'a> {
     }
 
     /// The text of `rows`, bounded like a single row's; `None` past that
-    /// bound or the area.
-    pub(super) fn read(&self, rows: RangeInclusive<u16>) -> Option<Run> {
+    /// bound or the area. Where `wraps` says the terminal wrapped the row
+    /// above, the row's leading blanks are text it printed, not an indent.
+    pub(super) fn read(&self, rows: RangeInclusive<u16>, wraps: Option<&[bool]>) -> Option<Run> {
         let first = *rows.start();
+        let wrapped_above = |row: u16| {
+            row.checked_sub(1)
+                .and_then(|above| wraps?.get(usize::from(above)).copied())
+                .unwrap_or(false)
+        };
+        let kept: Vec<bool> = rows.clone().map(wrapped_above).collect();
         let rows = rows
             .map(|row| self.cells(row))
             .collect::<Option<Vec<_>>>()?;
@@ -252,9 +259,14 @@ impl<'a> Area<'a> {
         // each next row on from the one before.
         let mut reading = None;
         let mut indents = Vec::with_capacity(rows.len());
-        for cells in &rows {
+        for (cells, &kept) in rows.iter().zip(&kept) {
             let words = Words::of(cells, reading);
-            indents.push(if reading.is_some() { words.indent() } else { 0 });
+            let indent = if reading.is_some() && !kept {
+                words.indent()
+            } else {
+                0
+            };
+            indents.push(indent);
             reading = Some(words.end);
         }
         let continuing: Vec<_> = rows.iter().map(|cells| continuations(cells)).collect();

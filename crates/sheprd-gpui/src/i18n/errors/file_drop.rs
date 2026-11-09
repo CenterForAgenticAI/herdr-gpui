@@ -9,6 +9,7 @@ impl Localize for Error {
             Self::Control => fl!("error-file-drop-control"),
             Self::EmptyPath => fl!("error-file-drop-empty-path"),
             Self::Encoding => fl!("error-file-drop-encoding"),
+            Self::OtherHost => fl!("error-file-drop-other-host"),
             Self::Size => fl!("error-file-drop-size"),
         }
     }

@@ -33,10 +33,20 @@ impl Infos {
     }
 
     /// The terminal herdr-core knows by `name`.
-    pub(super) fn named(&self, name: &str) -> Option<&TerminalInfo> {
+    pub(super) fn by_name(&self, name: &str) -> Option<&TerminalInfo> {
         self.known
             .values()
             .find(|info| info.name.as_deref() == Some(name))
+    }
+
+    /// The terminal `id` names: its address, or else its name, as a terminal
+    /// found by name is shown under it.
+    pub(super) fn named(&self, id: &TerminalId) -> Option<&TerminalInfo> {
+        self.get(id).or_else(|| {
+            self.known
+                .values()
+                .find(|info| info.name.as_deref() == Some(id.as_str()))
+        })
     }
 
     /// How many of the core's terminals run an agent that is working.
