@@ -21,6 +21,7 @@ mod folders;
 mod hosts;
 mod hub;
 mod infos;
+mod phone;
 mod requests;
 mod screen;
 mod selection;
@@ -168,6 +169,8 @@ pub(crate) struct CoreTerminals {
     /// The session over herdr-core of the selected host, by its scope,
     /// while that host is this computer.
     session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
+    /// A phone's split on its way, answered once it lands or fails.
+    phone_split: Option<phone::Pending>,
     /// The tab the active group shows and its pane in use, as of the last
     /// tick, for work that runs without the app's state at hand.
     shown: Option<(TabId, TerminalId)>,
@@ -427,6 +430,7 @@ impl SheprdWindow {
             view.update(cx, |view, cx| view.poll(cx));
         }
         self.poll_core_panes(window, cx);
+        self.answer_phone_split(cx);
         if self.core_terminals.poll_infos(std::time::Instant::now()) {
             self.hear_core_agents(cx);
             cx.notify();

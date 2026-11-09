@@ -12,6 +12,7 @@ use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
 pub mod changes;
 pub mod hosts;
+pub mod layout;
 pub mod pull_requests;
 pub mod tags;
 use serde::{Deserialize, Serialize};
@@ -216,6 +217,11 @@ pub enum Request {
         id: changes::AskId,
         answer: changes::Answer,
     },
+    /// What Sheprd did with a [`layout::Ask`].
+    LayoutAnswer {
+        id: changes::AskId,
+        answer: layout::Answer,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -265,6 +271,10 @@ pub enum Response {
     },
     ChangeAsks {
         asks: Vec<changes::Ask>,
+        /// Changes phones ask for in Herdr 2 tabs' layouts. An older
+        /// daemon sends none, and an older Sheprd leaves them to time out.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        layout: Vec<layout::Ask>,
     },
 }
 
