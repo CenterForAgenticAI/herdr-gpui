@@ -105,6 +105,15 @@ impl Terminal for ScriptedTerminal {
         Ok(())
     }
 
+    fn cell_pixels(&mut self, width: u16, height: u16) -> Result<(), Failure> {
+        self.0
+            .received
+            .lock()
+            .unwrap()
+            .push(Command::CellPixels(width, height));
+        Ok(())
+    }
+
     fn focus(&mut self, focused: bool) -> Result<(), Failure> {
         self.0
             .received

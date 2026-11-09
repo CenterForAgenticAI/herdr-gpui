@@ -4,6 +4,7 @@
 mod chats;
 mod checkouts;
 mod create;
+pub(super) use create::Place;
 mod error;
 mod hold;
 mod lines;
@@ -42,9 +43,29 @@ const IDLE_SCREEN: Duration = Duration::from_secs(5);
 /// Bounds emulators and attachments even when a phone visits many panes.
 const MAX_SCREENS: usize = 16;
 const RETRY: Duration = Duration::from_secs(3);
+const NEW_WORKSPACE: &str = "core:new:";
 const PREFIX: &str = "core:";
 /// Where terminals nothing else lists go, new ones from a phone included.
 pub(super) const UNLISTED: &str = "core:terminals";
+
+/// The workspace a phone's new workspace in `cwd` is listed as until
+/// Sheprd keeps one for it: named for its folder, so it keeps its id
+/// whichever of its panes close, and safe in a path.
+pub(super) fn new_workspace_id(cwd: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(cwd.as_bytes());
+    let mut id = String::from(NEW_WORKSPACE);
+    for byte in &digest[..8] {
+        use std::fmt::Write as _;
+        let _ = write!(id, "{byte:02x}");
+    }
+    id
+}
+
+/// Whether `workspace` is one [`new_workspace_id`] names.
+pub(super) fn is_new_workspace(workspace: &str) -> bool {
+    workspace.starts_with(NEW_WORKSPACE)
+}
 
 type Result<T> = std::result::Result<T, HubError>;
 

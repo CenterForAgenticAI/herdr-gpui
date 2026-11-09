@@ -192,10 +192,10 @@ impl CoreTerminals {
     pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
         let mut changed = false;
         for host in self.hosts() {
-            // This computer's stand-in shell runs agents too.
-            let listed = self.tabs.values().any(|shown| shown.host == host)
-                || (host == Host::Local
-                    && matches!(self.fallback, super::fallback::Fallback::Shown(_)));
+            // This computer's core is read while it answers, tabs or not:
+            // a phone may start a terminal there for one of its workspaces
+            // (`adopt`), and its stand-in shell runs agents too.
+            let listed = host == Host::Local || self.tabs.values().any(|shown| shown.host == host);
             let backend = listed.then(|| self.backend_of(&host).cloned()).flatten();
             if let Some(infos) = self.infos_of_mut(&host) {
                 changed |= infos.poll(backend.as_ref(), now);

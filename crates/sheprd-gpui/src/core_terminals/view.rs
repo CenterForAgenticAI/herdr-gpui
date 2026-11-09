@@ -6,8 +6,11 @@ mod accessibility;
 mod find;
 mod history;
 pub(super) mod keys;
+mod links;
 pub(super) mod paste;
 mod pointer;
+
+pub(crate) use links::LinkClick;
 
 use super::{
     effects::Effects,
@@ -17,16 +20,18 @@ use super::{
 };
 use crate::{
     config::{FontConfig, OptionAsAlt, Padding, Theme},
+    herdr_settings::RightClickPassthrough,
     i18n::fl,
     terminal::{HeldKeys, key_input, viewport},
-    terminal_painter::{Ground, TerminalPainter},
+    terminal_painter::{Ground, ImageTarget, PlacedImages, TerminalPainter},
 };
 use gpui::{prelude::*, *};
 use sheprd_backend::{ClientPaneInputEvent, FrameData, Size, TerminalId};
 use std::{cell::RefCell, ops::Range, rc::Rc, sync::Arc};
 
-/// How the window draws terminals, copied into each view and refreshed when
-/// fonts, theme, or options change.
+/// How the window draws terminals and handles the pointer over them,
+/// copied into each view and refreshed when fonts, theme, or options change.
+/// Herdr's shared `ui` settings apply to herdr-core panes as to Herdr panes.
 #[derive(Clone, PartialEq)]
 pub(crate) struct Look {
     pub(crate) background: Hsla,
@@ -34,10 +39,19 @@ pub(crate) struct Look {
     pub(crate) cell_width: f32,
     /// The window's own look, for what the view draws over its cells.
     pub(crate) chrome: Rc<Chrome>,
+    /// Herdr's `ui.copy_on_select`: releasing a selection copies it.
+    pub(crate) copy_on_select: bool,
     pub(crate) font: Font,
     pub(crate) ground: Ground,
+    /// The GUI's `keep_selection_after_copy`: a copied selection stays
+    /// highlighted.
+    pub(crate) keep_selection: bool,
     pub(crate) option_as_alt: OptionAsAlt,
     pub(crate) padding: Padding,
+    /// Herdr's `ui.right_click_passthrough_modifier`.
+    pub(crate) right_click_passthrough: RightClickPassthrough,
+    /// Herdr's `ui.mouse_scroll_lines`: lines one wheel notch scrolls.
+    pub(crate) scroll_lines: std::num::NonZeroU16,
 }
 
 /// The window's colors and interface font, for the find bar a view draws.
@@ -46,6 +60,20 @@ pub(crate) struct Chrome {
     pub(crate) theme: Theme,
     pub(crate) ui: FontConfig,
 }
+
+/// What a view asks of the window it is in.
+#[derive(Debug)]
+pub(crate) enum ToWindow {
+    /// Open a link clicked with the link modifier held.
+    OpenLink(LinkClick),
+    /// Say that a selection went to the clipboard.
+    Copied,
+    /// Say why something the user did was refused.
+    Refused(crate::Error),
+}
+
+/// How a view reaches the window it is in.
+pub(crate) type WindowCall = Rc<dyn Fn(ToWindow, &mut Window, &mut App)>;
 
 /// The least room a split's cells keep from their pane's edges, across
 /// and down.
@@ -64,6 +92,8 @@ pub(crate) struct PaneLook {
 pub(crate) struct CoreTerminalView {
     /// Where the cells were last painted, for the IME's candidate window.
     bounds: Option<Bounds<Pixels>>,
+    /// The terminal's working directory, as herdr-core last reported it.
+    cwd: Option<String>,
     /// Bells and clipboard writes the window has not taken yet.
     effects: Effects,
     /// The history text asked for an editor, once it arrived.
@@ -81,6 +111,8 @@ pub(crate) struct CoreTerminalView {
     hovered: Option<Cell>,
     id: TerminalId,
     link: Link,
+    /// The link under the pointer and the one a press went down on.
+    links: links::Links,
     look: Look,
     /// Text an IME is composing; committed text goes to the terminal.
     marked: String,
@@ -93,13 +125,19 @@ pub(crate) struct CoreTerminalView {
     pane: Option<PaneLook>,
     /// Where the button held down is going.
     press: Option<pointer::Press>,
+    /// Whether the terminal runs in another host's core.
+    remote: bool,
     selection: Option<Selection>,
     /// The last frame painted with its cursor hidden, and the frame it came
     /// from, so a veiled pane copies a frame once rather than every paint.
     sleeping: Option<(Arc<FrameData>, Arc<FrameData>)>,
     screen: Screen,
+    /// The cell size in whole pixels the terminal was last told.
+    sent_cell: Option<(u16, u16)>,
     sent_focus: Option<bool>,
     sent_size: Option<Size>,
+    /// The window's end; a view on its own, as in tests, has none.
+    to_window: Option<WindowCall>,
     /// Wheel motion short of a whole row, kept for the next event.
     wheel_rest: f32,
 }
@@ -120,6 +158,7 @@ impl CoreTerminalView {
     ) -> Self {
         Self {
             bounds: None,
+            cwd: None,
             effects: Effects::default(),
             edit_ready: None,
             editing: None,
@@ -130,6 +169,7 @@ impl CoreTerminalView {
             hovered: None,
             id,
             link,
+            links: links::Links::default(),
             look,
             marked: String::new(),
             next_request: 0,
@@ -137,12 +177,40 @@ impl CoreTerminalView {
             painter,
             pane: None,
             press: None,
+            remote: false,
             selection: None,
             sleeping: None,
             screen: Screen::default(),
+            sent_cell: None,
             sent_focus: None,
             sent_size: None,
+            to_window: None,
             wheel_rest: 0.,
+        }
+    }
+
+    /// Lets the view reach the window it is in.
+    pub(crate) fn with_window(mut self, to_window: WindowCall) -> Self {
+        self.to_window = Some(to_window);
+        self
+    }
+
+    /// Keeps the working directory a printed relative path is read
+    /// against, and reads the link under the pointer again when it moved.
+    pub(crate) fn set_cwd(&mut self, cwd: Option<&std::path::Path>, cx: &mut Context<Self>) {
+        let cwd = cwd.and_then(std::path::Path::to_str);
+        if self.cwd.as_deref() != cwd {
+            self.cwd = cwd.map(str::to_owned);
+            self.rehover_link(cx);
+        }
+    }
+
+    /// Whether the pane's terminal runs in another host's core, whose
+    /// printed paths are no link to a file on this computer.
+    pub(crate) fn set_remote(&mut self, remote: bool, cx: &mut Context<Self>) {
+        if self.remote != remote {
+            self.remote = remote;
+            self.rehover_link(cx);
         }
     }
 
@@ -215,6 +283,7 @@ impl CoreTerminalView {
                 });
             }
             self.screen = screen;
+            self.rehover_link(cx);
             cx.notify();
         }
         self.take_answers(cx);
@@ -248,6 +317,13 @@ impl CoreTerminalView {
             self.look.cell_width,
             self.look.cell_height,
         );
+        // Clamped first, so the casts cannot truncate.
+        let whole = |side: f32| side.round().clamp(1., f32::from(u16::MAX)) as u16;
+        let cell = (whole(self.look.cell_width), whole(self.look.cell_height));
+        if self.sent_cell != Some(cell) {
+            self.sent_cell = Some(cell);
+            self.link.send(Command::CellPixels(cell.0, cell.1));
+        }
         let Ok(size) = Size::new(fits.cols, fits.rows) else {
             return;
         };
@@ -264,11 +340,20 @@ impl CoreTerminalView {
         }
         let modifiers = event.keystroke.modifiers;
         // Cmd-C copies a selection, as the window's copy does a Herdr pane's.
-        if modifiers.platform
-            && !modifiers.control
+        // Ctrl-C does too only while `copy_on_select` is off, as in Herdr,
+        // where the highlight waits for that copy; a selection the release
+        // already copied must not stop Ctrl-C from interrupting the program.
+        let copies = if modifiers.platform {
+            !modifiers.control && !modifiers.shift
+        } else {
+            modifiers.control && (modifiers.shift || !self.look.copy_on_select)
+        };
+        if copies
+            && !modifiers.alt
             && event.keystroke.key.eq_ignore_ascii_case("c")
             && self.copy_selection(cx)
         {
+            self.finish_copy(window, cx);
             cx.stop_propagation();
             window.prevent_default();
             return;
@@ -285,7 +370,7 @@ impl CoreTerminalView {
             cfg!(any(windows, target_os = "linux")),
             has_text,
         ) {
-            self.paste_clipboard(cx);
+            self.paste_clipboard(window, cx);
             cx.stop_propagation();
             window.prevent_default();
             return;
@@ -364,9 +449,13 @@ impl Render for CoreTerminalView {
         let painter = self.painter.clone();
         let look = self.look.clone();
         let frame = self.frame_to_paint();
+        let graphics = self.screen.graphics.clone();
+        let images = self.screen.images.0.clone();
         let mut highlights = self.find_highlights();
         highlights.extend(self.highlights());
         let find_bar = self.render_find(cx);
+        let link_rows = self.link_rows();
+        let on_link = !link_rows.is_empty();
         let pane = self.pane;
         let background = self.look.background;
         let focus = self.focus.clone();
@@ -400,10 +489,23 @@ impl Render for CoreTerminalView {
                                 &highlights,
                                 &[],
                                 None,
-                                None,
+                                (!graphics.is_empty()).then_some(PlacedImages {
+                                    placements: &graphics,
+                                    images: &images,
+                                    target: ImageTarget::Main,
+                                }),
                                 window,
                                 cx,
                             );
+                            if !link_rows.is_empty() {
+                                painter.borrow().paint_link(
+                                    frame,
+                                    bounds.origin,
+                                    look.cell_width,
+                                    &link_rows,
+                                    window,
+                                );
+                            }
                         });
                     },
                 )
@@ -446,6 +548,8 @@ impl Render for CoreTerminalView {
             .min_w_0()
             .size_full()
             .bg(self.look.background)
+            // A hand marks the verified link a click opens.
+            .when(on_link, |root| root.cursor_pointer())
             .when_some(pane, |root, pane| {
                 // A split's cells never run into its gutter, whatever the
                 // configured padding.
@@ -460,15 +564,31 @@ impl Render for CoreTerminalView {
             })
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
+            .on_action(cx.listener(|this, _: &crate::actions::Copy, window, cx| {
+                if !this.find_focused(window, cx) && this.copy_selection(cx) {
+                    this.finish_copy(window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &crate::actions::Paste, window, cx| {
                 if !this.find_focused(window, cx) {
-                    this.paste_clipboard(cx);
+                    this.paste_clipboard(window, cx);
                 }
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
+            .on_modifiers_changed(
+                cx.listener(|this, event: &ModifiersChangedEvent, window, cx| {
+                    this.hover_link(window.mouse_position(), event.modifiers, cx);
+                }),
+            )
+            // Moves off the pane reach it no more, so leaving drops the hover.
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !*hovered {
+                    this.leave_link(cx);
+                }
+            }))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up(MouseButton::Right, cx.listener(Self::mouse_up))
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::mouse_up))

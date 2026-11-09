@@ -1,5 +1,6 @@
 use crate::{
     AgentStatus, CursorState, Error, FrameData, PaneSurfacePatchRow, Result, ScrollMetrics,
+    SurfaceGraphicsScene,
 };
 use std::{collections::BTreeMap, fmt, path::PathBuf};
 
@@ -172,6 +173,9 @@ pub enum SurfaceUpdate {
     Ended(Exit),
     /// The whole visible screen.
     Frame(FrameData),
+    /// The images on screen changed: every placement, and the bytes of each
+    /// image the previous update's placements did not show.
+    Graphics(SurfaceGraphicsScene),
     /// Which key events the program asked for beyond typed text.
     KeyReporting(KeyReporting),
     /// Whether the program reads the mouse: presses and drags go to it,
@@ -189,4 +193,7 @@ pub enum SurfaceUpdate {
         revision: u64,
     },
     Title(String),
+    /// Whether each visible row's line goes on to the next row because the
+    /// terminal wrapped it, which a frame cannot say; sent when it changes.
+    Wraps(Vec<bool>),
 }

@@ -25,10 +25,14 @@ pub(super) fn look() -> Look {
             theme: Default::default(),
             ui: crate::config::Config::default().ui,
         }),
+        copy_on_select: true,
         font: gpui::font("Menlo"),
         ground: Default::default(),
+        keep_selection: true,
         option_as_alt: Default::default(),
         padding: Default::default(),
+        right_click_passthrough: Default::default(),
+        scroll_lines: crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
     }
 }
 

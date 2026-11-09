@@ -7,6 +7,7 @@ fn every_file_drop_variant_has_a_message() {
         Error::Control,
         Error::EmptyPath,
         Error::Encoding,
+        Error::OtherHost,
         Error::Size,
     ]);
 }

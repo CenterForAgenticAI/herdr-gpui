@@ -54,3 +54,16 @@ fn tabs_show_as_blanks() {
     assert_eq!(cell(&frame, 1, 0).symbol, " ");
     assert_eq!(cell(&frame, 8, 0).symbol, "b");
 }
+
+#[test]
+fn rows_the_terminal_wrapped_are_told_from_lines_that_fill_them() {
+    let mut emulator = fed(4, 5, b"abcdefghij\r\nwxyz\r\nk");
+    // "abcd" and "efgh" go on; "wxyz" fills its row but ends there.
+    assert_eq!(emulator.wrapped_rows(), [true, true, false, false, false]);
+    // Two lines scroll "abcd" and "efgh" off; scrolled back, the flags
+    // follow the rows shown.
+    emulator.feed(b"\r\n\r\n");
+    assert_eq!(emulator.wrapped_rows(), [false, false, false, false, false]);
+    emulator.scroll(Scroll::Lines(1));
+    assert_eq!(emulator.wrapped_rows(), [true, false, false, false, false]);
+}

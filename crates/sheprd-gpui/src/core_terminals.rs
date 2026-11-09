@@ -11,6 +11,8 @@
 //! The window reads their mailboxes on its tick and renders the prepared
 //! screens.
 
+mod adopt;
+mod asks;
 mod checkouts;
 mod commands;
 mod context;
@@ -40,10 +42,11 @@ mod workspaces;
 mod tests;
 
 pub(crate) use error::Error;
+pub(crate) use fallback::Holder;
 pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
-pub(crate) use view::{CoreTerminalView, Look};
+pub(crate) use view::{CoreTerminalView, LinkClick, Look};
 
 use crate::{
     SheprdWindow,
@@ -156,6 +159,11 @@ const MAX_WANTED: usize = 16;
 /// The window's herdr-core state.
 #[derive(Default)]
 pub(crate) struct CoreTerminals {
+    /// When terminals labelled for a workspace were last looked at.
+    adopt_checked: Option<std::time::Instant>,
+    /// Terminals labelled for a workspace that were put in a tab, so each
+    /// is put in one only once.
+    adopted: std::collections::HashSet<TerminalId>,
     /// The Git checkout of each kept workspace's folder and of the shown
     /// pane's.
     checkouts: checkouts::Checkouts,
@@ -260,6 +268,14 @@ impl CoreTerminals {
         self.tabs.insert(tab, shown);
     }
 
+    /// Places `tab` in `workspace` of `scope`, as showing the workspace does.
+    #[cfg(test)]
+    pub(crate) fn place_for_test(&mut self, tab: TabId, scope: Scope, workspace: &str) {
+        if let Some(shown) = self.tabs.get_mut(&tab) {
+            shown.workspace = Some((scope, workspace.to_owned()));
+        }
+    }
+
     /// Whether `tab` is a herdr-core tab that holds chats: it drives its
     /// terminals, rather than a mirror that only watches, on this computer.
     pub(crate) fn drives(&self, tab: TabId) -> bool {
@@ -303,6 +319,14 @@ impl CoreTerminals {
             .iter()
             .find(|(_, shown)| shown.holds_chats() && shown.panes.contains(terminal))
             .map(|(id, _)| *id)
+    }
+
+    /// Whether a tab on this computer's core shows `terminal`, a mirror
+    /// included, which [`Self::tab_of`] leaves out.
+    pub(crate) fn mirrors(&self, terminal: &TerminalId) -> bool {
+        self.tabs
+            .values()
+            .any(|shown| shown.host == Host::Local && shown.panes.contains(terminal))
     }
 
     /// The tab and pane whose view holds the keyboard.
@@ -467,9 +491,28 @@ impl SheprdWindow {
         );
         self.poll_core_panes(window, cx);
         self.poll_core_edits(cx);
+        // While a phone may start work here, this computer's core is joined
+        // (never started) to see it, with or without a tab of its own.
+        if crate::remote::supervisor::Supervisor::enabled(cx) {
+            self.core_terminals.hub.connect(Start::Join);
+        }
+        // Split chrome and the sidebar's rows name panes from what herdr-core
+        // reports, and the shell shown in place of Herdr 1 reads its links
+        // against its folder, which this computer's core reports.
+        let fallback = self.core_fallback_view();
         self.answer_phone_split(cx);
-        if self.core_terminals.poll_infos(std::time::Instant::now()) {
+        let listed = self.core_terminals.poll_infos(std::time::Instant::now());
+        self.adopt_labelled_terminals(listed, cx);
+        if listed {
             cx.notify();
+        }
+        if let Some(view) = fallback {
+            let cwd = self
+                .core_terminals
+                .infos_of(&Host::Local)
+                .and_then(|infos| infos.named(view.read(cx).terminal()))
+                .and_then(|info| info.cwd.clone());
+            view.update(cx, |view, cx| view.set_cwd(cwd.as_deref(), cx));
         }
         self.core_terminals.shown = self.shown_core_pane(cx);
         if !cx.has_active_drag() {
@@ -580,6 +623,7 @@ impl SheprdWindow {
 
     /// How the window draws terminals, for its herdr-core views.
     pub(crate) fn core_look(&self) -> Look {
+        let shared = self.settings.shared.as_ref();
         Look {
             background: self.fill().base(self.terminal_theme().background),
             cell_height: self.config.terminal.line_height(),
@@ -588,10 +632,19 @@ impl SheprdWindow {
                 theme: self.theme.clone(),
                 ui: self.config.ui.clone(),
             }),
+            copy_on_select: shared.is_none_or(|shared| shared.copy_on_select),
             font: self.config.terminal.font(),
             ground: self.ground(),
+            keep_selection: self.config.keep_selection_after_copy,
             option_as_alt: self.config.option_as_alt,
             padding: self.config.terminal_padding,
+            right_click_passthrough: shared
+                .map(|shared| shared.right_click_passthrough)
+                .unwrap_or_default(),
+            scroll_lines: shared.map_or(
+                crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
+                |shared| shared.mouse_scroll_lines,
+            ),
         }
     }
 
