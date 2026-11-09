@@ -59,8 +59,10 @@ fn staged_metadata_reports_a_finished_turn() {
     live.apply(ClientEvent::Snapshot(Arc::new(done)));
     assert!(Arc::ptr_eq(live.snapshot.as_ref().unwrap(), &displayed));
     let mut checkpoints = Checkpoints::default();
-    checkpoints.observe("local", &Host::Local, &displayed);
-    checkpoints.observe("local", &Host::Local, live.latest_snapshot().unwrap());
+    let shown = crate::session_model::of_snapshot(&displayed);
+    checkpoints.observe("local", &Host::Local, &displayed.boot_id, &Arc::new(shown));
+    let (boot, latest) = live.latest_session().unwrap();
+    checkpoints.observe("local", &Host::Local, boot, &latest);
     assert_eq!(
         checkpoints.queued(),
         [(

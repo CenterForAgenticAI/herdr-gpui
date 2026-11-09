@@ -3,14 +3,16 @@
 //! step with the reason at the end of its log.
 
 use crate::{
+    drive::Drive,
     fingerprint::WorktreeScripts,
-    herdr::Herdr,
+    herdr_core::{AgentStart, HerdrCore},
     paths::{Paths, private_dir, private_file},
     process::{self, Job},
     runner::Reservation,
     store::{AgentRow, Store},
 };
 use sheprd_automation::{Resolved, Step};
+use sheprd_core_client::agent::Until;
 use std::{
     cell::Cell,
     ffi::OsStr,
@@ -32,12 +34,16 @@ pub enum Error {
     },
     #[error(transparent)]
     Herdr(#[from] crate::herdr::Error),
+    #[error(transparent)]
+    HerdrCore(#[from] crate::herdr_core::Error),
     #[error("worktree scripts need a Unix shell")]
     NeedsUnixShell,
     #[error("{} has no {name} script", path.display())]
     NoWorktreeScript { path: PathBuf, name: String },
     #[error("a personal script has no repository; move it to a repository's .herdr/automations")]
     NoRepository,
+    #[error(transparent)]
+    Notify(#[from] crate::notify::Error),
     #[error(transparent)]
     Run(#[from] crate::Error),
     #[error(
@@ -53,7 +59,7 @@ pub enum Error {
 pub struct StepContext<'a> {
     pub paths: &'a Paths,
     pub store: &'a Store,
-    pub herdr: &'a Herdr,
+    pub drive: &'a Drive,
     pub run: i64,
     pub script_path: &'a str,
     pub script_name: &'a str,
@@ -90,18 +96,21 @@ pub fn execute(
 ) -> StepResult {
     let log = context.paths.step_log(context.run, position);
     // Herdr calls end with the step too, as its commands do.
-    let herdr = context
-        .herdr
-        .bounded(context.stop.clone(), Instant::now() + timeout);
+    let deadline = Instant::now() + timeout;
+    let drive = context.drive.bounded(context.stop.clone(), deadline);
     let context = &StepContext {
-        herdr: &herdr,
+        drive: &drive,
         ..*context
+    };
+    let until = Until {
+        deadline,
+        stop: context.stop,
     };
     let result = match &step.call.step {
         Step::Pull { branch } => pull(context, &log, branch, timeout),
         Step::Run { name } => worktree_script(context, &log, name, timeout),
         Step::Sh { command } => shell(context, &log, command, &step.env, timeout),
-        Step::Worktree { name, base } => worktree(context, name, base.as_deref()),
+        Step::Worktree { name, base } => worktree(context, name, base.as_deref(), until),
         Step::Agent {
             harness,
             prompt,
@@ -110,14 +119,18 @@ pub fn execute(
             wait,
         } => agent(
             context,
-            position,
-            harness,
-            prompt,
-            worktree.as_deref(),
-            base.as_deref(),
-            wait.then_some(timeout),
+            &log,
+            &Agent {
+                position,
+                harness,
+                prompt,
+                worktree: worktree.as_deref(),
+                base: base.as_deref(),
+                wait: wait.then_some(timeout),
+            },
+            until,
         ),
-        Step::Notify { text } => notify(context, text),
+        Step::Notify { text } => notify(context, text, until),
     };
     match result {
         Ok(mut result) => {
@@ -307,73 +320,142 @@ fn shell(
     })
 }
 
-fn worktree(context: &StepContext<'_>, name: &str, base: Option<&str>) -> Outcome {
+fn worktree(
+    context: &StepContext<'_>,
+    name: &str,
+    base: Option<&str>,
+    until: Until<'_>,
+) -> Outcome {
     let repo = repo(context)?;
-    context.herdr.ensure_server()?;
-    let created = context.herdr.create_worktree(repo, name, base)?;
+    let (path, pane) = match context.drive {
+        Drive::Herdr(herdr) => {
+            herdr.ensure_server()?;
+            let created = herdr.create_worktree(repo, name, base)?;
+            (created.path, Some(created.pane))
+        }
+        // herdr-core has no workspace to open a shell in; the checkout is
+        // what later steps use.
+        Drive::HerdrCore(_) => {
+            let checkout = HerdrCore::create_worktree(repo, name, base, until)?;
+            (checkout.to_string_lossy().into_owned(), None)
+        }
+    };
     Ok(StepResult {
         ok: true,
-        log_tail: format!("created worktree {} on {name}", created.path),
-        worktree: Some(created.path),
-        pane: Some(created.pane),
+        log_tail: format!("created worktree {path} on {name}"),
+        worktree: Some(path),
+        pane,
         ..StepResult::default()
     })
 }
 
-fn agent(
-    context: &StepContext<'_>,
+/// An agent step as the plan resolved it.
+struct Agent<'a> {
     position: u32,
-    harness: &str,
-    prompt: &str,
-    worktree: Option<&str>,
-    base: Option<&str>,
+    harness: &'a str,
+    prompt: &'a str,
+    worktree: Option<&'a str>,
+    base: Option<&'a str>,
     wait: Option<Duration>,
-) -> Outcome {
+}
+
+/// Starts the agent in a new worktree, records it so it counts and is
+/// sampled, then sends the prompt.
+fn agent(context: &StepContext<'_>, log: &Path, step: &Agent<'_>, until: Until<'_>) -> Outcome {
     let repo = repo(context)?;
-    context.herdr.ensure_server()?;
-    let branch = worktree.map(str::to_owned).unwrap_or_else(|| {
+    let branch = step.worktree.map(str::to_owned).unwrap_or_else(|| {
         format!(
-            "automate/{}-{}-{position}",
-            context.script_name, context.run
+            "automate/{}-{}-{}",
+            context.script_name, context.run, step.position
         )
     });
-    let created = context.herdr.create_worktree(repo, &branch, base)?;
     let label = format!("{}-{}", context.script_name, context.run);
-    context.herdr.start_agent(&label, harness, &created.pane)?;
+    let (pane, cwd) = match context.drive {
+        Drive::Herdr(herdr) => {
+            herdr.ensure_server()?;
+            let created = herdr.create_worktree(repo, &branch, step.base)?;
+            herdr.start_agent(&label, step.harness, &created.pane)?;
+            (created.pane, created.path)
+        }
+        Drive::HerdrCore(core) => {
+            let started = core.start_agent(
+                &AgentStart {
+                    repo,
+                    branch: &branch,
+                    base: step.base,
+                    harness: step.harness,
+                    label: &label,
+                },
+                until,
+            )?;
+            (
+                started.terminal,
+                started.checkout.to_string_lossy().into_owned(),
+            )
+        }
+    };
     let row = AgentRow {
         run: context.run,
-        position,
+        position: step.position,
         path: context.script_path.to_owned(),
-        harness: harness.to_owned(),
-        pane: created.pane.clone(),
-        cwd: created.path.clone(),
+        harness: step.harness.to_owned(),
+        pane: pane.clone(),
+        cwd: cwd.clone(),
         started_at: (context.now)(),
+        terminals: context.drive.terminals(),
         ..AgentRow::default()
     };
     context.store.add_agent(&row)?;
     drop(context.reserved.take());
-    context.herdr.prompt(&created.pane, prompt, wait)?;
-    let waited = if wait.is_some() {
+    let prompted = match context.drive {
+        Drive::Herdr(herdr) => herdr
+            .prompt(&pane, step.prompt, step.wait)
+            .map_err(Error::from),
+        Drive::HerdrCore(core) => core
+            .prompt(&pane, step.prompt, step.wait.is_some(), until)
+            .map_err(Error::from),
+    };
+    if let Err(error) = prompted {
+        // The agent runs, so its step keeps its pane: the run's page can
+        // still open it, such as to answer the dialog that held the prompt.
+        let reason = error.to_string();
+        note(log, &reason);
+        return Ok(StepResult {
+            log_tail: process::tail(log, process::TAIL_BYTES)
+                .map(|(text, _)| text)
+                .unwrap_or(reason),
+            worktree: Some(cwd),
+            pane: Some(pane.clone()),
+            run_id: Some(pane),
+            ..StepResult::default()
+        });
+    }
+    let waited = if step.wait.is_some() {
         ", and it finished"
     } else {
         ""
     };
+    let harness = step.harness;
     Ok(StepResult {
         ok: true,
-        log_tail: format!(
-            "started {harness} in pane {} at {} and sent the prompt{waited}",
-            created.pane, created.path
-        ),
-        worktree: Some(created.path),
-        pane: Some(created.pane.clone()),
-        run_id: Some(created.pane),
+        log_tail: format!("started {harness} in pane {pane} at {cwd} and sent the prompt{waited}"),
+        worktree: Some(cwd),
+        pane: Some(pane.clone()),
+        run_id: Some(pane),
         ..StepResult::default()
     })
 }
 
-fn notify(context: &StepContext<'_>, text: &str) -> Outcome {
-    context.herdr.ensure_server()?;
-    context.herdr.notify(context.script_name, text)?;
+fn notify(context: &StepContext<'_>, text: &str, until: Until<'_>) -> Outcome {
+    match context.drive {
+        Drive::Herdr(herdr) => {
+            herdr.ensure_server()?;
+            herdr.notify(context.script_name, text)?;
+        }
+        Drive::HerdrCore(_) => {
+            crate::notify::show(context.script_name, text, || until.check().is_err())?
+        }
+    }
     Ok(StepResult {
         ok: true,
         log_tail: format!("notified: {text}"),

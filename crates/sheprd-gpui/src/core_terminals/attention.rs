@@ -10,39 +10,9 @@ use gpui::{prelude::*, *};
 use sheprd_backend::{AgentStatus, TerminalId};
 use sheprd_client::protocol::SemanticNotificationSound;
 use std::{
-    collections::{HashMap, VecDeque},
-    time::Instant,
+    collections::{HashMap, HashSet, VecDeque},
+    time::{Duration, Instant},
 };
-
-/// The most changes waiting out the delay; older ones give way.
-const MAX_DUE: usize = 32;
-
-/// What each herdr-core agent last reported, app-wide: every window lists the
-/// same core, so a change is news once, in whichever window hears it first.
-#[derive(Default)]
-pub(crate) struct Heard(HashMap<TerminalId, AgentStatus>);
-
-impl Global for Heard {}
-
-impl Heard {
-    /// Takes the status of each `listed` terminal and returns what changed
-    /// into news. Terminals the core no longer has, by `known`, are
-    /// forgotten.
-    pub(super) fn hear<'a>(
-        &mut self,
-        listed: impl IntoIterator<Item = (&'a TerminalId, AgentStatus)>,
-        known: impl Fn(&TerminalId) -> bool,
-    ) -> Vec<(TerminalId, News)> {
-        self.0.retain(|terminal, _| known(terminal));
-        listed
-            .into_iter()
-            .filter_map(|(terminal, status)| {
-                let before = self.0.insert(terminal.clone(), status);
-                News::of(before, status).map(|news| (terminal.clone(), news))
-            })
-            .collect()
-    }
-}
 
 /// A change worth a sound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,19 +51,101 @@ impl News {
     }
 }
 
-/// The window's news waiting out the delay.
+/// The most changes waiting out the delay; older ones give way.
+const MAX_DUE: usize = 32;
+/// How long past its delay a change may still play: one no window could play
+/// in time, as every window lost the core, is old news.
+const STALE: Duration = Duration::from_secs(5);
+
+/// What each herdr-core agent last reported, and the changes waiting out the
+/// delay, app-wide. Every window lists this computer's core on its own, so a
+/// change is news once, in whichever window hears it first, and any window
+/// still connected plays it.
 #[derive(Default)]
-pub(super) struct Attention {
+pub(crate) struct Heard {
+    status: HashMap<TerminalId, AgentStatus>,
+    /// When the newest list taken was asked for. Windows read the core on
+    /// their own, so an older list can arrive after a newer one.
+    newest: Option<Instant>,
     due: VecDeque<(Instant, TerminalId, News)>,
+    /// The terminals each window shows while it is the active one.
+    front: HashMap<WindowId, HashSet<TerminalId>>,
 }
 
-impl Attention {
-    fn push(&mut self, heard: Instant, terminal: TerminalId, news: News) {
+impl Global for Heard {}
+
+impl Heard {
+    /// Takes the status of each `listed` terminal, from a list asked for at
+    /// `read`, and returns what changed into news. Terminals the core no
+    /// longer has, by `known`, are forgotten. A list older than one already
+    /// taken tells nothing.
+    pub(super) fn hear<'a>(
+        &mut self,
+        read: Instant,
+        listed: impl IntoIterator<Item = (&'a TerminalId, AgentStatus)>,
+        known: impl Fn(&TerminalId) -> bool,
+    ) -> Vec<(TerminalId, News)> {
+        if self.newest.is_some_and(|newest| read < newest) {
+            return Vec::new();
+        }
+        self.newest = Some(read);
+        self.status.retain(|terminal, _| known(terminal));
+        listed
+            .into_iter()
+            .filter_map(|(terminal, status)| {
+                let before = self.status.insert(terminal.clone(), status);
+                News::of(before, status).map(|news| (terminal.clone(), news))
+            })
+            .collect()
+    }
+
+    /// Queues `news` heard at `heard`, replacing what waited for the same
+    /// terminal.
+    pub(super) fn push(&mut self, heard: Instant, terminal: TerminalId, news: News) {
         self.due.retain(|(_, waiting, _)| *waiting != terminal);
         if self.due.len() == MAX_DUE {
             self.due.pop_front();
         }
         self.due.push_back((heard, terminal, news));
+    }
+
+    /// Records the terminals `window` shows in front: none unless it is
+    /// active. Windows no longer `open` are forgotten.
+    pub(super) fn show(
+        &mut self,
+        window: WindowId,
+        shown: HashSet<TerminalId>,
+        open: impl Fn(WindowId) -> bool,
+    ) {
+        self.front.retain(|id, _| open(*id));
+        if shown.is_empty() {
+            self.front.remove(&window);
+        } else {
+            self.front.insert(window, shown);
+        }
+    }
+
+    /// Takes the news to play at `now`: past `delay`, still true of the
+    /// latest status, and, for a finished turn, not in front of the user.
+    /// What is still waiting stays; what went stale or untrue is dropped.
+    pub(super) fn take_due(&mut self, now: Instant, delay: Duration) -> Vec<(TerminalId, News)> {
+        let mut play = Vec::new();
+        for (heard, terminal, news) in std::mem::take(&mut self.due) {
+            if now < heard + delay {
+                self.due.push_back((heard, terminal, news));
+                continue;
+            }
+            let holds = self
+                .status
+                .get(&terminal)
+                .is_some_and(|status| news.holds(*status));
+            let seen = news == News::Finished
+                && self.front.values().any(|shown| shown.contains(&terminal));
+            if holds && !seen && now <= heard + delay + STALE {
+                play.push((terminal, news));
+            }
+        }
+        play
     }
 }
 
@@ -102,64 +154,71 @@ impl SheprdWindow {
     /// Call when the list changed.
     pub(super) fn hear_core_agents(&mut self, cx: &mut Context<Self>) {
         let terminals = &self.core_terminals;
+        let Some(read) = terminals.infos.read_at() else {
+            return;
+        };
         let listed: Vec<(&TerminalId, AgentStatus)> = terminals
             .chat_terminals()
             .map(|info| (&info.id, info.agent))
             .collect();
-        let news = cx
-            .default_global::<Heard>()
-            .hear(listed, |terminal| terminals.infos.get(terminal).is_some());
+        let heard = cx.default_global::<Heard>();
+        let news = heard.hear(read, listed, |terminal| {
+            terminals.infos.get(terminal).is_some()
+        });
         let now = Instant::now();
         for (terminal, news) in news {
-            self.core_terminals.attention.push(now, terminal, news);
+            heard.push(now, terminal, news);
         }
     }
 
     /// Plays the news whose delay is over and still holds, and counts the
-    /// agents that need the user on the badge. Runs every tick.
+    /// agents that need the user on the badge. Runs every tick, after
+    /// `core_terminals.shown` is current. A window that lost the core
+    /// counts, shows, and plays nothing, as what it last heard is stale.
     pub(super) fn tell_core_agents(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let id = window.window_handle().window_id();
+        let connected = self.core_terminals.hub.backend().is_some();
         #[cfg(any(target_os = "macos", windows))]
         {
             // Counted as a Herdr 1 agent is: blocked, or done.
-            let attention: std::collections::HashSet<TerminalId> = self
+            let attention: HashSet<TerminalId> = self
                 .core_terminals
                 .chat_terminals()
+                .filter(|_| connected)
                 .filter(|info| matches!(info.agent, AgentStatus::Blocked | AgentStatus::Done))
                 .map(|info| info.id.clone())
                 .collect();
-            crate::app_badge::sync_core(window.window_handle().window_id(), attention, cx);
+            crate::app_badge::sync_core(id, attention, cx);
         }
-        if self.core_terminals.attention.due.is_empty() {
+        // The tab the active window shows, a chat's included, whatever
+        // holds the keyboard.
+        let shown: HashSet<TerminalId> = self
+            .core_terminals
+            .shown
+            .as_ref()
+            .filter(|_| connected && window.is_window_active())
+            .and_then(|(tab, _)| self.core_terminals.tabs.get(tab))
+            .filter(|shown| shown.holds_chats())
+            .map(|shown| shown.panes.terminals().into_iter().cloned().collect())
+            .unwrap_or_default();
+        let open: HashSet<WindowId> = cx
+            .windows()
+            .iter()
+            .map(|handle| handle.window_id())
+            .collect();
+        let heard = cx.default_global::<Heard>();
+        heard.show(id, shown, |window| open.contains(&window));
+        if !connected || heard.due.is_empty() {
             return;
         }
         // Until the settings load, the default delay of a second.
-        let delay = std::time::Duration::from_secs(self.sound.delay().unwrap_or(1));
-        let now = Instant::now();
-        let in_front = window
-            .is_window_active()
-            .then(|| self.core_terminals.focused_pane(window, cx))
-            .flatten()
-            .map(|(tab, _)| tab);
-        let due = std::mem::take(&mut self.core_terminals.attention.due);
-        for (heard, terminal, news) in due {
-            if now < heard + delay {
-                self.core_terminals
-                    .attention
-                    .due
-                    .push_back((heard, terminal, news));
-                continue;
-            }
-            let Some(info) = self.core_terminals.infos.get(&terminal) else {
-                continue;
-            };
-            if !news.holds(info.agent) {
-                continue;
-            }
-            let shown = in_front.is_some() && in_front == self.core_terminals.tab_of(&terminal);
-            if news == News::Finished && shown {
-                continue;
-            }
-            let agent = sheprd_core_client::agent_kind(info);
+        let delay = Duration::from_secs(self.sound.delay().unwrap_or(1));
+        for (terminal, news) in heard.take_due(Instant::now(), delay) {
+            let agent = self
+                .core_terminals
+                .infos
+                .get(&terminal)
+                .and_then(sheprd_core_client::agent_kind);
             self.sound.play_agent(
                 news.sound(),
                 agent.map(|agent| agent.name()),

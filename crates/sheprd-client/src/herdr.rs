@@ -6,5 +6,6 @@ mod agent_kind;
 pub mod convert;
 pub mod processes;
 pub mod snapshot;
+pub mod worktree;
 
 pub use agent_kind::AgentKind;

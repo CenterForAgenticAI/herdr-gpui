@@ -77,7 +77,7 @@ The pairing page offers the certificate authority to install on the phone. Pairi
 
 Add the page to your Home Screen to install it as an app. On iOS, Safari and the Home Screen app keep separate storage; the paired browser hands its pairing over to the installed app without a second approval. An unpaired Home Screen app can also scan a fresh pairing code directly.
 
-Workspace headers show their pull request's number and status color, as on the desktop. Tapping the badge opens the pull request. No GitHub credentials are sent to the phone.
+Workspace headers show their pull request's number and status color, as on the desktop, for Herdr 2 workspaces too. Tapping the badge opens the pull request. No GitHub credentials are sent to the phone.
 
 ## Notifications
 
@@ -89,7 +89,7 @@ The app icon's badge counts agents that want you: those with a question, those H
 
 ## Your other machines
 
-Allowing a phone can also pair it directly with the SSH and cloud machines Sheprd connects to. The Allow step lists them under "Also pair it with these machines, so it reaches them while this computer sleeps", each ticked. For each machine you keep, Sheprd installs and starts `sheprd-remote-control` there over SSH and adds the phone. The machine needs no internet access for this.
+Allowing a phone can also pair it directly with the SSH and cloud machines Sheprd connects to. The Allow step lists them under "Also pair it with these machines, so it reaches them while this computer sleeps", each ticked. For each machine you keep, Sheprd installs and starts `sheprd-remote-control` there over SSH and adds the phone. The machine needs no internet access for this. When the machine is a Mac and this one is too, Sheprd puts its own `sheprd-acp` beside the daemon, so chats started from the phone work there. A Linux machine paired from a release gets no `sheprd-acp`: install it there yourself (see [Chats on SSH hosts](chat.md#chats-on-ssh-hosts)), which the daemon finds in `~/.herdr/bin`, `~/.cargo/bin`, `~/.local/bin`, or the `PATH`.
 
 The phone then reaches each machine's own daemon directly, so it keeps them while this computer sleeps. A machine added later is offered on the phone with a **Pair** button, and Sheprd asks on the desktop first. Revoking the phone here also revokes it on every machine it was paired with from here.
 

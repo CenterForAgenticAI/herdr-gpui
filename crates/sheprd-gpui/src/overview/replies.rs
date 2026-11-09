@@ -242,7 +242,12 @@ impl SheprdWindow {
 
     /// What `pane` holds, from the prepared snapshots, for a reply written to
     /// `agent` on daemon boot `boot`.
-    pub(super) fn reply_presence(&self, (id, pane): (&str, &str), boot: &str, agent: &str) -> Presence {
+    pub(super) fn reply_presence(
+        &self,
+        (id, pane): (&str, &str),
+        boot: &str,
+        agent: &str,
+    ) -> Presence {
         if id == super::core::ENDPOINT {
             return self.core_reply_presence(pane, agent);
         }

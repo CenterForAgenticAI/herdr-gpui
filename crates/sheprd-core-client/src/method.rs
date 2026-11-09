@@ -35,9 +35,11 @@ methods! {
     Hello => "hello", false;
     TerminalAttach => "terminal.attach", true;
     TerminalKill => "terminal.kill", true;
+    TerminalLabel => "terminal.label", false;
     TerminalList => "terminal.list", true;
     TerminalRun => "terminal.run", true;
     TerminalSend => "terminal.send", false;
+    TerminalWait => "terminal.wait", false;
     // keep-sorted end
 }
 

@@ -152,7 +152,11 @@ impl SheprdWindow {
             let backend = backend.ok_or(Error::ReplyCore(sheprd_core_client::Error::Lost))?;
             backend
                 .core()
-                .send(&reply.pane, &reply.text)
+                .send(&sheprd_core_client::wire::SendText {
+                    terminal: &reply.pane,
+                    text: &reply.text,
+                    ..Default::default()
+                })
                 .map(|_| ())
                 .map_err(|error| match error {
                     sheprd_core_client::Error::Refused {

@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     io::{self, Read, Write},
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
@@ -32,7 +32,7 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 /// The longest handshake reply accepted.
 const MAX_HELLO: usize = 64 << 10;
 /// How long a call waits for its answer.
-const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// Calls waiting for answers at once.
 const MAX_IN_FLIGHT: usize = 64;
 /// Frames queued for the worker to write.
@@ -207,20 +207,31 @@ impl Core {
         self.typed(Method::TerminalRun, run)
     }
 
-    /// Pastes `text` into `terminal` and presses Enter, once nobody has
-    /// typed there for a moment. The core refuses a program that waits on
-    /// the user (`Error::Refused` of kind [`wire::BLOCKED`]), in the same
-    /// step that would have typed, so a stale status cannot answer a
-    /// question the user never saw.
-    pub fn send(&self, terminal: &str, text: &str) -> Result<wire::Sent> {
+    /// Pastes text into a terminal and presses Enter, as `hc send` does.
+    pub fn send(&self, send: &wire::SendText<'_>) -> Result<wire::Sent> {
+        self.typed(Method::TerminalSend, send)
+    }
+
+    /// Waits until `terminal`'s program is not working, it ends, or
+    /// `timeout` passes, which the core answers as a check-in. Keep
+    /// `timeout` well under a call's own limit.
+    pub fn wait(&self, terminal: &str, timeout: Duration) -> Result<wire::Waited> {
         self.typed(
-            Method::TerminalSend,
-            &json!({"terminal": terminal, "text": text}),
+            Method::TerminalWait,
+            &json!({"terminal": terminal, "timeout": timeout.as_secs_f64()}),
         )
     }
 
     pub fn kill(&self, terminal: &str) -> Result<Terminal> {
         self.typed(Method::TerminalKill, &json!({"terminal": terminal}))
+    }
+
+    /// Sets `terminal`'s labels; an empty value removes that label.
+    pub fn label(&self, terminal: &str, labels: &BTreeMap<&str, &str>) -> Result<Terminal> {
+        self.typed(
+            Method::TerminalLabel,
+            &json!({"terminal": terminal, "labels": labels}),
+        )
     }
 
     pub fn doc_get(&self, name: &str) -> Result<Doc> {
