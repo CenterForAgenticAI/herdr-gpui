@@ -102,6 +102,20 @@ fn focused_checkout(view: &SheprdWindow) -> Option<Recent> {
     if endpoint.id != LOCAL {
         return None;
     }
+    // A workspace the app keeps for Herdr 2 is listed by its folder.
+    if let Some(front) = view.kept_in_front() {
+        let sessions = view.sessions(view.selected_endpoint);
+        let workspace = sessions.workspace(front)?;
+        let path = PathBuf::from(&workspace.cwd);
+        if workspace.cwd.is_empty() {
+            return None;
+        }
+        Link::parse(&Link::Open { path: path.clone() }.to_url()).ok()?;
+        return Some(Recent {
+            path,
+            label: workspace.label.clone(),
+        });
+    }
     let snapshot = view.live.snapshot.as_ref()?;
     let id = snapshot.focused_workspace_id.as_ref()?;
     let workspace = snapshot

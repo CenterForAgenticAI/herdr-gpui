@@ -3,8 +3,10 @@ local ICONS = {
 	automations = "clock",
 	issues = "circle-dot",
 	overview = "activity",
+	ports = "plug",
 	pull_requests = "git-pull-request",
 	security = "shield",
+	tasks = "list-checks",
 	usage = "chart-line",
 	workspaces = "square-terminal",
 }

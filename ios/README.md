@@ -94,6 +94,9 @@ and nothing goes through your phone.
    - `-tab workspaces|settings` opens that tab, and `-openWorkspace ID`
      opens that workspace's screen in it.
    - `-otherAgents YES` unfolds a workspace's other agents.
+   - With `-openWorkspace`, `-openChanges YES` opens its changes; then
+     `-openDiff PATH` opens a file's diff, and `-sendLog YES` opens the
+     confirmation for the first failing check's log.
    - `-renameWorkspace YES` opens a workspace's rename alert. It lists the
      local Herdr daemon's real workspaces, so pressing Rename changes one.
    - `-newWorkspace YES` opens the new workspace form.
@@ -102,6 +105,10 @@ and nothing goes through your phone.
      computer's page from that tab.
    - `-syncBar waiting|failed` shows the sync bar as if a change were on
      its way or had failed.
+   - `-voiceSay TEXT` runs a spoken command as if it were heard, since the
+     simulator has no microphone, and `-voiceConfirm YES` then presses Start
+     which creates what the card shows. Run it
+     against a sandboxed Herdr, not your own.
    - With `-openLink`, `-session YES` opens the chat's session sheet and
      `-draft TEXT` types into its composer (`-draft /` lists the slash
      commands).
@@ -111,6 +118,33 @@ and nothing goes through your phone.
      (`xcrun simctl get_app_container DEVICE so.pen.herdr.remote group.so.pen.herdr.remote`).
    - Avoid `simctl openurl`: its confirmation alert needs a tap, and it
      keeps the app inactive until the simulator restarts.
+
+## Voice commands
+
+The waveform button on Home, the Talk to Sheprd Control (for the Action
+button), and Siri open a sheet that listens for a command, such as "new
+worktree on studio about the login bug, and ask Claude to fix it". Commands
+are read as English unless Settings > Voice > Use Phone Language is on, which
+is experimental: only the model reads those, and it cannot stop or answer a
+chat. They can refer back ("stop it", "same thing on the mini"), name several
+computers ("on every host"), and reach agents in terminal tabs, which take
+pasted text and Escape but show no structured questions. How long the app
+waits for more words depends on what was said (`VoiceEndpoint`). Confirm by
+Voice reads the plan aloud and takes a plain yes, for a new worktree only.
+
+| Step | Where | What |
+| --- | --- | --- |
+| Hear | `SheprdRemote/Voice/VoiceListener.swift` | `DictationTranscriber` on the phone, primed with the fleet's names |
+| Read | `SheprdRemoteCore/.../Voice/VoiceParser.swift` | Rules, on every word, so the card fills in during the sentence |
+| Read what is left | `VoiceModel.swift` | The on-device model, only for sentences the rules cannot place; its schema lists only what exists |
+| Check | `VoiceDraft.adopting` | A name counts only if it was heard, and a task only if the words are the speaker's own. The model cannot stop a chat or answer a question |
+| Plan | `VoicePlan.swift` | Fills in what was not said and labels it. Something named that does not exist becomes a question, never a substitute |
+| Confirm | `SheprdRemote/Views/VoiceSheet.swift` | The card is the request. Starting an agent, sending, stopping, and answering take a tap on Start |
+
+`VOICE_EVAL=1 swift test --filter VoiceEvalTests` scores every sentence in
+`Fixtures/voice` against the real model, which needs Apple Intelligence on the
+Mac. Add new phrasing to `heldout2.json` only after checking it fails or
+passes untouched: a set the rules were tuned on stops measuring anything.
 
 ## Sign with your own team
 
@@ -138,9 +172,16 @@ app, once the repository's `testflight` environment holds these secrets:
 | `APPLE_TEAM_ID` | Your ten-character team |
 | `ASC_KEY_ID`, `ASC_ISSUER_ID` | An App Store Connect API key with the App Manager role (Users and Access > Integrations) |
 | `ASC_KEY_P8` | The key's `.p8` file, its whole text |
+| `IOS_SIGNING_P12_BASE64`, `IOS_SIGNING_P12_PASSWORD` | One Apple Development certificate with its private key, as base64 of a `.p12`, and that file's passphrase |
 
-- **How it signs:** Xcode signs automatically with that key, so no
-  certificates or profiles are stored.
+- **How it signs:** Xcode signs automatically with that key and makes the
+  profiles it needs. The archive signs with the stored development
+  certificate, imported into a keychain of its own (`ios/tools/signing.sh`,
+  which puts the keychain search list back afterwards): a runner starts with
+  none, and Xcode would otherwise create a certificate on every upload until
+  the team hits Apple's limit ("Your account has reached the maximum number
+  of certificates"). The upload refuses to run in CI without it. The export
+  signs with the team's cloud-managed distribution certificate.
 - **What it uploads:** the export re-signs for distribution and uploads to
   App Store Connect.
 - **Build number:** one more than the highest build App Store Connect has
@@ -239,6 +280,26 @@ The two must match, so switch both together.
   `"sandbox": false`.
 - **A mismatch:** a token sent to the wrong service is refused as
   `BadDeviceToken`, and the daemon then forgets it.
+
+## Live Activity detail
+
+Detailed, the default, shows the chat and its current step. Generic shows the
+agent and what it is doing in general. A computer chooses in Sheprd's Settings >
+Remote control (`live_activities` in `[remote]`), and a phone chooses with Keep
+Generic in its Settings. The stricter choice wins. Turning on Keep Generic ends
+the activities showing, since a title set when one starts cannot change, and the
+app ends any naming a chat that a computer starts before it hears. A computer that is away
+hears at the next sync, and while the app is closed such an activity can show
+until the app next runs. Choosing
+Generic on the computer applies from the next activity, so one already showing
+keeps its title until it ends.
+
+Questions, their answer buttons, and failure messages also need `notifications =
+"excerpt"`, the default. With `"generic"` a question shows Open, which answers in
+the app.
+
+A daemon older than this refuses a phone that keeps its activities generic, so
+update Sheprd first. Phones on the default are unaffected.
 
 ## Sealed alerts
 

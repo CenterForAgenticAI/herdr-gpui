@@ -47,7 +47,7 @@ class ReleaseTargets(unittest.TestCase):
             self.assertIn("github.repository == 'sheprd-labs/sheprd'", job)
         # Keeps every main cache inside the repository's 10 GB cache budget.
         self.assertIn("\nenv:\n  CARGO_PROFILE_DEV_DEBUG: '0'\n\njobs:\n", workflow)
-        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, commits]\n",
+        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, commits, website]\n",
                       jobs["checks-passed"])
         self.assertIn('test "$COMMITS" = success || exit 1', jobs["checks-passed"])
         self.assertIn('test "$RESULT" = success && test "$WINDOWS" = success', jobs["checks-passed"])
@@ -383,6 +383,15 @@ class ReleaseTargets(unittest.TestCase):
         for name in ("host-manifest.json", "host-manifest.sig"):
             self.assertIn(f"            dist/{name}\n", sign)
         self.assertIn('build-host.sh "$VERSION" "$HOST_TARGET" dist', jobs["linux"])
+        # Their sheprd-acp: signed here (schema 5) and packed with both builds
+        # into one archive, kept out of the Linux packages the attest job reads.
+        self.assertIn('create host-chats "$VERSION" --host-chats', sign)
+        self.assertIn('test "$(wc -c < host-chats/host-chat-manifest.sig | tr -d \' \')" = 64', sign)
+        self.assertIn('pack-host-chats host-chats "$VERSION"', sign)
+        self.assertIn("            dist/sheprd-acp-${{ needs.validate.outputs.version }}-linux-musl.tar.gz\n", sign)
+        for target in ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"):
+            self.assertIn(f"name: linux-host-chat-{target}\n", sign)
+            self.assertNotIn(f"name: linux-host-chat-{target}\n", jobs["attest"])
 
 
 class WindowsTrust(unittest.TestCase):
@@ -610,7 +619,8 @@ class ReleaseSecurity(unittest.TestCase):
             "windows-manifest.json", "windows-manifest.sig",
             *(f"sheprd-remote-control-20260920.1-{target}"
               for target in ("x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")),
-            "host-manifest.json", "host-manifest.sig"})
+            "host-manifest.json", "host-manifest.sig",
+            "sheprd-acp-20260920.1-linux-musl.tar.gz"})
         # Five files per base asset; SHA256SUMS lists all but itself.
         assets = len(MANIFEST.base_names(VERSION)) * 5 + len(MANIFEST.package_aliases(VERSION))
         self.assertEqual(len((self.path / "SHA256SUMS").read_text().splitlines()), assets)

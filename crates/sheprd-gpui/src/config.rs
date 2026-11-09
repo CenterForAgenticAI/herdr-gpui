@@ -16,6 +16,7 @@ mod azure;
 pub(crate) mod backdrop;
 mod bitmap_fonts;
 mod boat;
+mod boxd;
 pub(crate) mod chat;
 mod cjk_fonts;
 mod cloud;
@@ -47,10 +48,12 @@ mod sprites;
 pub(crate) mod ssh_hosts;
 pub(crate) mod status_bar;
 mod status_icons;
+mod tab_labels;
 pub(crate) mod tab_layout;
 #[cfg(any(
     feature = "azure",
     feature = "boat",
+    feature = "boxd",
     feature = "coder",
     feature = "container",
     feature = "daytona",
@@ -92,7 +95,7 @@ pub use github::{GitHubAccount, GitHubConfig};
 pub use layout::{Density, Layout, LayoutMode, Style};
 pub(crate) use notifications::NotificationDelivery;
 pub use notifications::{
-    BellConfig, ClipboardToast, ClipboardToastPosition, NotificationConfig, SoundConfig,
+    BellConfig, ClipboardToast, ClipboardToastPosition, NotificationConfig, QuietHours, SoundConfig,
 };
 use notifications::{ClipboardToastSettings, NotificationSettings};
 pub use option_as_alt::{OptionAsAlt, OptionKeys};
@@ -100,6 +103,7 @@ pub use padding::Padding;
 pub(crate) use padding::{Axis, MAX_PADDING, Side, Sides};
 pub use remote::RemoteConfig;
 use serde::Deserialize;
+pub use sheprd_orchestrator::azure::Config as AzureDevOpsConfig;
 pub use sheprd_orchestrator::gitlab::Config as GitLabConfig;
 pub use sheprd_remote::config::AzureConfig;
 #[cfg(feature = "azure")]
@@ -107,6 +111,9 @@ pub(crate) use sheprd_remote::config::AzureFields;
 pub use sheprd_remote::config::BoatConfig;
 #[cfg(feature = "boat")]
 pub(crate) use sheprd_remote::config::BoatFields;
+pub use sheprd_remote::config::BoxdConfig;
+#[cfg(feature = "boxd")]
+pub(crate) use sheprd_remote::config::BoxdFields;
 pub use sheprd_remote::config::CoderConfig;
 #[cfg(feature = "coder")]
 pub(crate) use sheprd_remote::config::CoderFields;
@@ -137,6 +144,7 @@ use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
 };
+pub use tab_labels::TabLabels;
 pub use tab_layout::TabLayoutMode;
 pub use theme::Theme;
 pub(crate) use theme::ThemeName;
@@ -171,9 +179,13 @@ pub struct Config {
     pub agents_placement: AgentsPlacement,
     /// What shows behind the main window's terminals and chrome.
     pub azure: AzureConfig,
+    /// Where Azure DevOps tokens pasted in the account menu are saved.
+    pub azure_devops: AzureDevOpsConfig,
     pub backdrop: Backdrop,
     pub bell: BellConfig,
     pub boat: BoatConfig,
+    /// The boxd account whose machines are devices.
+    pub boxd: BoxdConfig,
     /// What chats started from the app run with.
     pub chat: chat::ChatConfig,
     /// Only the keys this GUI's own file sets, so Settings can tell an
@@ -266,6 +278,7 @@ pub struct Config {
     pub show_gpu_load: bool,
     /// Ports each workspace listens on, in the sidebar and the status bar.
     pub show_listening_ports: bool,
+    pub show_menu_bar: bool,
     /// Latency and loss from this machine, by timed TCP connects, in the status bar.
     pub show_network_quality: bool,
     /// The repository owner's avatar, or the GitHub mark, before a space's name.
@@ -297,6 +310,8 @@ pub struct Config {
     pub status_bar: StatusBar,
     /// The set agent status is drawn with.
     pub status_icons: StatusIcons,
+    /// What a tab with no name of its own is called.
+    pub tab_labels: TabLabels,
     /// How tab strips draw their tabs, from View > Tab Layout.
     pub tab_layout: TabLayoutMode,
     pub tabs: FontConfig,
@@ -405,9 +420,11 @@ impl Default for Config {
             agent_skill: AgentSkillConfig::default(),
             agents_placement: AgentsPlacement::default(),
             azure: AzureConfig::default(),
+            azure_devops: AzureDevOpsConfig::default(),
             backdrop: Backdrop::default(),
             bell: BellConfig::default(),
             boat: BoatConfig::default(),
+            boxd: BoxdConfig::default(),
             chat: chat::ChatConfig::default(),
             clipboard_overrides: ClipboardToastSettings::default(),
             clipboard_toast: ClipboardToast::default(),
@@ -454,6 +471,7 @@ impl Default for Config {
             show_device_icons: true,
             show_gpu_load: false,
             show_listening_ports: true,
+            show_menu_bar: true,
             show_network_quality: false,
             show_repository_icons: true,
             show_sidebar_gpu_load: false,
@@ -469,6 +487,7 @@ impl Default for Config {
             ssh: SshConfig::default(),
             status_bar: StatusBar::default(),
             status_icons: StatusIcons::default(),
+            tab_labels: TabLabels::default(),
             tab_layout: TabLayoutMode::default(),
             // Tabs are terminal chrome, so they read in the monospace face the
             // sidebar and terminal use, as they do in the reference UI.
@@ -496,9 +515,11 @@ struct Settings {
     agent_skill: AgentSkillConfig,
     agents_placement: AgentsPlacement,
     azure: AzureConfig,
+    azure_devops: AzureDevOpsConfig,
     backdrop: Backdrop,
     bell: BellConfig,
     boat: BoatConfig,
+    boxd: BoxdConfig,
     chat: chat::ChatConfig,
     clipboard_toast: ClipboardToastSettings,
     cloud: CloudConfig,
@@ -539,6 +560,7 @@ struct Settings {
     show_device_icons: Option<bool>,
     show_gpu_load: Option<bool>,
     show_listening_ports: Option<bool>,
+    show_menu_bar: Option<bool>,
     show_network_quality: Option<bool>,
     show_repository_icons: Option<bool>,
     show_sidebar_gpu_load: Option<bool>,
@@ -552,6 +574,7 @@ struct Settings {
     ssh: SshConfig,
     status_bar: StatusBar,
     status_icons: Option<status_icons::SavedIcons>,
+    tab_labels: TabLabels,
     tab_layout: TabLayoutMode,
     tabs: FontSettings,
     terminal: FontSettings,
@@ -596,6 +619,7 @@ impl Config {
         Ok(sheprd_remote::config::Sections {
             azure: config.azure,
             boat: config.boat,
+            boxd: config.boxd,
             coder: config.coder,
             container: config.container,
             daytona: config.daytona,
@@ -829,6 +853,7 @@ impl Config {
         settings.github.client_id_with_override(None)?;
         settings.github.check_accounts()?;
         config.github = settings.github;
+        config.azure_devops = settings.azure_devops;
         config.gitlab = settings.gitlab;
         #[cfg(feature = "azure")]
         settings.azure.check()?;
@@ -836,6 +861,9 @@ impl Config {
         #[cfg(feature = "boat")]
         settings.boat.settings_with(|_| None)?;
         config.boat = settings.boat;
+        #[cfg(feature = "boxd")]
+        settings.boxd.settings_with(|_| None)?;
+        config.boxd = settings.boxd;
         settings.chat.check()?;
         config.chat = settings.chat;
         settings.cloud.check()?;
@@ -915,6 +943,7 @@ impl Config {
         config.show_device_icons = settings.show_device_icons.unwrap_or(true);
         config.show_gpu_load = settings.show_gpu_load.unwrap_or(false);
         config.show_listening_ports = settings.show_listening_ports.unwrap_or(true);
+        config.show_menu_bar = settings.show_menu_bar.unwrap_or(true);
         config.show_network_quality = settings.show_network_quality.unwrap_or(false);
         config.show_repository_icons = settings.show_repository_icons.unwrap_or(true);
         config.show_sidebar_gpu_load = settings.show_sidebar_gpu_load.unwrap_or(false);
@@ -928,6 +957,7 @@ impl Config {
         settings.mods.validate()?;
         config.mods = settings.mods;
         config.status_bar = settings.status_bar;
+        config.tab_labels = settings.tab_labels;
         config.tab_layout = settings.tab_layout;
         settings.ssh.check()?;
         config.ssh = settings.ssh;

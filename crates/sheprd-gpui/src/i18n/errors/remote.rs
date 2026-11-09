@@ -6,12 +6,15 @@
 mod azure;
 #[cfg(feature = "boat")]
 mod boat;
+#[cfg(feature = "boxd")]
+mod boxd;
 #[cfg(feature = "cloud")]
 mod cloud;
 #[cfg(feature = "coder")]
 mod coder;
 #[cfg(feature = "container")]
 mod container;
+mod core_install;
 #[cfg(feature = "daytona")]
 mod daytona;
 #[cfg(feature = "opensandbox")]
@@ -24,6 +27,7 @@ mod teleport;
 #[cfg(any(
     feature = "azure",
     feature = "boat",
+    feature = "boxd",
     feature = "coder",
     feature = "container",
     feature = "daytona",
@@ -53,6 +57,7 @@ impl Localize for Error {
             Self::Config(error) => error
                 .downcast_ref::<crate::Error>()
                 .map_or_else(|| error.to_string(), Localize::localize),
+            Self::CoreInstall(error) => error.localize(),
             Self::Credentials(error) => error.localize(),
             // The system's own words, as `Json` is its parser's.
             Self::Io(error) => error.to_string(),

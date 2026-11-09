@@ -15,6 +15,7 @@ fn destination_inventory_reconciles_selection_and_ignores_other_hosts(cx: &mut T
         workspace_id: "w1".into(),
         token: None,
         data_root: Some(dir.path().join("data")),
+        azure_store: Default::default(),
         gitlab_store: Default::default(),
         timing: Timing::default(),
     };
@@ -53,4 +54,18 @@ fn destination_inventory_reconciles_selection_and_ignores_other_hosts(cx: &mut T
             assert!(view.dialog.as_ref().unwrap().kind.is_none());
         })
     });
+}
+
+#[test]
+fn only_a_review_marks_a_profile_that_replaces_the_built_in_prompt() {
+    use crate::orchestrator::prompt::Profile;
+    let marked = Profile::parse("mine".into(), "review: replace\nBody");
+    let plain = Profile::parse("other".into(), "Body");
+    assert_eq!(
+        super::profile_label(&marked, true),
+        crate::i18n::fl!("orchestrator-profile-replaces", name = "mine")
+    );
+    assert_ne!(super::profile_label(&marked, true), "mine");
+    assert_eq!(super::profile_label(&marked, false), "mine");
+    assert_eq!(super::profile_label(&plain, true), "other");
 }

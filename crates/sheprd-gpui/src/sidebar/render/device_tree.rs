@@ -34,7 +34,8 @@ impl SheprdWindow {
         } else {
             &endpoint.live
         };
-        crate::devices_overview::Device::new(index, endpoint, live).matches(query)
+        crate::devices_overview::Device::new(index, endpoint, live, &self.sessions(index))
+            .matches(query)
     }
 
     /// Appends endpoint `index`'s agents, nested under its header, and

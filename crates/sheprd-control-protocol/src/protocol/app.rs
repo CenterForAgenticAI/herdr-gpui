@@ -11,8 +11,10 @@ pub enum ActivityPanel {
     Overview,
     PullRequests,
     Issues,
+    Tasks,
     Security,
     Automations,
+    Ports,
     Usage,
 }
 
@@ -22,8 +24,10 @@ impl ActivityPanel {
         Self::Overview,
         Self::PullRequests,
         Self::Issues,
+        Self::Tasks,
         Self::Security,
         Self::Automations,
+        Self::Ports,
         Self::Usage,
     ];
 
@@ -34,8 +38,10 @@ impl ActivityPanel {
             Self::Workspaces => "workspaces",
             Self::PullRequests => "pull-requests",
             Self::Issues => "issues",
+            Self::Tasks => "tasks",
             Self::Security => "security",
             Self::Automations => "automations",
+            Self::Ports => "ports",
             Self::Usage => "usage",
         }
     }
@@ -86,6 +92,8 @@ pub enum AppOp {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WindowOp {
     List,
+    /// The alerts the window kept, newest first.
+    Alerts,
     /// Another window of the first window's launch target, or of a named
     /// local session.
     New {
@@ -135,12 +143,23 @@ pub enum UiOp {
     StatusBar {
         switch: Switch,
     },
+    /// The in-window menu bar; refused where the system draws the menus.
+    MenuBar {
+        switch: Switch,
+    },
     FontSize {
         size: FontSize,
     },
     /// Shows an activity bar section.
     Panel {
         panel: ActivityPanel,
+    },
+    /// The agents panel's coordinator groups, and the one it shows.
+    AgentGroups,
+    /// Narrows the agents panel to a coordinator group; none lists them all.
+    AgentGroup {
+        #[serde(default)]
+        name: Option<String>,
     },
 }
 
@@ -182,17 +201,50 @@ pub struct HostInfo {
     /// "online", "connecting", "reconnecting", "detached", "disabled", ...
     pub status: String,
     pub selected: bool,
+    /// Its notifications are muted as a whole.
+    #[serde(default)]
+    pub muted: bool,
     /// What groups it in the sidebar.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 }
 
+/// An alert a window kept, shown or held back. The text is the agent's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlertInfo {
+    /// The host's label.
+    pub host: String,
+    /// Whether the agent needs the user, rather than having finished.
+    pub needs_attention: bool,
+    pub title: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub pane: Option<String>,
+    /// Unix seconds.
+    pub at: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reply {
-    Windows { windows: Vec<WindowInfo> },
-    Size { width: f32, height: f32 },
-    FontSize { points: f32 },
+    Windows {
+        windows: Vec<WindowInfo>,
+    },
+    Alerts {
+        alerts: Vec<AlertInfo>,
+    },
+    Size {
+        width: f32,
+        height: f32,
+    },
+    FontSize {
+        points: f32,
+    },
+    AgentGroups {
+        current: Option<String>,
+        groups: Vec<String>,
+    },
 }
 
 #[cfg(test)]

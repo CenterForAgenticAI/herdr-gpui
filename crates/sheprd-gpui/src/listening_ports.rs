@@ -8,6 +8,8 @@
 //! blocks rendering or delays another host.
 // i18n: migrated
 
+mod core;
+pub(crate) use core::Place;
 mod error;
 mod render;
 mod scan;
@@ -25,8 +27,11 @@ use crate::{
 };
 pub(crate) use render::{chips, close_button};
 #[cfg(test)]
-pub(crate) use scan::{Bind, Owner};
-pub(crate) use scan::{Link, Origin, Port, Ports, parse};
+pub(crate) use scan::Owner;
+// The Ports section's Unix scan reads its addresses the same way.
+#[cfg(unix)]
+pub(crate) use scan::listener;
+pub(crate) use scan::{Bind, Link, Origin, Port, Scan, parse};
 use sheprd_client::ConnectTarget;
 use std::{
     collections::HashMap,
@@ -74,6 +79,17 @@ impl Daemon {
             None => target.socket_path().ok().map(Identity::Client),
         };
         Some(Self { host, identity })
+    }
+
+    /// How browser tabs name this daemon, for one on this computer whose
+    /// client socket is known: its herdr-core tabs' workspaces are its own.
+    pub(crate) fn scope(&self) -> Option<crate::browser::Scope> {
+        match (&self.host, &self.identity) {
+            (Host::Local, Some(Identity::Client(socket))) => {
+                Some(crate::browser::Scope::local(socket))
+            }
+            _ => None,
+        }
     }
 
     #[cfg(test)]
@@ -150,7 +166,7 @@ fn local_shell() -> Result<Shell> {
     Err(Error::Unsupported.into())
 }
 
-fn scan(shell: &mut Shell) -> Result<Ports> {
+fn scan(shell: &mut Shell) -> Result<Scan> {
     let output = shell.run(scan::COMMAND, STEP_TIMEOUT).map_err(failed)?;
     parse(&output.stdout)
 }
@@ -161,7 +177,7 @@ fn failed(error: impl Into<crate::Error>) -> crate::Error {
 
 struct Worker {
     stop: Arc<Stop>,
-    results: mpsc::Receiver<Result<Ports>>,
+    results: mpsc::Receiver<Result<Scan>>,
 }
 
 impl Drop for Worker {
@@ -187,7 +203,7 @@ fn spawn(host: Host) -> Option<Worker> {
     }
 }
 
-fn run(host: &Host, stop: &Stop, results: &mpsc::SyncSender<Result<Ports>>) {
+fn run(host: &Host, stop: &Stop, results: &mpsc::SyncSender<Result<Scan>>) {
     let mut shell: Option<Shell> = None;
     loop {
         let opened = match shell.take() {
@@ -217,7 +233,7 @@ fn run(host: &Host, stop: &Stop, results: &mpsc::SyncSender<Result<Ports>>) {
 /// One host's latest scan.
 #[derive(Default)]
 struct Reading {
-    ports: Ports,
+    scan: Scan,
     /// Where the host's ports open, which follows from the host alone.
     origin: Origin,
     /// Why the latest scan failed, as last logged; the last good ports stay
@@ -227,14 +243,14 @@ struct Reading {
 
 impl Reading {
     /// Whether anything shown changed.
-    fn apply(&mut self, result: Result<Ports>) -> bool {
+    fn apply(&mut self, result: Result<Scan>) -> bool {
         match result {
-            Ok(ports) => {
+            Ok(scan) => {
                 self.error = None;
-                if ports == self.ports {
+                if scan == self.scan {
                     return false;
                 }
-                self.ports = ports;
+                self.scan = scan;
                 true
             }
             Err(error) => {
@@ -268,21 +284,42 @@ pub(crate) struct Listed<'a> {
 /// Every scanned host's listening ports, keyed by host.
 #[derive(Default)]
 pub(crate) struct ListeningPorts {
+    /// This computer's herdr-core terminals' ports, by workspace.
+    core: core::Placed,
     monitors: HashMap<Host, Monitor>,
 }
 
 impl ListeningPorts {
     /// The ports `workspace` of `daemon` listens on, lowest first, and where
     /// they open; None while it listens on none.
+    ///
+    /// A workspace whose Herdr panes listen on none lists what its
+    /// herdr-core terminals on this computer listen on instead.
     pub fn get(&self, daemon: &Daemon, workspace: &str) -> Option<Listed<'_>> {
         let reading = &self.monitors.get(&daemon.host)?.reading;
-        reading.ports.iter().find_map(|(owner, ports)| {
+        let herdr = reading.scan.ports.iter().find_map(|(owner, ports)| {
             (owner.workspace == workspace && daemon.owns(&owner.socket) && !ports.is_empty())
                 .then_some(Listed {
                     ports,
                     origin: &reading.origin,
                 })
-        })
+        });
+        herdr.or_else(|| self.core_ports(&daemon.scope()?, workspace))
+    }
+
+    /// The workspace of `daemon` whose pane started the listening process
+    /// `pid`, as the latest scan of its host found it.
+    pub fn workspace_of(&self, daemon: &Daemon, pid: u32) -> Option<&str> {
+        let owner = self.monitors.get(&daemon.host)?.reading.scan.pids.get(&pid);
+        match owner {
+            Some(owner) => daemon
+                .owns(&owner.socket)
+                .then_some(owner.workspace.as_str()),
+            // Started in a herdr-core terminal of this computer: the
+            // workspace whose tab shows it.
+            None if daemon.host == Host::Local => self.core_workspace_of(daemon, pid),
+            None => None,
+        }
     }
 
     /// Whether a port listed on `key`'s host still tunnels to exactly `key`.
@@ -295,18 +332,19 @@ impl ListeningPorts {
         };
         let reading = &monitor.reading;
         reading
+            .scan
             .ports
             .values()
             .flatten()
             .any(|port| matches!(port.link(&reading.origin), Some(Link::Tunnel(listed)) if listed == *key))
     }
 
-    /// Shows `ports` for `host` as if a scan had found them, with no worker.
+    /// Shows `scan` for `host` as if a scan had found it, with no worker.
     #[cfg(test)]
-    pub(crate) fn seed(&mut self, host: Host, ports: Ports) {
+    pub(crate) fn seed(&mut self, host: Host, scan: Scan) {
         let reading = Reading {
             origin: Origin::new(&host),
-            ports,
+            scan,
             error: None,
         };
         self.monitors.insert(
@@ -335,7 +373,7 @@ impl ListeningPorts {
         let mut changed = false;
         self.monitors.retain(|host, monitor| {
             let keep = wanted.contains(host);
-            changed |= !keep && !monitor.reading.ports.is_empty();
+            changed |= !keep && !monitor.reading.scan.ports.is_empty();
             keep
         });
         for host in wanted {

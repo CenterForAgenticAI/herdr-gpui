@@ -9,15 +9,21 @@ use axum::{
     extract::ConnectInfo,
     http::Request as HttpRequest,
 };
+use secrecy::ExposeSecret as _;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::ServiceExt;
 
 mod apps;
+mod attention;
+mod changes;
+mod convert;
 #[cfg(unix)]
 mod echo;
+mod empty_core;
 mod handoff;
 mod hosts;
 mod indicators;
+mod layout;
 mod nearby;
 mod origins;
 mod pace;
@@ -26,6 +32,7 @@ mod presence;
 mod pull_requests;
 mod rename;
 mod routes;
+mod service_worker;
 mod stream;
 #[cfg(unix)]
 mod streaming;
@@ -62,15 +69,18 @@ pub(crate) fn state_with(dir: &std::path::Path, hub: Arc<Hub>) -> Shared {
         apns: None,
         apps: auth.apps(),
         auth: Mutex::new(auth),
+        changes: Default::default(),
         computer: "Studio".into(),
         connected: Mutex::new(HashMap::new()),
         fingerprint: authority.fingerprint().to_owned(),
         authority: Some(authority),
         hub,
+        live_activities: crate::app::config::ActivityDetail::default(),
         load: tokio::sync::watch::channel(None).1,
         look: Look::load(dir),
         names: RwLock::new(names),
         near: Mutex::default(),
+        opened: crate::web::attention::Opened::default(),
         port: 7443,
         privacy: Privacy::Generic,
         pull_requests,
@@ -145,7 +155,7 @@ pub(crate) fn signed_in(state: &Shared, seed: u8) -> (DeviceId, String) {
             now,
         )
         .unwrap();
-    (device, session.token)
+    (device, session.token.expose_secret().to_owned())
 }
 
 pub(crate) fn get(path: &str) -> HttpRequest<Body> {

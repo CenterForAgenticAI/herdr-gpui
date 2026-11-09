@@ -13,6 +13,12 @@ enum Route: Codable, Hashable {
     case chat(PaneKey, title: String)
     case term(PaneKey, title: String)
     case workspace(WorkspaceKey)
+    case changes(WorkspaceKey)
+
+    /// Whether this shows the terminal of `pane`, under whatever title.
+    func showsTerminal(_ pane: PaneKey) -> Bool {
+        if case let .term(key, _) = self { key == pane } else { false }
+    }
 }
 
 /// The app's state: paired computers, their live links, and the tokens
@@ -30,6 +36,10 @@ final class AppModel {
     var message: String?
     /// Set by a deep link; the root view shows it and clears it.
     var pendingRoute: Route?
+    /// The terminal on screen that `pendingRoute` takes the place of, as
+    /// when its pane became a chat: Back must not return to a terminal
+    /// that is gone. The root view clears it with `pendingRoute`.
+    var pendingRouteReplaces: PaneKey?
     /// The workspace a tab on Home asked to go to; the root view shows it
     /// and clears it.
     var pendingWorkspace: WorkspaceKey?
@@ -54,6 +64,16 @@ final class AppModel {
     @ObservationIgnored private var startPicks = StartPicks()
     /// A new workspace or chat being set up, as a sheet over every tab.
     var creating: Creating?
+    /// A spoken command under way, shown as a sheet over every tab.
+    var voice: VoiceSession?
+    /// A command asked for while the app was locked; the unlock runs it.
+    struct PendingTalk { var words: String? }
+    @ObservationIgnored var pendingTalk: PendingTalk?
+    /// What the last command was about, so the next can say "it".
+    @ObservationIgnored var voiceContext = VoiceContext()
+    /// What each computer last offered a new workspace, by device, so a
+    /// spoken command need not wait for the computers to answer again.
+    @ObservationIgnored var voiceOptions: [String: NewOptions] = [:]
     /// A tab to switch to, from a Control or an intent; the root view
     /// shows it and clears it.
     var pendingTab: RootTab?
@@ -114,7 +134,7 @@ final class AppModel {
     /// The one model, for intents iOS runs in the app's process.
     static var current: AppModel?
 
-    enum Shortcut { case home, newWorkspace, chat(Route) }
+    enum Shortcut { case home, newWorkspace, chat(Route), talk(saying: String? = nil) }
 
     /// Shows what a Control, an intent, or Spotlight asked for.
     func show(_ shortcut: Shortcut) {
@@ -122,7 +142,69 @@ final class AppModel {
         case .home: pendingTab = .home
         case .newWorkspace: creating = .workspace(device: nil)
         case let .chat(route): pendingRoute = route
+        case let .talk(words): talk(saying: words)
         }
+    }
+
+    /// Opens the voice sheet, listening, or with `words` already said.
+    func talk(saying words: String? = nil) {
+        // A locked app must not start listening behind its cover: this
+        // waits for the unlock, which is why the Action button still works.
+        if LockState.shared.hidesNames {
+            pendingTalk = PendingTalk(words: words)
+            return
+        }
+        guard voice == nil, !fleet.machines.isEmpty else { return }
+        let session = VoiceSession(model: self)
+        voice = session
+        Task { await session.begin(saying: words) }
+    }
+
+    /// Native chats, then agents in terminal tabs that are not also one.
+    private func voiceChats() -> [VoiceCatalog.Chat] {
+        let chats = fleet.chatItems.map { item in
+            VoiceCatalog.Chat(
+                device: item.computer.device,
+                pane: item.chat.pane,
+                title: item.chat.title,
+                computer: displayName(item.computer),
+                question: item.question
+            )
+        }
+        let panes = Set(chats.map(\.id))
+        let terminals = fleet.agentTerminals.compactMap { item -> VoiceCatalog.Chat? in
+            guard let pane = item.terminal.agentPane?.pane, !panes.contains("\(item.computer.device)/\(pane)") else { return nil }
+            // A numbered tab cannot be told apart out loud; its workspace can.
+            let title = Int(item.title) == nil ? item.title : item.workspace.label
+            return VoiceCatalog.Chat(
+                device: item.computer.device,
+                pane: pane,
+                title: title,
+                computer: displayName(item.computer),
+                terminal: true,
+                terminalAgent: item.agent?.name
+            )
+        }
+        return chats + terminals
+    }
+
+    /// What can be named out loud right now.
+    func voiceCatalog() -> VoiceCatalog {
+        VoiceCatalog(
+            computers: fleet.machines.map { machine in
+                let online = if case .online = machine.status { machine.home?.connected != false } else { false }
+                return VoiceCatalog.Computer(
+                    id: machine.id,
+                    name: displayName(machine.computer),
+                    online: online,
+                    home: machine.home,
+                    options: voiceOptions[machine.id]
+                )
+            },
+            chats: voiceChats(),
+            recentDevice: recentDevice,
+            recentAgent: recentAgent
+        )
     }
     let sessions: Sessions
     let tokens: ActivityTokens
@@ -133,6 +215,7 @@ final class AppModel {
     let collapsed = CollapsedStore()
     let tagFilter = TagFilterStore()
     let shortcuts = ShortcutStore()
+    let termKeys = TermKeyStore()
     let bluetooth = NearbyBluetooth()
     /// Bluetooth presence with the computers that have it on.
     let presence = PresenceCentral()
@@ -273,8 +356,16 @@ final class AppModel {
             message = "\(link.computer.isEmpty ? "That computer" : link.computer) is not paired with this phone."
             return
         }
+        let key = PaneKey(device: computer.device, pane: link.pane)
+        // An agent in a plain terminal alerts too, and opens its terminal,
+        // even before this phone has heard of a new one.
+        let terminal = fleet.terminalItems.first { $0.computer.device == computer.device && $0.terminal.panes.contains { $0.pane == link.pane } }
+        if link.terminal || terminal != nil {
+            pendingRoute = .term(key, title: terminal?.terminal.label ?? "Terminal")
+            return
+        }
         let title = fleet.chatItems.first { $0.computer.device == computer.device && $0.chat.pane == link.pane }?.chat.title
-        pendingRoute = .chat(PaneKey(device: computer.device, pane: link.pane), title: title ?? "Chat")
+        pendingRoute = .chat(key, title: title ?? "Chat")
     }
 
     /// The computers nearby whose pairing dialog is open now, by

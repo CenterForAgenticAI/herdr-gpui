@@ -162,6 +162,14 @@ public struct ChatActivityFacts: Codable, Hashable, Sendable {
     public var chatTitle: String
     public var agent: String
     public var pane: String
+    /// Set for an agent in a plain terminal, whose terminal the activity
+    /// opens; absent for a chat.
+    public var terminal: Bool?
+
+    /// Whether this activity says which chat it is. A generic one has no
+    /// title and shows the computer as its workspace, as the daemon's
+    /// `Live::redacted` leaves it, whichever side asked for it.
+    public var namesChat: Bool { !chatTitle.isEmpty || workspace != computer }
 
     public init(
         computer: String,
@@ -187,7 +195,7 @@ public struct ChatActivityFacts: Codable, Hashable, Sendable {
 
     /// The link the activity opens.
     public var link: ChatLink {
-        ChatLink(computer: computer, computerId: computerId, pane: pane)
+        ChatLink(computer: computer, computerId: computerId, pane: pane, terminal: terminal ?? false)
     }
 
     /// `workspace · chat`, or the workspace alone for an untitled chat.

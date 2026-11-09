@@ -25,8 +25,10 @@ use super::{
 use crate::{SheprdWindow, config::ChatLayoutMode};
 
 mod input_resize;
+mod progress;
 mod running;
 mod selection;
+mod states;
 mod steps;
 
 const PANE: &str = "rich-chat-preview";
@@ -120,17 +122,25 @@ impl Options {
                 | "jump"
                 | "conversation"
                 | "existing"
+                | "loading"
                 | "input-resize"
                 | "tools"
                 | "turns"
+                | "progress"
+                | "progress-before"
                 | "running"
                 | "running-open"
+                | "running-rail"
                 | "steps"
                 | "steps-open"
+                | "state-completed"
+                | "state-failed"
+                | "state-stopped"
+                | "state-waiting"
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, input-resize, tools, turns, running, running-open, steps, steps-open, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, loading, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -400,7 +410,10 @@ fn install(
         "all" | "jump" => format!("{MATH}\n{CODE}\n{DIAGRAM}\n{widget}"),
         _ => MATH.to_owned(),
     };
-    let existing = matches!(options.case.as_str(), "existing" | "input-resize");
+    let existing = matches!(
+        options.case.as_str(),
+        "existing" | "input-resize" | "loading"
+    );
     let mut transcript = Transcript {
         agent: "Codex".into(), // i18n: data
         status: if options.working {
@@ -439,9 +452,15 @@ fn install(
     if options.case.starts_with("steps") {
         transcript.entries = steps::entries(super::now_ms());
     }
+    if options.case.starts_with("progress") {
+        transcript.entries = progress::entries(options.case == "progress");
+    }
     if options.case.starts_with("running") {
         transcript.entries = running::entries();
         transcript.activities = running::activities(super::now_ms());
+    }
+    if options.case.starts_with("state-") {
+        states::apply(&options.case, &mut transcript, super::now_ms());
     }
     if options.case == "turns" {
         transcript.entries = earlier_turns();
@@ -507,6 +526,13 @@ fn install(
         },
         transcript,
     )?;
+    if options.case == "loading"
+        && let Some(pane) = view.chats.pane_mut(PANE)
+    {
+        // A first snapshot still pending, with no agent or observer socket.
+        pane.session = Default::default();
+        pane.prepared = Default::default();
+    }
     if options.case == "selection"
         && let Some(pane) = view.chats.pane_mut(PANE)
     {
@@ -524,17 +550,32 @@ fn install(
         pane.expanded.insert(EntryId(3));
         pane.running.set(true, crate::motion::now(), true);
     }
+    // The running command's output and the task's progress, open.
+    if options.case.starts_with("progress")
+        && let Some(pane) = view.chats.pane_mut(PANE)
+    {
+        pane.toggle_expanded(EntryId(3));
+        pane.toggle_expanded(EntryId(4));
+    }
+    // The rail, which a fixture leaves off, listing what runs.
+    if options.case == "running-rail"
+        && let Some(pane) = view.chats.pane_mut(PANE)
+    {
+        pane.rail = true;
+    }
     // Every running step in full, from the working row.
     if options.case == "steps-open"
         && let Some(pane) = view.chats.pane_mut(PANE)
     {
         pane.steps.set(true, crate::motion::now(), true);
     }
-    // One call's output open, the rest folded, as a reader leaves them.
+    // A call's output and an edit's diff open, the rest folded, as a reader
+    // leaves them.
     if options.case == "tools"
         && let Some(pane) = view.chats.pane_mut(PANE)
     {
-        pane.expanded.insert(EntryId(3));
+        pane.toggle_expanded(EntryId(3));
+        pane.toggle_expanded(EntryId(5));
     }
     if !options.read_only && !existing {
         let font = view.config.ui.clone();
@@ -672,6 +713,15 @@ fn visuals_ready(view: &SheprdWindow) -> Result<bool> {
                     });
                 }
             }
+            // Only opened previews ask for a grammar; plain ones never land.
+            Body::Tool(summary) => ids.extend(
+                summary
+                    .previews
+                    .iter()
+                    .flat_map(super::prepared::tool::Preview::codes)
+                    .map(|code| code.id)
+                    .filter(|id| pane.prepared.visuals.wants(*id)),
+            ),
             _ => {}
         }
     }

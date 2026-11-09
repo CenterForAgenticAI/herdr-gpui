@@ -12,19 +12,25 @@
 //! Anything else opens in the system's default application instead.
 //!
 //! When the editor is Neovim it listens on a private socket, and later
-//! files for the same tab open in that pane (see [`nvim`]).
+//! files for the same tab open in that pane (see [`nvim`]). An editor opened
+//! from a review brings that review back when it quits (see [`back`]).
 
+mod back;
 mod error;
 mod nvim;
 
 // i18n: migrated
+pub(crate) use back::Return;
 pub(crate) use error::Error;
 
-use crate::{NavigationTarget, SheprdWindow};
+use crate::{NavigationTarget, SheprdWindow, browser::TabId};
 use gpui::Context;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sheprd_client::{Method, protocol::ClientPaneInputEvent};
+use sheprd_client::{
+    Method,
+    protocol::{ClientPaneInputEvent, ClientShellPane, ClientShellSnapshot},
+};
 use std::path::{Path, PathBuf};
 
 /// Whether this build starts the editor: the typed line runs POSIX `sh`,
@@ -143,16 +149,15 @@ impl EditorTarget {
     }
 }
 
-/// The line typed into the new pane's shell. A leading space keeps it out of
-/// the history of shells that honor that, and `exec` hands the pane to the
-/// editor, so quitting the editor closes the pane. Without a configured
-/// command, the pane's own `$VISUAL` or `$EDITOR` is used, then `vi`. A
-/// Neovim listens on `socket`, whose private folder the line makes.
-pub(crate) fn command_line(
+/// The `sh -c` script that runs the editor, and its words: the file as `$0`,
+/// the line as `$1`, and the socket a Neovim listens on as `$2`, whose
+/// private folder the script makes. Without a configured command, the
+/// pane's own `$VISUAL` or `$EDITOR` is used, then `vi`.
+fn invocation(
     target: &EditorTarget,
     command: Option<&EditorCommand>,
     socket: Option<&Path>,
-) -> crate::Result<String> {
+) -> crate::Result<(String, Vec<String>)> {
     if !SUPPORTED {
         return Err(Error::Unsupported.into());
     }
@@ -161,18 +166,53 @@ pub(crate) fn command_line(
         .to_str()
         .filter(|path| quotable(path) && target.path.is_absolute())
         .ok_or(Error::Path)?;
-    let line = target.line.unwrap_or(1).max(1);
+    let line = target.line.unwrap_or(1).max(1).to_string();
     let script = command.map_or_else(|| DEFAULT_SCRIPT.to_owned(), EditorCommand::script);
     let Some(socket) = socket
         .and_then(Path::to_str)
         .filter(|socket| quotable(socket))
     else {
-        return Ok(format!(" exec sh -c '{script}' '{path}' {line}")); // i18n: data
+        return Ok((script, vec![path.to_owned(), line]));
     };
-    Ok(format!(
+    Ok((
         // i18n: data
-        " exec sh -c 'mkdir -p -m 700 \"${{2%/*}}\" || set -- \"$1\" \"\"; {script}' '{path}' {line} '{socket}'"
+        format!("mkdir -p -m 700 \"${{2%/*}}\" || set -- \"$1\" \"\"; {script}"),
+        vec![path.to_owned(), line, socket.to_owned()],
     ))
+}
+
+/// The line typed into the new pane's shell. A leading space keeps it out of
+/// the history of shells that honor that, and `exec` hands the pane to the
+/// editor, so quitting the editor closes the pane. Every word is one
+/// [`quotable`] checked, so single quotes carry it whole.
+pub(crate) fn command_line(
+    target: &EditorTarget,
+    command: Option<&EditorCommand>,
+    socket: Option<&Path>,
+) -> crate::Result<String> {
+    let (script, words) = invocation(target, command, socket)?;
+    let mut line = format!(" exec sh -c '{script}'"); // i18n: data
+    for (index, word) in words.iter().enumerate() {
+        // The line is a number, written bare as it always was.
+        if index == 1 {
+            line.push_str(&format!(" {word}"));
+        } else {
+            line.push_str(&format!(" '{word}'"));
+        }
+    }
+    Ok(line)
+}
+
+/// The program a herdr-core pane runs for the editor: herdr-core starts it
+/// directly, so nothing is typed into a shell.
+pub(crate) fn argv(
+    target: &EditorTarget,
+    command: Option<&EditorCommand>,
+) -> crate::Result<Vec<String>> {
+    let (script, words) = invocation(target, command, None)?;
+    let mut argv = vec!["/bin/sh".to_owned(), "-c".to_owned(), script];
+    argv.extend(words);
+    Ok(argv)
 }
 
 /// An editor pane this window started with a Neovim socket, which later
@@ -198,6 +238,20 @@ pub(crate) struct Job {
     request: String,
     line: String,
     socket: Option<PathBuf>,
+    page: Option<TabId>,
+}
+
+/// The pane an editor opens beside: `beside` while it is still open, as an
+/// agent's pane may not be by the time its review is read, else the focused
+/// pane.
+fn anchor<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    beside: Option<&str>,
+) -> Option<&'a ClientShellPane> {
+    let pane = |id: &str| snapshot.panes.iter().find(|pane| pane.pane_id == id);
+    beside
+        .and_then(pane)
+        .or_else(|| snapshot.focused_pane_id.as_deref().and_then(pane))
 }
 
 /// The new pane a `pane.split` response names.
@@ -221,11 +275,47 @@ impl SheprdWindow {
         beside: Option<&str>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(reused) = self.reusable_editor(beside) {
-            self.reuse_editor(reused, target.clone(), beside.map(str::to_owned), cx);
+        self.open_in_editor_from(target, beside, None, cx);
+    }
+
+    /// Opens `target` as [`Self::open_in_editor`] does, for `page`, the tab
+    /// that comes back when the editor quits.
+    pub(crate) fn open_in_editor_from(
+        &mut self,
+        target: &EditorTarget,
+        beside: Option<&str>,
+        page: Option<TabId>,
+        cx: &mut Context<Self>,
+    ) {
+        // Beside nothing in particular, a herdr-core tab the active group
+        // shows splits with the editor, as a Herdr tab would.
+        let core = beside.is_none().then(|| self.shown_core_pane(cx)).flatten();
+        if core.is_none()
+            && let Some(reused) = self.reusable_editor(beside)
+        {
+            self.reuse_editor(reused, target.clone(), beside.map(str::to_owned), page, cx);
             return;
         }
-        if let Err(error) = self.start_editor(target, beside) {
+        let started = match core {
+            Some((tab, at)) => self.start_core_editor(target, tab, at, cx),
+            None => self.start_editor(target, beside, page),
+        };
+        if let Err(error) = started {
+            self.editor_failed(target, error, cx);
+        }
+        cx.notify();
+    }
+
+    /// Opens `target` in the editor in a herdr-core split beside `at` in
+    /// `tab`, whether or not the active group shows that tab.
+    pub(crate) fn open_in_core_editor(
+        &mut self,
+        target: &EditorTarget,
+        tab: TabId,
+        at: sheprd_backend::TerminalId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = self.start_core_editor(target, tab, at, cx) {
             self.editor_failed(target, error, cx);
         }
         cx.notify();
@@ -264,11 +354,7 @@ impl SheprdWindow {
                     .iter()
                     .any(|pane| pane.pane_id == editor.pane_id)
         });
-        let tab = beside
-            .or(snapshot.focused_pane_id.as_deref())
-            .and_then(|id| snapshot.panes.iter().find(|pane| pane.pane_id == id))?
-            .tab_id
-            .clone();
+        let tab = anchor(&snapshot, beside)?.tab_id.clone();
         self.editor_panes
             .iter()
             .rev()
@@ -292,6 +378,7 @@ impl SheprdWindow {
         editor: EditorPane,
         target: EditorTarget,
         beside: Option<String>,
+        page: Option<TabId>,
         cx: &mut Context<Self>,
     ) {
         let socket = editor.socket.clone();
@@ -314,6 +401,12 @@ impl SheprdWindow {
                     }
                 };
                 if !gone {
+                    this.note_editor_return(
+                        &editor.endpoint_id,
+                        &editor.boot,
+                        &editor.pane_id,
+                        page,
+                    );
                     this.navigate_endpoint(
                         &editor.endpoint_id,
                         NavigationTarget::Pane(&editor.pane_id),
@@ -322,7 +415,7 @@ impl SheprdWindow {
                     return;
                 }
                 this.editor_panes.retain(|kept| *kept != editor);
-                if let Err(error) = this.start_editor(&target, beside.as_deref()) {
+                if let Err(error) = this.start_editor(&target, beside.as_deref(), page) {
                     this.editor_failed(&target, error, cx);
                 }
                 cx.notify();
@@ -331,7 +424,12 @@ impl SheprdWindow {
         .detach();
     }
 
-    fn start_editor(&mut self, target: &EditorTarget, beside: Option<&str>) -> crate::Result<()> {
+    fn start_editor(
+        &mut self,
+        target: &EditorTarget,
+        beside: Option<&str>,
+        page: Option<TabId>,
+    ) -> crate::Result<()> {
         if self.editor_open.is_some() && self.editor_current() {
             return Err(Error::Busy.into());
         }
@@ -350,10 +448,7 @@ impl SheprdWindow {
             .as_deref()
             .filter(|_| self.live.status.is_connected())
             .ok_or(crate::Error::NotConnected)?;
-        let pane = beside
-            .or(snapshot.focused_pane_id.as_deref())
-            .and_then(|id| snapshot.panes.iter().find(|pane| pane.pane_id == id))
-            .ok_or(Error::NoPane)?;
+        let pane = anchor(snapshot, beside).ok_or(Error::NoPane)?;
         let cwd = pane
             .foreground_cwd
             .clone()
@@ -385,7 +480,39 @@ impl SheprdWindow {
             request,
             line,
             socket,
+            page,
         });
+        Ok(())
+    }
+
+    /// Splits `tab`'s pane `at` with the editor on `target`, in `at`'s
+    /// folder. herdr-core runs the editor as the pane's program, so quitting
+    /// it ends the pane. A mirror only watches, so it is not split.
+    fn start_core_editor(
+        &mut self,
+        target: &EditorTarget,
+        tab: TabId,
+        at: sheprd_backend::TerminalId,
+        cx: &gpui::App,
+    ) -> crate::Result<()> {
+        if !self.core_terminals.drives(tab) {
+            return Err(Error::NoPane.into());
+        }
+        let argv = argv(target, self.config.editor_command.as_ref())?;
+        let cwd = self
+            .core_folder(tab, &at)
+            .or_else(|| target.path.parent().map(Path::to_path_buf));
+        let spawn = sheprd_backend::Spawn {
+            argv,
+            cwd,
+            ..sheprd_backend::Spawn::default()
+        };
+        let purpose = crate::core_terminals::Purpose::Split {
+            tab,
+            at,
+            axis: crate::core_terminals::panes::Axis::Row,
+        };
+        self.start_core_program(purpose, spawn, cx);
         Ok(())
     }
 
@@ -442,6 +569,7 @@ impl SheprdWindow {
             });
         match typed {
             Ok(pane) => {
+                self.note_editor_return(&job.endpoint_id, &job.boot, &pane, job.page);
                 // Remembered whatever the editor turns out to be: a socket
                 // nothing listens on is found out, and forgotten, on reuse.
                 if let Some(socket) = job.socket {

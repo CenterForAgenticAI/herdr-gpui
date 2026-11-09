@@ -393,6 +393,12 @@ pub(super) const CATALOG: &[Entry] = &[
     entry(Section::Tabs, "tabs-position", "settings-tabs-position", ""),
     entry(
         Section::Tabs,
+        "tabs-agent-title",
+        "settings-tabs-agent-title",
+        "settings-tabs-agent-title-description",
+    ),
+    entry(
+        Section::Tabs,
         "tabs-hide-single",
         "settings-tabs-hide-single",
         "",
@@ -444,6 +450,12 @@ pub(super) const CATALOG: &[Entry] = &[
         "notif-finished",
         "settings-notif-finished",
         "settings-notif-finished-description",
+    ),
+    entry(
+        Section::Notifications,
+        "notif-quiet-hours",
+        "settings-notif-quiet-hours",
+        "settings-notif-quiet-hours-description",
     ),
     entry(
         Section::Notifications,

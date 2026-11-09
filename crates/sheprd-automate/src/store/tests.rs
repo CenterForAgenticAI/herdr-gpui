@@ -1,4 +1,6 @@
 use super::*;
+
+mod migrate;
 use sheprd_automation::report::Reason;
 
 fn store() -> (tempfile::TempDir, Store) {
@@ -252,12 +254,12 @@ fn a_newer_schema_is_refused() {
     drop(Store::open(&path).unwrap());
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute("UPDATE meta SET value = '2' WHERE key = 'schema'", [])
+        .execute("UPDATE meta SET value = '99' WHERE key = 'schema'", [])
         .unwrap();
     drop(connection);
     assert!(matches!(
         Store::open(&path),
-        Err(crate::Error::Schema { found: 2 })
+        Err(crate::Error::Schema { found: 99 })
     ));
 }
 

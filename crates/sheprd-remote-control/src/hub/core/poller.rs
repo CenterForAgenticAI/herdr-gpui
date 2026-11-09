@@ -7,6 +7,7 @@ use sheprd_core_client::{
     Error,
     wire::{Doc, Terminal},
 };
+use sheprd_session::SavedTabs;
 use std::{path::Path, time::SystemTime};
 
 #[derive(Default)]
@@ -16,8 +17,9 @@ pub(super) struct Poller {
     boot: String,
     /// The document's version and its spaces, `None` when it has none.
     doc: Option<(u64, Option<spaces::Spaces>)>,
+    checkouts: super::checkouts::Checkouts,
     names: spaces::Names,
-    saved: Option<(SystemTime, Option<projection::Saved>)>,
+    saved: Option<(SystemTime, Option<SavedTabs>)>,
 }
 
 impl Poller {
@@ -55,20 +57,36 @@ impl Poller {
         tabs: Option<&Path>,
         scope: Option<&str>,
     ) -> Layout {
-        if let Some((_, Some(spaces))) = &self.doc {
-            return spaces.project(boot, terminals, &mut self.names);
+        if let Some(tabs) = tabs {
+            self.refresh_saved(tabs);
         }
-        let saved = tabs.and_then(|tabs| self.saved(tabs));
-        projection::project(boot, terminals, saved, scope)
+        let saved = self.saved.as_ref().and_then(|(_, saved)| saved.as_ref());
+        let mut layout = match &self.doc {
+            Some((_, Some(spaces))) => {
+                let mut layout = spaces.project(boot, terminals, saved, scope, &mut self.names);
+                projection::lead_kept(&mut layout, saved, scope);
+                layout
+            }
+            _ => projection::project(boot, terminals, saved, scope),
+        };
+        self.checkouts.fill(&mut layout, std::time::Instant::now());
+        layout
     }
 
-    fn saved(&mut self, path: &Path) -> Option<&projection::Saved> {
+    /// Whether Sheprd keeps workspace `id` for `scope` in its saved tabs.
+    pub(super) fn keeps(&self, scope: &str, id: &str) -> bool {
+        self.saved
+            .as_ref()
+            .and_then(|(_, saved)| saved.as_ref())
+            .is_some_and(|saved| saved.workspaces(scope).any(|workspace| workspace.id == id))
+    }
+
+    fn refresh_saved(&mut self, path: &Path) {
         let changed = std::fs::metadata(path).and_then(|file| file.modified());
         match (changed, &self.saved) {
             (Ok(at), Some((read, _))) if at == *read => {}
             (Ok(at), _) => self.saved = Some((at, projection::read(path))),
             (Err(_), _) => self.saved = None,
         }
-        self.saved.as_ref()?.1.as_ref()
     }
 }

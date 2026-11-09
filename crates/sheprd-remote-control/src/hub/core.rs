@@ -2,23 +2,31 @@
 //! opening a phone never starts another user's terminal runtime.
 
 mod chats;
+mod checkouts;
 mod create;
+pub(super) use create::Place;
 mod error;
+mod hold;
+mod lines;
 mod poller;
 mod projection;
+mod saved;
 mod screen;
 mod spaces;
+mod wake;
 
 use super::Error as HubError;
-use super::{ApiMethod, Layout};
+use super::{ApiMethod, Layout, Workspace};
 pub use error::Error;
+pub(super) use hold::Hold;
 use serde_json::Value;
+pub(super) use sheprd_client::herdr::worktree;
 use sheprd_core_client::{Core, Subscription, event::Notice, wire::Terminal};
 use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -26,17 +34,38 @@ use std::{
 use tokio::sync::watch;
 
 const POLL: Duration = Duration::from_millis(500);
-/// The longest between polls while events flow: how late a change to the
-/// desktop's spaces can reach a phone.
+/// The longest between polls while events flow. Terminals and documents
+/// wake the worker sooner; this is what keeps chats linked and alerts
+/// flowing when nothing does.
 const HEARTBEAT: Duration = Duration::from_secs(3);
 /// How long a screen goes unread before a new one may take its place.
 const IDLE_SCREEN: Duration = Duration::from_secs(5);
 /// Bounds emulators and attachments even when a phone visits many panes.
 const MAX_SCREENS: usize = 16;
 const RETRY: Duration = Duration::from_secs(3);
+const NEW_WORKSPACE: &str = "core:new:";
 const PREFIX: &str = "core:";
 /// Where terminals nothing else lists go, new ones from a phone included.
 pub(super) const UNLISTED: &str = "core:terminals";
+
+/// The workspace a phone's new workspace in `cwd` is listed as until
+/// Sheprd keeps one for it: named for its folder, so it keeps its id
+/// whichever of its panes close, and safe in a path.
+pub(super) fn new_workspace_id(cwd: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(cwd.as_bytes());
+    let mut id = String::from(NEW_WORKSPACE);
+    for byte in &digest[..8] {
+        use std::fmt::Write as _;
+        let _ = write!(id, "{byte:02x}");
+    }
+    id
+}
+
+/// Whether `workspace` is one [`new_workspace_id`] names.
+pub(super) fn is_new_workspace(workspace: &str) -> bool {
+    workspace.starts_with(NEW_WORKSPACE)
+}
 
 type Result<T> = std::result::Result<T, HubError>;
 
@@ -49,6 +78,8 @@ impl From<sheprd_core_client::Error> for HubError {
 pub(super) struct Source {
     connected: AtomicBool,
     endpoint: crate::core_target::CoreTarget,
+    /// The next phone size held on a screen gets this id.
+    holds: AtomicU64,
     /// Only the worker reads the core's document and the saved tabs; it
     /// keeps them apart from `state`, whose lock phones wait on.
     poller: Mutex<poller::Poller>,
@@ -60,10 +91,12 @@ pub(super) struct Source {
 /// What phones and the worker share. Its lock is held only to read or swap
 /// these, never across a core call: a stalled core or pane must not stop
 /// the other panes. Each screen has a lock of its own for the same reason.
+type SharedScreen = Arc<Mutex<screen::Screen>>;
+
 #[derive(Default)]
 struct State {
     core: Option<Arc<Core>>,
-    screens: HashMap<String, Arc<Mutex<screen::Screen>>>,
+    screens: HashMap<String, SharedScreen>,
     /// The panes of each listed tab, chats included, as the last poll saw.
     tabs: HashMap<String, Vec<String>>,
     terminals: Vec<Terminal>,
@@ -83,6 +116,7 @@ impl Source {
         let source = Arc::new(Self {
             connected: AtomicBool::new(false),
             endpoint,
+            holds: AtomicU64::new(0),
             poller: Mutex::default(),
             scope: target
                 .socket_path()
@@ -166,26 +200,29 @@ impl Source {
             return Err(Error::Unsupported.into());
         }
         let pane = params["pane_id"].as_str().ok_or(HubError::Response)?;
-        let (core, terminal) = {
-            let state = lock(&self.state);
-            let core = state.core.clone().ok_or(Error::Disconnected)?;
-            let boot = &core.hello().core.id;
-            let terminal = state
-                .terminals
-                .iter()
-                .find(|terminal| pane_id(boot, &terminal.address) == pane)
-                .cloned()
-                .ok_or(HubError::Response)?;
-            (core, terminal)
-        };
+        let (core, terminal) = self.terminal(pane)?;
         let screen = self.screen(&core, &terminal)?;
         let mut screen = lock(&screen);
         screen.follow_size(&terminal)?;
         screen.call(&core, method, params)
     }
 
+    /// The connection and the terminal `pane` names, as the last poll saw.
+    fn terminal(&self, pane: &str) -> Result<(Arc<Core>, Terminal)> {
+        let state = lock(&self.state);
+        let core = state.core.clone().ok_or(Error::Disconnected)?;
+        let boot = &core.hello().core.id;
+        let terminal = state
+            .terminals
+            .iter()
+            .find(|terminal| pane_id(boot, &terminal.address) == pane)
+            .cloned()
+            .ok_or(HubError::Response)?;
+        Ok((core, terminal))
+    }
+
     /// The shared screen of `terminal`, opened outside the state lock.
-    fn screen(&self, core: &Arc<Core>, terminal: &Terminal) -> Result<Arc<Mutex<screen::Screen>>> {
+    fn screen(&self, core: &Arc<Core>, terminal: &Terminal) -> Result<SharedScreen> {
         let address = &terminal.address;
         let found = lock(&self.state).screens.get(address).cloned();
         if let Some(screen) = found {
@@ -228,7 +265,7 @@ impl Source {
 /// The screen nobody has read or typed into for longest, if any is idle.
 /// Bounds emulators and attachments without letting abandoned panes keep
 /// out a pane a phone wants now.
-fn oldest_idle(screens: &HashMap<String, Arc<Mutex<screen::Screen>>>) -> Option<String> {
+fn oldest_idle(screens: &HashMap<String, SharedScreen>) -> Option<String> {
     screens
         .iter()
         .filter_map(|(address, screen)| {
@@ -275,10 +312,9 @@ fn run(source: Weak<Source>, layout: watch::Sender<Arc<Layout>>) {
     }
 }
 
-/// Waits for a terminal to change, or `limit` for what no event reports,
-/// which is the desktop's document. Polling is what keeps chats linked and
-/// alerts flowing with no phone open, so it slows down but never stops.
-/// Without events the next poll comes right away.
+/// Waits for a terminal or document to change, or `limit`. Polling is what
+/// keeps chats linked and alerts flowing with no phone open, so it slows
+/// down but never stops. Without events the next poll comes right away.
 fn wait(events: &mut Option<Subscription>, limit: Duration) {
     let Some(subscription) = events else {
         return;
@@ -327,13 +363,11 @@ fn pane_id(boot: &str, address: &str) -> String {
 }
 
 pub(super) fn owns(params: &Value) -> bool {
-    ["pane_id", "tab_id", "target_pane_id", "workspace_id"]
-        .iter()
-        .any(|key| {
-            params[key]
-                .as_str()
-                .is_some_and(|id| id.starts_with(PREFIX))
-        })
+    super::sessions::ID_KEYS.iter().any(|key| {
+        params[key]
+            .as_str()
+            .is_some_and(|id| id.starts_with(PREFIX))
+    })
 }
 
 fn merge(daemon: &Layout, core: &Layout) -> Layout {
@@ -354,6 +388,25 @@ fn merge(daemon: &Layout, core: &Layout) -> Layout {
         } else {
             merged.workspaces.push(workspace.clone());
         }
+    }
+    // A core with nothing in it, as one just started after a reboot, still
+    // gives a phone a workspace to start a chat in, and a folder to offer
+    // for new ones: the home folder.
+    if !daemon.connected
+        && core.connected
+        && merged.workspaces.is_empty()
+        && let Some(home) = sheprd_client::local_path::home_dir()
+    {
+        merged.workspaces.push(Workspace {
+            branch: None,
+            chats: Vec::new(),
+            cwd: home.to_string_lossy().into_owned(),
+            id: UNLISTED.to_owned(),
+            label: "Herdr 2".to_owned(),
+            session: None,
+            terminals: Vec::new(),
+            worktree: None,
+        });
     }
     merged
 }

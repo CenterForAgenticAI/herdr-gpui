@@ -1,6 +1,6 @@
 //! Command-line options, parsed from OS strings before any runtime starts.
 
-use crate::push::Privacy;
+use crate::{app::config::ActivityDetail, push::Privacy};
 use std::{
     ffi::OsString,
     net::{IpAddr, Ipv6Addr},
@@ -39,9 +39,13 @@ pub struct Options {
     /// discovers it from this process's environment. A service manager's
     /// environment may lack the shell's `XDG_CONFIG_HOME`.
     pub herdr_socket: Option<PathBuf>,
+    pub live_activities: ActivityDetail,
     pub port: u16,
     pub privacy: Privacy,
     pub state_dir: PathBuf,
+    /// The saved WSL distributions, as Sheprd resolved them; `None` resolves
+    /// them from this process's environment.
+    pub wsl_catalog: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
@@ -65,7 +69,7 @@ pub enum ParseError {
 /// What the command line asks for.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Invocation {
-    Serve(Options),
+    Serve(Box<Options>),
     /// Adds a phone another computer's Sheprd allowed, read as JSON from
     /// standard input (`app::enroll`).
     Enroll {
@@ -100,12 +104,17 @@ Options:
   --bind all|ADDRESS       Listen on every interface (default) or one address
   --cert FILE --key FILE   Use this certificate chain and key instead of the
                            daemon's own certificate authority
-  --herdr-socket PATH      The Herdr daemon's client socket (default: discovered)
+  --herdr-socket PATH      The Herdr daemon's client socket (default: discovered);
+                           other running Herdr sessions are followed too
   --core-socket PATH --core-session NAME
                            The desktop core endpoint (default: discovered)
   --chat-dir DIR           Where chat sockets live (default: discovered)
+  --wsl-catalog FILE       The saved WSL distributions (default: discovered)
   --privacy generic|excerpt
-                           Whether notifications may quote the chat (default generic)
+                           Whether notifications may quote the chat (default excerpt)
+  --live-activities detailed|generic
+                           Whether Live Activities name the chat and its step
+                           (default detailed)
   --device-idle-days N     Forget devices unseen this long, 0 for never
                            (default 30)
   --no-bonjour             Do not advertise over Bonjour; phones then pair
@@ -134,9 +143,10 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     let mut port = DEFAULT_PORT;
     let mut bind = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
     let (mut cert, mut key) = (None, None);
-    let mut privacy = Privacy::Generic;
+    let mut privacy = Privacy::default();
+    let mut live_activities = ActivityDetail::default();
     let mut idle_days = DEFAULT_IDLE_DAYS;
-    let (mut herdr_socket, mut chat_dir) = (None, None);
+    let (mut herdr_socket, mut chat_dir, mut wsl_catalog) = (None, None, None);
     let (mut core_socket, mut core_session) = (None, None);
     let mut bonjour = true;
     while let Some(arg) = args.next() {
@@ -172,6 +182,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
                 core_session = Some(text(value("--core-session")?, "--core-session")?)
             }
             "--chat-dir" => chat_dir = Some(PathBuf::from(value("--chat-dir")?)),
+            "--wsl-catalog" => wsl_catalog = Some(PathBuf::from(value("--wsl-catalog")?)),
             "--privacy" => {
                 privacy = match text(value("--privacy")?, "--privacy")?.as_str() {
                     "generic" => Privacy::Generic,
@@ -182,6 +193,18 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
                         });
                     }
                 };
+            }
+            "--live-activities" => {
+                live_activities =
+                    match text(value("--live-activities")?, "--live-activities")?.as_str() {
+                        "detailed" => ActivityDetail::Detailed,
+                        "generic" => ActivityDetail::Generic,
+                        _ => {
+                            return Err(ParseError::Value {
+                                option: "--live-activities",
+                            });
+                        }
+                    };
             }
             "--device-idle-days" => {
                 idle_days = text(value("--device-idle-days")?, "--device-idle-days")?
@@ -212,7 +235,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         }
         _ => return Err(ParseError::CorePair),
     };
-    Ok(Invocation::Serve(Options {
+    Ok(Invocation::Serve(Box::new(Options {
         bind,
         bonjour,
         certificate,
@@ -220,10 +243,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         core_endpoint,
         device_idle: (idle_days != 0).then(|| Duration::from_secs(idle_days * 24 * 60 * 60)),
         herdr_socket,
+        live_activities,
         port,
         privacy,
         state_dir: state_dir.ok_or(ParseError::NoStateDir)?,
-    }))
+        wsl_catalog,
+    })))
 }
 
 /// `enroll [--state-dir DIR]` and `revoke --device ID [--state-dir DIR]`.

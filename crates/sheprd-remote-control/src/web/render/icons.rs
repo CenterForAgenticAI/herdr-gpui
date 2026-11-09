@@ -19,11 +19,14 @@ fn icon(size: u16, body: &str) -> Markup {
 /// one shape in `currentColor`; `.agent-mark svg` sizes it to its tile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Agent {
+    Antigravity,
     Claude,
     Codex,
     Copilot,
+    Cursor,
     Gemini,
     Generic,
+    Grok,
     OpenCode,
     Pi,
 }
@@ -32,11 +35,14 @@ impl Agent {
     pub(crate) fn svg(self) -> Markup {
         PreEscaped(
             match self {
+                Self::Antigravity => include_str!("../../../../../assets/icons/agent-agy.svg"),
                 Self::Claude => include_str!("../../../../../assets/icons/agent-claude.svg"),
                 Self::Codex => include_str!("../../../../../assets/icons/agent-codex.svg"),
                 Self::Copilot => include_str!("../../../../../assets/icons/agent-copilot.svg"),
+                Self::Cursor => include_str!("../../../../../assets/icons/agent-cursor.svg"),
                 Self::Gemini => include_str!("../../../../../assets/icons/agent-gemini.svg"),
                 Self::Generic => include_str!("../../../../../assets/icons/agent-generic.svg"),
+                Self::Grok => include_str!("../../../../../assets/icons/agent-grok.svg"),
                 Self::OpenCode => include_str!("../../../../../assets/icons/agent-opencode.svg"),
                 Self::Pi => include_str!("../../../../../assets/icons/agent-pi.svg"),
             }

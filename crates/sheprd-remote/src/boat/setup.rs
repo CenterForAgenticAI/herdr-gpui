@@ -179,6 +179,14 @@ fn ensure_herdr(
             return Err(cloud::Error::Install(install::Failure::Missing).into());
         }
     }
+    if install {
+        match gateway::prepare(request, &sandbox.id) {
+            Ok(gateway) => gateway.with_command(|command| {
+                install::add_core(Ok::<_, std::convert::Infallible>(command), &cancelled)
+            })?,
+            Err(error) => install::core_unprepared(error, &cancelled)?,
+        }
+    }
     Ok(())
 }
 

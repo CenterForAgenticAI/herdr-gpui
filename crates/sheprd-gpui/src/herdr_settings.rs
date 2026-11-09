@@ -207,6 +207,12 @@ impl RightClickPassthrough {
         Some(Self((!unreportable).then_some(modifiers)))
     }
 
+    /// The combination `held`, as a config naming it reads.
+    #[cfg(test)]
+    pub(crate) fn held(held: Modifiers) -> Self {
+        Self(Some(held))
+    }
+
     /// Whether `held` is exactly the configured combination. The application
     /// then receives the click without it, as Herdr strips it.
     pub(crate) fn matches(self, held: Modifiers) -> bool {

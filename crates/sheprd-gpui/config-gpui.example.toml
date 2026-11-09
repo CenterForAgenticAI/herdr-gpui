@@ -137,6 +137,12 @@ smooth_scroll = true
 # On Wayland without server-side decorations (GNOME), buttons are always shown
 # regardless of this setting.
 # show_window_controls = true
+# Linux and Windows: the row of menus at the top of the window, also under
+# Settings > General. false opens windows without it; Terminal > Toggle Menu
+# Bar, or a `toggle_menu_bar` binding, hides or shows it for the session. While
+# hidden, F10 opens the menus over the window and any window controls move to
+# the title bar.
+# show_menu_bar = true
 
 # Focus split terminal panes on hover in the active window, without clicking.
 focus_follows_mouse = true
@@ -264,7 +270,9 @@ project_roots = []
 # or a function key F1 through F24. Sheprd > Keyboard Shortcuts also edits,
 # unbinds, and resets them.
 # Herdr's own [keys] in config.toml (prefix chords included) add to these
-# defaults; a command named here keeps only the keystrokes listed here.
+# defaults; a command named here keeps only what is listed here. List a prefix
+# chord as prefix- and the key typed after the prefix, so to free Cmd-W and keep
+# Herdr's default chord for Close Pane: close_pane = "prefix-x".
 # The examples below use the macOS defaults. Linux and Windows have their own
 # Ctrl+Shift defaults (not Super or Win): new_tab = "ctrl-shift-t",
 # new_window = "ctrl-alt-n", close_window = "ctrl-alt-w",
@@ -299,6 +307,7 @@ project_roots = []
 # focus_tab_1 = "cmd-1"   # through focus_tab_9 = "cmd-9"
 # toggle_sidebar = "cmd-b"
 # toggle_status_bar = "cmd-ctrl-b"   # unbound by default
+# toggle_menu_bar = "ctrl-alt-m"     # Linux and Windows; no menu bar in the window on macOS
 # toggle_zen_mode = "ctrl-cmd-z"   # Linux and Windows: "ctrl-alt-z"
 # increase_font_size = ["cmd-=", "cmd-+"]
 # decrease_font_size = "cmd--"
@@ -326,11 +335,13 @@ project_roots = []
 # shift-enter), or "text:" and the text to type, at most 1024 bytes; an empty
 # string removes a default. A keystroke here leaves its default or daemon
 # command, but naming it in [keybindings] too is an error.
-# Shift-Enter sends Alt-Enter (Esc CR) by default everywhere, so a prompt that
-# never enabled the kitty keyboard protocol reads a newline instead of the bare
-# CR Herdr would send it; "shift-enter" = "" sends Shift-Enter unchanged.
-# On macOS these are also defaults:
+# Shift-Enter is sent unchanged, distinct from Alt-Enter for kitty programs
+# such as Pi. For legacy prompts needing Alt-Enter (Esc CR) for a newline,
+# opt in below. It affects every pane, including kitty programs; the GUI is
+# not told each pane's keyboard protocol. "shift-enter" = "" keeps it unchanged.
 # [pane_keys]
+# "shift-enter" = "alt-enter" # Optional legacy newline mapping, not a default.
+# On macOS these are defaults:
 # "cmd-left" = "ctrl-a"
 # "cmd-right" = "ctrl-e"
 # "cmd-backspace" = "ctrl-u"
@@ -400,6 +411,17 @@ size = 12
 # the uncommitted-work probe's slow schedule: one checkout at a time, each at
 # most every 30 seconds while the window is active.
 # change_counts = "pr"
+# What ends a coordinator session's name, which turns on coordinator groups.
+# A session named "demo-coord" gets the coordinator mark in place of its agent's
+# and leads the group "demo", whose workers are the sessions named "demo-12",
+# "demo-13", and so on, in any workspace or on any host. The agents header then
+# offers a filter: each click shows the next group, its coordinator first, and
+# then all groups again. A session's name is what `herdr agent start` or `agent
+# rename` gave it, or its pane's Rename label. Groups follow names, so a new
+# session given the coordinator's name takes the group over. Unset leaves the
+# agents list as it was. Agents nested under workspaces get the mark but no
+# filter.
+# coordinator_suffix = "-coord"
 
 # The activity bar: an icon column at the window's left edge. Workspaces is
 # the sidebar beside the terminals; Orchestrator, Pull requests, and Issues
@@ -434,6 +456,12 @@ size = 12
 # [worktrees]
 # tint = "#7aa2f7"
 # apply_to = ["sidebar", "terminal"]
+
+[tab_labels]
+# Show the agent's terminal title on a tab with no name of its own, in place
+# of its number, cut after 28 columns. A tab you named keeps its name, and a
+# tab without an agent or a title keeps its number.
+agent_title = false
 
 [tabs]
 # Default: "Menlo" on macOS, "Cascadia Mono" on Windows (Consolas when
@@ -691,6 +719,19 @@ size = 12
 # memory = "4Gi"
 # allow_plaintext_credentials = false
 
+# boxd machines as devices (experimental). Settings > Cloud devices > boxd edits
+# api_url and saves the API key to the credential store; the key is never read
+# from this file. HERDR_BOXD_API_KEY overrides the saved key and
+# HERDR_BOXD_API_URL overrides api_url.
+# [boxd]
+# The API of boxd's service; a region is https://<region>.boxd.sh:9443.
+# api_url = "https://boxd.sh:9443"
+# Labels added to every machine made here, beside sheprd = "device".
+# labels = { team = "web" }
+# Same meaning as [github] allow_plaintext_credentials, for the key, which is
+# saved in its own 0600 boxd-api-key file. Default is false.
+# allow_plaintext_credentials = false
+
 # Fly Sprites as devices (experimental). Settings > Cloud devices > Sprites
 # edits this table and saves the API token to the credential store; the token
 # is never read from this file. HERDR_SPRITES_TOKEN overrides the saved token
@@ -718,7 +759,9 @@ size = 12
 # default opacity the window paints as it always has.
 # [backdrop]
 # How solid the theme's background is, from 0 (clear) to 1 (opaque). Terminal
-# colors a program chooses, popups, and dialogs stay opaque.
+# colors a program chooses, popups, and dialogs stay opaque. On Windows, a window
+# that starts below 1 shows no browser pages, and a change between the two takes
+# a restart.
 # opacity = 1.0
 # Blur the desktop behind a translucent window: macOS, Windows, and Wayland
 # compositors with KDE's blur protocol.

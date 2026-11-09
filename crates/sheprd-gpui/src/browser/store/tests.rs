@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 
+mod core_terminals;
 mod editors;
+mod kept;
 mod orchestrator_tabs;
 mod px0;
 
@@ -129,9 +131,10 @@ fn saved_tabs_round_trip_and_invalid_files_are_rejected() {
         .unwrap();
     let bytes = serde_json::to_vec(&Saved {
         tabs: store.tabs.clone(),
+        workspaces: Vec::new(),
     })
     .unwrap();
-    let restored = Store::with_tabs(parse(&bytes).unwrap(), None);
+    let restored = Store::with_tabs(parse(&bytes).unwrap().tabs, None);
     assert_eq!(restored.tabs, store.tabs);
     // New tabs never reuse a restored ID.
     assert!(restored.next > id.0);
@@ -242,21 +245,22 @@ fn saved_vs_code_tabs_round_trip_and_older_places_still_read() {
         .unwrap();
     let bytes = serde_json::to_vec(&Saved {
         tabs: store.tabs.clone(),
+        workspaces: Vec::new(),
     })
     .unwrap();
-    let restored = Store::with_tabs(parse(&bytes).unwrap(), None);
+    let restored = Store::with_tabs(parse(&bytes).unwrap().tabs, None);
     assert_eq!(restored.tabs, store.tabs);
     assert!(restored.code_tab(&scope, "w_1").is_some());
     let old =
         r#"{"tabs":[{"id":0,"scope":"local","workspace_id":"w","location":null,"title":""}]}"#;
-    let tabs = parse(old.as_bytes()).unwrap();
+    let tabs = parse(old.as_bytes()).unwrap().tabs;
     assert_eq!(tabs[0].place, Place::Group);
     for place in ["code", "code_group"] {
         let saved = format!(
             r#"{{"tabs":[{{"id":0,"scope":"local","workspace_id":"w","location":null,"title":"","place":"{place}"}}]}}"#
         );
         assert_eq!(
-            parse(saved.as_bytes()).unwrap()[0].place,
+            parse(saved.as_bytes()).unwrap().tabs[0].place,
             Place::Editor(Editor::VsCode)
         );
     }

@@ -32,7 +32,7 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
                     .then(|| view.core_chat_group_tab(None, cx))
                     .flatten();
                 let started = match core {
-                    Some(tab) => view.start_core_chat(agent, tab),
+                    Some(tab) => view.start_core_chat(agent, tab, cx),
                     None => view.start_chat(agent, beside.as_deref()),
                 };
                 match started {
@@ -115,26 +115,31 @@ fn start_code(error: &crate::chat::StartError) -> ErrorCode {
 /// How an agent that did not move is reported to the caller.
 fn convert_code(error: &crate::chat::ConvertError) -> ErrorCode {
     use crate::chat::ConvertError;
+    use sheprd_client::herdr::convert;
     match error {
         ConvertError::Program(error) => start_code(error),
-        ConvertError::Disabled
+        ConvertError::Convert(
+            convert::Error::Line
+            | convert::Error::NoSession(_)
+            | convert::Error::Unknown(_)
+            | convert::Error::Unsupported(_),
+        )
+        | ConvertError::Disabled
         | ConvertError::HostProgram(_)
-        | ConvertError::Line
-        | ConvertError::NoSession(_)
-        | ConvertError::NotReachable
-        | ConvertError::Unknown(_)
-        | ConvertError::Unsupported(_) => ErrorCode::Unsupported,
-        ConvertError::AlreadyChat | ConvertError::NoAgent | ConvertError::NotRunning(_) => {
-            ErrorCode::NotFound
+        | ConvertError::NotReachable => ErrorCode::Unsupported,
+        ConvertError::Convert(
+            convert::Error::AlreadyChat | convert::Error::NoAgent | convert::Error::NotRunning(_),
+        ) => ErrorCode::NotFound,
+        ConvertError::AlreadyConverting | ConvertError::Convert(convert::Error::Busy(_)) => {
+            ErrorCode::Busy
         }
-        ConvertError::AlreadyConverting | ConvertError::Busy(_) => ErrorCode::Busy,
-        ConvertError::Answer(_)
+        ConvertError::Convert(
+            convert::Error::Moved | convert::Error::StillRunning(_) | convert::Error::Stopped,
+        )
+        | ConvertError::Answer(_)
         | ConvertError::Existing(_)
-        | ConvertError::Moved
         | ConvertError::NotConnected
         | ConvertError::Stale
-        | ConvertError::StillRunning(_)
-        | ConvertError::Stopped
         | ConvertError::Type(_)
         | ConvertError::Worker(_) => ErrorCode::Failed,
     }

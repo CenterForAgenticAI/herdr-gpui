@@ -5,7 +5,7 @@
 //! thread owns the blocking I/O; the server only reads the layout.
 
 use super::{
-    layout::{self, Layout},
+    layout::{self, Chats, Layout},
     recency::AgentTimes,
 };
 use sheprd_client::{ClientEvent, ClientHandle, ConnectOptions, ConnectTarget};
@@ -30,20 +30,31 @@ struct Shared {
     /// The live connection's handle, to disconnect on drop.
     handle: Mutex<Option<ClientHandle>>,
     layout: watch::Sender<Arc<Layout>>,
+    /// The Herdr 1 session its workspaces are in, when its name is known.
+    session: Option<String>,
     stop: AtomicBool,
+    /// The worker returned; only a WSL session's does on its own.
+    ended: AtomicBool,
 }
 
 impl Daemon {
     /// Starts the worker, which connects now and again whenever the daemon
-    /// goes away.
+    /// goes away, and names `session` on every workspace it lists. A WSL
+    /// session is connected to once: its bridge starts a server that is down
+    /// and boots a stopped distribution, so what the user stopped would come
+    /// straight back. The session listing decides when it is worth following
+    /// again.
     pub(crate) fn start(
         layout: watch::Sender<Arc<Layout>>,
         target: ConnectTarget,
+        session: Option<String>,
     ) -> std::io::Result<Self> {
         let shared = Arc::new(Shared {
             handle: Mutex::new(None),
             layout,
+            session,
             stop: AtomicBool::new(false),
+            ended: AtomicBool::new(false),
         });
         let worker = shared.clone();
         thread::Builder::new()
@@ -60,9 +71,16 @@ impl Daemon {
             shared: Arc::new(Shared {
                 handle: Mutex::new(None),
                 layout,
+                session: None,
                 stop: AtomicBool::new(true),
+                ended: AtomicBool::new(false),
             }),
         }
+    }
+
+    /// Whether the worker has stopped for good.
+    pub(crate) fn ended(&self) -> bool {
+        self.shared.ended.load(Ordering::Acquire)
     }
 }
 
@@ -82,21 +100,27 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 fn run(shared: &Shared, target: &ConnectTarget) {
     // Outlives a connection: a reconnect to the same boot keeps the times.
     let mut times = AgentTimes::default();
+    let wsl = matches!(target, ConnectTarget::Wsl { .. });
     while !shared.stop.load(Ordering::Acquire) {
         if let Ok(client) = sheprd_client::connect_with_surface_active(
             target.clone(),
             ConnectOptions::default(),
             false,
         ) {
-            serve(shared, client, &mut times);
+            let chats = if wsl { Chats::Terminals } else { Chats::Linked };
+            serve(shared, client, &mut times, chats);
         }
         *lock(&shared.handle) = None;
         shared.layout.send_replace(Arc::new(Layout::default()));
+        if wsl {
+            break;
+        }
         thread::sleep(RETRY);
     }
+    shared.ended.store(true, Ordering::Release);
 }
 
-fn serve(shared: &Shared, client: sheprd_client::Client, times: &mut AgentTimes) {
+fn serve(shared: &Shared, client: sheprd_client::Client, times: &mut AgentTimes, chats: Chats) {
     let handle = client.handle.clone();
     *lock(&shared.handle) = Some(handle.clone());
     while let Ok(event) = client.events.recv() {
@@ -106,7 +130,10 @@ fn serve(shared: &Shared, client: sheprd_client::Client, times: &mut AgentTimes)
         }
         match event {
             ClientEvent::Snapshot(snapshot) => {
-                let mut next = layout::project(&snapshot);
+                let mut next = layout::project_with(&snapshot, chats);
+                if let Some(session) = &shared.session {
+                    next.name_session(session);
+                }
                 times.stamp(&snapshot, &mut next, crate::web::now_ms());
                 shared.layout.send_if_modified(|current| {
                     let changed = **current != next;

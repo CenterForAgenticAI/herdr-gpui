@@ -140,8 +140,45 @@ pub(super) fn window_for(caller: &Caller, cx: &mut App) -> Result<MainWindow, Re
             .find(|handle| handle.window_id().as_u64() == id)
             .ok_or_else(|| not_found(format!("Sheprd has no window {id}")));
     }
+    // A herdr-core terminal outside any Herdr workspace is found by the tab
+    // that holds it.
+    if caller.workspace_id.is_none()
+        && let Some(terminal) = &caller.terminal_id
+    {
+        let target = target(caller);
+        return windows
+            .into_iter()
+            .find(|handle| {
+                handle
+                    .read_with(cx, |view, _| view.control_target(&target, false).is_some())
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| {
+                Response::error(
+                    ErrorCode::WorkspaceNotFound,
+                    format!("No Sheprd window shows herdr-core terminal {terminal}"),
+                )
+            });
+    }
     if let Some(workspace) = &caller.workspace_id {
         let target = target(caller);
+        // Several windows may show the workspace of a herdr-core terminal
+        // in a Herdr workspace; the one holding its tab is the caller's.
+        if let Some(terminal) = caller.terminal_id.as_deref() {
+            for strict in target.strictness() {
+                let holder = windows.iter().find(|handle| {
+                    handle
+                        .read_with(cx, |view, _| {
+                            view.holds_core_terminal(terminal)
+                                && view.control_target(&target, *strict).is_some()
+                        })
+                        .unwrap_or(false)
+                });
+                if let Some(handle) = holder {
+                    return Ok(handle.clone());
+                }
+            }
+        }
         for strict in target.strictness() {
             for handle in &windows {
                 let shows = handle
@@ -187,6 +224,7 @@ pub(super) fn target(caller: &Caller) -> Target<'_> {
         daemon: caller.daemon_socket.as_deref().map(Path::new),
         workspace: caller.workspace_id.as_deref(),
         pane: caller.pane_id.as_deref(),
+        terminal: caller.terminal_id.as_deref(),
     }
 }
 

@@ -4,6 +4,7 @@
 //! prepared when entries changed; nothing here reads a socket. Program text
 //! is untrusted and only ever drawn as text.
 
+mod activity;
 mod composer;
 mod copy;
 mod disclosure;
@@ -11,6 +12,7 @@ mod embeds;
 mod entries;
 mod jump;
 mod layout;
+mod loading;
 mod panels;
 mod pinned;
 mod rail;
@@ -127,6 +129,7 @@ pub(super) fn agent_icon(agent: &str) -> &'static str {
 pub(super) struct Hues {
     pub(super) blue: u32,
     pub(super) green: u32,
+    pub(super) purple: u32,
     pub(super) red: u32,
     pub(super) yellow: u32,
 }
@@ -136,6 +139,7 @@ impl Hues {
         Self {
             blue: theme.ink(theme.palette[4]),
             green: theme.ink(theme.palette[2]),
+            purple: theme.ink(theme.palette[5]),
             red: theme.ink(theme.palette[1]),
             yellow: theme.ink(theme.palette[3]),
         }
@@ -188,6 +192,9 @@ impl SheprdWindow {
             .panes
             .iter()
             .flat_map(|pane| {
+                if let Some(loading) = self.render_chat_loading(pane, surface, cx) {
+                    return vec![loading];
+                }
                 let Some(chat) = self.chats.pane(&pane.pane_id) else {
                     return Vec::new();
                 };
@@ -284,9 +291,11 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let bounds = place.bounds();
+        let rail_shows = Self::chat_rail_shows(chat, bounds);
         let theme = &self.theme;
         let pane_id = chat.target.pane_id.clone();
         chat.text_geometry.begin_frame();
+        chat.prepared.visuals.begin_frame();
         let entries = {
             let pane_id = pane_id.clone();
             list(
@@ -442,7 +451,7 @@ impl SheprdWindow {
                                 !chat.selection.is_empty() || chat.selection.is_selecting(),
                             ))
                             .children(
-                                self.render_chat_working(chat, cx)
+                                self.render_chat_working(chat, rail_shows, cx)
                                     .map(|content| self.chat_column(content)),
                             )
                             .children(
@@ -450,7 +459,7 @@ impl SheprdWindow {
                                     .map(|content| self.chat_column(content)),
                             )
                             .children(
-                                self.render_chat_running_table(chat)
+                                self.render_chat_running_table(chat, rail_shows)
                                     .map(|content| self.chat_column(content)),
                             )
                             .children(
@@ -471,7 +480,7 @@ impl SheprdWindow {
                                 view.child(self.chat_column(self.render_chat_composer(chat, cx)))
                             }),
                     )
-                    .children(self.render_chat_rail(chat, bounds)),
+                    .children(self.render_chat_rail(chat, bounds, cx)),
             )
             .children(self.render_chat_viewer(chat, bounds, cx))
             .into_any_element()
@@ -479,10 +488,23 @@ impl SheprdWindow {
 
     /// The layout's sign that the agent is working on a turn, with what it
     /// left running said after it.
-    fn render_chat_working(&self, chat: &ChatPane, cx: &mut Context<Self>) -> Option<Div> {
+    fn render_chat_working(
+        &self,
+        chat: &ChatPane,
+        rail_shows: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         let open = chat.steps.is_open();
+        let needs_input = self.chat_needs_input(chat);
         let working = working::Working::of(chat.session.transcript(), super::now_ms())
-            .map(|working| working::Working { open, ..working });
+            .map(|working| working::Working { open, ..working })
+            .map(|working| {
+                if needs_input {
+                    working.waiting(chat.input())
+                } else {
+                    working
+                }
+            });
         let row = layout::layout_for(self.config.chat.layout)
             .working(working.as_ref(), &self.chat_look())
             .map(|row| {
@@ -501,7 +523,7 @@ impl SheprdWindow {
                     }),
                 )
             });
-        self.render_chat_running_row(chat, row, working.is_none(), cx)
+        self.render_chat_running_row(chat, row, working.is_none(), rail_shows, cx)
     }
 
     /// The chat's background where no page shows: on macOS, where a page
@@ -594,15 +616,7 @@ impl SheprdWindow {
         let hues = Hues::of(theme);
         let transcript = chat.session.transcript();
         let status = &transcript.status;
-        let needs_input = chat.input() == ChatInput::Terminal
-            && self.live.agent_status(&chat.target.pane_id)
-                == Some(sheprd_client::protocol::AgentStatus::Blocked);
-        let dot = match status {
-            Status::Starting => theme.muted,
-            Status::Idle => hues.green,
-            Status::Working => hues.yellow,
-            Status::Failed { .. } | Status::Exited { .. } => hues.red,
-        };
+        let state = activity::State::of(transcript, self.chat_needs_input(chat));
         let pane_id = chat.target.pane_id.clone();
         let button = |id: &'static str| {
             div()
@@ -641,6 +655,11 @@ impl SheprdWindow {
                     this.step_chat_layout(cx);
                 }))
         };
+        // Without a composer to carry the meter, the header does, where
+        // there is room for it.
+        let usage = (rail_fits && (chat.input() != ChatInput::Composer))
+            .then(|| self.render_chat_usage(chat))
+            .flatten();
         let rail = self.render_chat_rail_controls(chat, rail_fits, cx);
         let terminal = {
             let pane_id = pane_id.clone();
@@ -694,21 +713,18 @@ impl SheprdWindow {
                             .font_weight(FontWeight::MEDIUM)
                             .child(crate::notifications::safe_text(chat.session.agent(), 80)),
                     )
-                    .child(div().flex_none().size(px(7.)).rounded_full().bg(rgb(dot)))
+                    .child(state.mark(theme))
                     .child(
                         div()
                             .debug_selector(|| "chat-status".into())
                             .flex_none()
                             .text_color(rgb(theme.subtext()))
-                            .child(if needs_input {
-                                fl!("chat-needs-input")
-                            } else {
-                                status_text(transcript)
-                            }),
+                            .child(state.text(transcript)),
                     )
                     .child(div().flex_1())
                     .children(reconnecting)
                     .children(watching)
+                    .children(usage)
                     .child(layout)
                     .children(rail)
                     .child(terminal),

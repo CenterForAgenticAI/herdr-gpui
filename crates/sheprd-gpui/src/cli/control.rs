@@ -33,7 +33,7 @@ pub use settings::{
 };
 use std::ffi::OsString;
 pub use tabs::{CodeCommand, FileAt, Items, OrchestratorCommand, TabCommand};
-pub use work::{CheckpointCommand, FanOut, NotesCommand, WaitFor};
+pub use work::{CheckpointCommand, FanOut, NotesCommand, WaitFor, WorktreeCommand};
 
 /// What to do, and how the answer is printed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +69,7 @@ pub enum ControlCommand {
     Chat(ChatCommand),
     Px0,
     Notes(NotesCommand),
+    Worktree(WorktreeCommand),
     /// Every kind of note the user sent this pane: page, review, terminal.
     Feedback {
         wait: u64,
@@ -89,6 +90,8 @@ pub enum ControlCommand {
     Ports(PortsCommand),
     Processes {
         pane: Option<String>,
+        /// A herdr-core terminal, by its address such as `t7`.
+        terminal: Option<String>,
     },
     Usage,
     System,
@@ -175,6 +178,7 @@ pub const FAMILIES: &[(&str, &str)] = &[
     ),
     ("px0", "Open px0 on the caller's local checkout"),
     ("notes", "Notes kept on worktrees"),
+    ("worktree", "Mute or unmute the caller's worktree"),
     (
         "feedback",
         "Notes the user sent this pane, from pages, reviews, or terminals",
@@ -193,7 +197,7 @@ pub const FAMILIES: &[(&str, &str)] = &[
         "Send one prompt to several agents, each in its own worktree",
     ),
     ("pr", "The pull request of the caller's branch"),
-    ("host", "List the window's hosts, or show one"),
+    ("host", "List the window's hosts, show one, or mute one"),
     (
         "cloud",
         "Saved cloud machines: list, add, run a command, destroy",
@@ -349,6 +353,7 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
             ControlCommand::Px0
         }
         "notes" => ControlCommand::Notes(work::notes(args)?),
+        "worktree" => ControlCommand::Worktree(work::worktree(args)?),
         "feedback" => ControlCommand::Feedback {
             wait: wait_option(args, "--wait")?,
         },
@@ -369,6 +374,7 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
         "ports" => ControlCommand::Ports(hosts::ports(args)?),
         "processes" => ControlCommand::Processes {
             pane: args.text_option("--pane")?,
+            terminal: args.text_option("--terminal")?,
         },
         "usage" => ControlCommand::Usage,
         "system" => ControlCommand::System,

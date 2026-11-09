@@ -1,10 +1,13 @@
 //! Every device the sidebar lists, for a host's layout: its header (name,
 //! connection, load, folded or not) and the rows under it, each with what
 //! the window's own row shows, in the order and with the folds it shows them.
+//! Rows come from each device's sessions, as the window's own sidebar reads
+//! them: Herdr 1's workspaces, then those the app keeps for herdr-core.
 
 use super::{hex, load_state, status_name};
 use crate::{
     endpoint::Endpoint,
+    session_model::Sessions,
     sidebar::workspaces::{
         visible_workspace_entries, workspace_badge, workspace_entries, workspace_label,
         workspace_note,
@@ -13,25 +16,27 @@ use crate::{
 };
 use gpui::App;
 use serde_json::{Value, json};
-use sheprd_client::protocol::{ClientShellSnapshot, ClientShellWorkspace};
+use sheprd_session::{Keeper, Session, Workspace};
 use std::{
     collections::HashSet,
     hash::{DefaultHasher, Hash, Hasher},
 };
 
-/// One row's place: its device, and the repository it folds when it heads a
-/// group of linked worktrees.
+/// One row's place: its device, the repository it folds when it heads a
+/// group of linked worktrees, and whether it shows as focused.
 struct Place<'a> {
     index: usize,
     endpoint: &'a Endpoint,
     group: Option<String>,
     collapsed: &'a HashSet<String>,
     muted: bool,
+    focused: bool,
+    number: usize,
 }
 
 impl SheprdWindow {
     /// The window's folds and devices, as one number: equal numbers say no
-    /// header or group was folded and no device's snapshot changed. Read on
+    /// header or group was folded and no device's sessions changed. Read on
     /// every notification, so it allocates nothing.
     pub(super) fn hosted_devices_stamp(&self) -> u64 {
         let mut stamp = 0u64;
@@ -69,6 +74,14 @@ impl SheprdWindow {
         for key in &self.collapsed_repos {
             mix(&|hasher| ("local", key).hash(hasher));
         }
+        // The workspaces the app keeps for herdr-core, and the one in front.
+        let core = self
+            .sessions(self.selected_endpoint)
+            .core
+            .as_ref()
+            .map(|session| std::sync::Arc::as_ptr(session) as usize);
+        let front = self.kept_in_front();
+        mix(&|hasher| (core, front).hash(hasher));
         stamp
     }
 
@@ -88,14 +101,12 @@ impl SheprdWindow {
                     .and_then(|host| self.system_load.get(host))
                     .and_then(|load| load.latest().copied());
                 let folded = multi && endpoint.collapsed;
-                let rows = match live.snapshot.as_deref() {
-                    Some(snapshot) if !folded => self.hosted_rows(index, endpoint, snapshot, cx),
-                    _ => Vec::new(),
+                let sessions = self.sessions(index);
+                let rows = if folded {
+                    Vec::new()
+                } else {
+                    self.hosted_rows(index, endpoint, &sessions, cx)
                 };
-                let search = live
-                    .snapshot
-                    .as_deref()
-                    .map_or_else(Vec::new, |snapshot| search_rows(endpoint, snapshot, cx));
                 json!({
                     "collapsed": folded,
                     "connected": live.status.is_connected(),
@@ -104,7 +115,7 @@ impl SheprdWindow {
                     "label": endpoint.label,
                     "load": reading.as_ref().map(|reading| load_state(Some(reading))),
                     "removing": self.device_removing(endpoint),
-                    "search": search,
+                    "search": search_rows(endpoint, &sessions, cx),
                     "selected": selected,
                     "workspaces": rows,
                 })
@@ -115,37 +126,63 @@ impl SheprdWindow {
     /// Every workspace of the selected device, folded or not, in the
     /// sidebar's order, for what reads the focused one.
     pub(super) fn hosted_workspaces(&self, cx: &App) -> Vec<Value> {
-        let (Some(endpoint), Some(snapshot)) = (
-            self.endpoints.get(self.selected_endpoint),
-            self.live.snapshot.as_deref(),
-        ) else {
+        let Some(endpoint) = self.endpoints.get(self.selected_endpoint) else {
             return Vec::new();
         };
         let none = HashSet::new();
-        let silenced = crate::notification_mutes::Mutes::silenced_in(cx, endpoint, snapshot);
-        workspace_entries(&snapshot.workspaces)
-            .into_iter()
-            .map(|(row, child)| {
-                let workspace = &snapshot.workspaces[row];
+        let sessions = self.sessions(self.selected_endpoint);
+        let silenced = self.silenced(endpoint, cx);
+        let kept_front = self.kept_in_front();
+        let mut number = 0;
+        let mut rows = Vec::new();
+        for (keeper, session) in sessions.keyed() {
+            let front = Sessions::front_of(keeper, session, kept_front);
+            for (row, child) in workspace_entries(&session.workspaces) {
+                let workspace = &session.workspaces[row];
+                number += 1;
                 let place = Place {
                     index: self.selected_endpoint,
                     endpoint,
                     group: None,
                     collapsed: &none,
-                    muted: silenced.workspace(&workspace.workspace_id),
+                    muted: silenced.contains(&workspace.id),
+                    focused: front == Some(workspace.id.as_str()),
+                    number,
                 };
-                self.hosted_row(workspace, child, &place, cx)
-            })
+                rows.push(self.hosted_row(workspace, child, &place, cx));
+            }
+        }
+        rows
+    }
+
+    /// The workspaces of `endpoint` whose notifications are muted. Mutes are
+    /// kept per Herdr 1 daemon; a device without one has none.
+    fn silenced(&self, endpoint: &Endpoint, cx: &App) -> HashSet<String> {
+        let index = self.endpoints.iter().position(|e| e.id == endpoint.id);
+        let live = match index {
+            Some(index) if index == self.selected_endpoint => &self.live,
+            _ => &endpoint.live,
+        };
+        let Some(snapshot) = live.snapshot.as_deref() else {
+            return HashSet::new();
+        };
+        let silenced = crate::notification_mutes::Mutes::silenced_in(cx, endpoint, snapshot);
+        snapshot
+            .workspaces
+            .iter()
+            .map(|workspace| &workspace.workspace_id)
+            .filter(|id| silenced.workspace(id))
+            .cloned()
             .collect()
     }
 
-    /// A device's rows as its section lists them: linked worktrees under
-    /// their checkout, and none of a folded group's.
+    /// A device's rows as its section lists them: each session's workspaces,
+    /// linked worktrees under their checkout, and none of a folded group's.
     fn hosted_rows(
         &self,
         index: usize,
         endpoint: &Endpoint,
-        snapshot: &ClientShellSnapshot,
+        sessions: &Sessions,
         cx: &App,
     ) -> Vec<Value> {
         let collapsed = if index == 0 {
@@ -153,31 +190,35 @@ impl SheprdWindow {
         } else {
             &endpoint.collapsed_repos
         };
-        let silenced = crate::notification_mutes::Mutes::silenced_in(cx, endpoint, snapshot);
-        visible_workspace_entries(&snapshot.workspaces, collapsed)
-            .into_iter()
-            .map(|(row, child, group)| {
-                let workspace = &snapshot.workspaces[row];
+        let silenced = self.silenced(endpoint, cx);
+        let selected = index == self.selected_endpoint;
+        let kept_front = self.kept_in_front();
+        let mut number = 0;
+        let mut rows = Vec::new();
+        for (keeper, session) in sessions.keyed() {
+            let front = selected
+                .then(|| Sessions::front_of(keeper, session, kept_front))
+                .flatten();
+            for (row, child, group) in visible_workspace_entries(&session.workspaces, collapsed) {
+                let workspace = &session.workspaces[row];
+                number += 1;
                 let place = Place {
                     index,
                     endpoint,
                     group,
                     collapsed,
-                    muted: silenced.workspace(&workspace.workspace_id),
+                    muted: silenced.contains(&workspace.id),
+                    focused: front == Some(workspace.id.as_str()),
+                    number,
                 };
-                self.hosted_row(workspace, child, &place, cx)
-            })
-            .collect()
+                rows.push(self.hosted_row(workspace, child, &place, cx));
+            }
+        }
+        rows
     }
 
     /// One row: what the window's row shows, its device, and its fold.
-    fn hosted_row(
-        &self,
-        workspace: &ClientShellWorkspace,
-        child: bool,
-        place: &Place<'_>,
-        cx: &App,
-    ) -> Value {
+    fn hosted_row(&self, workspace: &Workspace, child: bool, place: &Place<'_>, cx: &App) -> Value {
         let note = workspace_note(
             workspace,
             crate::worktree_notes::Notes::of(cx),
@@ -192,13 +233,13 @@ impl SheprdWindow {
             (note, place.muted),
             &self.theme,
         );
-        let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
+        let (ahead, behind) = workspace.ahead_behind.unwrap_or((0, 0));
         let tree = workspace.worktree.as_ref();
         let counts = badge.as_ref().and_then(|badge| badge.counts.as_ref());
         let pr = badge.as_ref().and_then(|badge| badge.pr.as_ref());
         json!({
             "added": counts.map(|counts| counts.additions.clone()),
-            "agent_status": status_name(workspace.agent_status),
+            "agent_status": status_name(workspace.status),
             "ahead": ahead,
             "behind": behind,
             "branch": workspace.branch,
@@ -206,15 +247,16 @@ impl SheprdWindow {
             "collapsed": place.group.as_ref().is_some_and(|key| place.collapsed.contains(key)),
             "dirty": badge.as_ref().is_some_and(|badge| badge.dirty),
             "endpoint": place.endpoint.id,
-            "focused": workspace.focused,
+            "focused": place.focused,
             "group": place.group,
-            "id": workspace.workspace_id,
+            "id": workspace.id,
+            "kept": workspace.keeper == Keeper::App,
             "label": workspace_label(workspace, child),
-            "linked": tree.is_some_and(|tree| tree.is_linked_worktree),
+            "linked": tree.is_some_and(|tree| tree.linked),
             "local_counts": counts.is_some_and(|counts| counts.local),
             "muted": place.muted,
             "note": note,
-            "number": workspace.number,
+            "number": place.number,
             "pr": pr.map(|pr| pr.number.clone()),
             // The number's color says the pull request's state, as the row's
             // own badge does.
@@ -230,17 +272,21 @@ impl SheprdWindow {
 /// Every workspace of a device, folded or not, with what the sidebar's search
 /// matches: its name, its branch and the note on its checkout, as the
 /// window's own search reads them.
-fn search_rows(endpoint: &Endpoint, snapshot: &ClientShellSnapshot, cx: &App) -> Vec<Value> {
+fn search_rows(endpoint: &Endpoint, sessions: &Sessions, cx: &App) -> Vec<Value> {
     let notes = crate::worktree_notes::Notes::of(cx);
-    workspace_entries(&snapshot.workspaces)
-        .into_iter()
-        .map(|(row, child)| {
-            let workspace = &snapshot.workspaces[row];
+    sessions
+        .each()
+        .flat_map(|session: &Session| {
+            workspace_entries(&session.workspaces)
+                .into_iter()
+                .map(move |(row, child)| (&session.workspaces[row], child))
+        })
+        .map(|(workspace, child)| {
             json!({
-                "agent_status": status_name(workspace.agent_status),
+                "agent_status": status_name(workspace.status),
                 "branch": workspace.branch,
                 "endpoint": endpoint.id,
-                "id": workspace.workspace_id,
+                "id": workspace.id,
                 "label": workspace_label(workspace, child),
                 "note": workspace_note(workspace, notes, &endpoint.id),
             })

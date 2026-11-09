@@ -5,7 +5,7 @@
 
 use crate::teleport::ProcessInfo;
 use sheprd_chat_protocol::{EndpointId, TOKEN, restore};
-use sheprd_client::protocol::ClientShellSnapshot;
+use sheprd_client::{protocol::ClientShellSnapshot, quoted_line};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -330,20 +330,6 @@ pub(in crate::chat) fn line(program: &Path, record: &restore::Record) -> Option<
         return None;
     }
     quoted_line(&words)
-}
-
-/// The line that runs `words`, the program first, through `sh`, each as its
-/// own single-quoted word; `None` when one holds a quote or a control
-/// character. See [`line`].
-pub(in crate::chat) fn quoted_line(words: &[&str]) -> Option<String> {
-    if words
-        .iter()
-        .any(|word| word.contains('\'') || word.chars().any(char::is_control))
-    {
-        return None;
-    }
-    let quoted: Vec<String> = words.iter().map(|word| format!("'{word}'")).collect();
-    Some(format!(" sh -c 'exec \"$0\" \"$@\"' {}", quoted.join(" ")))
 }
 
 /// How the pass learns what it cannot see in a record or a snapshot.

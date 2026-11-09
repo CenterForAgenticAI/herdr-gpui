@@ -82,8 +82,8 @@ keeps its terminal view.
 ## Moving a terminal agent into a chat
 
 An agent running in its own CLI can move into a chat without leaving its pane
-or its conversation. With the agent's pane focused, run **Move Agent into
-Chat** from the command palette, or:
+or its conversation. Right-click its tab and choose **Move Agent into Chat**,
+run the same command from the palette with the agent's pane focused, or:
 
 ```sh
 sheprd chat convert [--pane ID]
@@ -105,6 +105,14 @@ and the chat opens with the conversation so far and its context window use.
 Herdr must know the agent's session, which takes its integration: run
 `herdr integration install claude` (or `codex`, `copilot`, `opencode`), then
 restart the agent. Without it the move is refused and the agent keeps running.
+
+Sheprd Remote on a phone offers the same move as **Move Agent into Chat** in a
+terminal tab's menu, for agents on the computer it is paired with, and opens
+the chat once it is up.
+
+The tab's menu offers the row for an agent that can move, on a host chats reach,
+and shows a refusal in the menu. In a tab with several such agents it moves the
+one in the focused pane, else the first; use `--pane` to choose another.
 
 Only an idle agent moves, since stopping one mid-turn would lose the turn, and
 a refusal leaves it running in its terminal. Everything that can refuse is
@@ -226,15 +234,70 @@ stays at the far right, as in `Editing server/purpose.ts… · 42s +1 more 11m 1
 Click the row to list the running steps in full, each with its own time; click
 again to close the list. It keeps the newest 16 and says how many more run. A chat from an older `sheprd-acp` has no step times.
 
-## Sub-agents and background shells
+The row's dot pulses in a color for what the agent does: thinking, writing, or
+running a step. When the agent stops on your answer, the dot gives way to a
+still mark and the row says where to answer. The header gives the same state in
+a word and a mark: **Working**, **Needs input**, and once the agent is idle how
+its last turn ended, **Completed**, **Stopped** (cancelled, refused, or out of
+turns) or **Failed**. An observed CLI agent's state comes from the daemon, and
+its log only shows steps it recorded, so between them the row says **Working**.
+Times and token counts appear only when reported: the turn's line in the
+conversation has them, and the composer the context meter. A chat with no
+composer shows that meter in its header, when the pane is wide enough.
 
-When the agent hands a task to a sub-agent or leaves a command running in the
-background, the row above the composer says so after what the agent is doing,
-such as `Writing… 12s · 2 sub-agents · 1 background shell`. A background shell
-outlives the turn that started it, so once the agent is idle the row keeps
-saying what still runs (`1 background shell still running`) and clears when
-everything has ended. Click it for a table of each one: what it is, how long it
-has run or ran, and whether it is running, done, failed, or stopped.
+## Tool calls
+
+A folded tool call says what it did: the command, file, search, or sub-agent
+task. Click anywhere on its header to open or fold it. Screen readers hear the
+same expanded state and can use the Expand and Collapse actions.
+
+Opening a call shows each thing it reported as source: a command as shell, known
+arguments as JSON, and edits as a red and green diff with a little context and
+syntax colors. **Copy diff** or **Copy code** copies what is drawn, and
+**Copy original** gives the exact payload when the preview left part of it out.
+Output the app can't read as structure stays as plain text.
+
+A diff compares only the text the agent reported, so its line numbers are not
+the file's. When the agent didn't report a file's earlier text, as with a
+whole-file write, the card shows the written text and counts its lines without
+claiming any were removed. Changes too large to compare show their text before
+and after. A tool the app doesn't know keeps its own name.
+
+A running call updates in place. Native Codex shows a command's output as it
+prints, pi shows each partial result its tools report, and Claude Code shows how
+long a tool has run and what its background tasks report, though a Claude
+command's own output still arrives with its result. The final output replaces
+what streamed, and other ACP agents show whatever updates they send. A chat
+following an existing CLI session can only show what that CLI saves to its log.
+
+## Sub-agents, background shells, and monitors
+
+When the agent hands a task to a sub-agent, leaves a command running in the
+background, or starts a monitor, the row above the composer says so after what
+the agent is doing, such as `Writing… 12s · 2 sub-agents · 1 background shell`.
+A background shell outlives the turn that started it, so once the agent is idle
+the row keeps saying what still runs (`1 background shell still running`) and
+clears when everything has ended.
+
+The rail beside the conversation lists each one under **Sub-agents**,
+**Shells**, or **Monitors**, running work first with how long it has run and
+its latest step, and what ended folded under **N ended**. Click a row to go to
+its card. Hover a running row and its time becomes a Stop button, which ends
+that one piece of work at once, without asking, and leaves the turn running.
+Only work the agent can really stop offers it: Claude's sub-agents, shells, and
+monitors once Claude has named them, and Codex's sub-agents. Codex offers no
+way to stop a command inside a thread, so its shells have no Stop, and Copilot's
+and OpenCode's sub-agents are listed without one, as ACP has no request for it.
+Gemini and Pi report none of this, so these sections stay away.
+
+Every rail section folds to one line. While anything runs, **Plan** and
+**Changed** fold on their own to leave room, showing the current step and the
+change totals; once nothing runs they open again. Clicking a section's header
+overrides that for as long as the chat is open.
+
+When the rail is hidden or the pane is too narrow for it, click the row above
+the composer for a table instead: what each one is, how long it has run or ran,
+and whether it is running, done, failed, or stopped.
 
 A sub-agent's call is marked **Sub-agent** in the conversation, with the number
 of steps it took; open it to list them. Its steps stay in its card rather than
@@ -324,6 +387,15 @@ original editor's cursor remains visible even if it needs more rows than chosen.
 Unusual full-screen dialogs may require the terminal view.
 Leaving the agent returns to the ordinary terminal.
 
+Until the first transcript arrives, a loading view covers the old terminal
+output and leaves the original editor below it usable. **Use terminal** dismisses
+it and keeps the terminal once the conversation is ready; **Show chat** then
+brings the conversation back. A question or approval is never covered, and a
+session that cannot be found or read leaves the ordinary terminal in place.
+
+CLI logs keep only a tool's name and arguments, so the reader takes the command,
+file, search term, or task from the arguments of the tools it knows.
+
 If another window owns a larger terminal grid, **Activate to fit agent input**
 and **Fit input** let the normal window geometry update restore the editor and
 status rows. An inactive window does not repeatedly resize another window's
@@ -369,8 +441,11 @@ readable without opening a same-named local file.
 
 Rich parsing lives in [`chat/rich`](../crates/sheprd-gpui/src/chat/rich.rs), with
 native layout in [`chat/view/rich.rs`](../crates/sheprd-gpui/src/chat/view/rich.rs).
-Math rasterization and syntax highlighting use the bounded visual worker queue;
-discarded streamed revisions retain their worker slots until completion.
+Math rasterization and syntax highlighting use the bounded visual worker queue,
+which a window's chats share: what is on screen goes first, a hidden chat starts
+nothing, and discarded streamed revisions retain their worker slots until
+completion. Scrolling back rebuilds evicted formulas and code, and a formula the
+texture budget refused is drawn again once it is on screen and room exists.
 
 - Message preparation is limited to 256 KiB and 2,000 lines. Rich fragments
   exceeding 4,096 words or 16,384 parser events use the bounded source renderer.

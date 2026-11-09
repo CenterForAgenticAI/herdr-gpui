@@ -3,6 +3,7 @@
 
 use crate::{
     Core, Endpoint, Error,
+    event::Notice,
     wire::{Attach, Run},
 };
 use std::{
@@ -12,15 +13,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Sandbox {
+pub(super) struct Sandbox {
     _dir: tempfile::TempDir,
-    binary: OsString,
+    pub(super) binary: OsString,
     child: Child,
-    vars: Vec<(&'static str, OsString)>,
+    pub(super) vars: Vec<(&'static str, OsString)>,
 }
 
 impl Sandbox {
-    fn start(binary: OsString) -> Self {
+    /// The private folder holding the core's home and socket.
+    #[cfg(unix)]
+    pub(super) fn dir(&self) -> &Path {
+        self._dir.path()
+    }
+
+    pub(super) fn start(binary: OsString) -> Self {
         let parent = std::env::var_os("HERDR_TEST_TMPDIR").unwrap_or_else(|| "/tmp".into());
         let dir = tempfile::Builder::new()
             .prefix("hc")
@@ -148,6 +155,7 @@ fn a_real_core_runs_streams_and_stores() {
         seen.extend(chunk.bytes);
     }
 
+    let mut events = core.subscribe().unwrap();
     let doc = core.doc_get("herdr-ui-live").unwrap();
     assert_eq!(doc.version, 0);
     let version = core
@@ -162,6 +170,22 @@ fn a_real_core_runs_streams_and_stores() {
         Err(Error::Refused { .. })
     ));
     assert!(version > 0);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let changed = loop {
+        assert!(Instant::now() < deadline, "no doc event arrived");
+        let notices = events.next(Duration::from_millis(100)).unwrap();
+        if let Some(notice) = notices
+            .into_iter()
+            .find(|notice| matches!(notice, Notice::Doc { .. }))
+        {
+            break notice;
+        }
+    };
+    assert!(matches!(
+        changed,
+        Notice::Doc { machine: None, name, version: seen, .. }
+            if name == "herdr-ui-live" && seen == version
+    ));
 
     core.kill(&started.address).unwrap();
 }
@@ -249,5 +273,129 @@ fn a_real_core_through_the_backend_traits() {
             }
         }
     }
+    backend.kill(&info.id).unwrap();
+}
+
+#[test]
+#[ignore = "needs HERDR_CORE_TEST_BINARY"]
+fn an_image_a_program_sends_reaches_the_view() {
+    use sheprd_backend::{
+        Backend, ClientKeyCode, ClientKeyKind, ClientPaneInputEvent, Role, Size, Spawn,
+        SurfaceUpdate, Terminal as _,
+    };
+
+    // A 1x1 PNG.
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    let binary = std::env::var_os("HERDR_CORE_TEST_BINARY").expect("HERDR_CORE_TEST_BINARY");
+    let sandbox = Sandbox::start(binary);
+    let backend = crate::CoreBackend::new(sandbox.connect(), 1000);
+    let info = backend
+        .spawn(&Spawn {
+            argv: vec!["sh".into()],
+            ..Spawn::default()
+        })
+        .unwrap();
+    let mut terminal = backend
+        .attach(&info.id, Size::new(40, 8).unwrap(), Role::Active)
+        .unwrap();
+    terminal.cell_pixels(10, 20).unwrap();
+    let line = format!("printf '\\033_Ga=T,f=100,c=3,r=2;{PNG}\\033\\\\'");
+    terminal
+        .input(&ClientPaneInputEvent::TextCommit(line))
+        .unwrap();
+    terminal
+        .input(&ClientPaneInputEvent::Key {
+            code: ClientKeyCode::Enter,
+            modifiers: 0,
+            kind: ClientKeyKind::Press,
+            repeat_count: 1,
+            shifted_codepoint: None,
+            generated_text: None,
+            tracks_release: false,
+            physical_key_id: None,
+            windows_record: None,
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let scene = loop {
+        assert!(Instant::now() < deadline, "no image arrived");
+        let scene = terminal
+            .next(Duration::from_millis(100))
+            .unwrap()
+            .into_iter()
+            .find_map(|update| match update {
+                SurfaceUpdate::Graphics(scene) => Some(scene),
+                _ => None,
+            });
+        if let Some(scene) = scene {
+            break scene;
+        }
+    };
+    let [placement] = &scene.placements[..] else {
+        panic!("{scene:?}")
+    };
+    assert_eq!((placement.cols, placement.rows), (3, 2));
+    assert_eq!(
+        (placement.asset.image_width, placement.asset.image_height),
+        (1, 1)
+    );
+    assert_eq!(scene.assets.len(), 1);
+    backend.kill(&info.id).unwrap();
+}
+
+#[test]
+#[ignore = "needs HERDR_CORE_TEST_BINARY"]
+fn a_terminal_attached_anew_scrolls_back_through_what_it_missed() {
+    use sheprd_backend::{
+        Backend, ClientMouseKind, ClientMousePosition, ClientPaneInputEvent, Role, Size, Spawn,
+        SurfaceUpdate, Terminal as _,
+    };
+
+    let binary = std::env::var_os("HERDR_CORE_TEST_BINARY").expect("HERDR_CORE_TEST_BINARY");
+    let sandbox = Sandbox::start(binary);
+    let backend = crate::CoreBackend::new(sandbox.connect(), 1000);
+    let info = backend
+        .spawn(&Spawn {
+            argv: vec!["sh".into(), "-c".into(), "seq 1 300; exec sleep 600".into()],
+            ..Spawn::default()
+        })
+        .unwrap();
+    let size = Size::new(20, 6).unwrap();
+    // The whole screen as text after each update, until `done` holds.
+    let read_until = |terminal: &mut crate::CoreTerminal, done: &dyn Fn(&str) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut text = String::new();
+        while !done(&text) {
+            assert!(Instant::now() < deadline, "never shown: {text:?}");
+            for update in terminal.next(Duration::from_millis(100)).unwrap() {
+                if let SurfaceUpdate::Frame(frame) = update {
+                    text = frame
+                        .cells
+                        .iter()
+                        .map(|cell| cell.symbol.as_str())
+                        .collect();
+                }
+            }
+        }
+    };
+    // The output ran with no one attached; a view attached now gets the
+    // history the core kept, which the wheel scrolls back through.
+    let wait = Instant::now() + Duration::from_secs(10);
+    while backend.terminals().unwrap().iter().all(|t| t.id != info.id) {
+        assert!(Instant::now() < wait);
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let mut terminal = backend.attach(&info.id, size, Role::Active).unwrap();
+    read_until(&mut terminal, &|text| text.contains("300"));
+    terminal
+        .input(&ClientPaneInputEvent::Mouse {
+            kind: ClientMouseKind::ScrollUp,
+            position: ClientMousePosition::Cell { column: 0, row: 0 },
+            geometry: None,
+            modifiers: 0,
+            lines: 100,
+        })
+        .unwrap();
+    read_until(&mut terminal, &|text| text.contains("200"));
     backend.kill(&info.id).unwrap();
 }

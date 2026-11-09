@@ -15,14 +15,16 @@ pub mod image;
 pub mod install;
 pub mod names;
 mod providers;
-#[cfg(any(feature = "opensandbox", feature = "sprites"))]
+#[cfg(any(feature = "azure", feature = "opensandbox", feature = "sprites"))]
+pub(crate) mod relay;
+#[cfg(any(feature = "boxd", feature = "opensandbox", feature = "sprites"))]
 pub mod socket;
 pub mod unsynced;
 mod value;
 mod worker;
 
 pub use catalog::{FILE as CATALOG_FILE, SavedDevice, load, remove, rename, save};
-pub use command::with_command;
+pub use command::{connect_core, with_command};
 pub use providers::ProviderError;
 pub use providers::{
     Deletion, Shape, Spec, connect, deletion, icon, image as image_support, name, noun, offer,

@@ -19,7 +19,7 @@ fn args(list: &[&str]) -> Vec<OsString> {
 
 fn serve(list: &[&str]) -> Options {
     match parse(args(list)).unwrap() {
-        Invocation::Serve(options) => options,
+        Invocation::Serve(options) => *options,
         other => panic!("expected serve, got {other:?}"),
     }
 }
@@ -31,7 +31,7 @@ fn serve_takes_its_defaults() {
     assert_eq!(options.port, 7443);
     assert!(options.bind.is_unspecified());
     assert_eq!(options.certificate, Certificate::Own);
-    assert_eq!(options.privacy, Privacy::Generic);
+    assert_eq!(options.privacy, Privacy::Excerpt);
     assert_eq!(
         options.device_idle,
         Some(Duration::from_secs(30 * 24 * 60 * 60))
@@ -71,6 +71,16 @@ fn every_option_is_read() {
         options.device_idle,
         Some(Duration::from_secs(7 * 24 * 60 * 60))
     );
+}
+
+#[test]
+fn live_activities_are_detailed_unless_asked() {
+    use crate::app::config::ActivityDetail;
+
+    let options = serve(&["serve", "--state-dir", "/s"]);
+    assert_eq!(options.live_activities, ActivityDetail::Detailed);
+    let args = ["serve", "--state-dir", "/s", "--live-activities", "generic"];
+    assert_eq!(serve(&args).live_activities, ActivityDetail::Generic);
 }
 
 #[test]
@@ -136,12 +146,15 @@ fn serve_takes_the_daemon_and_chat_locations_herdr_ui_resolved() {
         "/h/herdr-client.sock",
         "--chat-dir",
         "/h/acp",
+        "--wsl-catalog",
+        "/h/wsl.json",
     ]);
     assert_eq!(
         options.herdr_socket,
         Some(PathBuf::from("/h/herdr-client.sock"))
     );
     assert_eq!(options.chat_dir, Some(PathBuf::from("/h/acp")));
+    assert_eq!(options.wsl_catalog, Some(PathBuf::from("/h/wsl.json")));
     assert_eq!(
         parse(args(&["serve", "--state-dir", "/s", "--chat-dir"])),
         Err(ParseError::Missing("--chat-dir"))

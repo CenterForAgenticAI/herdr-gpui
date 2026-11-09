@@ -16,6 +16,15 @@
 //! in `~/.local/share/herdr-remote-control/bin/VERSION/` and is skipped when
 //! the host holds the same bytes there; a source build is skipped when that
 //! snapshot was built there before.
+//!
+//! So the phone's chats work there, `sheprd-acp` goes beside it: this app's
+//! own when that is what the host gets (a Mac from a Mac release, or a host
+//! like this computer from a development build), the release's static one
+//! for a Linux host from a release (`sheprd_updater::download_host_chat`,
+//! checked against the signed manifest packed with it), and a source build
+//! builds it too. It is never linked into `~/.local/bin`, where it would
+//! replace one the user installed; the daemon starts the one beside it
+//! first.
 
 use super::{Error, PROGRAM};
 use crate::{
@@ -101,16 +110,124 @@ pub(super) fn ensure(host: &Host, cancelled: &AtomicBool) -> Result<String, Erro
     let bundled = crate::bundled::locate(crate::remote::service::PROGRAM);
     let universal = bundled.as_deref().is_some_and(is_universal);
     match choose(&platform, crate::RELEASE_BUILD, bundled, universal) {
-        Some(Choice::Bundled(path)) => copy(host, &path, crate::APP_VERSION, cancelled),
+        Some(Choice::Bundled(path)) => {
+            let program = copy(host, &path, crate::APP_VERSION, cancelled)?;
+            add_chats(host, &platform, crate::APP_VERSION, cancelled);
+            Ok(program)
+        }
         Some(Choice::Download(target)) => {
-            let path = download(&target, cancelled)?;
-            copy(host, &path, crate::APP_VERSION, cancelled)
+            let path = download(&target, Build::Daemon, cancelled)?;
+            let program = copy(host, &path, crate::APP_VERSION, cancelled)?;
+            // Pairing goes on without it: chats then need one the user installed.
+            let chats = download(&target, Build::Chats, cancelled)
+                .and_then(|chats| copy_chats(host, &chats, crate::APP_VERSION, cancelled));
+            if let Err(error) = chats {
+                tracing::warn!(%error, "Could not put the release's sheprd-acp on a Linux host");
+            }
+            Ok(program)
         }
         Some(Choice::Source) => build_from_source(host, cancelled),
         None => Err(Error::NoBuild {
             platform: platform.to_string(),
         }),
     }
+}
+
+/// Puts this app's `sheprd-acp` beside the daemon's build of `version`,
+/// when it fits the host. Pairing goes on without it: chats then need one
+/// the user installed, as before.
+fn add_chats(host: &Host, platform: &Platform, version: &str, cancelled: &AtomicBool) {
+    let Some(path) = crate::bundled::locate(CHAT_PROGRAM) else {
+        return;
+    };
+    let fits = *platform == Platform::local()
+        || (platform.os == "macos" && Platform::local().os == "macos" && is_universal(&path));
+    if !fits {
+        return;
+    }
+    if let Err(error) = copy_chats(host, &path, version, cancelled) {
+        tracing::warn!(%error, "Could not put sheprd-acp beside remote control on a host");
+    }
+}
+
+fn copy_chats(
+    host: &Host,
+    path: &Path,
+    version: &str,
+    cancelled: &AtomicBool,
+) -> Result<(), Error> {
+    let (_, sha256) = host_build::digest(CHAT_PROGRAM, path)?;
+    let installed = host
+        .capture(&chat_probe_script(version), cancelled)
+        .map_err(Error::Run)?;
+    if String::from_utf8_lossy(&installed).trim() == sha256 {
+        return Ok(());
+    }
+    let file = std::fs::File::open(path).map_err(|source| host_build::Error::Binary {
+        program: CHAT_PROGRAM,
+        path: path.to_owned(),
+        source,
+    })?;
+    host.stream(
+        &chat_copy_script(version, &sha256),
+        file,
+        Vec::new(),
+        ScriptLimits {
+            output: COPY_OUTPUT,
+            idle: COPY_IDLE,
+        },
+        cancelled,
+    )
+    .map_err(Error::Run)?;
+    Ok(())
+}
+
+/// The chat program the host's daemon starts, by the name it looks for
+/// beside itself.
+const CHAT_PROGRAM: &str = "sheprd-acp";
+
+/// Where the daemon's build of `version` keeps `sheprd-acp` on the host.
+fn chat_path(version: &str) -> String {
+    format!(
+        "\"$HOME/.local/share/{PROGRAM}/bin/\"{}\"/{CHAT_PROGRAM}\"", // i18n: data
+        shell_quote(version)
+    )
+}
+
+/// Prints the SHA-256 of the `sheprd-acp` beside the daemon of `version`.
+pub(crate) fn chat_probe_script(version: &str) -> String {
+    format!(
+        // i18n: data
+        "file={}\n\
+         if [ -f \"$file\" ]; then\n\
+         if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum \"$file\"); else sum=$(shasum -a 256 \"$file\"); fi\n\
+         echo \"${{sum%% *}}\"\n\
+         fi\n",
+        chat_path(version)
+    )
+}
+
+/// Takes `sheprd-acp` on stdin, checks it against `sha256`, and puts it
+/// beside the daemon of `version`, linking nothing.
+pub(crate) fn chat_copy_script(version: &str, sha256: &str) -> String {
+    format!(
+        // i18n: data
+        r#"file={file}
+sum={sum}
+mkdir -p "$(dirname "$file")"
+part="$file.part.$$"
+trap 'rm -f "$part"' EXIT
+cat > "$part"
+if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$part"); else got=$(shasum -a 256 "$part"); fi
+got=${{got%% *}}
+if [ "$got" != "$sum" ]; then echo "the copy does not match its checksum" >&2; exit {checksum}; fi
+chmod 755 "$part"
+mv -f "$part" "$file"
+"#,
+        file = chat_path(version),
+        sum = shell_quote(sha256),
+        checksum = host_build::CHECKSUM_EXIT,
+    )
 }
 
 /// Whether the Mach-O at `path` holds several architectures.
@@ -156,14 +273,26 @@ fn copy(host: &Host, path: &Path, version: &str, cancelled: &AtomicBool) -> Resu
     Ok(installed_path(version))
 }
 
-/// The release's static build for `target`, downloaded once per version
+/// Which of the release's static builds for another machine.
+#[derive(Clone, Copy, Debug)]
+enum Build {
+    /// `sheprd-acp`, which chats there run.
+    Chats,
+    /// `sheprd-remote-control`.
+    Daemon,
+}
+
+/// The release's static `build` for `target`, downloaded once per version
 /// into this app's private state. Blocks.
-fn download(target: &str, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
+fn download(target: &str, build: Build, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
     let dir = crate::remote::state_dir()
         .map_err(|_| Error::NoStateDir)?
         .join("host-builds")
         .join(crate::APP_VERSION);
-    let path = dir.join(target);
+    let path = match build {
+        Build::Chats => dir.join(format!("{CHAT_PROGRAM}-{target}")),
+        Build::Daemon => dir.join(target),
+    };
     let _one = DOWNLOADS.lock().unwrap_or_else(PoisonError::into_inner);
     if path.is_file() {
         return Ok(path);
@@ -174,13 +303,14 @@ fn download(target: &str, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
     };
     std::fs::create_dir_all(&dir).map_err(failed)?;
     let part = dir.join(format!(".{}.part", unique(target)));
-    let downloaded =
-        sheprd_updater::download_host_build(target, &part, cancelled).map_err(|source| {
-            Error::Download {
-                target: target.to_owned(),
-                source,
-            }
-        });
+    let downloaded = match build {
+        Build::Chats => sheprd_updater::download_host_chat(target, &part, cancelled),
+        Build::Daemon => sheprd_updater::download_host_build(target, &part, cancelled),
+    }
+    .map_err(|source| Error::Download {
+        target: target.to_owned(),
+        source,
+    });
     if let Err(error) = downloaded {
         let _ = std::fs::remove_file(&part);
         return Err(error);
@@ -305,6 +435,18 @@ if command -v rustup >/dev/null 2>&1; then rustup show >/dev/null 2>&1 || true; 
 CARGO_TARGET_DIR="$cache/target" cargo build --release --locked -p sheprd-remote-control >&2
 dir="$HOME/.local/share/{PROGRAM}/bin/$version"
 mkdir -p "$dir" "$HOME/.local/bin"
+# The phone's chats run the sheprd-acp beside it; without one they need the
+# user's own, so a failed build or copy of it fails nothing else. Each job
+# copies through its own file: two pairings may run here at once.
+chat_part="$dir/.{CHAT_PROGRAM}.part.$$"
+if CARGO_TARGET_DIR="$cache/target" cargo build --release --locked -p sheprd-acp >&2 \
+  && cp "$cache/target/release/sheprd-acp" "$chat_part" \
+  && chmod 755 "$chat_part" \
+  && mv -f "$chat_part" "$dir/{CHAT_PROGRAM}"; then
+  :
+else
+  rm -f "$chat_part"
+fi
 cp "$cache/target/release/sheprd-remote-control" "$dir/.{PROGRAM}.part"
 chmod 755 "$dir/.{PROGRAM}.part"
 mv -f "$dir/.{PROGRAM}.part" "$dir/{PROGRAM}"

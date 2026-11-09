@@ -42,7 +42,10 @@ const UNOPENED_NOTE_MIN_WIDTH: f32 = 720.;
 
 impl SheprdWindow {
     fn open_profile(&mut self, connect: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let shown = matches!(self.menu.page, Some(Page::GitHub | Page::GitLab));
+        let shown = matches!(
+            self.menu.page,
+            Some(Page::GitHub | Page::GitLab | Page::AzureDevOps)
+        );
         if !shown && !self.open_menu(window, cx) {
             return;
         }
@@ -54,6 +57,14 @@ impl SheprdWindow {
             && self.github_rate_limit_message().is_none()
         {
             self.open_gitlab_page(window, cx);
+            return;
+        }
+        // Azure DevOps waiting for a token opens its page the same way.
+        if self.orchestrator_needs_sign_in(crate::orchestrator::Provider::Azure, cx)
+            && self.pr_profile().is_some()
+            && !self.github_needs_attention()
+        {
+            self.open_azure_page(window, cx);
             return;
         }
         self.menu.page = Some(Page::GitHub);
@@ -82,6 +93,7 @@ impl SheprdWindow {
         let font = &self.config.ui;
         let background = rgb(theme.surface).blend(rgba(0xffffff1a));
         let status = self.git.status();
+        let uncommitted = self.git.uncommitted() == Some(true);
         let running = self.git.running().is_some();
         let anchor = self.git_anchor.clone();
         let unopened = self.git_unopened_commits();
@@ -195,38 +207,42 @@ impl SheprdWindow {
                         )
                         // The pull request's churn is history; the badge
                         // says work is still sitting in the checkout.
-                        .when(status.is_some_and(|status| status.dirty()), |button| {
+                        .when(uncommitted, |button| {
                             button.child(
                                 crate::icons::uncommitted(theme, 18.)
                                     .debug_selector(|| "titlebar-git-dirty".into()),
                             )
                         }),
-                    None => button.when_some(
-                        status.filter(|status| status.dirty()),
-                        |button, status| {
-                            button
-                                .when(status.additions > 0, |button| {
-                                    button.child(
-                                        div()
-                                            .debug_selector(|| "titlebar-git-additions".into())
-                                            .text_color(rgb(theme.ink(theme.palette[2])))
-                                            .child(format!("+{}", status.additions)),
-                                    )
-                                })
-                                .when(status.deletions > 0, |button| {
-                                    button.child(
-                                        div()
-                                            .debug_selector(|| "titlebar-git-deletions".into())
-                                            .text_color(rgb(theme.ink(theme.palette[1])))
-                                            .child(format!("-{}", status.deletions)),
-                                    )
-                                })
-                                .child(
+                    None => {
+                        let counts =
+                            status.filter(|status| status.additions > 0 || status.deletions > 0);
+                        button
+                            .when_some(counts, |button, status| {
+                                button
+                                    .when(status.additions > 0, |button| {
+                                        button.child(
+                                            div()
+                                                .debug_selector(|| "titlebar-git-additions".into())
+                                                .text_color(rgb(theme.ink(theme.palette[2])))
+                                                .child(format!("+{}", status.additions)),
+                                        )
+                                    })
+                                    .when(status.deletions > 0, |button| {
+                                        button.child(
+                                            div()
+                                                .debug_selector(|| "titlebar-git-deletions".into())
+                                                .text_color(rgb(theme.ink(theme.palette[1])))
+                                                .child(format!("-{}", status.deletions)),
+                                        )
+                                    })
+                            })
+                            .when(uncommitted, |button| {
+                                button.child(
                                     crate::icons::uncommitted(theme, 18.)
                                         .debug_selector(|| "titlebar-git-dirty".into()),
                                 )
-                        },
-                    ),
+                            })
+                    }
                 })
                 .child(
                     div()
@@ -366,7 +382,9 @@ impl SheprdWindow {
         let image = self
             .pr_profile()
             .and_then(|profile| self.menu.github_avatars.get(&profile.avatar_url));
-        let attention = self.github_needs_attention() || self.orchestrator_gitlab_needs_sign_in(cx);
+        let attention = self.github_needs_attention()
+            || self.orchestrator_gitlab_needs_sign_in(cx)
+            || self.orchestrator_needs_sign_in(crate::orchestrator::Provider::Azure, cx);
         let rate_limit = self.github_rate_limit_message();
         let limited = rate_limit.is_some();
         let foreground = self.theme.foreground;
@@ -484,9 +502,11 @@ impl SheprdWindow {
                             }),
                     ),
             )
-            // The in-window menu bar carries the window controls instead.
-            .when(!crate::menus::IN_WINDOW, |end| {
-                end.children(controls(false, window, &self.theme, |window, _| {
+            // The in-window menu bar carries the window controls instead,
+            // until it is hidden and they would leave with it.
+            .when(!self.menu_bar_shown(), |end| {
+                let enabled = crate::menus::IN_WINDOW && self.config.show_window_controls;
+                end.children(controls(enabled, window, &self.theme, |window, _| {
                     window.remove_window();
                 }))
             })

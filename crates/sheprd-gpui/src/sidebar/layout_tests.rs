@@ -19,6 +19,8 @@ use sheprd_client::{ConnectOptions, ConnectTarget};
 use std::sync::Arc;
 
 #[cfg(test)]
+mod agent_groups;
+#[cfg(test)]
 mod agent_menu;
 #[cfg(test)]
 mod agent_rows;
@@ -62,6 +64,8 @@ mod listening_ports;
 mod local_counts_chip;
 #[cfg(test)]
 mod mark_sizes;
+#[cfg(test)]
+mod minimal_pull_requests;
 #[cfg(test)]
 mod mod_places;
 #[cfg(test)]
@@ -615,6 +619,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         wsl_paste: None,
         editor_open: None,
         editor_panes: Vec::new(),
+        editor_returns: Vec::new(),
         teleport: None,
         teleport_marks: crate::teleport::Marks::detached(),
         teleport_follow: None,
@@ -690,6 +695,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         sidebar_visible: true,
         sidebar_start_pending: true,
         status_bar_visible: true,
+        menu_bar_visible: true,
         zen: Default::default(),
         device_filter: Default::default(),
         device_tag_filter: None,
@@ -771,6 +777,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         hover: None,
         hover_menu: None,
         local_error: None,
+        local_ports: Default::default(),
         menu: crate::menu::MenuState::new(cx),
         settings: Default::default(),
         integrations: Default::default(),
@@ -788,6 +795,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         sidebar_split_modified: false,
         sidebar_preferences: None,
         sidebar_modified: false,
+        agent_group: None,
         agent_sort: Default::default(),
         agent_sort_modified: false,
         avatars: None,

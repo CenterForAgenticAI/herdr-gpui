@@ -53,14 +53,30 @@ impl Localize for ConvertError {
     fn localize(&self) -> String {
         match self {
             // keep-sorted start
-            Self::AlreadyChat => fl!("error-chat-convert-already-chat"),
             Self::AlreadyConverting => fl!("error-chat-convert-already-converting"),
             Self::Answer(_) => fl!("error-chat-convert-answer"),
-            Self::Busy(agent) => fl!("error-chat-convert-busy", agent = agent.display_name()),
+            Self::Convert(error) => error.localize(),
             Self::Disabled => fl!("error-chat-start-disabled"),
             // Discovery's own diagnostics, which have no message of their own.
             Self::Existing(error) => error.to_string(),
             Self::HostProgram(_) => fl!("error-chat-convert-host-program"),
+            Self::NotConnected => fl!("error-chat-start-not-connected"),
+            Self::NotReachable => fl!("error-chat-convert-not-reachable"),
+            Self::Program(error) => error.localize(),
+            Self::Stale => fl!("error-chat-convert-stale"),
+            Self::Type(error) => error.localize(),
+            Self::Worker(_) => fl!("error-chat-convert-worker"),
+            // keep-sorted end
+        }
+    }
+}
+
+impl Localize for sheprd_client::herdr::convert::Error {
+    fn localize(&self) -> String {
+        match self {
+            // keep-sorted start
+            Self::AlreadyChat => fl!("error-chat-convert-already-chat"),
+            Self::Busy(agent) => fl!("error-chat-convert-busy", agent = agent.display_name()),
             Self::Line => fl!("error-chat-convert-line"),
             Self::Moved => fl!("error-chat-convert-moved"),
             Self::NoAgent => fl!("error-chat-convert-no-agent"),
@@ -71,16 +87,12 @@ impl Localize for ConvertError {
                     command = agent.name()
                 )
             }
-            Self::NotConnected => fl!("error-chat-start-not-connected"),
-            Self::NotReachable => fl!("error-chat-convert-not-reachable"),
             Self::NotRunning(agent) => {
                 fl!(
                     "error-chat-convert-not-running",
                     agent = agent.display_name()
                 )
             }
-            Self::Program(error) => error.localize(),
-            Self::Stale => fl!("error-chat-convert-stale"),
             Self::StillRunning(agent) => {
                 fl!(
                     "error-chat-convert-still-running",
@@ -88,15 +100,11 @@ impl Localize for ConvertError {
                 )
             }
             Self::Stopped => fl!("error-chat-convert-stopped"),
-            Self::Type(error) => error.localize(),
             Self::Unknown(name) => fl!("error-chat-convert-unknown", name = name.as_str()),
-            Self::Unsupported(agent) => {
-                fl!(
-                    "error-chat-convert-unsupported",
-                    agent = agent.display_name()
-                )
-            }
-            Self::Worker(_) => fl!("error-chat-convert-worker"),
+            Self::Unsupported(agent) => fl!(
+                "error-chat-convert-unsupported",
+                agent = agent.display_name()
+            ),
             // keep-sorted end
         }
     }
@@ -183,6 +191,7 @@ impl Localize for sheprd_chat_protocol::Rejection {
             Self::UnknownOption => fl!("error-chat-rejection-unknown-option"),
             Self::UnknownMode => fl!("error-chat-rejection-unknown-mode"),
             Self::UnknownSetting => fl!("error-chat-rejection-unknown-setting"),
+            Self::UnknownActivity => fl!("error-chat-rejection-unknown-activity"),
             Self::UnknownQueued => fl!("error-chat-rejection-unknown-queued"),
             Self::AgentUnavailable => fl!("error-chat-rejection-agent-unavailable"),
             Self::TooManyAttachments => fl!(

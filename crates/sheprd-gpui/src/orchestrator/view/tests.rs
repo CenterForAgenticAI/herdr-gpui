@@ -7,6 +7,8 @@ use chrono::{DateTime, Utc};
 use sheprd_client::protocol::AgentStatus;
 
 mod author_column;
+mod azure_browse;
+mod browse_pages;
 mod clicks;
 mod conversation;
 mod conversation_list;
@@ -23,15 +25,20 @@ mod outside_git;
 mod pills;
 mod pr_empty;
 mod pr_standing;
+mod pr_status;
+mod project_filter;
 mod refresh;
 mod repo_name;
 mod review_requested;
 mod row_start;
 mod rows;
+mod search_row;
 mod sessions;
 mod sign_in;
 mod source_chip;
 mod status;
+mod stores;
+mod tasks;
 mod twin_text;
 mod twins;
 
@@ -69,6 +76,8 @@ fn item(provider: Provider, id: &str, title: &str, updated: &str) -> Item {
         labels: Vec::new(),
         parent_id: None,
         blocked_by: Vec::new(),
+        assignee: None,
+        acceptance: None,
         priority: None,
         created_at: Some(at(updated)),
         updated_at: Some(at(updated)),

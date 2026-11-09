@@ -47,12 +47,12 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(shown) = self.core_terminals.tabs.get(&tab.id) else {
-            return self.core_placeholder();
+            return self.core_placeholder(&super::Host::of(&tab.scope));
         };
-        if shown.panes.len() == 1 {
+        if shown.panes.count() == 1 {
             let key = (tab.id, shown.panes.first().clone());
             let Some(view) = self.core_terminals.views.get(&key).cloned() else {
-                return self.core_placeholder();
+                return self.core_placeholder(&super::Host::of(&tab.scope));
             };
             view.update(cx, |view, _| view.set_pane(None));
             return self.core_pane_body(key.0, &key.1, &view, cx);
@@ -249,7 +249,7 @@ impl SheprdWindow {
                 veil: (!is_active).then(|| chrome.veil()),
             }))
         });
-        let info = self.core_terminals.infos.get(terminal);
+        let info = self.core_terminals.info(tab, terminal);
         let shown = view.read(cx);
         let (title, status) = self.core_pane_label(tab, terminal, cx);
         let face = PaneFace {
@@ -271,21 +271,26 @@ impl SheprdWindow {
     /// What a pane is called and how its program is doing, as its chrome
     /// and the sidebar show it: the program's title, else herdr-core's, its
     /// name, or its folder for a shell that sets no title.
-    pub(super) fn core_pane_label(
+    pub(crate) fn core_pane_label(
         &self,
         tab: TabId,
         terminal: &TerminalId,
         cx: &App,
     ) -> (String, AgentStatus) {
-        let info = self.core_terminals.infos.get(terminal);
+        let info = self.core_terminals.info(tab, terminal);
         let view = self
             .core_terminals
             .views
             .get(&(tab, terminal.clone()))
             .map(|view| view.read(cx));
-        let title = view
-            .and_then(|view| view.title())
-            .map(str::to_owned)
+        let named = self
+            .core_terminals
+            .tabs
+            .get(&tab)
+            .and_then(|shown| shown.names.get(terminal))
+            .cloned();
+        let title = named
+            .or_else(|| view.and_then(|view| view.title()).map(str::to_owned))
             .or_else(|| info.and_then(|info| info.title.clone()))
             .or_else(|| info.and_then(|info| info.name.clone()))
             .or_else(|| {
@@ -326,9 +331,9 @@ impl SheprdWindow {
     }
 
     /// What a herdr-core tab shows before its panes have views.
-    fn core_placeholder(&self) -> AnyElement {
-        let note = match self.core_terminals.hub.state() {
-            State::Unavailable(error) => {
+    fn core_placeholder(&self, host: &super::Host) -> AnyElement {
+        let note = match self.core_terminals.hub_of(host).map(super::Hub::state) {
+            Some(State::Unavailable(error)) => {
                 let reason = error.to_string();
                 fl!("core-terminals-unavailable", reason = reason)
             }

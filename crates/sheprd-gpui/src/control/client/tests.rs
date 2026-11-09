@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 
+mod alert_lines;
 mod chat_lines;
+mod core_caller;
 mod remote_lines;
 
 #[test]

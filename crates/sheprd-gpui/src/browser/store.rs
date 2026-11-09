@@ -2,11 +2,16 @@
 //! belongs to. Herdr has no browser panes, so these live only in this client;
 //! every window shows the same tabs for a workspace, each with its own page.
 use super::{Editor, Location, WebUrl, zoom::Zoom};
-use crate::i18n::fl;
+use crate::{core_terminals::Host, i18n::fl};
 use crate::{reorder::Beside, state_file};
 use gpui::{App, Global};
 use serde::{Deserialize, Serialize};
+use sheprd_session::SavedWorkspace;
 use std::path::PathBuf;
+
+mod kept;
+
+pub(crate) use kept::is_kept_id;
 
 const MAX_TABS: usize = 256;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
@@ -196,18 +201,36 @@ impl Tab {
 #[derive(Serialize, Deserialize)]
 struct Saved {
     tabs: Vec<Tab>,
+    /// The workspaces the app keeps for Herdr 2 terminals; files from before
+    /// them have none.
+    #[serde(
+        default,
+        deserialize_with = "sheprd_session::saved::readable_workspaces",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    workspaces: Vec<SavedWorkspace>,
 }
 
 #[derive(Default)]
 pub(crate) struct Store {
     tabs: Vec<Tab>,
+    /// Herdr 2 workspaces, in the user's order (`kept.rs`).
+    pub(super) workspaces: Vec<SavedWorkspace>,
+    /// The last kept workspace number handed out this run.
+    last_kept: u64,
     next: u64,
     pub(super) closed: super::closed::ClosedTabs,
     writer: Option<state_file::Writer<Saved>>,
     quitting: bool,
+    /// herdr-core terminals of closed tabs and the core each runs in, for a
+    /// window connected to that core to end.
+    ending: Vec<Ending>,
 }
 
 impl Global for Store {}
+
+/// A herdr-core terminal to end, and the core it runs in.
+pub(crate) type Ending = (Host, sheprd_backend::TerminalId);
 
 /// Page titles are untrusted: one line, bounded, and free of control and
 /// bidirectional formatting characters that could disguise a tab.
@@ -220,16 +243,19 @@ fn clean_title(title: &str) -> String {
         .to_owned()
 }
 
-fn parse(bytes: &[u8]) -> crate::Result<Vec<Tab>> {
-    let saved: Saved = serde_json::from_slice(bytes)?;
+fn parse(bytes: &[u8]) -> crate::Result<Saved> {
+    let mut saved: Saved = serde_json::from_slice(bytes)?;
     if saved.tabs.len() > MAX_TABS || !saved.tabs.iter().all(Tab::valid) {
         return Err(crate::Error::InvalidBrowserTabs);
     }
-    Ok(saved.tabs)
+    // A damaged workspace costs only itself: its tabs stay with their id.
+    saved.workspaces.retain(SavedWorkspace::valid);
+    saved.workspaces.truncate(kept::MAX_WORKSPACES);
+    Ok(saved)
 }
 
 impl Store {
-    fn path() -> Option<PathBuf> {
+    pub(crate) fn path() -> Option<PathBuf> {
         crate::preferences::state_dir().map(|dir| dir.join("browser-tabs.json"))
     }
 
@@ -237,18 +263,26 @@ impl Store {
     /// damaged file starts with no tabs.
     pub(crate) fn load() -> Self {
         let path = Self::path();
-        let tabs = path
+        let saved = path
             .as_deref()
             .map(|path| {
-                state_file::read(path, MAX_FILE_BYTES)
-                    .and_then(|bytes| bytes.as_deref().map_or(Ok(Vec::new()), parse))
+                state_file::read(path, MAX_FILE_BYTES).and_then(|bytes| {
+                    bytes.as_deref().map_or(
+                        Ok(Saved {
+                            tabs: Vec::new(),
+                            workspaces: Vec::new(),
+                        }),
+                        parse,
+                    )
+                })
             })
             .transpose()
             .unwrap_or_else(|error| {
                 tracing::warn!(%error, "Cannot restore browser tabs");
                 None
-            })
-            .unwrap_or_default();
+            });
+        let (tabs, workspaces) =
+            saved.map_or_else(Default::default, |saved| (saved.tabs, saved.workspaces));
         let writer = path.and_then(
             |path| match state_file::Writer::start("browser-tabs", path) {
                 Ok(writer) => Some(writer),
@@ -258,7 +292,9 @@ impl Store {
                 }
             },
         );
-        Self::with_tabs(tabs, writer)
+        let mut store = Self::with_tabs(tabs, writer);
+        store.workspaces = workspaces;
+        store
     }
 
     fn with_tabs(mut tabs: Vec<Tab>, writer: Option<state_file::Writer<Saved>>) -> Self {
@@ -268,10 +304,13 @@ impl Store {
         let next = tabs.iter().map(|tab| tab.id.0 + 1).max().unwrap_or(0);
         Self {
             tabs,
+            workspaces: Vec::new(),
+            last_kept: 0,
             next,
             closed: Default::default(),
             writer,
             quitting: false,
+            ending: Vec::new(),
         }
     }
 
@@ -306,6 +345,7 @@ impl Store {
         if let Some(writer) = &self.writer {
             writer.save(Saved {
                 tabs: self.tabs.clone(),
+                workspaces: self.workspaces.clone(),
             });
         }
     }
@@ -329,6 +369,11 @@ impl Store {
         self.tabs
             .iter()
             .filter(move |tab| &tab.scope == scope && tab.workspace_id == workspace_id)
+    }
+
+    /// Every tab of one host, in the order they were opened.
+    pub(crate) fn in_scope<'a>(&'a self, scope: &'a Scope) -> impl Iterator<Item = &'a Tab> + 'a {
+        self.tabs.iter().filter(move |tab| &tab.scope == scope)
     }
 
     /// The workspace's VS Code tab, if it has one.
@@ -407,6 +452,11 @@ impl Store {
         })
     }
 
+    /// How many more tabs the app can hold.
+    pub(crate) fn room(&self) -> usize {
+        MAX_TABS.saturating_sub(self.tabs.len())
+    }
+
     pub(super) fn restore_tab(&mut self, mut tab: Tab) -> Option<TabId> {
         if self.tabs.len() >= MAX_TABS {
             return None;
@@ -476,10 +526,68 @@ impl Store {
         true
     }
 
+    /// Closes a tab. A herdr-core tab's terminals end with it, as a Herdr
+    /// tab's panes do, so it cannot be reopened; a mirror only stops
+    /// watching.
     pub(crate) fn close(&mut self, id: TabId) -> Option<Tab> {
         let tab = self.detach(id)?;
-        self.closed.push_page(tab.clone());
+        match &tab.location {
+            Some(Location::CoreTerminal { .. }) => self.ending.extend(Self::driven_terminals(&tab)),
+            _ => self.closed.push_page(tab.clone()),
+        }
         Some(tab)
+    }
+
+    /// The herdr-core terminals `tab` types into; none for a mirror or a
+    /// page.
+    fn driven_terminals(tab: &Tab) -> Vec<Ending> {
+        match &tab.location {
+            Some(Location::CoreTerminal {
+                panes,
+                observe: false,
+                ..
+            }) => {
+                let host = Host::of(&tab.scope);
+                panes
+                    .terminals()
+                    .into_iter()
+                    .map(|terminal| (host.clone(), terminal.clone()))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Takes the terminals closed tabs left to end, each once, but those
+    /// another tab of the same core still types into, as one a pane moved
+    /// to.
+    pub(crate) fn take_ending(&mut self) -> Vec<Ending> {
+        let mut ending: Vec<Ending> = Vec::new();
+        for queued in std::mem::take(&mut self.ending) {
+            let (host, terminal) = &queued;
+            let held = self.tabs.iter().any(|tab| {
+                matches!(
+                    &tab.location,
+                    Some(Location::CoreTerminal { panes, observe: false, .. })
+                        if panes.contains(terminal) && Host::of(&tab.scope) == *host
+                )
+            });
+            if !held && !ending.contains(&queued) {
+                ending.push(queued);
+            }
+        }
+        ending
+    }
+
+    /// Queues `terminals` of a tab already closed to end, as a layout split
+    /// after its last save still holds.
+    pub(crate) fn end_terminals(&mut self, terminals: impl IntoIterator<Item = Ending>) {
+        self.ending.extend(terminals);
+    }
+
+    /// Whether closed tabs left terminals to end.
+    pub(crate) fn has_ending(&self) -> bool {
+        !self.ending.is_empty()
     }
 
     /// Removes a tab without recording it as closed, as when its view moves
@@ -538,8 +646,16 @@ impl Store {
     pub(crate) fn forget_workspaces(&mut self, scope: &Scope, closed: &[String]) -> bool {
         self.closed.forget_workspaces(scope, closed);
         let before = self.tabs.len();
-        self.tabs
-            .retain(|tab| &tab.scope != scope || !closed.contains(&tab.workspace_id));
+        let gone = |tab: &Tab| &tab.scope == scope && closed.contains(&tab.workspace_id);
+        // A closed workspace's terminal tabs end with it, as its panes do.
+        let ending: Vec<_> = self
+            .tabs
+            .iter()
+            .filter(|tab| gone(tab))
+            .flat_map(Self::driven_terminals)
+            .collect();
+        self.ending.extend(ending);
+        self.tabs.retain(|tab| !gone(tab));
         let changed = self.tabs.len() != before;
         if changed {
             self.save();

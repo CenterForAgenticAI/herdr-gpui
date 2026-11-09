@@ -49,6 +49,10 @@ pub enum Error {
     Disconnected,
     #[error(transparent)]
     Clipboard(#[from] crate::clipboard::Error),
+    #[error(transparent)]
+    Convert(#[from] crate::herdr::convert::Error),
+    #[error(transparent)]
+    CoreBridge(#[from] crate::core_bridge::Error),
     #[error("terminal input write timed out; reconnect required")]
     InputWriteTimeout,
     #[error("invalid client command: snapshot boot ID required")]
@@ -148,6 +152,8 @@ pub enum Error {
     Ssh(#[from] crate::ssh::Error),
     #[error(transparent)]
     TerminalAttach(#[from] crate::terminal_attach::Error),
+    #[error(transparent)]
+    Worktree(#[from] crate::herdr::worktree::Error),
     #[error(transparent)]
     Wsl(#[from] crate::wsl::Error),
     /// Every Herdr installed on the SSH host or WSL distribution was skipped
@@ -339,6 +345,7 @@ impl Error {
             }),
             Self::InvalidSession | Self::NoLocalSocket => io::ErrorKind::InvalidInput,
             Self::Clipboard(error) => error.kind(),
+            Self::CoreBridge(error) => error.kind(),
             Self::Cancelled => io::ErrorKind::Interrupted,
             Self::EventReceiverDropped | Self::Disconnected => io::ErrorKind::BrokenPipe,
             Self::SocketClosed | Self::ClosedBeforeWelcome => io::ErrorKind::UnexpectedEof,

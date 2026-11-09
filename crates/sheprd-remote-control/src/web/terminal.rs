@@ -71,14 +71,51 @@ fn known(layout: &Layout, pane: &str) -> Result<(), ApiError> {
 
 /// The pane's visible screen, as text with SGR colors.
 pub(crate) async fn read_screen(state: &Shared, pane: &str) -> Result<String, ApiError> {
-    let read = state
-        .hub
-        .call(
-            ApiMethod::PaneRead,
-            json!({"pane_id": pane, "source": "visible", "format": "ansi"}),
-        )
-        .await?;
-    Ok(read["read"]["text"].as_str().unwrap_or_default().to_owned())
+    Ok(read_scrolled(state, pane, 0, None).await?.text)
+}
+
+/// A Herdr 2 screen as one view scrolled it.
+#[derive(Debug, Default)]
+pub(crate) struct Scrolled {
+    pub(crate) text: String,
+    /// History lines above the screen.
+    pub(crate) history: usize,
+    /// Lines the view is scrolled up now, after output moved its lines.
+    pub(crate) up: usize,
+    /// Lines pushed into history so far, for the view's next read.
+    pub(crate) lines: Option<u64>,
+}
+
+/// The pane's screen `up` lines into its history, for a view that last
+/// read at `since` lines pushed: only a Herdr 2 pane scrolls its reads
+/// and counts its history; Herdr 1's attach scrolls the terminal itself.
+pub(crate) async fn read_scrolled(
+    state: &Shared,
+    pane: &str,
+    up: usize,
+    since: Option<u64>,
+) -> Result<Scrolled, ApiError> {
+    let mut params = json!({"pane_id": pane, "source": "visible", "format": "ansi"});
+    if up > 0 {
+        params["scroll"] = json!(up);
+        if let Some(since) = since {
+            params["since"] = json!(since);
+        }
+    }
+    let read = state.hub.call(ApiMethod::PaneRead, params).await?;
+    let read = &read["read"];
+    let count = |key: &str| {
+        read[key]
+            .as_u64()
+            .and_then(|lines| usize::try_from(lines).ok())
+            .unwrap_or(0)
+    };
+    Ok(Scrolled {
+        text: read["text"].as_str().unwrap_or_default().to_owned(),
+        history: count("history"),
+        up: count("scroll"),
+        lines: read["lines"].as_u64(),
+    })
 }
 
 pub(super) async fn fragment(
@@ -90,6 +127,7 @@ pub(super) async fn fragment(
     known(&state.hub.layout(), &pane)?;
     let text = read_screen(&state, &pane).await?;
     let layout = state.hub.layout();
+    state.mark_opened(&layout, &pane);
     let (workspace, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
     let row = terminal
         .panes
@@ -136,7 +174,7 @@ pub(super) struct Keys {
 
 pub(super) async fn keys(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     Path(pane): Path<String>,
     Json(request): Json<Keys>,
 ) -> Result<Json<Value>, ApiError> {
@@ -154,7 +192,7 @@ pub(super) async fn keys(
             json!({"pane_id": pane, "keys": request.keys}),
         )
         .await?;
-    state.typed.typed(&pane);
+    state.typed.typed_by(&pane, &device.0);
     Ok(Json(json!({})))
 }
 
@@ -167,7 +205,7 @@ pub(super) struct Paste {
 /// program asked for one.
 pub(super) async fn paste(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     Path(pane): Path<String>,
     Json(request): Json<Paste>,
 ) -> Result<Json<Value>, ApiError> {
@@ -182,17 +220,18 @@ pub(super) async fn paste(
             json!({"pane_id": pane, "text": request.text}),
         )
         .await?;
-    state.typed.typed(&pane);
+    state.typed.typed_by(&pane, &device.0);
     Ok(Json(json!({})))
 }
 
 /// A picture pasted into a terminal: stored like a chat's upload, then its
 /// path typed into the pane as a terminal file drop would, so a program such
-/// as Claude Code attaches it. The phone never names the path; this computer
-/// chooses it.
+/// as Claude Code attaches it, as the pane's WSL distribution reads the path
+/// when it is in one. The phone never names the path; this computer chooses
+/// it.
 pub(super) async fn upload(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     Path(pane): Path<String>,
     bytes: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
@@ -206,14 +245,18 @@ pub(super) async fn upload(
     })
     .await
     .map_err(|_| ApiError::Invalid("the upload was interrupted"))??;
+    let text = match state.hub.wsl_path(&pane, &path).await? {
+        Some(path) => dropped_unix_path(&path),
+        None => dropped_path(&path),
+    };
     state
         .hub
         .call(
             ApiMethod::PaneSendText,
-            json!({"pane_id": pane, "text": dropped_path(&path)}),
+            json!({"pane_id": pane, "text": text}),
         )
         .await?;
-    state.typed.typed(&pane);
+    state.typed.typed_by(&pane, &device.0);
     Ok(Json(json!({})))
 }
 
@@ -224,6 +267,11 @@ pub(crate) fn dropped_path(path: &std::path::Path) -> String {
     if cfg!(windows) {
         return format!("\"{path}\" ");
     }
+    dropped_unix_path(&path)
+}
+
+/// [`dropped_path`] for a Unix shell, whichever computer this is.
+pub(crate) fn dropped_unix_path(path: &str) -> String {
     let mut text = String::with_capacity(path.len() + 8);
     for character in path.chars() {
         if !(character.is_alphanumeric()
@@ -306,6 +354,32 @@ pub(super) async fn action(
             })
             .ok_or(ApiError::NotFound)?
     };
+    // Sheprd keeps a Herdr 2 tab's layout: it makes the change.
+    let op = match request.action {
+        Action::SplitRight => Some(crate::control::layout::Op::SplitRight),
+        Action::SplitDown => Some(crate::control::layout::Op::SplitDown),
+        Action::Zoom => Some(crate::control::layout::Op::Zoom),
+        Action::ClosePane | Action::CloseTab | Action::NewTab => None,
+    };
+    if let Some(op) = op
+        && let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)?
+    {
+        let created = crate::native::changes::change_layout(&state, saved, terminal, op).await?;
+        // A split shows its new shell next, as Herdr 1's does.
+        let next = match created {
+            Some(address) => state.hub.core_pane_listed(&address).await,
+            None => None,
+        }
+        .unwrap_or(pane);
+        let location = format!("/term/{}", render::urlencode(&next));
+        return Ok(Json(json!({ "location": location, "pane": next })));
+    }
+    // A Herdr 2 tab Sheprd keeps is named before its terminals end (they
+    // leave the listing as they do), and Sheprd drops it after, or its last
+    // pane would stay there, ended. Without Sheprd its terminals still end.
+    let saved_tab = (request.action == Action::CloseTab)
+        .then(|| state.hub.core_saved_pane(&tab, &pane).ok().flatten())
+        .flatten();
     let core_tab = if request.action == Action::NewTab {
         state.hub.new_core_tab(&workspace).await?
     } else {
@@ -318,6 +392,13 @@ pub(super) async fn action(
             state.hub.call(method, params).await?
         }
     };
+    if let Some((saved, terminal)) = saved_tab {
+        let op = crate::control::layout::Op::Close;
+        if let Err(error) = crate::native::changes::change_layout(&state, saved, terminal, op).await
+        {
+            tracing::debug!(%error, "Sheprd did not drop a Herdr 2 tab a phone closed");
+        }
+    }
     let created = result["pane"]["pane_id"]
         .as_str()
         .or_else(|| result["root_pane"]["pane_id"].as_str())
@@ -406,16 +487,38 @@ pub(super) async fn rename(
     Path(pane): Path<String>,
     Json(request): Json<RenameRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let (method, params) = {
+    let (chat, tab) = {
         let layout = state.hub.layout();
-        let target = if layout.chat(&pane).is_some() {
-            RenameTarget::Chat { pane: &pane }
-        } else {
-            let (_, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
-            RenameTarget::Tab { tab: &terminal.tab }
-        };
-        rename_call(target, &request.label)?
+        match layout.chat(&pane) {
+            Some((_, chat)) => (true, chat.tab.clone()),
+            None => {
+                let (_, terminal) = layout.terminal(&pane).ok_or(ApiError::NotFound)?;
+                (false, terminal.tab.clone())
+            }
+        }
     };
+    let label = request.label.trim();
+    if label.chars().count() > MAX_LABEL {
+        return Err(ApiError::Invalid("that name is too long"));
+    }
+    // Sheprd keeps a Herdr 2 tab's names: it renames it. A blank name gives
+    // a tab its program's title back, as Sheprd's menu does.
+    if let Some((saved, terminal)) = state.hub.core_saved_pane(&tab, &pane)? {
+        let name = Some(label.to_owned()).filter(|name| !name.is_empty());
+        let op = if chat {
+            crate::control::layout::Op::RenamePane(name)
+        } else {
+            crate::control::layout::Op::RenameTab(name)
+        };
+        crate::native::changes::change_layout(&state, saved, terminal, op).await?;
+        return Ok(Json(json!({})));
+    }
+    let target = if chat {
+        RenameTarget::Chat { pane: &pane }
+    } else {
+        RenameTarget::Tab { tab: &tab }
+    };
+    let (method, params) = rename_call(target, label)?;
     state.hub.call(method, params).await?;
     Ok(Json(json!({})))
 }
@@ -434,6 +537,15 @@ pub(super) async fn rename_workspace(
         workspace: &workspace,
     };
     let (method, params) = rename_call(target, &request.label)?;
+    // A workspace Sheprd keeps for Herdr 2 is Sheprd's to rename.
+    if state.hub.kept_workspace(&workspace) {
+        let op = crate::control::layout::Op::RenameWorkspace {
+            workspace,
+            name: request.label.trim().to_owned(),
+        };
+        crate::native::changes::change_layout(&state, 0, String::new(), op).await?;
+        return Ok(Json(json!({})));
+    }
     state.hub.call(method, params).await?;
     Ok(Json(json!({})))
 }

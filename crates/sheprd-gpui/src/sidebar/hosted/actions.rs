@@ -256,17 +256,16 @@ impl SheprdWindow {
     fn fold_all_repositories(&mut self, fold: bool, cx: &mut Context<Self>) {
         let groups: Vec<(usize, Vec<String>)> = (0..self.endpoints.len())
             .map(|index| {
-                let live = if index == self.selected_endpoint {
-                    &self.live
-                } else {
-                    &self.endpoints[index].live
-                };
-                let keys = live.snapshot.as_deref().map_or_else(Vec::new, |snapshot| {
-                    super::super::workspaces::grouped_keys(&snapshot.workspaces)
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect()
-                });
+                let sessions = self.sessions(index);
+                let keys = sessions
+                    .each()
+                    .flat_map(|session| {
+                        super::super::workspaces::grouped_keys(&session.workspaces)
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
                 (index, keys)
             })
             .collect();

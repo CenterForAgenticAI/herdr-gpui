@@ -324,7 +324,11 @@ impl SheprdWindow {
                     return;
                 }
                 match opened {
-                    Opened::Editor(target) => this.open_in_editor(&target, Some(&pane), cx),
+                    Opened::Editor(target) => {
+                        if !this.open_link_in_core_editor(&target, &pane, cx) {
+                            this.open_in_editor(&target, Some(&pane), cx);
+                        }
+                    }
                     Opened::System(url) => cx.open_url(url.as_str()),
                     Opened::Missing(path) => this.show_flash(
                         super::flash::Flash::warning(

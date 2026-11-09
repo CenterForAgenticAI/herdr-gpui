@@ -10,6 +10,7 @@ fn work_requests_have_a_stable_wire_form() {
             workspace_id: Some("w_1".into()),
             daemon_socket: None,
             window: None,
+            terminal_id: None,
         },
         op: WorkOp::FanOut(FanOutRequest {
             prompt: "fix it".into(),
@@ -92,4 +93,12 @@ fn work_replies_round_trip() {
         let text = serde_json::to_string(&response).unwrap();
         assert_eq!(serde_json::from_str::<Response>(&text).unwrap(), response);
     }
+}
+
+#[test]
+fn mute_requests_keep_their_wire_names() {
+    let op: WorkOp = serde_json::from_str(r#"{"op":"mute","muted":true}"#).unwrap();
+    assert_eq!(op, WorkOp::Mute { muted: true });
+    let op: WorkOp = serde_json::from_str(r#"{"op":"mute_status"}"#).unwrap();
+    assert_eq!(op, WorkOp::MuteStatus);
 }

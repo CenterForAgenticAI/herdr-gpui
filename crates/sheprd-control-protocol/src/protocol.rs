@@ -30,8 +30,8 @@ pub enum Placement {
 /// an outdated app from a refused request. 3: `browser.open` placement.
 /// 4: `link`. 5: the `tab` family's `zoom`. 6: the `cloud` family. 7: `chat`.
 /// 8: `host` `automation_approve`. 9: `remote`. 10: `settings` `language`.
-/// 11: `mod`.
-pub const PROTOCOL_VERSION: u32 = 11;
+/// 11: `mod`. 12: `window` `alerts`.
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {
@@ -149,6 +149,11 @@ pub struct Caller {
     /// The window to act in, by the ID `window list` reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<u64>,
+    /// The herdr-core terminal the caller runs in (`HC_TERMINAL_ID`), such
+    /// as `t7`. It stands for the caller's pane: the window showing it acts,
+    /// in the workspace of the tab that holds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,6 +318,7 @@ mod tests {
                 workspace_id: Some("w_1".into()),
                 daemon_socket: None,
                 window: None,
+                terminal_id: None,
             },
             focus: true,
             placement: Placement::Tab,

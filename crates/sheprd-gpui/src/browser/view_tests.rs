@@ -63,6 +63,12 @@ mod middle_click;
 /// Pages a control request opens, only in a workspace the window shows.
 mod requests;
 
+/// Pages a caller in a herdr-core terminal opens, in its tab's workspace.
+mod core_requests;
+
+/// The herdr-core shell standing in for Herdr 1 keeps its group when split.
+mod fallback_split;
+
 /// Notes a control request sends, only to a pane the window shows.
 mod requested_notes;
 
@@ -114,8 +120,8 @@ mod code_start;
 #[cfg(windows)]
 mod status_tooltip;
 
-/// Pages hide under toasts and the file-transfer card where they draw above
-/// the window, which only Windows does.
+/// Pages hide under toasts, notice cards, and the file-transfer card where
+/// they draw above the window, which only Windows does.
 #[cfg(windows)]
 mod overlays;
 

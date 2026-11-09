@@ -8,6 +8,7 @@
 //! cloud provider's authenticated command).
 
 pub mod carry;
+mod core;
 mod credentials;
 pub mod error;
 mod fresh;
@@ -20,7 +21,7 @@ pub mod marks;
 pub mod provision;
 pub mod remote;
 mod sessions;
-pub mod snapshot;
+pub use sheprd_client::herdr::snapshot;
 mod warning;
 
 pub use {

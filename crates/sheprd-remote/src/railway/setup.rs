@@ -175,21 +175,23 @@ fn ensure_herdr(
     cancelled: &dyn Fn() -> bool,
     report: &dyn Fn(cloud::Step),
 ) -> Result<()> {
-    if hidden(install::installed(session()?, &cancelled))? {
-        return Ok(());
-    }
-    if !install {
-        return Err(cloud::Error::Install(install::Failure::NotInstalled {
-            machine: None,
-            retry: install::Retry::Allow,
-        })
-        .into());
-    }
-    report(cloud::Step::InstallingHerdr);
-    hidden(install::install(session()?, &cancelled))?;
-    // The installer's own success is not proof the bridge will find it.
     if !hidden(install::installed(session()?, &cancelled))? {
-        return Err(cloud::Error::Install(install::Failure::Missing).into());
+        if !install {
+            return Err(cloud::Error::Install(install::Failure::NotInstalled {
+                machine: None,
+                retry: install::Retry::Allow,
+            })
+            .into());
+        }
+        report(cloud::Step::InstallingHerdr);
+        hidden(install::install(session()?, &cancelled))?;
+        // The installer's own success is not proof the bridge will find it.
+        if !hidden(install::installed(session()?, &cancelled))? {
+            return Err(cloud::Error::Install(install::Failure::Missing).into());
+        }
+    }
+    if install {
+        hidden(install::add_core(session(), &cancelled))?;
     }
     Ok(())
 }

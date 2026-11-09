@@ -1,38 +1,37 @@
+//! The line for an SSH host; the shared policy is tested in `sheprd-client`.
+
 use super::*;
-use std::cell::{Cell, RefCell};
 
-mod line;
-mod refusals;
-mod stopping;
-
-/// A Claude session as Herdr's own integration reports it.
-const SESSION: &str = "0c6f0c39-3c1e-4b7e-9a51-6d1b8e2d7f10";
-
-fn pane(value: serde_json::Value) -> teleport::snapshot::Pane {
-    let mut pane = serde_json::json!({
-        "pane_id": "w1:p1",
-        "tab_id": "w1:t1",
-        "cwd": "/shell",
-        "foreground_cwd": "/foreground",
-        "agent": "claude",
-        "agent_session": {
-            "agent": "claude",
-            "kind": "id",
-            "source": "herdr:claude",
-            "value": SESSION,
-        },
-    });
-    if let (Some(pane), Some(changes)) = (pane.as_object_mut(), value.as_object()) {
-        pane.extend(changes.clone());
+fn resume(cwd: &str) -> Resume {
+    Resume {
+        agent: Agent::Claude,
+        cwd: cwd.to_owned(),
+        flags: Vec::new(),
+        session: "0c6f0c39-3c1e-4b7e-9a51-6d1b8e2d7f10".to_owned(),
     }
-    serde_json::from_value(pane).unwrap()
 }
 
-fn info(argv: &[&str], cwd: Option<&str>) -> ProcessInfo {
-    serde_json::from_value(serde_json::json!({
-        "foreground_process_group_id": 20,
-        "shell_pid": 10,
-        "foreground_processes": [{"pid": 20, "argv": argv, "cwd": cwd}],
-    }))
-    .unwrap()
+#[test]
+fn the_remote_line_finds_the_hosts_program() {
+    let line = line(&resume("/my work"), None).unwrap();
+    assert!(line.starts_with(" sh -c 'for p in "));
+    assert!(line.contains(
+        "exec \"$p\" \"--resume\" \"0c6f0c39-3c1e-4b7e-9a51-6d1b8e2d7f10\" \"--cwd\" \"/my work\" \"claude\""
+    ));
+}
+
+#[test]
+fn the_local_line_runs_this_apps_program() {
+    let line = line(&resume("/work"), Some(Path::new("/app/sheprd-acp"))).unwrap();
+    assert!(line.contains("'/app/sheprd-acp' '--resume'"), "{line}");
+}
+
+#[test]
+fn a_folder_no_remote_line_can_carry_is_refused() {
+    for cwd in ["/$HOME", "/`id`", "/a\"b", "/a\\b", "/it's"] {
+        assert!(matches!(
+            line(&resume(cwd), None),
+            Err(convert::Error::Line)
+        ));
+    }
 }

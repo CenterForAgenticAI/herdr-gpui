@@ -7,6 +7,7 @@
 //! It never blocks: the [`Service`] worker does the I/O, and the host pushes
 //! the theme, live agent statuses, and the GitHub account from its tick.
 
+mod browse;
 mod conversation;
 mod detail;
 mod dispatch;
@@ -18,10 +19,14 @@ mod look;
 mod markdown;
 pub(crate) mod pane;
 mod pills;
+mod pr_cells;
+mod projects;
 mod pull;
+mod remote;
 mod repo;
 mod rows;
 mod status;
+mod tasks;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -69,6 +74,10 @@ pub(crate) enum Event {
         session: Option<String>,
         workspace_id: String,
     },
+    /// Show the workspace holding the project with repository key `repo`.
+    OpenProject {
+        repo: String,
+    },
     /// Open a web address, such as an issue's page, in a browser tab.
     OpenUrl(String),
     /// Sign in to the provider the view needs to list a repository: the
@@ -86,6 +95,17 @@ impl EventEmitter<Event> for OrchestratorView {}
 
 /// How long Refresh spins before the workers' own sync states take over.
 const REFRESH_GRACE: Duration = Duration::from_millis(1500);
+
+/// A dropdown under the search row; one is open at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Menu {
+    Sort,
+    State,
+    /// Browsing Azure DevOps organizations.
+    Projects,
+    /// Which listed projects the list shows.
+    Repos,
+}
 
 /// The detail page of one item.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,7 +187,10 @@ pub(crate) struct OrchestratorView {
     live_branches: Arc<Vec<super::LiveBranch>>,
     tab: Tab,
     sort: Sort,
-    sort_open: bool,
+    /// The dropdown open under the search row, if any.
+    menu: Option<Menu>,
+    /// How many repositories the Browse menu draws: its pages so far.
+    browse_rows: usize,
     filters: Filters,
     /// The Pull requests tab's Mine and Review requested toggles.
     yours: rows::Yours,
@@ -175,6 +198,8 @@ pub(crate) struct OrchestratorView {
     filters_open: bool,
     /// Only issues with this label.
     label: Option<String>,
+    /// What only the Tasks list narrows by.
+    task_filters: tasks::TaskFilters,
     collapsed: HashSet<String>,
     search: Entity<SearchInput>,
     query: String,
@@ -255,11 +280,13 @@ impl OrchestratorView {
             live_branches: Arc::default(),
             tab: Tab::default(),
             sort: Sort::default(),
-            sort_open: false,
+            menu: None,
+            browse_rows: browse::MAX_ROWS,
             filters: Filters::default(),
             yours: rows::Yours::default(),
             filters_open: false,
             label: None,
+            task_filters: tasks::TaskFilters::default(),
             collapsed: HashSet::new(),
             search,
             query: String::new(),
@@ -355,6 +382,7 @@ impl OrchestratorView {
         }
         if read {
             self.discard_non_projects();
+            self.sync_remotes();
             self.reconcile_agents();
             self.refresh_rows();
             self.follow_pull_request();
@@ -404,7 +432,8 @@ impl OrchestratorView {
     /// The hosts the listed repositories are on, once each.
     pub(crate) fn targets(&self) -> Vec<sheprd_client::ConnectTarget> {
         let mut targets: Vec<sheprd_client::ConnectTarget> = Vec::new();
-        for repo in &self.repos {
+        // A repository read without a checkout is on no host.
+        for repo in self.repos.iter().filter(|repo| repo.remote.is_none()) {
             if !targets.contains(&repo.request.target) {
                 targets.push(repo.request.target.clone());
             }
@@ -517,7 +546,7 @@ impl OrchestratorView {
         for repo in self
             .repos
             .iter_mut()
-            .filter(|repo| repo.request.target == *target)
+            .filter(|repo| repo.remote.is_none() && repo.request.target == *target)
         {
             repo.login = login.clone();
             let same = match (&token, &repo.request.token) {
@@ -586,13 +615,26 @@ impl OrchestratorView {
         })
     }
 
-    /// A GitLab source waits for a token that works.
-    pub(crate) fn gitlab_needs_sign_in(&self) -> bool {
+    /// A `provider` source waits for a token that works.
+    pub(crate) fn needs_sign_in(&self, provider: Provider) -> bool {
         self.repos
             .iter()
             .flat_map(|repo| &repo.snapshot.sources)
             .any(|status| {
-                status.key.provider == Provider::Gitlab && matches!(status.state, SyncState::SignIn)
+                status.key.provider == provider && matches!(status.state, SyncState::SignIn)
+            })
+    }
+
+    /// The Azure DevOps organizations this view's repositories are read
+    /// from, lowercase, as tokens are saved for them.
+    pub(crate) fn azure_organizations(&self) -> impl Iterator<Item = String> + '_ {
+        self.repos
+            .iter()
+            .flat_map(|repo| &repo.snapshot.sources)
+            .filter(|status| status.key.provider == Provider::Azure)
+            .filter_map(|status| {
+                sheprd_orchestrator::azure::Repository::organization(&status.key)
+                    .map(str::to_ascii_lowercase)
             })
     }
 
@@ -640,7 +682,7 @@ impl OrchestratorView {
         // The open item belongs to the list left behind.
         self.detail = None;
         self.merge_open = false;
-        self.sort_open = false;
+        self.menu = None;
         self.refresh_rows();
         self.follow_pull_request();
         cx.notify();
@@ -785,8 +827,8 @@ impl OrchestratorView {
                 cx.notify();
                 true
             }
-            ("escape", None) if self.sort_open => {
-                self.sort_open = false;
+            ("escape", None) if self.menu.is_some() => {
+                self.menu = None;
                 cx.notify();
                 true
             }

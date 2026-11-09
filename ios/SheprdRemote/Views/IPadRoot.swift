@@ -29,6 +29,10 @@ struct IPadRoot: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
                     ToolbarItem(placement: .topBarTrailing) {
+                        Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
+                            .disabled(model.fleet.machines.isEmpty)
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button("New Workspace", systemImage: "plus") { model.creating = .workspace(device: nil) }
                             .keyboardShortcut("n", modifiers: .command)
                             .disabled(model.fleet.machines.isEmpty)
@@ -49,6 +53,8 @@ struct IPadRoot: View {
             case let .workspace(key)?:
                 // Unfolding a phone that was showing one.
                 NavigationStack { WorkspaceScreen(key: key).withRoutes() }.id(key)
+            case let .changes(key)?:
+                NavigationStack { ChangesScreen(key: key).withRoutes() }.id(key)
             case nil:
                 ContentUnavailableView("Pick a chat", systemImage: "bubble.left.and.text.bubble.right",
                                        description: Text("What needs you is at the top of the list."))

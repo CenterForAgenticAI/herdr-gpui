@@ -1,5 +1,5 @@
 use super::*;
-use crate::chat::prepared::{Body, DiffSummary, Part, Prepared, diff_counts, summarize};
+use crate::chat::prepared::{Body, DiffSummary, Part, Prepared, summarize};
 use sheprd_chat_protocol::{Tool, ToolContent, ToolKind, ToolStatus};
 
 mod cut;
@@ -23,13 +23,6 @@ fn literal_indented_widget_examples_cannot_become_controls() {
 }
 
 #[test]
-fn diffs_count_lines_added_and_removed() {
-    assert_eq!(diff_counts("a\nb\nc\n", "a\nB\nc\nd\n"), (2, 1));
-    assert_eq!(diff_counts("", "one\ntwo"), (2, 0));
-    assert_eq!(diff_counts("same", "same"), (0, 0));
-}
-
-#[test]
 fn a_tool_call_is_summarized() {
     let text = (0..10)
         .map(|n| format!("line {n}"))
@@ -45,17 +38,14 @@ fn a_tool_call_is_summarized() {
             },
             ToolContent::Terminal { id: "t1".into() },
         ],
+        ToolKind::Execute,
         &mut Default::default(),
     );
     assert_eq!(summary.lines.len(), 6);
     assert_eq!(summary.more, 4);
     assert_eq!(
         summary.diffs,
-        vec![DiffSummary {
-            path: "/src/new.rs".into(),
-            added: 2,
-            removed: 0
-        }]
+        vec![DiffSummary::counted("/src/new.rs".into(), 2, 0)]
     );
     assert_eq!(summary.terminals, 1);
 }

@@ -2,7 +2,9 @@ use super::*;
 use uuid::Uuid;
 
 mod alerts;
+mod badge;
 mod presence;
+mod terminals;
 
 #[test]
 fn a_copy_skips_the_changes_it_already_holds() {

@@ -2,8 +2,8 @@
 
 The orchestrator (`crates/sheprd-gpui/src/orchestrator/`) lists a repository's
 issues, pull requests, and the agent runs dispatched for them in the activity
-bar's Pull requests and Issues sections, and dispatches new ones through the
-Herdr CLI. User-facing behavior is in the crate README's "Orchestrator"
+bar's Pull requests, Issues, and Tasks sections, and dispatches new ones through
+the Herdr CLI. User-facing behavior is in the crate README's "Orchestrator"
 section; this page is for working on it.
 
 ## State and restart
@@ -12,8 +12,9 @@ The orchestrator keeps its own per-repository SQLite database, in the app's
 state directory: `<state dir>/repositories/<uuid v5 of the canonical git
 common dir>/state.sqlite3`, private to the user. Repositories on SSH hosts
 are keyed by `ssh://<destination><git common dir>` and live on this machine.
-Its schema began as agent-launcher's (`PRAGMA user_version`, currently 2,
-which added each open pull request's last read review and checks):
+Its schema began as agent-launcher's (`PRAGMA user_version`, currently 3:
+version 2 added each open pull request's last read review and checks, and
+version 3 each bead's assignee and acceptance criteria):
 
 - The first time a repository opens, agent-launcher's database at
   `<data_local_dir>/agent-launcher/repositories/<same uuid>/state.sqlite3`
@@ -48,9 +49,10 @@ agent-launcher wrote it and check that migration keeps its rows.
 | `actions.rs` | Dispatch, stop, send, remove, delete: each on its own thread. |
 | `prompt.rs` | Prompt profiles, agent-launcher's built-in and review prompts. |
 | `naming.rs` | agent-launcher's branch names, and runs found from branches. |
-| `view/` | The view entity: the list of every repository (`view/repo.rs` keeps each one's worker, snapshot, and rows; an item's page and actions go to its own), the backend and project pills, filters, the item pane, dialogs. Pure row, merge, and grouping logic is in `view/rows.rs`. |
+| `beads/claim.rs` | Claiming a bead for a dispatch, and giving it back. |
+| `view/` | The view entity: the list of every repository (`view/repo.rs` keeps each one's worker, snapshot, and rows; an item's page and actions go to its own), the backend and project pills, filters, the item pane, dialogs. Pure row, merge, and grouping logic is in `view/rows.rs`; what the Tasks section adds is in `view/tasks.rs`. |
 | `host.rs` | The window's one view and the repositories it lists, one per Git common directory per host across every connected host's workspaces: the tick that feeds it, and its events. |
-| `section.rs` | The Pull requests and Issues sections, and the commands that open them narrowed to a project. |
+| `section.rs` | The Pull requests, Issues, and Tasks sections, and the commands that open them narrowed to a project. |
 
 The view is a GPUI entity that talks to its host only through `Event`s and
 setters (`set_look`, `set_live`, `set_github`, `set_hosts`). Tabs hosted it
@@ -82,6 +84,58 @@ The hash makes the branch the item's own, so work is found without a database:
 Each becomes a run owned by `branch`, shown like any other but never written,
 and only when no recorded run already has that branch. It opens its workspace;
 it has no Stop, Send, or Remove, since no application owns it.
+
+## Review profiles
+
+`compose_review` keeps the built-in read-only prompt and appends the chosen
+profile. `Profile::parse` takes a first line of `review: replace` out of the
+template and sets `Review::Replace`, and such a profile is the whole prompt
+(plus extra instructions), rendered with the `pr_` variables as well as the
+`issue_` ones. The marker is removed at load so that no render path can send
+it, including an issue dispatch, where the same profile replaces the built-in
+prompt anyway. Other profiles never see the `pr_` variables: they are left as
+written, as they were before the marker existed. `{{ pr_title }}` and
+`{{ pr_body }}` stay marked as untrusted, and ref and repository names outside
+`valid_branch`'s characters are withheld, since Git allows `$(…)` in a branch
+name and a profile may put one in a command. The rest of what the built-in
+prompt guards is the profile author's to keep.
+
+## Tasks
+
+Tasks is a third list on the same view, not a store of its own: Beads remains
+the source of truth, and the database only caches what `bd` last listed, as it
+does for Issues. `Tab::Tasks` lists the Beads items of `Item`, and only while it
+shows are its rows computed. The bar lists the section while a project has a
+`.beads` folder.
+
+A task is `ItemKey`: its source and its Beads id. The source's `repository` is
+the folder holding the database `bd` opens, so identical ids in two projects stay
+apart, while everything that reaches one database is one source and the
+existing dedupe of rows, pills, and counts applies. `.beads/redirect` is read in
+discovery as `bd` reads it (the first line neither blank nor a comment, relative
+to the project), by `repo.rs` on this machine and `discover.sh` on an SSH host;
+`RepoInfo::beads_root` keeps the result. A target not named `.beads` has no such
+folder, so it stays the project's source and `bd` follows the redirect itself;
+projects sharing one are not deduplicated. When a project's source moves, as
+adding a redirect moves it, `Store::settle_beads` forgets the old source's rows
+and moves this app's runs to the new one once discovery confirms it, never from
+cached details, so tasks keep their runs and `orchestrator tasks` reads the same rows. A database this
+build cannot write keeps the old rows, so `reload` still lists only the current
+source's.
+
+A dispatch to a bead claims it before anything else happens (`beads::claim`):
+`bd show` says whether it was held, then `bd update --claim`, which is atomic.
+Claiming runs as `bd` by hand does, without `--sandbox`, since a claim has to
+reach a shared Dolt remote to coordinate anything.
+`bd` marks a refused claim only in its words (`already claimed by NAME`, or
+`already claimed: already assigned to "NAME"`), read at that boundary into
+`claim::Error`; any other refusal stays `bd`'s own failure. Nothing was started
+then, so no run is recorded. A failed launch runs `bd unclaim --if-assignee`, but
+only for a claim that dispatch took: a second agent on a task its actor already
+holds leaves it. The actor is `bd`'s own default. Agents start on the database's
+host: embedded databases are not reachable from another, so the dialog offers
+none. `bd` leases a claim for five minutes, which is why the prompt asks for
+`bd heartbeat`; a stale lease is only ever recovered by `bd reclaim`, never here.
 
 ## GitLab
 
@@ -204,6 +258,70 @@ desktop keyring (`dev.herdr.gpui.gitlab`), or with `[gitlab]
 allow_plaintext_credentials = true` the private `0600` `gitlab-credentials`
 file beside the GUI config. A headless window never reads or writes them.
 
+Azure DevOps repositories are read with `AZURE_DEVOPS_EXT_PAT` from the
+login shell, else the personal access token saved for the repository's
+organization, else the Azure CLI's sign-in (`az login`). The account menu's
+**Azure DevOps** tab saves a token: type the organization (it starts at one
+the open checkouts read) and paste a token with the Code (Read) and Work
+Items (Read) scopes, made from the page's link to
+`https://dev.azure.com/<organization>/_usersSettings/tokens`. **Check and
+save** asks the organization's `_apis/connectionData` whom it signs in as and
+`_apis/projects` how many projects it shows before saving, and keeps the
+token in its field when the check fails. Each organization's card shows the
+account, where its token comes from, and **Forget** for one saved here. A
+repository waiting for a token shows a banner in its section that opens the
+tab, and marks the title bar's account button. Tokens are one
+credential-store record of `organization<TAB>token` lines, at most 32
+organizations: the desktop keyring (`dev.herdr.gpui.azure-devops`), or with
+`[azure_devops] allow_plaintext_credentials = true` the private `0600`
+`azure-devops-credentials` file beside the GUI config. Changing that setting
+reaches running workers at once, which sync again with the new store. When
+Azure DevOps refuses a token, the worker tries the saved token, then the
+Azure CLI's sign-in, and the shell's token last: that one is read once per
+run, so it may be the token just refused. A saved token that is still the
+refused one goes after them all.
+
 Merge requests are not listed yet. They would need `PullRequest`-like
 metadata in the shared schema, which is a contract change for both
 applications.
+
+## Azure DevOps
+
+`azure.rs` reads an Azure DevOps repository (`dev.azure.com`, keyed
+`organization/project/repository`) with the token `AZURE_DEVOPS_EXT_PAT`
+names, else the Azure CLI's sign-in: its active pull requests, the latest
+100 completed and 25 abandoned ones, and its project's open work items
+(keyed `organization/project`, so two repositories of one project list each
+once). The reader's display name, from `connectionData`, makes Mine work.
+
+Beyond the open checkouts, each organization a checkout's remote names
+becomes one more project, named after the organization, read by a remote
+worker (`service/remote.rs`, `Service::start_remote`) that needs no
+checkout: it finds no repository, reads no branches, opens no database, and
+takes no action (one asked for is refused with a notice). It lists every
+pull request the reader created in the organization
+(`_apis/git/pullrequests?searchCriteria.creatorId=<connectionData id>&searchCriteria.status=all`),
+in every state, a page of 100 at a time up to 500, each keyed by its own
+repository, so a pull request a checkout lists too shows once. It also reads
+the organization's catalog of projects and repositories
+(`_apis/git/repositories`, at most 2,000, disabled ones left out) when it
+starts and on Refresh. A remote worker reads again every five minutes.
+
+The Pull requests search row's Projects menu lists each organization's
+catalog; picking a repository starts a remote worker for its pull requests
+alone (active and recently settled, no work items), at most 16 at once,
+until it is picked again or its pill is closed. These last the session: an
+organization stays once known, and nothing about them is saved. The State
+menu beside the Open toggle narrows the list to all, open (with drafts, as
+the toggle does), draft, merged, or closed pull requests; Azure DevOps'
+abandoned ones read as closed.
+
+Mine on Azure DevOps matches the reader by identity: each listing keeps
+the keys of the pull requests whose `createdBy.id` is connectionData's
+`authenticatedUser.id` (`Snapshot::authored`, in memory only), since two
+people can share a display name. Each active pull request's reviewer votes
+give its review verdict (`azure::pull_request::review`), shown in the
+Review column beside GitHub's and never stored.
+
+A section narrows to some projects through the projects menu in its search
+row ("All projects" while none is picked); backends keep their pills.

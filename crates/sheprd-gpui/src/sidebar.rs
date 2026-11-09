@@ -50,7 +50,7 @@ pub(crate) use {
     row::{compact, github_mark, label_text, styled as styled_token},
     search::SidebarSearch,
     view::SidebarView,
-    workspaces::{workspace_entries, workspace_label},
+    workspaces::{label_of, workspace_entries, workspace_label},
 };
 
 pub(crate) use layout::SidebarMetrics;
@@ -62,6 +62,7 @@ pub(crate) use metrics::LABEL_WIDTH;
 pub(crate) use view::cached as cached_view;
 
 use agents::agents_sort;
+pub(crate) use agents::status_priority;
 use metrics::*;
 use row::{RowBadge, first_text};
 use workspaces::visible_workspace_entries;

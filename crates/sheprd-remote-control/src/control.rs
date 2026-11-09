@@ -10,7 +10,9 @@
 
 use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
+pub mod changes;
 pub mod hosts;
+pub mod layout;
 pub mod pull_requests;
 pub mod tags;
 use serde::{Deserialize, Serialize};
@@ -24,6 +26,9 @@ use std::{
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long a client waits for the daemon's answer.
 pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long `Request::ChangeAsks` waits for a phone's question: within
+/// [`RESPONSE_TIMEOUT`], so an empty answer is not taken for a dead daemon.
+pub const ASK_WAIT: Duration = Duration::from_secs(4);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -204,6 +209,19 @@ pub enum Request {
         instance: u32,
         update: app_update::AppUpdate,
     },
+    /// Takes the phones' questions about workspaces, waiting up to
+    /// [`ASK_WAIT`] for one. Sheprd sends it while a phone is connected.
+    ChangeAsks,
+    /// What Sheprd found for an [`changes::Ask`].
+    ChangeAnswer {
+        id: changes::AskId,
+        answer: changes::Answer,
+    },
+    /// What Sheprd did with a [`layout::Ask`].
+    LayoutAnswer {
+        id: changes::AskId,
+        answer: layout::Answer,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -250,6 +268,13 @@ pub enum Response {
     AppUpdate {
         /// A phone asked to update since the last report. Taken by reading.
         requested: bool,
+    },
+    ChangeAsks {
+        asks: Vec<changes::Ask>,
+        /// Changes phones ask for in Herdr 2 tabs' layouts. An older
+        /// daemon sends none, and an older Sheprd leaves them to time out.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        layout: Vec<layout::Ask>,
     },
 }
 

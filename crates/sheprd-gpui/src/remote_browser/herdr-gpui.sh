@@ -3,8 +3,10 @@
 #
 # Sheprd's `herdr-gpui` command for an agent on an SSH host. Sheprd runs
 # on the user's own machine, which this host cannot reach, so a request is
-# left as metadata on the caller's Herdr workspace, for a short while; a Herdr
-# UI window connected to this host opens the page in that workspace.
+# left as metadata on the caller's Herdr workspace, for a short while, or, in
+# a Herdr 2 (herdr-core) terminal, as labels on that terminal, which the
+# window removes once it acts; a Sheprd window connected to this host opens
+# the page in the workspace that shows the caller.
 set -u
 LC_ALL=C
 export LC_ALL
@@ -23,7 +25,8 @@ Usage: sheprd browser open [--no-focus] [--tab] URL
        sheprd browser reload
 
 Run on an SSH host, this asks the Sheprd window connected to this host to
-open URL in a browser tab of your workspace (HERDR_WORKSPACE_ID).
+open URL in a browser tab of your workspace (HERDR_WORKSPACE_ID), or, in a
+Herdr 2 terminal (HC_TERMINAL_ID), of the workspace that shows it.
 
   open URL      An http or https address, or a bare host such as
                 localhost:3000. An address on this host's localhost is
@@ -70,10 +73,42 @@ unavailable() {
     fail 8 unsupported "Not available on an SSH host: only \`browser open\` and \`browser reload\` reach Sheprd from here."
 }
 
+# In a herdr-core terminal outside a Herdr pane: the core, as the bridge
+# finds it.
+core_terminal() {
+    [ -z "${HERDR_WORKSPACE_ID:-}" ] && [ -n "${HC_TERMINAL_ID:-}" ]
+}
+
+# send_core ACTION [URL]: the request as the calling terminal's labels, set at
+# once, under the same names a workspace's tokens have.
+send_core() {
+    action=$1
+    url=${2:-}
+    core=$(command -v herdr-core 2>/dev/null || :)
+    [ -n "$core" ] || core="$HOME/.local/bin/herdr-core"
+    [ -x "$core" ] || fail 5 not_found "herdr-core is not on PATH or in ~/.local/bin."
+    key="herdr-gpui-$(date +%s)-$$"
+    set -- "$key=$action"
+    rest=$url
+    i=0
+    while [ -n "$rest" ] && [ "$i" -lt "$CHUNKS" ]; do
+        chunk=$(printf '%s\n' "$rest" | cut -c "1-$CHUNK")
+        rest=$(printf '%s\n' "$rest" | cut -c "$((CHUNK + 1))-")
+        set -- "$@" "${key}_$i=$chunk"
+        i=$((i + 1))
+    done
+    "$core" label "$HC_TERMINAL_ID" "$@" >/dev/null ||
+        fail 1 refused "herdr-core refused the request."
+}
+
 # send ACTION [URL]: one report, so a window sees the whole request at once.
 # The request's ID names its tokens, so requests from this or another pane
 # made before a window reads them stand side by side.
 send() {
+    if core_terminal; then
+        send_core "$@"
+        return
+    fi
     action=$1
     url=${2:-}
     workspace=${HERDR_WORKSPACE_ID:-}
@@ -140,11 +175,16 @@ open_page() {
     else
         send open-background "$target"
     fi
-    done_message "Asked Sheprd to open $target in workspace $HERDR_WORKSPACE_ID; a window connected to this host opens it."
+    if core_terminal; then
+        done_message "Asked Sheprd to open $target; a window showing this terminal opens it."
+    else
+        done_message "Asked Sheprd to open $target in workspace $HERDR_WORKSPACE_ID; a window connected to this host opens it."
+    fi
 }
 
 reload_pages() {
     [ "$#" = 0 ] || fail 2 usage "browser reload takes no arguments."
+    core_terminal && fail 8 unsupported "browser reload is not available in a Herdr 2 terminal on an SSH host."
     [ -n "${HERDR_PANE_ID:-}" ] || fail 1 refused "browser reload runs in the Herdr pane that opened the page."
     send reload
     done_message "Asked Sheprd to reload this pane's browser tabs."

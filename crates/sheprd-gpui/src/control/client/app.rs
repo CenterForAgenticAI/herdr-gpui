@@ -4,10 +4,27 @@ use crate::{
     cli::control::{AppCommand, UiCommand, WindowCommand},
     control::protocol::{
         Request, Response,
-        app::{AppOp, CommandOp, Reply, Status, UiOp, WindowInfo, WindowOp},
+        app::{AlertInfo, AppOp, CommandOp, Reply, Status, UiOp, WindowInfo, WindowOp},
     },
 };
 use std::fmt::Write as _;
+
+/// One line per alert, newest first, each saying who needs what.
+pub(super) fn alert_lines(alerts: &[AlertInfo]) -> String {
+    if alerts.is_empty() {
+        return "No alerts yet".to_owned();
+    }
+    let mut text = String::new();
+    for alert in alerts {
+        let kind = if alert.needs_attention {
+            "needs you"
+        } else {
+            "finished"
+        };
+        let _ = writeln!(text, "{kind}  {}  {}", alert.host, alert.title);
+    }
+    text
+}
 
 fn describe_window(window: &WindowInfo, text: &mut String) {
     let _ = writeln!(
@@ -89,6 +106,7 @@ pub(super) fn app(command: AppCommand, context: &Context) -> crate::Result<Outpu
 pub(super) fn window(command: WindowCommand, context: &Context) -> crate::Result<Output> {
     let op = match command {
         WindowCommand::List => WindowOp::List,
+        WindowCommand::Alerts => WindowOp::Alerts,
         WindowCommand::New { session } => WindowOp::New { session },
         WindowCommand::Focus { id } => {
             let context = Context {
@@ -117,6 +135,9 @@ pub(super) fn window(command: WindowCommand, context: &Context) -> crate::Result
             Output::data(text.trim_end(), &windows)
         }
         Response::App {
+            reply: Reply::Alerts { alerts },
+        } => Output::data(alert_lines(&alerts).trim_end(), &alerts),
+        Response::App {
             reply: Reply::Size { width, height },
         } => Output::data(
             format!("{}x{}", width.round(), height.round()),
@@ -130,8 +151,11 @@ pub(super) fn ui(command: UiCommand, context: &Context) -> crate::Result<Output>
     let op = match command {
         UiCommand::Sidebar(switch) => UiOp::Sidebar { switch },
         UiCommand::StatusBar(switch) => UiOp::StatusBar { switch },
+        UiCommand::MenuBar(switch) => UiOp::MenuBar { switch },
         UiCommand::FontSize(size) => UiOp::FontSize { size },
         UiCommand::Panel(panel) => UiOp::Panel { panel },
+        UiCommand::AgentGroups => UiOp::AgentGroups,
+        UiCommand::AgentGroup(name) => UiOp::AgentGroup { name },
     };
     match context.call(Request::Ui, op)? {
         Response::Done { message } => Ok(Output::message(message)),
@@ -141,8 +165,33 @@ pub(super) fn ui(command: UiCommand, context: &Context) -> crate::Result<Output>
             format!("Terminal font size {points}"),
             &serde_json::json!({ "points": points }),
         ),
+        Response::App {
+            reply: Reply::AgentGroups { current, groups },
+        } => Output::data(
+            agent_groups_text(current.as_deref(), &groups),
+            &serde_json::json!({ "current": current, "groups": groups }),
+        ),
         response => Err(unexpected(response)),
     }
+}
+
+/// One group a line, the one shown marked, as `theme list` marks its own.
+fn agent_groups_text(current: Option<&str>, groups: &[String]) -> String {
+    if groups.is_empty() {
+        return "No coordinator sessions are listed".to_owned();
+    }
+    groups
+        .iter()
+        .map(|group| {
+            let mark = if current == Some(group.as_str()) {
+                "*"
+            } else {
+                " "
+            };
+            format!("{mark} {group}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(super) fn run_command(name: &str, context: &Context) -> crate::Result<Output> {
@@ -163,3 +212,6 @@ pub(super) fn run_command(name: &str, context: &Context) -> crate::Result<Output
         },
     )
 }
+
+#[cfg(test)]
+mod tests;

@@ -3,6 +3,7 @@
 //! requests grouped by what each waits on. Pure, so it is tested without a
 //! window.
 
+use super::tasks::TaskFilters;
 use crate::i18n::fl;
 use crate::orchestrator::{
     Backend, CheckState, HerdrSession, Item, PrStatus, Provider, Review, Run, RunState,
@@ -18,6 +19,7 @@ pub(crate) enum Tab {
     #[default]
     Issues,
     PullRequests,
+    Tasks,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -77,6 +79,30 @@ pub(crate) struct Filters {
     pub(crate) blocked: bool,
     /// Pull requests: only open and draft ones.
     pub(crate) open_only: bool,
+    /// Pull requests: only those in this one state, which the State menu
+    /// picks; it clears `open_only`, and turning Open on clears it.
+    pub(crate) state: Option<PrState>,
+}
+
+/// A pull request's state the State menu narrows to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PrState {
+    Draft,
+    Merged,
+    /// Closed without merging: Azure DevOps calls it abandoned.
+    Closed,
+}
+
+impl PrState {
+    /// Whether an item in `state`, as the readers word it, is in this one.
+    pub(crate) fn holds(self, state: &str) -> bool {
+        state
+            == match self {
+                Self::Draft => "draft",
+                Self::Merged => "merged",
+                Self::Closed => "closed",
+            }
+    }
 }
 
 /// Merged and closed pull requests are hidden until asked for, as on GitHub.
@@ -87,6 +113,7 @@ impl Default for Filters {
             has_run: false,
             blocked: false,
             open_only: true,
+            state: None,
         }
     }
 }
@@ -278,7 +305,9 @@ pub(crate) fn matches(item: &Item, query: &str) -> bool {
         Some(item.title.as_str()),
         Some(item.state.as_str()),
         item.author.as_deref(),
+        item.assignee.as_deref(),
         item.description.as_deref(),
+        item.acceptance.as_deref(),
         Some(item.key.native_id.as_str()),
         item.pull_request.as_ref().map(|pr| pr.head_ref.as_str()),
     ];
@@ -311,6 +340,54 @@ pub(crate) fn issue_rows(
     sort: Sort,
     collapsed: &HashSet<String>,
 ) -> Vec<ItemRow> {
+    nested_rows(
+        items,
+        (runs, query),
+        filters,
+        sort,
+        collapsed,
+        |item| item.pull_request.is_none() && !closed(item),
+        |_| true,
+    )
+}
+
+/// The Tasks tab: beads alone, narrowed by `tasks` as well.
+pub(crate) fn task_rows(
+    items: &[Item],
+    runs: &Runs<'_>,
+    query: &str,
+    filters: Filters,
+    sort: Sort,
+    collapsed: &HashSet<String>,
+    tasks: &TaskFilters,
+) -> Vec<ItemRow> {
+    // Tasks are all one provider; the Issues list's pick does not apply.
+    let filters = Filters {
+        provider: None,
+        ..filters
+    };
+    nested_rows(
+        items,
+        (runs, query),
+        filters,
+        sort,
+        collapsed,
+        |item| tasks.lists(item),
+        |item| tasks.matches(item),
+    )
+}
+
+/// The `listed` items that match, children under their parents. Those
+/// `narrowed` turns down still show when a child of theirs matches.
+fn nested_rows(
+    items: &[Item],
+    (runs, query): (&Runs<'_>, &str),
+    filters: Filters,
+    sort: Sort,
+    collapsed: &HashSet<String>,
+    listed: impl Fn(&Item) -> bool,
+    narrowed: impl Fn(&Item) -> bool,
+) -> Vec<ItemRow> {
     let latest = runs.latest();
     let keys: Vec<String> = items.iter().map(|item| item.key.canonical()).collect();
     let sources: Vec<String> = items
@@ -318,7 +395,7 @@ pub(crate) fn issue_rows(
         .map(|item| item.key.source.canonical())
         .collect();
     let listed: Vec<usize> = (0..items.len())
-        .filter(|&index| items[index].pull_request.is_none() && !closed(&items[index]))
+        .filter(|&index| listed(&items[index]))
         .collect();
     // A bead's parent is another bead of the same source with that id.
     let by_id: HashMap<(&str, &str), usize> = listed
@@ -341,6 +418,7 @@ pub(crate) fn issue_rows(
         let item = &items[index];
         let run = latest.get(keys[index].as_str());
         matches(item, query)
+            && narrowed(item)
             && filters
                 .provider
                 .is_none_or(|provider| item.key.source.provider == provider)
@@ -418,17 +496,29 @@ impl Yours {
     }
 
     fn keeps(self, item: &Item, status: Option<&PrStatus>, login: Option<&str>) -> bool {
+        let opened = login.is_some_and(|login| {
+            item.author
+                .as_deref()
+                .is_some_and(|author| author.eq_ignore_ascii_case(login))
+        });
+        self.holds(opened, status, login)
+    }
+
+    /// Whether a pull request stays, given whether the account opened it:
+    /// a forge whose authors share names answers that by identity instead.
+    pub(crate) fn holds(
+        self,
+        opened: bool,
+        status: Option<&PrStatus>,
+        login: Option<&str>,
+    ) -> bool {
         if !self.any() {
             return true;
         }
         let Some(login) = login else {
             return false;
         };
-        let authored = item
-            .author
-            .as_deref()
-            .is_some_and(|author| author.eq_ignore_ascii_case(login));
-        (self.authored && authored)
+        (self.authored && opened)
             || (self.review_requested && status.is_some_and(|status| status.requests(login)))
     }
 }
@@ -449,6 +539,7 @@ pub(crate) fn pull_request_rows(
         .enumerate()
         .filter(|(_, item)| item.pull_request.is_some())
         .filter(|(_, item)| !filters.open_only || matches!(item.state.as_str(), "open" | "draft"))
+        .filter(|(_, item)| filters.state.is_none_or(|state| state.holds(&item.state)))
         .filter(|(_, item)| yours.keeps(item, status_of(item, statuses), login))
         .filter(|(_, item)| matches(item, query))
         .map(|(index, item)| ItemRow {
@@ -498,14 +589,25 @@ pub(crate) enum Next {
 
 impl Next {
     pub(crate) fn of(item: &Item, status: Option<&PrStatus>, login: Option<&str>) -> Self {
-        if matches!(item.state.as_str(), "closed" | "merged") {
-            return Self::Closed;
-        }
         let mine = login.is_some_and(|login| {
             item.author
                 .as_deref()
                 .is_some_and(|author| author.eq_ignore_ascii_case(login))
         });
+        Self::given(mine, item, status, login)
+    }
+
+    /// As [`Next::of`], told whether the reader opened it: a forge whose
+    /// authors share names answers that by identity instead.
+    pub(crate) fn given(
+        mine: bool,
+        item: &Item,
+        status: Option<&PrStatus>,
+        login: Option<&str>,
+    ) -> Self {
+        if matches!(item.state.as_str(), "closed" | "merged") {
+            return Self::Closed;
+        }
         let review = status.and_then(|status| status.review);
         let checks = status.and_then(PrStatus::checks_state);
         if !mine
@@ -515,11 +617,16 @@ impl Next {
         {
             Self::Review
         } else if mine
-            && (review == Some(Review::ChangesRequested) || checks == Some(CheckState::Failed))
+            && (matches!(
+                review,
+                Some(Review::ChangesRequested | Review::WaitingForAuthor | Review::Rejected)
+            ) || checks == Some(CheckState::Failed))
         {
             Self::Fix
-        } else if review == Some(Review::Approved)
-            && !matches!(checks, Some(CheckState::Failed | CheckState::Pending))
+        } else if matches!(
+            review,
+            Some(Review::Approved | Review::ApprovedWithSuggestions)
+        ) && !matches!(checks, Some(CheckState::Failed | CheckState::Pending))
             && item.state == "open"
         {
             Self::Merge
@@ -557,7 +664,13 @@ pub(crate) fn status_of<'a>(
     item: &Item,
     statuses: &'a HashMap<(String, u64), PrStatus>,
 ) -> Option<&'a PrStatus> {
-    let number = item.github_pull_request()?.number;
+    // GitHub's are read and stored; Azure DevOps's come from its listing,
+    // whose repositories have three parts. A GitLab path may equal a GitHub
+    // one, so it never borrows GitHub's.
+    let number = match item.key.source.provider {
+        Provider::Github | Provider::Azure => item.pull_request.as_ref()?.number,
+        Provider::Gitlab | Provider::Beads => return None,
+    };
     statuses.get(&(item.key.source.repository.clone(), number))
 }
 

@@ -5,13 +5,15 @@
 use super::{
     OrchestratorView,
     look::{BLUE, CYAN, GREEN, Look, MAGENTA, RED, YELLOW, age, agent_icon},
+    pr_cells::{checks_count, checks_dot, review_dot, review_text, row_tone, standing_word},
     rows::{Heading, ItemRow, Line, Next, Tab},
+    tasks::status_label,
 };
 use crate::{
     fonts::StyledFont,
     i18n::fl,
-    orchestrator::{Access, CheckState, Item, PrStatus, Provider, Review, SyncState},
-    pull_request::{MergeState, Tone, tone_color},
+    orchestrator::{Access, Item, Provider, SyncState},
+    pull_request::tone_color,
 };
 use gpui::{prelude::*, *};
 use std::{cell::Cell, rc::Rc};
@@ -26,6 +28,8 @@ const PROJECT_WIDTH: f32 = 130.;
 const SOURCE_WIDTH: f32 = 22.;
 /// The column holding a row's action, such as Start agent.
 const ACTION_WIDTH: f32 = 96.;
+/// The status column of the Tasks list.
+const TASK_STATUS_WIDTH: f32 = 78.;
 /// The author column of each list.
 const ISSUE_AUTHOR_WIDTH: f32 = 110.;
 const PULL_REQUEST_AUTHOR_WIDTH: f32 = 100.;
@@ -34,10 +38,17 @@ pub(super) const AUTHOR_TITLE_MIN: f32 = 280.;
 /// The gap between a row's cells, and its padding on either side.
 const CELL_GAP: f32 = 8.;
 const ROW_PADDING: f32 = 16.;
+/// The list width below which the search field takes its own line, at the
+/// usual text size: the Pull requests list's controls fill the row.
+const SEARCH_BESIDE_WIDTH: f32 = 960.;
+/// What that line adds above a dropdown.
+const SEARCH_LINE: f32 = 40.;
 /// The columns saying where a pull request stands, at the usual text size:
 /// see [`Look::column`].
-const STATUS_WIDTH: f32 = 72.;
+const STATUS_WIDTH: f32 = 80.;
 const CHECKS_WIDTH: f32 = 70.;
+/// The review column, wide enough for "approved with suggestions".
+const REVIEW_WIDTH: f32 = 168.;
 
 /// Why the list is empty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,17 +67,35 @@ impl OrchestratorView {
         self.detail.is_some()
     }
 
+    /// Whether the search field sits above its controls, not beside them.
+    pub(super) fn search_stacked(&self) -> bool {
+        self.tab == Tab::PullRequests && self.list_width.get() < self.search_fit()
+    }
+
+    fn search_fit(&self) -> f32 {
+        self.look.column(SEARCH_BESIDE_WIDTH)
+    }
+
+    /// How far a dropdown moves down for the search field's own line.
+    pub(super) fn search_line(&self) -> f32 {
+        if self.search_stacked() {
+            SEARCH_LINE
+        } else {
+            0.
+        }
+    }
+
     /// Whether rows name their author: always, unless an open item leaves
     /// the title too little room for it.
     fn shows_author(&self) -> bool {
-        !self.compact() || self.list_width.get() >= self.author_fit()
+        self.tab != Tab::Tasks && (!self.compact() || self.list_width.get() >= self.author_fit())
     }
 
     /// The list width at which a row beside an open item fits its author.
     pub(super) fn author_fit(&self) -> f32 {
         let (cells, fixed) = match self.tab {
             // Age, run, title, author, and action.
-            Tab::Issues => (5., 32. + 30. + ISSUE_AUTHOR_WIDTH + ACTION_WIDTH),
+            Tab::Issues | Tab::Tasks => (5., 32. + 30. + ISSUE_AUTHOR_WIDTH + ACTION_WIDTH),
             // Number, title, author, two dots, and age.
             Tab::PullRequests => (6., 48. + PULL_REQUEST_AUTHOR_WIDTH + 12. + 12. + 32.),
         };
@@ -99,7 +128,7 @@ impl OrchestratorView {
 
     /// Whether rows of several projects are listed, so each names its own.
     pub(super) fn listing_projects(&self) -> bool {
-        self.projects_named().count() > 1 && self.projects.len() != 1
+        self.projects_listing().count() > 1 && self.projects.len() != 1
     }
 
     /// A row's project, in its own column while several are listed.
@@ -117,10 +146,21 @@ impl OrchestratorView {
     }
 
     /// The project a row names: its checkout's, or how many hosts list it
-    /// when several checkouts of the same repository do.
+    /// when several checkouts of the same repository do. Projects sharing a
+    /// Beads database are different projects, not one on several hosts.
     fn row_project(&self, row: &ItemRow) -> String {
         let repo = &self.repos[row.repo];
-        match self.twins(&self.row_item(row).key.canonical()) {
+        // An organization's list mixes repositories: each row names its own.
+        if matches!(
+            repo.remote,
+            Some(crate::orchestrator::RemoteScope::Mine { .. })
+        ) {
+            let source = &self.row_item(row).key.source.repository;
+            return source.rsplit('/').next().unwrap_or(source).to_owned();
+        }
+        let item = self.row_item(row);
+        match self.twins(&item.key.canonical()) {
+            _ if item.key.source.provider == Provider::Beads => self.project_label(repo),
             0 => self.project_label(repo),
             twins => fl!(
                 "orchestrator-project-hosts",
@@ -142,7 +182,7 @@ impl OrchestratorView {
 
     fn row_height(&self) -> f32 {
         self.look.row(match self.tab {
-            Tab::Issues => ISSUE_ROW,
+            Tab::Issues | Tab::Tasks => ISSUE_ROW,
             Tab::PullRequests => PULL_REQUEST_ROW,
         })
     }
@@ -155,7 +195,7 @@ impl OrchestratorView {
         let projects = self.listing_projects();
         let mut head: Vec<(String, Option<f32>)> = Vec::new();
         match self.tab {
-            Tab::Issues => {
+            Tab::Issues | Tab::Tasks => {
                 head.push((fl!("orchestrator-column-age"), Some(32.)));
                 if sources {
                     head.push((fl!("orchestrator-column-source"), Some(SOURCE_WIDTH)));
@@ -165,10 +205,16 @@ impl OrchestratorView {
                     head.push((fl!("orchestrator-column-project"), Some(PROJECT_WIDTH)));
                 }
                 head.push((fl!("orchestrator-column-title"), None));
+                if !compact && self.tab == Tab::Tasks {
+                    head.extend([
+                        (fl!("orchestrator-column-assignee"), Some(110.)),
+                        (fl!("orchestrator-column-status"), Some(TASK_STATUS_WIDTH)),
+                    ]);
+                }
                 if author {
                     head.push((fl!("orchestrator-column-author"), Some(ISSUE_AUTHOR_WIDTH)));
                 }
-                if !compact {
+                if !compact && self.tab != Tab::Tasks {
                     head.push(("\u{1f4ac}".into(), Some(34.)));
                 }
                 head.push((String::new(), Some(ACTION_WIDTH)));
@@ -196,7 +242,10 @@ impl OrchestratorView {
                             fl!("orchestrator-column-status"),
                             Some(look.column(STATUS_WIDTH)),
                         ),
-                        (fl!("orchestrator-column-review"), Some(124.)),
+                        (
+                            fl!("orchestrator-column-review"),
+                            Some(look.column(REVIEW_WIDTH)),
+                        ),
                         (
                             fl!("orchestrator-column-checks"),
                             Some(look.column(CHECKS_WIDTH)),
@@ -229,9 +278,13 @@ impl OrchestratorView {
             .relative()
             .flex_1()
             .min_w_0()
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .child(measure(self.list_width.clone(), self.author_fit()))
+            .child(measure(
+                self.list_width.clone(),
+                [self.author_fit(), self.search_fit()],
+            ))
             // Column heads over nothing to line up are clutter.
             .when(count > 0, |el| el.child(column_head(look, &head)))
             .child(list)
@@ -252,9 +305,9 @@ impl OrchestratorView {
         let searching = !self.query.trim().is_empty();
         // The pills narrow both tabs; each tab also has its own filters.
         let filtered = !self.projects.is_empty()
-            || !self.backends.is_empty()
+            || (self.tab != Tab::Tasks && !self.backends.is_empty())
             || match self.tab {
-                Tab::Issues => self.active_filters() > 0,
+                Tab::Issues | Tab::Tasks => self.active_filters() > 0,
                 Tab::PullRequests => self.yours.any() || self.filters.has_run,
             };
         if self.repos.is_empty() {
@@ -273,6 +326,7 @@ impl OrchestratorView {
     fn render_empty(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let look = &self.look;
         let issues = self.tab == Tab::Issues;
+        let tasks = self.tab == Tab::Tasks;
         let query = self.query.trim();
         // With nothing listed at all, the section says what it is for.
         let (icon, text, about) = match self.empty() {
@@ -282,6 +336,11 @@ impl OrchestratorView {
                 Some(fl!("orchestrator-no-repositories-about")),
             ),
             Empty::Loading => ("icons/refresh.svg", fl!("orchestrator-loading"), None),
+            Empty::Search if tasks => (
+                "icons/search.svg",
+                fl!("orchestrator-no-tasks-match", query = query),
+                None,
+            ),
             Empty::Search if issues => (
                 "icons/search.svg",
                 fl!("orchestrator-no-issues-match", query = query),
@@ -290,6 +349,11 @@ impl OrchestratorView {
             Empty::Search => (
                 "icons/search.svg",
                 fl!("orchestrator-no-pull-requests-match", query = query),
+                None,
+            ),
+            Empty::Filtered if tasks => (
+                "icons/search.svg",
+                fl!("orchestrator-no-tasks-filtered"),
                 None,
             ),
             Empty::Filtered if issues => (
@@ -301,6 +365,11 @@ impl OrchestratorView {
                 "icons/search.svg",
                 fl!("orchestrator-no-pull-requests-filtered"),
                 None,
+            ),
+            Empty::Nothing if tasks => (
+                "icons/check.svg",
+                fl!("orchestrator-no-tasks"),
+                Some(fl!("orchestrator-no-tasks-about")),
             ),
             Empty::Nothing if issues => (
                 "icons/check.svg",
@@ -349,7 +418,7 @@ impl OrchestratorView {
         match self.lines.get(index) {
             Some(Line::Heading { heading, count }) => self.render_heading(*heading, *count),
             Some(Line::Row(row)) => match self.tab {
-                Tab::Issues => self.render_issue_row(index, *row, cx),
+                Tab::Issues | Tab::Tasks => self.render_issue_row(index, *row, cx),
                 Tab::PullRequests => self.render_pull_request_row(index, *row, cx),
             },
             None => div().h(px(self.row_height())).into_any_element(),
@@ -471,7 +540,9 @@ impl OrchestratorView {
         });
         let writable = self.repos[row.repo].snapshot.access == Some(Access::ReadWrite);
         let blocked = !item.blocked_by.is_empty() || item.state == "blocked";
-        let start = (writable && row.run.is_none() && !blocked).then(|| {
+        let tasks = self.tab == Tab::Tasks;
+        let closed = super::rows::closed(item);
+        let start = (writable && row.run.is_none() && !blocked && !closed).then(|| {
             let key = key.clone();
             look.compact_button(
                 ("orchestrator-start", index),
@@ -524,10 +595,30 @@ impl OrchestratorView {
                         el.child(look.icon("icons/lock.svg", 11., look.hue(YELLOW)))
                     }),
             )
+            .when(!compact && tasks, |el| {
+                el.child(
+                    div()
+                        .flex_none()
+                        .w(px(110.))
+                        .truncate()
+                        .text_size(look.small())
+                        .text_color(rgb(theme.subtext()))
+                        .child(item.assignee.clone().unwrap_or_default()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(TASK_STATUS_WIDTH))
+                        .truncate()
+                        .text_size(look.small())
+                        .text_color(rgb(look.hue(look.state_hue(&item.state))))
+                        .child(status_label(&item.state)),
+                )
+            })
             .when(self.shows_author(), |el| {
                 el.child(self.author_cell(item, ISSUE_AUTHOR_WIDTH))
             })
-            .when(!compact, |el| {
+            .when(!compact && !tasks, |el| {
                 el.child(
                     div()
                         .flex_none()
@@ -661,11 +752,21 @@ impl OrchestratorView {
                                     .map(|word| look.badge_in(word, tone_color(tone, theme))),
                             ),
                     )
-                    .child(div().flex_none().w(px(124.)).flex().children(review_badge(
-                        look,
-                        status,
-                        self.repos[row.repo].reading_login(),
-                    )))
+                    .child(
+                        div()
+                            .debug_selector({
+                                let key = item.key.canonical();
+                                move || format!("orchestrator-review-{key}")
+                            })
+                            .flex_none()
+                            .w(px(look.column(REVIEW_WIDTH)))
+                            .flex()
+                            .overflow_hidden()
+                            .children(
+                                review_text(status, self.repos[row.repo].reading_login())
+                                    .map(|(word, hue)| look.badge(word, hue)),
+                            ),
+                    )
                     .child(
                         div()
                             .flex_none()
@@ -706,13 +807,14 @@ impl OrchestratorView {
 }
 
 /// Records the list's width as it lays out, and draws again when that moves
-/// it across `fit`, so rows gain or lose their author on the next frame.
-fn measure(width: Rc<Cell<f32>>, fit: f32) -> impl IntoElement {
+/// it across a width in `fits`, so rows gain or lose their author and the
+/// search field its line on the next frame.
+fn measure(width: Rc<Cell<f32>>, fits: [f32; 2]) -> impl IntoElement {
     canvas(
         move |bounds, window, _| {
             let now = f32::from(bounds.size.width);
             let before = width.replace(now);
-            if (before >= fit) != (now >= fit) {
+            if fits.iter().any(|fit| (before >= *fit) != (now >= *fit)) {
                 window.refresh();
             }
         },
@@ -790,96 +892,6 @@ pub(super) fn diff_squares(look: &Look, additions: Option<u64>, deletions: Optio
 }
 
 /// A priority's heading: `P1 · high`.
-fn priority_name(priority: i64) -> String {
+pub(super) fn priority_name(priority: i64) -> String {
     fl!("orchestrator-priority", priority = priority)
-}
-
-fn check_hue(look: &Look, state: CheckState) -> u32 {
-    match state {
-        CheckState::Failed => look.hue(RED),
-        CheckState::Pending => look.hue(YELLOW),
-        CheckState::Passed => look.hue(GREEN),
-        CheckState::Skipped => look.theme.muted,
-    }
-}
-
-/// The review state's word, or that the user is asked to review.
-fn review_badge(look: &Look, status: Option<&PrStatus>, login: Option<&str>) -> Option<Div> {
-    let status = status?;
-    if login.is_some_and(|login| status.requests(login)) {
-        return Some(look.badge(fl!("orchestrator-review-yours"), MAGENTA));
-    }
-    Some(match status.review? {
-        Review::Approved => look.badge(fl!("orchestrator-review-approved"), GREEN),
-        Review::ChangesRequested => look.badge(fl!("orchestrator-review-changes"), RED),
-        Review::Required => look.badge(fl!("orchestrator-review-required"), BLUE),
-    })
-}
-
-fn review_dot(look: &Look, status: Option<&PrStatus>) -> Option<Div> {
-    let hue = match status?.review? {
-        Review::Approved => GREEN,
-        Review::ChangesRequested => RED,
-        Review::Required => BLUE,
-    };
-    Some(look.dot(look.hue(hue), 7.))
-}
-
-fn checks_dot(look: &Look, status: Option<&PrStatus>) -> Option<Div> {
-    let state = status?.checks_state()?;
-    Some(look.dot(check_hue(look, state), 7.))
-}
-
-/// The tone of a row's pull request, the one its sidebar badge takes. One
-/// with no status yet, or a merge request, says nothing rather than ready.
-pub(super) fn row_tone(item: &Item, status: Option<&PrStatus>) -> Tone {
-    match item.state.as_str() {
-        "merged" => Tone::Merged,
-        "closed" => Tone::Attention,
-        "draft" => Tone::Muted,
-        _ => status.map_or(Tone::Muted, PrStatus::tone),
-    }
-}
-
-/// The word beside the tone's color, naming what no other column shows:
-/// conflicts and a branch behind its base. A draft's badge is by its title.
-pub(super) fn standing_word(tone: Tone, item: &Item, status: Option<&PrStatus>) -> Option<String> {
-    let merge = status.map_or(MergeState::Unknown, |status| status.merge);
-    Some(match tone {
-        Tone::Attention if item.state == "closed" => fl!("orchestrator-standing-closed"),
-        Tone::Attention if merge == MergeState::Dirty => fl!("orchestrator-standing-conflicts"),
-        Tone::Attention => fl!("orchestrator-standing-attention"),
-        Tone::Held if merge == MergeState::Behind => fl!("orchestrator-standing-behind"),
-        Tone::Held => fl!("orchestrator-badge-blocked"),
-        Tone::Merged => fl!("orchestrator-standing-merged"),
-        Tone::Muted => return None,
-        Tone::Ready => fl!("orchestrator-standing-ready"),
-        Tone::Waiting => fl!("orchestrator-standing-waiting"),
-    })
-}
-
-/// How many checks are fine out of how many reported, in the color and mark
-/// of what they add up to.
-fn checks_count(look: &Look, status: Option<&PrStatus>) -> Option<Div> {
-    let status = status.filter(|status| !status.checks.is_empty())?;
-    let state = status.checks_state().unwrap_or(CheckState::Skipped);
-    let icon = match state {
-        CheckState::Failed => "icons/error.svg",
-        CheckState::Pending => "icons/refresh.svg",
-        CheckState::Passed => "icons/check.svg",
-        CheckState::Skipped => "icons/pass.svg",
-    };
-    let hue = check_hue(look, state);
-    Some(
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(look.icon(icon, 11., hue))
-            .child(
-                look.mono(format!("{}/{}", status.checks_ok(), status.checks.len()))
-                    .text_size(look.small())
-                    .text_color(rgb(hue)),
-            ),
-    )
 }

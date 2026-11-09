@@ -8,23 +8,47 @@
 //! `https://dev.azure.com/…/_git/…`, `git@ssh.dev.azure.com:v3/…`, or the
 //! older `https://organization.visualstudio.com/…/_git/…`.
 //!
-//! The credential comes from `AZURE_DEVOPS_EXT_PAT`, else from the Azure CLI's
-//! sign-in (`token`). Without one, nothing is read: Azure DevOps answers an
-//! anonymous request with a sign-in page.
+//! The credential comes from `AZURE_DEVOPS_EXT_PAT`, else from the token
+//! pasted for the organization in the account menu (`saved`), else from the
+//! Azure CLI's sign-in (`token`). Without one, nothing is read: Azure DevOps
+//! answers an anonymous request with a sign-in page.
 
+pub mod account;
 mod error;
 pub(crate) mod html;
+pub mod organization;
 pub mod pull_request;
+pub mod saved;
 pub mod token;
 pub mod work_item;
 
 pub use error::Error;
 
+/// The `[azure_devops]` table.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    /// Saves pasted tokens in the private `0600` `azure-devops-credentials`
+    /// file when no desktop keyring is running. Same meaning as `[github]`'s.
+    pub allow_plaintext_credentials: bool,
+}
+
+impl Config {
+    /// Where pasted tokens are saved.
+    pub fn store(&self) -> sheprd_credentials::Store {
+        sheprd_credentials::Store::for_policy(self.allow_plaintext_credentials)
+    }
+}
+
 use super::{Checkpoint, Item, Provider, SourceKey};
 use chrono::Utc;
 use percent_encoding::percent_decode_str;
 use serde::{Deserialize, de::DeserializeOwned};
-use std::{collections::HashSet, io::Read, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Read,
+    time::Duration,
+};
 
 /// Where every Azure DevOps source is keyed and read.
 pub const HOST: &str = "dev.azure.com";
@@ -32,6 +56,11 @@ const API_VERSION: &str = "7.1";
 const PAGE: usize = 100;
 /// The most active pull requests one sync reads.
 pub const MAX_OPEN: usize = 2_000;
+/// How many of the latest completed pull requests a sync keeps beside the
+/// active ones, so the list can show what merged recently.
+pub const RECENT_COMPLETED: usize = 100;
+/// How many of the latest abandoned pull requests a sync keeps.
+pub const RECENT_ABANDONED: usize = 25;
 /// Work item ids one batch read may name.
 const BATCH: usize = 200;
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -42,11 +71,18 @@ const LIMIT: u64 = 8 * 1024 * 1024;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity {
+    /// Unique across the organization, as `connectionData` names the reader;
+    /// two people may share a display name.
+    id: Option<String>,
     display_name: Option<String>,
     unique_name: Option<String>,
 }
 
 impl Identity {
+    pub(crate) fn id(&self) -> Option<&str> {
+        self.id.as_deref().filter(|id| !id.is_empty())
+    }
+
     /// The display name, else the sign-in name.
     fn name(self) -> Option<String> {
         self.display_name
@@ -105,6 +141,16 @@ pub struct Repository<'a> {
 }
 
 impl<'a> Repository<'a> {
+    /// The organization `source` belongs to, which its token is saved for;
+    /// a project's own source names it as well.
+    pub fn organization(source: &SourceKey) -> Option<&str> {
+        source
+            .repository
+            .split('/')
+            .next()
+            .filter(|organization| !organization.is_empty())
+    }
+
     pub fn of(source: &'a SourceKey) -> Result<Self, Error> {
         let mut parts = source.repository.splitn(3, '/');
         match (parts.next(), parts.next(), parts.next()) {
@@ -157,13 +203,28 @@ impl<'a> Repository<'a> {
 
     /// The repository's active pull requests, `skip` of them passed.
     pub fn pull_requests_url(&self, skip: usize) -> Result<url::Url, Error> {
+        self.pull_requests_in("active", PAGE, skip)
+    }
+
+    /// The repository's latest `top` pull requests that ended as `status`,
+    /// `completed` or `abandoned`, newest first.
+    pub fn settled_url(&self, status: &str, top: usize) -> Result<url::Url, Error> {
+        self.pull_requests_in(status, top, 0)
+    }
+
+    fn pull_requests_in(&self, status: &str, top: usize, skip: usize) -> Result<url::Url, Error> {
         let mut url = self.url(&["_apis", "git", "repositories", self.name, "pullrequests"])?;
         url.query_pairs_mut()
-            .append_pair("searchCriteria.status", "active")
-            .append_pair("$top", &PAGE.to_string())
+            .append_pair("searchCriteria.status", status)
+            .append_pair("$top", &top.to_string())
             .append_pair("$skip", &skip.to_string())
             .append_pair("api-version", API_VERSION);
         Ok(url)
+    }
+
+    /// Who the token reads as, for the organization.
+    pub fn connection_url(&self) -> Result<url::Url, Error> {
+        organization::url(self.organization, &["_apis", "connectionData"])
     }
 
     /// The project's WIQL endpoint, capped at [`work_item::MAX_OPEN`].
@@ -193,6 +254,39 @@ pub struct Listing {
     pub items: Vec<Item>,
     pub checkpoint: Checkpoint,
     pub complete: bool,
+    /// The name Azure DevOps shows for the token's owner, as pull request
+    /// authors are named, so the lists can keep the reader's own; `None`
+    /// when Azure DevOps did not say.
+    pub viewer: Option<String>,
+    /// The canonical keys of the pull requests the token's owner created,
+    /// matched by identity id rather than by the name rows show.
+    pub authored: HashSet<String>,
+    /// Each active pull request's review verdict, by repository and number,
+    /// as the shared status map keys them. Never stored.
+    pub statuses: HashMap<(String, u64), super::PrStatus>,
+}
+
+/// The reply of `GET {organization}/_apis/connectionData`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Connection {
+    authenticated_user: Option<Viewer>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Viewer {
+    id: Option<String>,
+    provider_display_name: Option<String>,
+    custom_display_name: Option<String>,
+}
+
+/// Who the token reads as: the id pull requests name their creator by, and
+/// the name they show for them.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Reader {
+    pub id: Option<String>,
+    pub name: Option<String>,
 }
 
 /// A request Azure DevOps answers with JSON.
@@ -209,12 +303,52 @@ pub fn list(
     previous: Option<&Checkpoint>,
     fetch: &mut impl FnMut(Call) -> super::Result<Vec<u8>>,
 ) -> super::Result<Listing> {
+    let repository = Repository::of(source)?;
+    let (work_items, complete) = work_items(&repository, fetch)?;
+    let mut listing = list_pull_requests(source, previous, fetch)?;
+    listing.items.splice(0..0, work_items);
+    listing.complete &= complete;
+    Ok(listing)
+}
+
+/// Lists `source`'s active pull requests and its latest settled ones, with
+/// no work items: a repository browsed without a checkout shows only these.
+pub fn list_pull_requests(
+    source: &SourceKey,
+    previous: Option<&Checkpoint>,
+    fetch: &mut impl FnMut(Call) -> super::Result<Vec<u8>>,
+) -> super::Result<Listing> {
     let started = Utc::now();
     let repository = Repository::of(source)?;
-    let (mut items, mut complete) = work_items(&repository, fetch)?;
-    let (pull_requests, listed) = pull_requests(source, &repository, fetch)?;
-    items.extend(pull_requests);
-    complete &= listed;
+    let mut noted = Noted::default();
+    let (mut items, complete) = pull_requests(source, &repository, &mut noted, fetch)?;
+    let settled = settled(source, &repository, &mut noted, fetch)?;
+    let Noted { creators, statuses } = noted;
+    let statuses = statuses
+        .into_iter()
+        .map(|(number, status)| ((source.repository.clone(), number), status))
+        .collect();
+    let later: HashSet<String> = settled
+        .iter()
+        .map(|item| item.key.native_id.clone())
+        .collect();
+    items.retain(|item| !later.contains(&item.key.native_id));
+    items.extend(settled);
+    let reader = reader(repository.organization, fetch)?;
+    let authored = reader.id.as_deref().map_or_else(HashSet::new, |me| {
+        items
+            .iter()
+            .filter(|item| {
+                let number = item.pull_request.as_ref().map(|pr| pr.number);
+                number
+                    .and_then(|number| creators.get(&number))
+                    .map(String::as_str)
+                    == Some(me)
+            })
+            .map(|item| item.key.canonical())
+            .collect()
+    });
+    let viewer = reader.name;
     let previous = previous.cloned().unwrap_or_default();
     Ok(Listing {
         items,
@@ -226,6 +360,59 @@ pub fn list(
             pr_cursor: previous.pr_cursor,
         },
         complete,
+        viewer,
+        authored,
+        statuses,
+    })
+}
+
+/// The latest completed and abandoned pull requests, which the lists show
+/// when they are asked for more than open ones. A pull request settled
+/// while the active ones were read is listed once, as the later read has it.
+fn settled(
+    source: &SourceKey,
+    repository: &Repository<'_>,
+    noted: &mut Noted,
+    fetch: &mut impl FnMut(Call) -> super::Result<Vec<u8>>,
+) -> super::Result<Vec<Item>> {
+    let web = repository.repository_web()?;
+    let mut items = Vec::new();
+    for (status, top) in [
+        ("completed", RECENT_COMPLETED),
+        ("abandoned", RECENT_ABANDONED),
+    ] {
+        let page: pull_request::Page =
+            parse(&fetch(Call::Get(repository.settled_url(status, top)?))?)?;
+        items.extend(
+            page.value
+                .into_iter()
+                .inspect(|node| noted.note(node))
+                .map(|node| node.into_item(source, &web)),
+        );
+    }
+    Ok(items)
+}
+
+/// Who the token reads as in `organization`. A reply in another shape names
+/// no one rather than failing the listing.
+pub fn reader(
+    organization: &str,
+    fetch: &mut impl FnMut(Call) -> super::Result<Vec<u8>>,
+) -> super::Result<Reader> {
+    let url = organization::url(organization, &["_apis", "connectionData"])?;
+    let bytes = fetch(Call::Get(url))?;
+    let Some(viewer) = serde_json::from_slice::<Connection>(&bytes)
+        .ok()
+        .and_then(|connection| connection.authenticated_user)
+    else {
+        return Ok(Reader::default());
+    };
+    Ok(Reader {
+        id: viewer.id.filter(|id| !id.is_empty()),
+        name: viewer
+            .custom_display_name
+            .or(viewer.provider_display_name)
+            .filter(|name| !name.is_empty()),
     })
 }
 
@@ -237,6 +424,7 @@ pub fn list(
 fn pull_requests(
     source: &SourceKey,
     repository: &Repository<'_>,
+    noted: &mut Noted,
     fetch: &mut impl FnMut(Call) -> super::Result<Vec<u8>>,
 ) -> super::Result<(Vec<Item>, bool)> {
     let web = repository.repository_web()?;
@@ -253,6 +441,7 @@ fn pull_requests(
             page.value
                 .into_iter()
                 .filter(|node| seen.insert(node.id()))
+                .inspect(|node| noted.note(node))
                 .map(|node| node.into_item(source, &web)),
         );
         if !more {
@@ -292,6 +481,27 @@ fn work_items(
     Ok((items, complete))
 }
 
+/// What a listing learns of each pull request beyond its item, by id: who
+/// created it, by identity id, and where an active one's reviews stand.
+#[derive(Default)]
+struct Noted {
+    creators: HashMap<u64, String>,
+    statuses: HashMap<u64, super::PrStatus>,
+}
+
+impl Noted {
+    fn note(&mut self, node: &pull_request::PullRequestNode) {
+        if let Some(id) = node.creator() {
+            self.creators.insert(node.id(), id.to_owned());
+        }
+        // A pull request settled since it was read active has none.
+        match node.status() {
+            Some(status) => self.statuses.insert(node.id(), status),
+            None => self.statuses.remove(&node.id()),
+        };
+    }
+}
+
 fn parse<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Error> {
     serde_json::from_slice(bytes).map_err(Error::Json)
 }
@@ -305,24 +515,43 @@ pub fn sync(
     cancelled: &impl Fn() -> bool,
     cooldown: &mut Option<Duration>,
 ) -> super::Result<Listing> {
+    over_https(
+        &source.repository,
+        token,
+        cancelled,
+        cooldown,
+        |mut fetch| list(source, previous, &mut fetch),
+    )
+}
+
+/// Runs `read` with a fetch that sends each call with `token` over HTTPS;
+/// `subject`, a repository or organization, names what a refusal was for.
+/// Blocks on the network, which `cancelled` stops between requests.
+pub fn over_https<T>(
+    subject: &str,
+    token: Option<&token::Token>,
+    cancelled: &impl Fn() -> bool,
+    cooldown: &mut Option<Duration>,
+    read: impl FnOnce(&mut dyn FnMut(Call) -> super::Result<Vec<u8>>) -> super::Result<T>,
+) -> super::Result<T> {
     let Some(token) = token else {
         return Err(Error::SignIn {
-            repository: source.repository.clone(),
+            repository: subject.to_owned(),
         }
         .into());
     };
     let agent = agent(TIMEOUT);
-    list(source, previous, &mut |call| {
+    read(&mut |call| {
         if cancelled() {
             return Err(super::Error::Cancelled);
         }
-        Ok(send(&agent, source, token, call, cooldown)?)
+        Ok(send(&agent, subject, token, call, cooldown)?)
     })
 }
 
 fn send(
     agent: &ureq::Agent,
-    source: &SourceKey,
+    subject: &str,
     token: &token::Token,
     call: Call,
     cooldown: &mut Option<Duration>,
@@ -357,7 +586,7 @@ fn send(
             status,
             "Azure DevOps refused a listing"
         );
-        return Err(status_error(status, &source.repository));
+        return Err(status_error(status, subject));
     }
     body(&mut reply, LIMIT)
 }

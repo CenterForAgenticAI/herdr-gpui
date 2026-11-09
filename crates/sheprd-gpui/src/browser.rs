@@ -89,7 +89,7 @@ pub(crate) use page_keys::bind as bind_page_keys;
 /// A page screenshot as PNG, for `browser screenshot`.
 #[cfg(target_os = "macos")]
 pub(crate) use snapshot::png as page_png;
-pub(crate) use store::{Scope, Store, Tab, TabId};
+pub(crate) use store::{Scope, Store, Tab, TabId, is_kept_id};
 pub(crate) use tab_appear::{Leaving, Listed};
 pub(crate) use tab_scroll::{Thumb, ThumbDrag};
 #[cfg(target_os = "macos")]
@@ -97,6 +97,7 @@ pub(crate) use underlay::{
     AroundPages, around as around_pages, ground as ground_around_pages,
     picture as picture_around_pages,
 };
+pub(crate) use view::present::Overlay;
 pub(crate) use view::{Browser, PageOpened, scope};
 pub(crate) use zoom::Zoom;
 

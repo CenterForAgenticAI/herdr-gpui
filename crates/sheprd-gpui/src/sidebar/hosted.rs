@@ -115,8 +115,10 @@ fn panel_id(panel: ActivityPanel) -> &'static str {
         ActivityPanel::Automations => "automations",
         ActivityPanel::Issues => "issues",
         ActivityPanel::Overview => "overview",
+        ActivityPanel::Ports => "ports",
         ActivityPanel::PullRequests => "pull_requests",
         ActivityPanel::Security => "security",
+        ActivityPanel::Tasks => "tasks",
         ActivityPanel::Usage => "usage",
         ActivityPanel::Workspaces => "workspaces",
     }

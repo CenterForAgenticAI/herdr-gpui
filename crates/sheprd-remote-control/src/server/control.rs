@@ -77,7 +77,24 @@ pub(super) fn serve(
 pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request) -> Response {
     let now = now_ms();
     let result = match request {
-        Request::Status => return Response::Status(status(state)),
+        Request::Status => {
+            // Sheprd asks this while it is open, whether or not it is
+            // waiting for phones' questions yet.
+            state.changes.seen();
+            return Response::Status(status(state));
+        }
+        Request::ChangeAsks => {
+            let (asks, layout) = state.changes.take(control::ASK_WAIT);
+            return Response::ChangeAsks { asks, layout };
+        }
+        Request::ChangeAnswer { id, answer } => {
+            state.changes.answer(id, answer);
+            return Response::Done;
+        }
+        Request::LayoutAnswer { id, answer } => {
+            state.changes.answer_layout(id, answer);
+            return Response::Done;
+        }
         Request::Pair => {
             let mut origins = state.origins();
             let details = super::addresses::current(&mut origins);

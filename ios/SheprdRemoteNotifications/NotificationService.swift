@@ -15,9 +15,10 @@ final class NotificationService: UNNotificationServiceExtension {
         guard let sealed = request.content.userInfo["sealed"] as? String,
               let opened = try? NotifyKey.open(sealed)
         else {
-            // Shown as sent: "Sheprd", "New activity"; opening the app
-            // shows what it was.
-            contentHandler(content)
+            // Not from a paired computer, or one this phone forgot. Only
+            // the cover is shown, whatever the push said, with none of its
+            // actions: opening the app shows what is really waiting.
+            contentHandler(Self.cover())
             return
         }
         let alert = opened.alert
@@ -35,6 +36,7 @@ final class NotificationService: UNNotificationServiceExtension {
         info[AlertKeys.computer] = opened.computer.hex
         info[AlertKeys.pane] = alert.pane
         if let permission = alert.permission { info[AlertKeys.permission] = NSNumber(value: permission.id.value) }
+        if alert.kind.isTerminal { info[AlertKeys.terminal] = true }
         content.userInfo = info
         let presentation = alert.presentation
         guard let category = presentation.category else {
@@ -48,6 +50,15 @@ final class NotificationService: UNNotificationServiceExtension {
             await NotificationCategories.register(presentation)
             deliver.value(finished.value)
         }
+    }
+
+    /// What every sealed alert says on the way here, built fresh so nothing
+    /// of the push survives: text, actions, badge, or data an action reads.
+    private static func cover() -> UNNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = "Sheprd"
+        content.body = "New activity"
+        return content
     }
 }
 

@@ -13,6 +13,7 @@ pub use error::{Error, Result};
 pub use sheprd_protocol::{
     AgentStatus, ClientKeyCode, ClientKeyKind, ClientMouseButton, ClientMouseKind,
     ClientMousePosition, ClientPaneInputEvent, CursorState, FrameData, PaneSurfacePatchRow,
+    SurfaceGraphicsScene,
 };
 pub use terminal::{
     Change, Exit, KeyReporting, MAX_CELLS, MAX_SIDE, MAX_TERMINAL_ID, Role, RunState, Size, Spawn,
@@ -72,6 +73,10 @@ pub trait Terminal: Send {
     fn resize(&mut self, size: Size) -> Result<(), Self::Error>;
 
     fn focus(&mut self, focused: bool) -> Result<(), Self::Error>;
+
+    /// The view's cell size in whole pixels, which programs are told and
+    /// which sizes an image placed without a size in cells.
+    fn cell_pixels(&mut self, width: u16, height: u16) -> Result<(), Self::Error>;
 
     /// What changed, waiting at most `timeout`; empty when nothing did.
     fn next(&mut self, timeout: Duration) -> Result<Vec<SurfaceUpdate>, Self::Error>;

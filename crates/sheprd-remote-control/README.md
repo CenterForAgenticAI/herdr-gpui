@@ -6,8 +6,47 @@ chats, answers agent questions, and receives push notifications. The plan is
 `docs/remote-control-plan.md`.
 
 The daemon is a user service that Sheprd installs when Remote control is
-turned on, and it keeps running when the app quits. It never starts, stops,
-or upgrades a Herdr daemon.
+turned on, and it keeps running when the app quits. It never stops or
+upgrades a Herdr daemon, and starts only herdr-core, only on a machine
+without Herdr 1 (below).
+
+## Herdr 1 sessions
+
+The daemon follows the Herdr 1 session at `--herdr-socket` (discovered when
+absent) and every other running session of this user's installation
+(`herdr --session NAME`, under `sessions/` in Herdr's configuration
+directory), so a computer that runs only named sessions still shows phones
+all of them. The installation is the one that socket is in, as the desktop
+resolved it, since the service's environment may lack the shell's
+`XDG_CONFIG_HOME`. Sessions are listed again every 30 seconds: one started or
+stopped later is followed or let go without a restart. A named session's
+workspace, tab, and pane ids carry `herdr:NAME:`, and its requests go to its
+own API socket. The session at `--herdr-socket` keeps its ids, and desktop
+pull request data is matched against it. A new workspace goes to that
+session, or to the alphabetically first named session that answers when it
+does not.
+
+A socket outside such an installation (a sandbox's, or a development
+daemon's) keeps the daemon to that one session: no other is followed. Chats
+are bounded across all sessions, the primary's first and then by name.
+
+Each workspace names the session it is in (`session` in `/api/v2/home`):
+`default` for the root session, `NAME` for a named one, by where its socket
+is in the installation; Herdr 2 workspaces name none. The phone's Workspaces
+tab lists a computer's repositories under each session's name when more than
+one session has workspaces, and as before otherwise. A new worktree started
+from a repository there names its session, and opens in it.
+
+herdr-core reports no branch or repository, so the core's worker reads each
+Herdr 2 workspace's from its folder with Git (cached for five seconds), as
+Herdr does: the repository is keyed by its common Git folder, which its linked
+worktrees share, and named after it. The phone then lists Herdr 2 workspaces
+under their repository and branch beside Herdr 1's. The group of terminals no
+tab holds has no one folder, and stays apart.
+
+Pairing a phone gives it this computer, not one session: a paired phone can
+read and type into every session the daemon follows, including one started
+after it was paired.
 
 ## Herdr 2 terminals
 
@@ -17,8 +56,17 @@ so it joins the same core even when its service environment differs.
 A foreground daemon discovers herdr-core through
 `HC_SOCKET`, the core's configured socket, or its default session socket.
 `HC_SESSION` selects the session. Explicit `--core-socket PATH --core-session NAME`
-arguments override discovery. Remote control only joins an existing core.
-It never starts the bundled core or runs `hc server start`.
+arguments override discovery. Remote control joins an existing core. When
+no core answers and Herdr 1 neither answers nor is installed (no `herdr`
+beside the daemon, in `~/.herdr/bin`, `~/.cargo/bin`, `~/.local/bin`, or on
+`PATH`), a phone opening its home view, or asking for a new tab, chat, or
+workspace, runs `herdr-core server start --json` from those folders first,
+as on a cloud machine set up with only the pinned core. A failed start is
+tried again from a view at most once a minute, and new work reports why it
+failed. A core with nothing in it, and nothing else answering, lists an
+empty **Herdr 2** workspace in the home folder, so a phone can start a chat
+or offer that folder for a new workspace. Where Herdr 1 is installed, moving to Herdr 2 stays
+the user's choice, and nothing is started.
 
 Herdr 1 workspaces and chats keep their existing behavior.
 
@@ -26,9 +74,11 @@ When the Herdr desktop app's `herdr-app` document exists in the core,
 the phone shows its local spaces in document order, with their tabs and
 split panes. Named spaces keep their names. Unnamed spaces use the first
 terminal's current repository or folder, with `~` for home. Spaces from
-other machines are omitted. Unlisted terminals stay in **Herdr 2**.
-The worker reads the document after a terminal changes and at least every
-3 seconds, and parses it only when its version changes. It accepts at most 1 MiB,
+other machines are omitted. A terminal Sheprd's own tabs hold stays in that
+tab and its split, even when a space holds it too. Unlisted terminals stay in
+**Herdr 2**.
+The worker reads the document after a terminal or document changes and at
+least every 3 seconds, and parses it only when its version changes. It accepts at most 1 MiB,
 256 spaces and tabs, and 16 terminal panes per tab within 16 tree levels.
 A malformed or oversized document falls back to Sheprd's saved tabs.
 
@@ -37,11 +87,22 @@ their workspace and split membership. The file is read beside the explicit
 remote `--state-dir`
 (for example, `gpui/browser-tabs.json` beside `gpui/remote`), using the
 desktop state context instead of the service environment. Only tabs for the
-selected local Herdr 1 endpoint are used.
+selected local Herdr 1 endpoint are used. The workspaces Sheprd keeps for
+Herdr 2 terminals in the same file come first, in the user's order, with
+their names and folders, even before they hold a tab. A tab or chat a phone
+starts in a workspace is labelled with it (`sheprd.workspace`): the daemon
+lists it there at once, and Sheprd gives it a tab of its own there. A new
+workspace a phone starts on Herdr 2 is labelled with its folder
+(`sheprd.new_workspace`): it is listed apart, named for that folder, until
+Sheprd keeps a workspace there and puts the chat in it.
 Other core terminals appear in a **Herdr 2** workspace, including terminals
 created by `hc` and the desktop's shell when Herdr 1 is absent. Status comes
 from the core's terminal records. The phone reports **Herdr not running**
 only when neither source answers.
+
+Renaming a Herdr 2 tab, a chat or terminal pane in one, or a workspace
+Sheprd keeps for Herdr 2 goes to Sheprd too, which names it as its own
+menus do; the daemon then shows the names Sheprd saved with the tab.
 
 A phone opens a Herdr 2 pane through the same screen and input endpoints
 as a Herdr 1 pane. The server uses `sheprd-terminal` to emulate raw core
@@ -49,12 +110,28 @@ output and sends complete ANSI screens through the existing stream.
 Keys and pastes use the terminal's current modes, including bracketed paste.
 The pane opens as an observer at its current dimensions, so watching changes
 nothing on the desktop. The first key or paste takes the driver's role at the
-terminal's current size. Phone-specific sizing, scrolling,
-renaming, splitting, and zooming remain Herdr 1 actions. A phone closes a Herdr 2
-pane, or a tab of one pane; a tab of several panes stays open.
+terminal's current size. A view sized to the phone holds the terminal at the
+phone's size by taking the driver's role at it; when the view closes the pane
+observes again, and the core sizes the terminal back to its previous driver,
+as Herdr 1 does when a direct attach drops. The latest phone's size wins.
+Each screen keeps 1,000 lines of history, painted by the core when the pane is
+first opened, which the web app reads back and the native app scrolls through.
+A phone closes a Herdr 2 pane, or a tab with every pane in it, chats
+included, as closing a Herdr 1 tab does.
+
+Sheprd keeps a Herdr 2 tab's layout with the tab, so a phone's split, zoom, or
+close of one of Sheprd's Herdr 2 tabs waits in the daemon with the phones'
+questions about workspaces (`control::layout`), and the window holding the tab
+makes it as its own commands do. A split is answered once its shell is in the
+tab (it takes that window's keyboard, as a split there does), and refused as
+busy while another terminal is starting; a zoom makes the zoomed pane the one in
+use; a close ends the tab's terminals, then Sheprd drops the tab. With Sheprd
+closed the phone is told it is not open (a close still ends the terminals); a
+pane of the Herdr desktop app's spaces, or one no tab holds, cannot be split.
 The daemon keeps at most 16 shared core attachments and releases each after
-30 seconds without a screen read or input request. When all 16 are held, the
-one idle longest gives way to a new pane if it has been idle for 5 seconds.
+30 seconds without a screen read or input request, unless a phone holds it at
+its size. When all 16 are held, the one idle longest gives way to a new pane if
+it has been idle for 5 seconds.
 
 While a core answers, new work from a phone starts there, even from a Herdr 1
 pane or workspace: new tabs, chats, and workspaces. Herdr 1 terminals stay listed
@@ -195,6 +272,23 @@ fresh desktop pairing code directly, without reinstalling the shortcut.
 HTTPS post to the phone's push service, the triggers that turn chat changes
 into questions, finished turns, and errors, and a per-device throttle. The
 service worker receives `push::Message` as JSON.
+
+Agents in plain terminal tabs, Herdr 1 or Herdr 2, have no transcript, so
+`push::terminals` follows their status in the layout on the notifier's
+one-second tick. A status counts once it held for two seconds, so detection
+flicker and an agent answered at the computer at once push nothing, and what
+a pane showed when the daemon first saw it is never announced. Waiting for
+the user sends `terminal_asking`, as urgent as a chat's question; finishing a
+run sends `terminal_done`. Both open `/term/{pane}` and share the chat tag, so
+the badge's clear closes them. The native app gets the same alerts sealed
+through APNs, without answer or Reply buttons, and a Live Activity per run
+(`apns::terminal`) whose step is the terminal's title.
+
+The app's badge counts agents that want the user (`web::attention`): those
+with a question, those Herdr reports blocked, and those that finished and
+nobody has opened on a phone or focused in a Herdr client. A background push
+moves it when the count changes, and iOS may delay or drop those, so the
+number is exact only once the app is open.
 
 ## Empty chats
 

@@ -22,12 +22,61 @@ pub(super) struct Infos {
     fresh: HashSet<TerminalId>,
     known: HashMap<TerminalId, TerminalInfo>,
     last: Option<Instant>,
+    /// Lists read so far.
+    lists: u64,
     pending: Option<Listed>,
 }
 
 impl Infos {
     pub(super) fn get(&self, id: &TerminalId) -> Option<&TerminalInfo> {
         self.known.get(id)
+    }
+
+    /// The terminal herdr-core knows by `name`.
+    pub(super) fn by_name(&self, name: &str) -> Option<&TerminalInfo> {
+        self.known
+            .values()
+            .find(|info| info.name.as_deref() == Some(name))
+    }
+
+    /// The terminal `id` names: its address, or else its name, as a terminal
+    /// found by name is shown under it.
+    pub(super) fn named(&self, id: &TerminalId) -> Option<&TerminalInfo> {
+        self.get(id).or_else(|| {
+            self.known
+                .values()
+                .find(|info| info.name.as_deref() == Some(id.as_str()))
+        })
+    }
+
+    /// How many of the core's terminals run an agent that is working.
+    pub(super) fn working(&self) -> u32 {
+        let working = self
+            .known
+            .values()
+            .filter(|info| info.agent == sheprd_client::protocol::AgentStatus::Working)
+            .count();
+        u32::try_from(working).unwrap_or(u32::MAX)
+    }
+
+    /// Every terminal the core last reported.
+    pub(super) fn all(&self) -> impl Iterator<Item = &TerminalInfo> {
+        self.known.values()
+    }
+
+    /// How many lists have been read; none means nothing is known yet.
+    pub(super) fn lists(&self) -> u64 {
+        self.lists
+    }
+
+    /// Takes `list` as a finished read would.
+    #[cfg(test)]
+    pub(super) fn list_for_test(&mut self, list: Vec<TerminalInfo>) {
+        self.known = list
+            .into_iter()
+            .map(|info| (info.id.clone(), info))
+            .collect();
+        self.lists += 1;
     }
 
     /// Records a terminal just started, until the next list replaces it,
@@ -59,6 +108,7 @@ impl Infos {
                     }
                     changed = known != self.known;
                     self.known = known;
+                    self.lists += 1;
                     self.pending = None;
                 }
                 Ok(Err(error)) => {

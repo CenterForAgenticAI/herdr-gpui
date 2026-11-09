@@ -1,4 +1,6 @@
-use crate::{AgentStatus, CursorState, Error, FrameData, PaneSurfacePatchRow, Result};
+use crate::{
+    AgentStatus, CursorState, Error, FrameData, PaneSurfacePatchRow, Result, SurfaceGraphicsScene,
+};
 use std::{collections::BTreeMap, fmt, path::PathBuf};
 
 /// The longest side a terminal may have, matching the app's viewport clamp.
@@ -163,10 +165,16 @@ pub struct KeyReporting {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SurfaceUpdate {
     Bell,
+    /// The program set the clipboard (OSC 52): bounded UTF-8 text, never
+    /// bytes or files. Only the latest of a burst is reported.
+    Clipboard(String),
     /// The program ended; no further updates follow.
     Ended(Exit),
     /// The whole visible screen.
     Frame(FrameData),
+    /// The images on screen changed: every placement, and the bytes of each
+    /// image the previous update's placements did not show.
+    Graphics(SurfaceGraphicsScene),
     /// Which key events the program asked for beyond typed text.
     KeyReporting(KeyReporting),
     /// Whether the program reads the mouse: presses and drags go to it,
@@ -178,4 +186,7 @@ pub enum SurfaceUpdate {
         rows: Vec<PaneSurfacePatchRow>,
     },
     Title(String),
+    /// Whether each visible row's line goes on to the next row because the
+    /// terminal wrapped it, which a frame cannot say; sent when it changes.
+    Wraps(Vec<bool>),
 }

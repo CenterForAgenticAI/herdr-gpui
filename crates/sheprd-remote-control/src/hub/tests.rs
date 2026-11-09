@@ -4,10 +4,15 @@ use sheprd_client::protocol::ClientShellSnapshot;
 mod agent_times;
 mod api_socket;
 mod chat_link;
+mod convert_offer;
+mod herdr_installed;
 mod new_chat;
+mod program_dirs;
 mod projection;
+mod sessions;
 mod summary;
 mod titles;
+mod wsl_sessions;
 
 /// A snapshot with one workspace holding a chat tab and a terminal tab.
 pub(super) fn snapshot(agents: Value) -> ClientShellSnapshot {

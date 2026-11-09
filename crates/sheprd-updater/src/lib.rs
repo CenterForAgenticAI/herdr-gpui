@@ -35,7 +35,9 @@ pub mod windows;
 #[cfg(windows)]
 use windows as install;
 
-pub use release::{HOST_TARGETS, RELEASES_PAGE, download_host_build, release_page};
+pub use release::{
+    HOST_TARGETS, RELEASES_PAGE, download_host_build, download_host_chat, release_page,
+};
 
 use std::{
     ffi::OsString,
@@ -49,8 +51,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The macOS bundle identifier, also the Linux app ID and Windows
-/// AppUserModelID. The Homebrew relaunch reopens the bundle by it.
+/// The macOS bundle identifier, also the Windows AppUserModelID. The Homebrew
+/// relaunch reopens the bundle by it.
 pub const APP_ID: &str = "so.pen.herdr-gpui";
 
 /// Release builds embed the same calendar version (YYYYMMDD.COUNTER) used for

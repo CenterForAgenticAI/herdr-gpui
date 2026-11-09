@@ -104,6 +104,10 @@ chat-copy-answers-label = Copy answers
 chat-copy-answers-done = Copied the answers
 chat-copy-code-label = Copy code
 chat-copy-code-done = Copied the code
+chat-copy-diff-label = Copy diff
+chat-copy-diff-done = Copied the diff
+chat-copy-original-label = Copy original
+chat-copy-original-done = Copied the original source
 chat-copy-latex-label = Copy LaTeX
 chat-copy-latex-done = Copied the LaTeX
 
@@ -141,7 +145,7 @@ chat-tool-terminal = Terminal { $id }: output is available in the program's term
 # Labels on their own lines around a file's text before and after a change.
 chat-diff-before = Before:
 chat-diff-after = After:
-chat-diff-new-file = New file:
+chat-diff-written-content = Written content (previous content unavailable):
 # Items past the ones listed.
 chat-more = and { $count } more
 
@@ -178,6 +182,7 @@ chat-visual-not-drawn = Not drawn: { $error }
 chat-visual-image-failed = [image] { $error }
 # A code block with no language named.
 chat-code = Code
+chat-diff = Diff
 # $lines and $characters are the limits, already formatted.
 chat-code-truncated = Preview limited to { $lines } lines and { $characters } characters per line; Copy code includes the full block.
 chat-math-unavailable = Equation preview unavailable; original LaTeX is shown below.
@@ -186,8 +191,14 @@ chat-summary-show = Show
 chat-summary-hide = Hide
 
 # The side rail: the agent's plan and the files it changed.
-chat-rail-plan = PLAN
-chat-rail-changed = CHANGED
+chat-rail-plan = Plan
+chat-rail-changed = Changed
+chat-rail-subagents = Sub-agents
+chat-rail-shells = Shells
+chat-rail-monitors = Monitors
+chat-rail-running = { $count } running
+chat-rail-ended = { $count } ended
+chat-rail-stop = Stop { $what }
 chat-rail-files = { $count ->
     [one] { $count } file
    *[other] { $count } files
@@ -203,6 +214,10 @@ chat-running-subagents = { $count ->
 chat-running-shells = { $count ->
     [one] { $count } background shell
    *[other] { $count } background shells
+}
+chat-running-monitors = { $count ->
+    [one] { $count } monitor
+   *[other] { $count } monitors
 }
 chat-running-tasks = { $count ->
     [one] { $count } task

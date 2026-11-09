@@ -12,6 +12,7 @@ impl Page {
     pub(crate) fn accessible_role(self) -> Role {
         match self {
             Self::Application
+            | Self::CoreMenu
             | Self::Git
             | Self::Group
             | Self::Host
@@ -38,10 +39,12 @@ impl Page {
             Self::Application => fl!("menu-page-menu"),
             Self::AppUpdate | Self::Update => fl!("menu-page-update"),
             Self::Automation => fl!("menu-page-automations"),
+            Self::AzureDevOps => fl!("menu-page-azure-devops-tokens"),
             Self::CarryPane => fl!("menu-page-move-pane-to-another-device"),
             Self::Checkpoints => fl!("menu-page-checkpoints"),
             Self::CodeSearch => fl!("menu-page-go-to-symbol-or-file"),
             Self::ConfirmClose => fl!("menu-page-close"),
+            Self::CoreMenu => fl!("menu-page-tab"),
             #[cfg(feature = "cloud")]
             Self::CreateCloud => fl!("menu-page-create-cloud-machines"),
             #[cfg(feature = "cloud")]
@@ -75,9 +78,11 @@ impl Page {
             Self::MoveTab => fl!("menu-page-move-tab"),
             Self::OpenCheckout => fl!("menu-page-open-checkout"),
             Self::OpenLink => fl!("menu-page-open-link"),
+            Self::OverviewReply => fl!("overview-reply"),
             Self::Palette => fl!("menu-page-command-palette"),
             Self::Pane => fl!("menu-page-pane"),
             Self::PaneProcesses => fl!("menu-page-processes"),
+            Self::PortSignal => fl!("menu-page-ports"),
             Self::PrComment => fl!("menu-page-comment-on-pull-request"),
             Self::PrMerge => fl!("menu-page-merge-pull-request"),
             Self::PrReview => fl!("menu-page-pull-request"),
@@ -86,6 +91,7 @@ impl Page {
             Self::RemoteHostAsk => fl!("menu-page-pair-another-machine"),
             Self::RemoveDevice => fl!("menu-page-remove-device"),
             Self::RemoveWsl => fl!("menu-page-remove-wsl-distribution"),
+            Self::RenameCore => fl!("menu-page-rename-tab"),
             Self::RenameDevice => fl!("menu-page-rename-device"),
             Self::RenamePane => fl!("menu-page-rename-pane"),
             Self::RenameTab => fl!("menu-page-rename-tab"),

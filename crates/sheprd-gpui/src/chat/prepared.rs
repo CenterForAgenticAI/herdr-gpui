@@ -13,8 +13,8 @@ use crate::{
     release_notes::{self, Line},
 };
 use sheprd_chat_protocol::{
-    Author, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, QuestionAnswer,
-    ToolContent, Transcript,
+    Author, EDIT_OMITTED, EntryId, EntryKind, MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT,
+    QuestionAnswer, Tool, ToolContent, ToolKind, ToolStatus, Transcript,
 };
 use std::{
     borrow::Cow,
@@ -23,11 +23,10 @@ use std::{
     rc::Rc,
 };
 
+pub(crate) mod tool;
+
 /// Lines of a tool call's text output shown under it.
 const TOOL_LINES: usize = 6;
-/// Bytes of a diff's sides compared line by line; past them it is counted
-/// as changed without its lines.
-const DIFF_BYTES: usize = 512 * 1024;
 /// How much of one answer is drawn: as much text as the program keeps for
 /// an entry, with room for long code. A longer answer ends with a note.
 pub(super) const MESSAGE: release_notes::Limits = release_notes::Limits {
@@ -68,8 +67,62 @@ const TOOL_IMAGES: usize = 4;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiffSummary {
     pub(crate) path: String,
+    /// Absent when the two sides were not compared: the file changed, but
+    /// by how much is unknown.
+    pub(crate) lines: Option<LineChanges>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LineChanges {
     pub(crate) added: usize,
     pub(crate) removed: usize,
+}
+
+impl std::ops::Add for LineChanges {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            added: self.added + other.added,
+            removed: self.removed + other.removed,
+        }
+    }
+}
+
+impl DiffSummary {
+    pub(crate) fn counted(path: String, added: usize, removed: usize) -> Self {
+        Self {
+            path,
+            lines: Some(LineChanges { added, removed }),
+        }
+    }
+
+    /// Adds another change to the same file. One unknown count makes the
+    /// total unknown: a partial sum would read as the whole change.
+    fn merge(&mut self, lines: Option<LineChanges>) {
+        self.lines = self.lines.zip(lines).map(|(a, b)| a + b);
+    }
+}
+
+/// The lines these changes add up to, unless one of them was not counted.
+pub(crate) fn total_lines(diffs: &[DiffSummary]) -> Option<LineChanges> {
+    diffs
+        .iter()
+        .try_fold(LineChanges::default(), |total, diff| {
+            Some(total + diff.lines?)
+        })
+}
+
+/// The files a finished edit changed without saying how, as when its sides
+/// were too large to send: the file still changed. Locations are listed as
+/// reported: a `:line` an agent added cannot be told from a name ending in
+/// `:digits`, so neither is cut.
+fn unshown_edits(tool: &Tool) -> &[String] {
+    if tool.kind == ToolKind::Edit && tool.status == ToolStatus::Completed {
+        &tool.locations
+    } else {
+        &[]
+    }
 }
 
 /// Characters of a tool call's header.
@@ -109,28 +162,14 @@ pub(super) fn folded_thought(text: &str) -> String {
     crate::notifications::safe_text(first, FOLDED_THOUGHT)
 }
 
-/// Expanded tool output comes from the retained transcript, not its preview.
-/// Shared by the view and the selection document, like [`tool_header`].
-pub(crate) fn tool_text(content: &ToolContent) -> Option<String> {
-    match content {
-        ToolContent::Text { text } => Some(text.clone()),
-        ToolContent::Diff { old, new, path } => Some(match old {
-            // Each label is a line of its own, between the file's text.
-            Some(old) => format!(
-                "{path}\n{}\n{old}\n{}\n{new}",
-                fl!("chat-diff-before"),
-                fl!("chat-diff-after")
-            ),
-            None => format!("{path}\n{}\n{new}", fl!("chat-diff-new-file")),
-        }),
-        ToolContent::Terminal { id } => Some(fl!("chat-tool-terminal", id = id.to_string())),
-        ToolContent::Image { .. } => None,
-    }
-}
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ToolSummary {
+    /// What each content item shows once the card opens.
+    pub(crate) previews: Vec<tool::Preview>,
     pub(crate) diffs: Vec<DiffSummary>,
+    /// An edit of the call was too large to send, so its files changed by
+    /// amounts nobody counted, even where another edit was counted.
+    pub(crate) omitted: bool,
     /// The first lines of its text output.
     pub(crate) lines: Vec<String>,
     /// Pictures it returned, the first [`TOOL_IMAGES`] of them.
@@ -181,7 +220,9 @@ pub(crate) enum Body {
 }
 
 impl Body {
-    fn visuals(&self) -> impl Iterator<Item = VisualId> + '_ {
+    /// What this body draws. A tool's previews only count when `opened`: a
+    /// folded card holds no slot of the budget message code shares.
+    fn visuals(&self, opened: bool) -> impl Iterator<Item = VisualId> + '_ {
         let (parts, images): (&[Part], &[VisualId]) = match self {
             Self::Message(parts) | Self::Answers { parts, .. } => (parts, &[]),
             Self::Summary(_) => (&[], &[]),
@@ -202,6 +243,15 @@ impl Body {
                     .chain(blocks.iter().flat_map(super::rich::Block::visuals))
             })
             .chain(images.iter().copied())
+            .chain(
+                match self {
+                    Self::Tool(summary) if opened => &summary.previews[..],
+                    _ => &[],
+                }
+                .iter()
+                .flat_map(tool::Preview::codes)
+                .map(|code| code.id),
+            )
     }
 }
 
@@ -262,11 +312,36 @@ impl Prepared {
         self.text.set_expanded(expanded);
     }
 
+    /// Notes the formulas and code of a row the lazy list drew. A folded
+    /// card's source stays out, as it does from the budget.
+    pub(crate) fn request_visible(&self, id: EntryId, opened: bool) {
+        let Some((_, body)) = self.bodies.get(&id) else {
+            return;
+        };
+        match &**body {
+            Body::Message(parts) | Body::Answers { parts, .. } => {
+                for part in parts {
+                    if let Part::Rich(blocks) = part {
+                        for block in &**blocks {
+                            block.request_visible(&self.visuals);
+                        }
+                    }
+                }
+            }
+            Body::Tool(summary) if opened => {
+                for preview in &summary.previews {
+                    preview.request_visible(&self.visuals);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The entries that draw `visual`, to measure again once it lands.
     pub(crate) fn drawing(&self, visual: VisualId) -> impl Iterator<Item = EntryId> + '_ {
         self.bodies
             .iter()
-            .filter(move |(_, (_, body))| body.visuals().any(|id| id == visual))
+            .filter(move |(_, (_, body))| body.visuals(true).any(|id| id == visual))
             .map(|(id, _)| *id)
     }
 
@@ -307,7 +382,7 @@ impl Prepared {
                     visuals.want(id, Source::Image(image.clone()));
                     Body::Image(id)
                 }
-                EntryKind::Tool(tool) => Body::Tool(summarize(&tool.content, visuals)),
+                EntryKind::Tool(tool) => Body::Tool(summarize(&tool.content, tool.kind, visuals)),
                 _ => {
                     self.bodies.remove(&entry.id);
                     continue;
@@ -316,6 +391,15 @@ impl Prepared {
             self.bodies.insert(entry.id, (*revision, Rc::new(body)));
         }
         self.text.update(transcript, keys, &self.bodies);
+        for id in self.text.expanded() {
+            if let Some((_, body)) = self.bodies.get(id)
+                && let Body::Tool(summary) = &**body
+            {
+                for preview in &summary.previews {
+                    preview.request(&mut self.visuals);
+                }
+            }
+        }
         self.steps.clear();
         for entry in &transcript.entries {
             if let EntryKind::Tool(tool) = &entry.kind
@@ -332,24 +416,31 @@ impl Prepared {
             let Body::Tool(summary) = &**body else {
                 continue;
             };
-            for diff in &summary.diffs {
+            let unshown = match &entry.kind {
+                EntryKind::Tool(tool) if summary.diffs.is_empty() || summary.omitted => {
+                    unshown_edits(tool)
+                }
+                _ => &[],
+            };
+            let unshown = unshown.iter().map(|location| DiffSummary {
+                path: location.clone(),
+                lines: None,
+            });
+            for diff in summary.diffs.iter().cloned().chain(unshown) {
                 match self
                     .changed
                     .iter_mut()
                     .find(|known| known.path == diff.path)
                 {
-                    Some(known) => {
-                        known.added += diff.added;
-                        known.removed += diff.removed;
-                    }
-                    None => self.changed.push(diff.clone()),
+                    Some(known) => known.merge(diff.lines),
+                    None => self.changed.push(diff),
                 }
             }
         }
         let live: HashSet<VisualId> = self
             .bodies
-            .values()
-            .flat_map(|(_, body)| body.visuals())
+            .iter()
+            .flat_map(|(id, (_, body))| body.visuals(self.text.expanded().contains(id)))
             .collect();
         self.visuals.retain(&live);
     }
@@ -582,12 +673,19 @@ fn picture(line: &str) -> Option<Part> {
     Some(Part::Picture { alt })
 }
 
-pub(crate) fn summarize(content: &[ToolContent], visuals: &mut Visuals) -> ToolSummary {
+pub(crate) fn summarize(
+    content: &[ToolContent],
+    kind: ToolKind,
+    visuals: &mut Visuals,
+) -> ToolSummary {
     let mut summary = ToolSummary::default();
-    for item in content {
+    for (index, item) in content.iter().enumerate() {
+        let preview = tool::preview(index, item, kind, &mut summary.diffs);
         match item {
             ToolContent::Text { text } => {
-                for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                // Arguments read as what they ask for, not as JSON.
+                let shown = preview.as_ref().map_or(&**text, |item| &*item.code.source);
+                for line in shown.lines().filter(|line| !line.trim().is_empty()) {
                     if summary.lines.len() < TOOL_LINES {
                         summary
                             .lines
@@ -597,14 +695,7 @@ pub(crate) fn summarize(content: &[ToolContent], visuals: &mut Visuals) -> ToolS
                     }
                 }
             }
-            ToolContent::Diff { new, old, path } => {
-                let (added, removed) = diff_counts(old.as_deref().unwrap_or(""), new);
-                summary.diffs.push(DiffSummary {
-                    path: path.clone(),
-                    added,
-                    removed,
-                });
-            }
+            ToolContent::Diff { .. } => {}
             ToolContent::Image { image } => {
                 if summary.images.len() < TOOL_IMAGES {
                     let id = VisualId::of(&image.data);
@@ -614,28 +705,17 @@ pub(crate) fn summarize(content: &[ToolContent], visuals: &mut Visuals) -> ToolS
             }
             ToolContent::Terminal { .. } => summary.terminals += 1,
         }
+        summary.previews.extend(preview);
+    }
+    summary.omitted = content
+        .iter()
+        .any(|item| matches!(item, ToolContent::Text { text } if text == EDIT_OMITTED));
+    if summary.omitted {
+        // A fragment that fit is only part of the change; its count alone
+        // would read as the whole.
+        for diff in &mut summary.diffs {
+            diff.lines = None;
+        }
     }
     summary
-}
-
-/// Lines added and removed between two versions of a file, by counting
-/// each distinct line on both sides: what `+`/`-` totals show, without the
-/// cost of an alignment.
-pub(crate) fn diff_counts(old: &str, new: &str) -> (usize, usize) {
-    if old.len() + new.len() > DIFF_BYTES {
-        return (new.lines().count(), old.lines().count());
-    }
-    let mut counts: HashMap<&str, isize> = HashMap::new();
-    for line in old.lines() {
-        *counts.entry(line).or_default() -= 1;
-    }
-    for line in new.lines() {
-        *counts.entry(line).or_default() += 1;
-    }
-    counts
-        .values()
-        .fold((0, 0), |(added, removed), &count| match count {
-            count if count > 0 => (added + count.unsigned_abs(), removed),
-            count => (added, removed + count.unsigned_abs()),
-        })
 }

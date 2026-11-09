@@ -44,6 +44,8 @@ fn caret(
     }
 }
 
+mod tools;
+
 #[test]
 fn unicode_reverse_selection_uses_transcript_order_and_readable_markdown() {
     let (_, prepared, _) = prepare(vec![agent(90, "**café** 東京"), agent(2, "next 🦀 end")]);
@@ -319,6 +321,7 @@ fn code_projection_obeys_preview_bounds_without_copying_full_source() {
                     id: VisualId::of(&source),
                     language: String::new(),
                     source,
+                    highlight: false,
                 }]
                 .into(),
             )])),
@@ -380,7 +383,7 @@ fn folded_thoughts_and_tools_never_leak_hidden_text_across_messages() {
     selection.select_all(prepared.text());
     let text = selection.text(prepared.text()).unwrap();
     assert!(text.contains("visible thought\nhidden thought"));
-    assert!(text.contains("Read file\nRead file\nsrc/test.rs\nhidden tool source"));
+    assert!(text.contains("Read file\nRead file\nsrc/test.rs\nOutput\n\nhidden tool source"));
 }
 
 #[test]

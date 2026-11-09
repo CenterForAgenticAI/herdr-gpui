@@ -85,6 +85,10 @@ pub(crate) struct NewWorkspace {
     cwd: String,
     #[serde(default)]
     prompt: String,
+    /// The Herdr 1 session to open it in, as `/api/v2/home` names it; the
+    /// primary when absent or not followed.
+    #[serde(default)]
+    session: Option<String>,
     #[serde(default)]
     start: Option<Start>,
 }
@@ -174,7 +178,7 @@ pub(crate) async fn new_options(
     let folders = tokio::task::spawn_blocking(move || folders(&layout))
         .await
         .map_err(|_| ApiError::Folder)?;
-    let agents = offered(installed_agents(state.hub.program()).await);
+    let agents = offered(installed_agents(state.hub.program().as_deref()).await);
     Ok(Json(NewOptions::new(
         &agents,
         folders.recent,
@@ -249,7 +253,12 @@ pub(crate) async fn create_workspace(
         check_new_workspace(&state, &request.cwd, &request.branch, &request.agent).await?;
     let created = state
         .hub
-        .create_workspace(&request.cwd, branch.as_deref(), agent)
+        .create_workspace(
+            &request.cwd,
+            branch.as_deref(),
+            agent,
+            request.session.as_deref(),
+        )
         .await?;
     let opened = open(&state, created.pane, request.start, request.prompt).await;
     Ok(Json(CreatedWorkspace {

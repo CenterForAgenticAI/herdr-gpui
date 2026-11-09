@@ -9,6 +9,7 @@ fn activity(call: &str, kind: ActivityKind, state: ActivityState) -> Activity {
         label: format!("{call} label"),
         started_ms: 1_000,
         state,
+        stoppable: false,
     }
 }
 
@@ -32,6 +33,7 @@ fn an_activity_is_added_then_replaced_by_its_call_id() {
     assert_eq!(
         transcript.running(),
         Running {
+            monitors: 0,
             other: 0,
             shells: 1,
             subagents: 1

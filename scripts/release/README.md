@@ -348,6 +348,10 @@ The maintainer has to:
    and URLs, and submit. Until that version is merged, the job only prints a
    warning.
 
+Without `WINGET_TOKEN` the job also prints a warning and submits nothing, so a
+release does not fail while winget is not set up. Once winget is live, that
+warning is the only sign a lost token leaves.
+
 ## Updater Signing
 
 These scripts publish the exact Sheprd names accepted by the deployed
@@ -373,7 +377,8 @@ The compatibility exceptions are intentional:
   **`Herdr.app`**, so an old running updater can reopen it. The cask exposes
   `sheprd` on PATH. Moving that target or cask token needs a separate migration.
 - Linux packages retain package ownership **`herdr-gpui`**, version `VERSION-1`,
-  desktop ID `so.pen.herdr-gpui`, and a real root-owned `/usr/bin/herdr-gpui`.
+  and a real root-owned `/usr/bin/herdr-gpui`. The desktop ID is
+  `org.sheprd.Sheprd`, matching the app's Wayland app ID and X11 `WM_CLASS`.
   They also install `/usr/bin/sheprd` and both names of each owned helper.
   These are regular copies, not shell shims or symlinks.
   Distro packaging accepts only the standalone tree's exact `bin/herdr-gpui ->
@@ -611,7 +616,10 @@ original actor, or source repository to be the owner. An owner rerun only change
 Pushes and manual dispatches remain restricted to owner-triggered `main` runs.
 The final **Format, lint, and test** gate requires successful platform checks for
 code changes, and the macOS optimized builds on pull requests, and permits
-skipped platform jobs only for confirmed non-code edits.
+skipped platform jobs only for confirmed non-code edits. It also requires the
+Python-only **Website and docs** job whenever the website, a Markdown file, or
+code changed, so a website-only pull request runs that job and no native one
+(`scripts/ci-changes.sh` decides both).
 
 Fork PR execution uses GitHub-hosted runners and read-only permissions. GitHub
 withholds repository secrets from fork `pull_request` runs, including after

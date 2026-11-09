@@ -1,14 +1,17 @@
 ---
 name: herdr-gpui-browser
-description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it inside Herdr (HERDR_ENV=1) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain, demo, or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills, a system browser, or long text explanations. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, asking the user to approve an automation script you wrote, forwarding or opening a port, creating, running commands on, or deleting cloud machines, remote control from a phone, listing or focusing the app's windows and tabs, waiting for a tab to close or the user's notes, Sheprd settings, themes, and fonts, and keeping the machine awake."
+description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills, a system browser, or long explanations. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, asking the user to approve an automation script you wrote, forwarding, opening, or stopping ports, creating, running commands on, or deleting cloud machines, remote control from a phone, listing or focusing its windows and tabs, waiting for a tab to close or the user's notes, Sheprd settings, themes, and fonts, and keeping the machine awake."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
 # Browser tabs in Sheprd
 
-Inside a Herdr pane (`HERDR_ENV=1`), "open a browser tab" means a tab in
-Sheprd, beside the user's terminals: use the commands below, not `open`, a
-system browser, or another tool's browser skill.
+Inside a Herdr pane (`HERDR_ENV=1`) or a Herdr 2 terminal (`HC_TERMINAL_ID`
+is set), "open a browser tab" means a tab in Sheprd, beside the user's
+terminals: use the commands below, not `open`, a system browser, or another
+tool's browser skill. Everything here works the same from either: in a
+Herdr 2 terminal, Sheprd finds your workspace from the tab holding your
+terminal, and pages you open and the user's notes on them belong to it.
 
 Sheprd, the native desktop client for Herdr, can show web pages in
 browser tabs that sit beside the terminal tabs of a workspace. The user can
@@ -58,7 +61,7 @@ sheprd browser open http://localhost:3000
   and the keyboard stays with your pane, so they can keep talking to you
   while the page updates. Later files you open join the same split.
 - A web address opens as a tab in your own workspace (`HERDR_WORKSPACE_ID`,
-  which Herdr sets in every pane) and the window switches to it. The
+  which Herdr sets in every pane, or the workspace of your Herdr 2 tab) and the window switches to it. The
   terminal keeps running underneath; the user returns to it by clicking its
   tab.
 - Add `--tab` to open a file as a tab instead, or `--beside` to put a web
@@ -221,6 +224,13 @@ tell whether a window opened the page, so say what you asked for. Notes the
 user sends on the page arrive as your next prompt; `browser feedback` does
 not work there.
 
+In a Herdr 2 terminal on such a host (`HC_TERMINAL_ID` set, no
+`HERDR_WORKSPACE_ID`), the shim reaches the app through that terminal's
+labels instead, and only `sheprd browser open` with a web address works:
+`browser reload` exits 8, and notes on the page do not come back to you.
+Ask the user to tell you what they want changed, and after editing, to
+reload the tab themselves.
+
 On Linux the app has no embedded browser yet: web pages open in the system
 browser, and local files and annotations are not available.
 
@@ -240,6 +250,8 @@ for what only Sheprd shows or keeps.
 | Open px0 to browse, edit, or review your local checkout (macOS/Windows) | `sheprd px0 open` |
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
 | Keep a note on this worktree (repository and branch) | `sheprd notes set waiting on CI` |
+| Silence this worktree's notifications | `sheprd worktree mute` |
+| Silence a whole host's notifications | `sheprd host mute studio` |
 | Save the working tree before a risky change, and compare later | `sheprd checkpoint create before refactor`, `sheprd checkpoint diff ID` |
 | Your branch's pull request, its checks, and (with your workspace focused) its comments | `sheprd pr`, `sheprd pr checks`, `sheprd pr comments` |
 | Diagnose missing GitHub details: last reported GraphQL quota and rate-limit retry delays | `sheprd pr quota --json` |
@@ -247,12 +259,16 @@ for what only Sheprd shows or keeps.
 | Show the user an alert's or a vulnerability report's page in Sheprd | `sheprd security open OWNER/NAME 42` or `... GHSA-xxxx-xxxx-xxxx` |
 | Ask the user to approve an automation script you wrote (the app shows its plan; the user approves) | `sheprd automation approve .herdr/automations/nightly.luau` |
 | Show the Automations section: every host's scripts and runs | `sheprd ui panel automations` |
+| Show the user one coordinator's sessions in the agents panel, or list the groups | `sheprd ui agent-group demo`, `sheprd ui agent-group` |
 | Open a dev server in a tab, forwarded when you run on an SSH host | `sheprd ports open 3000` |
+| See every port this computer listens on, with the process, directory, and workspace behind it | `sheprd ports all --json` |
+| Ask the user to stop (or pause) whatever holds a port you need | `sheprd ports stop 3000`; they confirm in the app |
 | See the processes under a pane, with CPU and memory | `sheprd processes` |
 | Start a chat with another agent in a new tab, shown as a native chat view | `sheprd chat new claude`, then `sheprd chat` for its status |
 | Move a terminal agent into a native chat, keeping its conversation (an agent that is idle, in another pane) | `sheprd chat convert --pane ID`, then `sheprd chat` for its status |
 | Render existing Linux Codex/Claude conversations in their current panes | `sheprd config set chat.render_existing true` (needs `features.acp_chats`, on by default); `chat status --json` reports the session and input mode |
 | List or focus the app's windows and its own tabs | `sheprd window`, `sheprd tab`, `sheprd tab focus ID` |
+| Read the alerts the user may have missed | `sheprd window alerts` |
 | Block until something happens in the app | `sheprd wait tab-closed ID --timeout 600`, `sheprd events --follow` |
 | Read or change a Sheprd setting | `sheprd config get KEY`, `sheprd config set KEY VALUE` |
 | Install agents or rerun the setup script on a saved cloud machine | `sheprd config set cloud.agents '["claude"]'`, `sheprd cloud setup ID` |
@@ -273,7 +289,9 @@ it in the app.
 Add `--json` to any command for machine-readable output; errors then come
 back as `{"error": {"code", "message"}}`. Exit statuses are the ones in the
 table above. A command acts in the window that shows your workspace; it
-exits 5 rather than act in another session's window.
+exits 5 rather than act in another session's window. In a Herdr 2 terminal
+in no Herdr workspace, `sheprd work` notes, mutes, restores, scripts,
+Teleport, and fan-out exit 8: they keep Herdr's workspace state.
 
 Some commands only open the app's dialog and the user confirms there:
 restoring a checkpoint, teleporting a worktree, fanning out a prompt, running

@@ -3,9 +3,11 @@
 //! their mappings beside this file.
 
 mod clipboard;
+mod core_bridge;
 mod sessions;
 mod ssh;
 mod terminal_attach;
+mod worktree;
 mod wsl;
 
 /// A missing home or config root, in the root error's words.
@@ -64,6 +66,8 @@ impl Localize for Error {
                 )
             }
             Self::CommandBoot => fl!("error-client-command-boot"),
+            Self::Convert(error) => error.localize(),
+            Self::CoreBridge(error) => error.localize(),
             Self::Disconnected => fl!("error-client-disconnected"),
             Self::EmptySurface => fl!("error-client-empty-surface"),
             Self::EncodedSurfaceBeforeBaseline => {
@@ -194,6 +198,7 @@ impl Localize for Error {
                 code = code.as_str(),
                 message = message.as_str()
             ),
+            Self::Worktree(error) => error.localize(),
             Self::Wsl(error) => error.localize(),
             // keep-sorted end
         }

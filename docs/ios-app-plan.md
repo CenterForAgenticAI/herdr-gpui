@@ -142,6 +142,7 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   "workspaces": [{
     "id": "w1", "label": "sheprd", "branch": "main", "cwd": "/Users/me/code/sheprd",
     "worktree": {"key": "/Users/me/code/sheprd/.git", "label": "sheprd", "is_linked_worktree": false},
+    "session": "default",
     "pull_request": {"number": 870, "url": "https://github.com/...", "tone": "success"},
     "chats": [{
       "pane": "p1", "tab": "t1", "title": "Equalize splits", "agent": "claude",
@@ -156,7 +157,8 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
     "terminals": [{
       "tab": "t2", "label": "zsh", "cwd": "/Users/me/code/sheprd", "zoomed": false,
       "panes": [{"pane": "p2", "label": null, "cwd": "/Users/me/code/sheprd", "focused": true}],
-      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"}
+      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"},
+      "convert": {"agent": "claude", "pane": "p2"}
     }]
   }]
 }
@@ -170,6 +172,11 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
   with the chats, by status, and opens the agent's pane.
+- A terminal's `convert` is what its menu may move into a chat, as
+  Sheprd's Move Agent into Chat does: the agent's pane, and which agent it
+  is. It is absent when nothing can move (`sheprd_client::herdr::convert`),
+  from Herdr 2 tabs, and from older daemons. A busy agent is still offered,
+  and the move says to wait.
 - `load` is the computer's CPU and memory in whole percentages, read
   every five seconds; it is absent until the first reading and from older
   daemons. A home goes out again when either figure moves by a point.
@@ -178,6 +185,10 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   Workspaces tab lists a repository's own checkouts, then its linked
   worktrees, under that name. It is absent for a folder outside a
   repository and from older daemons.
+- `session` is the Herdr 1 session the workspace is in: `default` for the
+  root session, `NAME` for `herdr --session NAME`. It is absent for a
+  Herdr 2 workspace and from older daemons. With more than one session
+  named, the Workspaces tab lists a computer's repositories under each.
 - `pull_request` is absent when the workspace has none; `tone` is
   `sheprd_github::pull_request::Tone` as serde writes it.
 - As built: `waiting` counts every waiting permission request, as the web
@@ -290,13 +301,24 @@ app learns the pane it should open:
   this computer (all of them if it finds none or cannot run); `id` is
   what a request names.
 - `POST /api/v2/workspaces` takes `{"cwd", "agent", "branch"?, "prompt"?,
-  "start"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
+  "start"?, "session"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
   true, "started": true}`. The
   folder must be one `new` offers, and `branch`, when not blank, opens a
-  worktree.
+  worktree. `session`, as home names it, opens it in that Herdr 1
+  session; absent, or naming none the daemon follows, it opens where new
+  workspaces go.
 - `POST /api/v2/workspaces/{workspace}/chats` takes `{"agent", "prompt"?,
   "start"?}` and answers `{"pane": "p7", "prompted": true, "started":
   true}`.
+- `POST /api/v2/term/{pane}/convert` takes `{"agent"}`, the agent the
+  terminal's `convert` offered, and moves it into a chat in the same pane.
+  A pane whose agent was replaced since is refused, so the phone never
+  stops an agent the person did not choose. It answers `{"agent":
+  "claude", "pane": "p2"}` once the line continuing it is typed and the
+  chat is up, `pane` being `null` when it was not up within 10 s. Stopping
+  the agent can take up to 30 s. A refusal, such as a busy agent or one
+  Herdr reports no session for, is a `409` whose `error` the phone shows;
+  every refusal comes before the agent is touched, and leaves it running.
 - `start` is what the chat begins with, as last picked on the phone:
   `{"mode"?, "option"?, "auto_accept"?}`. `mode` is the mode's id, or the
   choice's when `option` names the agent's mode setting. It goes before the
@@ -326,6 +348,44 @@ app learns the pane it should open:
   chat refused it, and the phone opens the chat to send it again.
   A prompt over 256 KiB, an unknown agent, a folder not offered, or an
   invalid branch is answered 400 before anything is created.
+
+A workspace's changes and its pull request's checks are read-only and
+worked out by Sheprd, which alone reads the checkout: the phone does no Git
+work, and the daemon does none either. Bounds are in
+`crates/sheprd-remote-control/src/control/changes.rs`.
+
+- `GET /api/v2/workspaces/{workspace}/changes?scope=uncommitted|branch`
+  answers `{"base"?, "total": 3, "files": [{"path", "old_path"?, "status",
+  "added"?, "removed"?, "shown"}]}`. `scope` defaults to `uncommitted`;
+  `base` names what `branch` compared with. `total` counts every changed
+  file, and `files` holds at most the first 500. `shown` is `text`,
+  `binary`, `too_large`, or `unreadable`.
+- `GET /api/v2/workspaces/{workspace}/changes/diff?scope=&path=` answers
+  `{"path", "shown", "lines": [{"kind", "old"?, "new"?, "text"}],
+  "truncated": false}`. `path` must be one the list gave; anything else
+  answers 404, so a phone cannot read other files. At most 3,000 lines,
+  512 KiB, and 500 characters a line; `truncated` says lines were cut.
+- `GET /api/v2/workspaces/{workspace}/checks` answers `{"number"?, "checks":
+  [{"name", "state", "job"?, "url"?}]}` from the desktop's pull request
+  cache, so it is as fresh as the desktop's last lookup. `state` is `passed`,
+  `failed`, `pending`, or `skipped`. `job` is present only on a failed
+  GitHub Actions check.
+- `GET /api/v2/workspaces/{workspace}/checks/{job}/log` answers
+  `{"excerpt"}`: at most 8 KiB, ending on the log's last error, without
+  timestamps or colors. Only a `job` the list gave is read. The phone puts
+  it in a prompt to a chat of the workspace with the usual `POST
+  /api/chat/{pane}/command`, after showing it and asking; the daemon does
+  not send it anywhere itself.
+
+The daemon cannot call Sheprd, so a question waits in a bounded mailbox.
+While a phone is connected, Sheprd holds one `Request::ChangeAsks` open on
+the control socket, answers each question on a background thread, and
+replies with `Request::ChangeAnswer`, which the daemon checks against the
+same bounds. A question answers 503 at once when Sheprd is closed, 429 when
+16 already wait, 504 when no answer comes within 25 s, 409 when the
+workspace has no repository or base branch, and 404 when the workspace or
+file is gone. Workspaces on other hosts have no Sheprd beside their daemon,
+so they answer 503.
 
 ## Connectivity
 
@@ -814,6 +874,10 @@ Workspaces round (2026-10-29) replaces the Computers tab with a
     computer.
   - Controls (Control Center, Lock Screen, Action button): open the board,
     new chat on the last computer, and dictate a prompt.
+- **Voice commands.** Speaking controls the app, not just the composer: the
+  pipeline and its rules are in `ios/README.md`. Nothing that reaches an agent
+  runs without a tap, and auto-accept is never turned on
+  by voice.
 - **App Intents, Siri, Shortcuts, Spotlight.**
   - `AppEntity` types for computers, workspaces, and chats.
   - Intents: "Ask Claude in sheprd to …", "What needs me?", "Stop the

@@ -17,7 +17,7 @@
 
 mod chats;
 mod convert;
-mod core_pane;
+pub(crate) mod core_pane;
 mod discovery;
 mod existing;
 mod glide;
@@ -29,6 +29,7 @@ pub(crate) mod pasted;
 mod prepared;
 #[cfg(feature = "integration-test")]
 pub(crate) mod preview;
+mod rail_folds;
 mod reader;
 mod restore;
 mod rich;

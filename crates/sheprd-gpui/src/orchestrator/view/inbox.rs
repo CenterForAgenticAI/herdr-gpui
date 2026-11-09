@@ -5,7 +5,7 @@
 //! beads cost only the rows on screen.
 
 use super::{
-    Event, OrchestratorView, PaneDrag, Resize,
+    Event, Menu, OrchestratorView, PaneDrag, Resize,
     look::{BLUE, GREEN, Look, MAGENTA, RED, YELLOW},
     rows::{Sort, Tab},
 };
@@ -27,7 +27,7 @@ impl OrchestratorView {
             .clone()
             .map(|detail| self.render_pane(detail, window, cx));
         let filters =
-            (self.tab == Tab::Issues && self.filters_open).then(|| self.render_facets(cx));
+            (self.tab != Tab::PullRequests && self.filters_open).then(|| self.render_facets(cx));
         div()
             .flex_1()
             .min_h_0()
@@ -57,7 +57,18 @@ impl OrchestratorView {
                     .child(self.render_list(cx))
                     .children(pane),
             )
-            .when(self.sort_open, |el| el.child(self.render_sort_menu(cx)))
+            .when(self.menu == Some(Menu::Sort), |el| {
+                el.child(self.render_sort_menu(cx))
+            })
+            .when(self.menu == Some(Menu::State), |el| {
+                el.child(self.render_state_menu(cx))
+            })
+            .when(self.menu == Some(Menu::Projects), |el| {
+                el.child(self.render_projects_menu(cx))
+            })
+            .when(self.menu == Some(Menu::Repos), |el| {
+                el.child(self.render_project_filter_menu(cx))
+            })
             .into_any_element()
     }
 
@@ -89,10 +100,12 @@ impl OrchestratorView {
 
     /// How many of the Issues filters narrow the list.
     pub(super) fn active_filters(&self) -> usize {
-        usize::from(self.filters.provider.is_some())
+        let tasks = self.tab == Tab::Tasks;
+        usize::from(!tasks && self.filters.provider.is_some())
             + usize::from(self.filters.has_run)
             + usize::from(self.filters.blocked)
             + usize::from(self.label.is_some())
+            + if tasks { self.task_filters.active() } else { 0 }
     }
 
     /// The Issues filters' column: state, and the labels the open issues
@@ -106,6 +119,7 @@ impl OrchestratorView {
             .iter()
             .flat_map(|repo| repo.snapshot.items.iter())
             .filter(|item| item.pull_request.is_none() && !super::rows::closed(item))
+            .filter(|item| self.tab != Tab::Tasks || item.key.source.provider == Provider::Beads)
             .collect();
         let mut labels: Vec<(String, usize)> = Vec::new();
         for label in open.iter().flat_map(|item| &item.labels) {
@@ -116,39 +130,10 @@ impl OrchestratorView {
         }
         labels.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         labels.truncate(FACET_LABELS);
-        let hover = theme.surface;
         let option = |id: SharedString, label: SharedString, count: Option<usize>, on: bool| {
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_2()
-                .py(px(3.))
-                .rounded(px(corners::SMALL))
-                .cursor_pointer()
-                .hover(move |style| style.bg(rgb(hover)))
-                .when(on, |el| el.bg(rgb(theme.primary_wash())))
-                .child(
-                    div()
-                        .flex_none()
-                        .size(px(11.))
-                        .rounded(px(2.))
-                        .border_1()
-                        .border_color(rgb(if on { theme.primary() } else { theme.muted }))
-                        .when(on, |el| el.bg(rgb(theme.primary()))),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(look.small())
-                        .child(label),
-                )
-                .children(count.map(|count| look.muted(count.to_string())))
+            self.facet(id, label, count, on)
         };
-        let heading = |text: String| look.label(text).pt_2().pb_1();
+        let heading = |text: String| self.facet_heading(text);
         let has_run = open
             .iter()
             .filter(|item| {
@@ -176,6 +161,9 @@ impl OrchestratorView {
             .flex_col()
             .border_r_1()
             .border_color(rgb(theme.active))
+            .when(self.tab == Tab::Tasks, |el| {
+                el.children(self.render_task_facets(cx))
+            })
             .child(heading(fl!("orchestrator-facets-state")))
             .child(
                 option(
@@ -224,10 +212,58 @@ impl OrchestratorView {
             })
     }
 
+    /// A filter's heading in the column.
+    pub(super) fn facet_heading(&self, text: String) -> Div {
+        self.look.label(text).pt_2().pb_1()
+    }
+
+    /// One filter of the column: its box, its name, and what it would count.
+    pub(super) fn facet(
+        &self,
+        id: SharedString,
+        label: SharedString,
+        count: Option<usize>,
+        on: bool,
+    ) -> Stateful<Div> {
+        let look = &self.look;
+        let theme = &look.theme;
+        let hover = theme.surface;
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .py(px(3.))
+            .rounded(px(corners::SMALL))
+            .cursor_pointer()
+            .hover(move |style| style.bg(rgb(hover)))
+            .when(on, |el| el.bg(rgb(theme.primary_wash())))
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(11.))
+                    .rounded(px(2.))
+                    .border_1()
+                    .border_color(rgb(if on { theme.primary() } else { theme.muted }))
+                    .when(on, |el| el.bg(rgb(theme.primary()))),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(look.small())
+                    .child(label),
+            )
+            .children(count.map(|count| look.muted(count.to_string())))
+    }
+
     /// While the Issues filters are folded, the ones in use as chips that
     /// clear them.
     fn render_chips(&self, cx: &mut Context<Self>) -> Option<Div> {
-        if self.tab != Tab::Issues || self.filters_open || self.active_filters() == 0 {
+        let tasks = self.tab == Tab::Tasks;
+        if self.tab == Tab::PullRequests || self.filters_open || self.active_filters() == 0 {
             return None;
         }
         let look = &self.look;
@@ -263,7 +299,12 @@ impl OrchestratorView {
             .px_4()
             .pb_2()
             .child(look.muted(fl!("orchestrator-showing-only")));
-        if let Some(provider) = self.filters.provider {
+        if tasks {
+            for (id, text, clear) in self.task_chips() {
+                row = row.child(chip(id, text, clear));
+            }
+        }
+        if let Some(provider) = self.filters.provider.filter(|_| !tasks) {
             row = row.child(chip(
                 "orchestrator-chip-source",
                 provider_name(provider).into(),
@@ -301,7 +342,7 @@ impl OrchestratorView {
     fn render_header(&self, cx: &mut Context<Self>) -> Div {
         let look = &self.look;
         let theme = &look.theme;
-        let listed: Vec<_> = self.projects_named().collect();
+        let listed: Vec<_> = self.projects_listing().collect();
         let title = match listed.as_slice() {
             [] => fl!("orchestrator-no-repositories-yet"),
             [only] => only.name(),
@@ -311,7 +352,10 @@ impl OrchestratorView {
         // repository holds from it for a sync that has not reported a count.
         let mut providers: Vec<(Provider, Vec<(&SyncState, usize)>)> = Vec::new();
         for repo in &self.repos {
-            for status in &repo.snapshot.sources {
+            let sources = repo.snapshot.sources.iter();
+            for status in sources
+                .filter(|status| self.tab != Tab::Tasks || status.key.provider == Provider::Beads)
+            {
                 let held = repo
                     .snapshot
                     .items
@@ -366,7 +410,7 @@ impl OrchestratorView {
             });
         // A repository without a GitHub remote has no GitHub source, which
         // reads like a missing account without this.
-        let no_github = (!github && !self.repos.is_empty()).then(|| {
+        let no_github = (!github && !self.repos.is_empty() && self.tab != Tab::Tasks).then(|| {
             source_chip(look, ("orchestrator-source-none", 0), Provider::Github).child(
                 div()
                     .text_color(rgb(theme.muted))
@@ -442,16 +486,24 @@ impl OrchestratorView {
         let look = &self.look;
         let theme = &look.theme;
         let filters = self.filters;
-        let mut row = div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_4()
-            .py_2()
-            .child(self.render_search_field(window, cx));
+        let stacked = self.search_stacked();
+        let search = self.render_search_field(window, cx);
+        let mut row = div().flex_none().flex().items_center().gap_2();
+        let mut beside = Some(search);
+        if !stacked {
+            row = row.px_4().py_2().children(beside.take());
+        }
+        let (state, projects) = match self.tab {
+            Tab::PullRequests => (
+                Some(self.render_state_control(cx)),
+                self.render_projects_control(cx),
+            ),
+            Tab::Issues | Tab::Tasks => (None, None),
+        };
+        let project_filter = self.render_project_filter_control(cx);
         let toggle = |id: &'static str, label: String, on: bool, flip: fn(&mut Self)| {
             look.toggle(id, label, on)
+                .debug_selector(move || id.to_owned())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     flip(this);
                     this.refresh_rows();
@@ -459,7 +511,7 @@ impl OrchestratorView {
                 }))
         };
         match self.tab {
-            Tab::Issues => {
+            Tab::Issues | Tab::Tasks => {
                 let active = self.active_filters();
                 let open = self.filters_open;
                 row = row.child(
@@ -505,8 +557,10 @@ impl OrchestratorView {
                         filters.open_only,
                         |this| {
                             this.filters.open_only = !this.filters.open_only;
+                            this.filters.state = None;
                         },
                     ))
+                    .children(state)
                     .when(
                         self.repos.iter().any(|repo| repo.reading_login().is_some()),
                         |row| {
@@ -535,10 +589,11 @@ impl OrchestratorView {
                         |this| {
                             this.filters.has_run = !this.filters.has_run;
                         },
-                    ));
+                    ))
+                    .children(projects);
             }
         }
-        row.child(
+        let row = row.children(project_filter).child(
             div()
                 .id("orchestrator-sort")
                 .flex_none()
@@ -551,10 +606,24 @@ impl OrchestratorView {
                 .child(self.sort.label())
                 .child(look.icon("icons/chevron-down.svg", 10., theme.muted))
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.sort_open = !this.sort_open;
+                    this.toggle_menu(Menu::Sort);
                     cx.notify();
                 })),
-        )
+        );
+        match beside {
+            // Too narrow for both: the field keeps a line, the controls wrap.
+            Some(search) => div()
+                .debug_selector(|| "orchestrator-search-stacked".into())
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .px_4()
+                .py_2()
+                .child(search)
+                .child(row.flex_wrap()),
+            None => row,
+        }
     }
 
     /// One outlined field, the magnifier inside: the outline turns accent
@@ -564,6 +633,7 @@ impl OrchestratorView {
         let look = &self.look;
         let focused = self.search.read(cx).focus.is_focused(window);
         look.search_frame("orchestrator-search", focused)
+            .debug_selector(|| "orchestrator-search".into())
             .child(div().flex_1().min_w_0().child(self.search.clone()))
             .when(!self.query.is_empty(), |field| {
                 field.child(
@@ -586,7 +656,7 @@ impl OrchestratorView {
         deferred(crate::motion::pop_in(
             div()
                 .absolute()
-                .top(px(120.))
+                .top(px(120. + self.search_line()))
                 .right(px(16.))
                 .w(px(200.))
                 .p_1()
@@ -616,7 +686,7 @@ impl OrchestratorView {
                         .child(sort.label())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.sort = sort;
-                            this.sort_open = false;
+                            this.menu = None;
                             this.refresh_rows();
                             cx.notify();
                         }))
@@ -640,21 +710,39 @@ impl OrchestratorView {
             };
             let snapshot = &repo.snapshot;
             if let Some(Access::ReadOnly { found }) = snapshot.access {
-                banners.push(banner(
-                    look,
-                    RED,
-                    "icons/lock.svg",
-                    of(fl!(
-                        "orchestrator-newer-schema",
-                        found = found,
-                        known = crate::orchestrator::SCHEMA_VERSION
-                    )),
+                banners.push((
+                    banner(
+                        look,
+                        RED,
+                        "icons/lock.svg",
+                        of(fl!(
+                            "orchestrator-newer-schema",
+                            found = found,
+                            known = crate::orchestrator::SCHEMA_VERSION
+                        )),
+                    ),
+                    None,
                 ));
             }
             if let Some(error) = &snapshot.error {
-                banners.push(banner(look, RED, "icons/x.svg", of(error.localize())));
+                banners.push((banner(look, RED, "icons/x.svg", of(error.localize())), None));
             }
             for status in &snapshot.sources {
+                // Azure DevOps has no sign-in of its own in the title bar
+                // for most users, so its missing token says where to add one.
+                if status.key.provider == Provider::Azure
+                    && matches!(status.state, SyncState::SignIn)
+                {
+                    let text = fl!(
+                        "azure-devops-menu-connect-banner",
+                        repository = status.key.repository.as_str()
+                    );
+                    banners.push((
+                        banner(look, YELLOW, "icons/azure-devops.svg", of(text)),
+                        Some(Provider::Azure),
+                    ));
+                    continue;
+                }
                 let text = match &status.state {
                     SyncState::Failed(error) => failure_text(status.key.provider, error),
                     SyncState::Capped { count } => fl!(
@@ -669,19 +757,25 @@ impl OrchestratorView {
                 } else {
                     RED
                 };
-                banners.push(banner(look, hue, "icons/refresh.svg", of(text)));
+                banners.push((banner(look, hue, "icons/refresh.svg", of(text)), None));
             }
         }
         banners
             .into_iter()
             .enumerate()
-            .map(|(index, banner)| {
+            .map(|(index, (banner, sign_in))| {
                 banner
-                    .debug_selector(|| "orchestrator-banner".into())
+                    .debug_selector(move || match sign_in {
+                        Some(_) => "orchestrator-banner-sign-in".into(),
+                        None => "orchestrator-banner".into(),
+                    })
                     .id(("orchestrator-banner", index))
                     .cursor_pointer()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.ask_refresh();
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        match sign_in {
+                            Some(provider) => cx.emit(Event::SignIn(provider)),
+                            None => this.ask_refresh(),
+                        }
                         cx.notify();
                     }))
                     .into_any_element()

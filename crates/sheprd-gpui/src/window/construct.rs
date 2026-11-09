@@ -83,6 +83,7 @@ impl SheprdWindow {
         } = appearance;
         // Effects run here in a fixed order, so the fields below can stay sorted.
         let configured_terminal_size = config.terminal.size;
+        let menu_bar_visible = config.show_menu_bar;
         let status_bar_visible = config.status_bar.show;
         let mut gui_config_diagnostic = crate::config_diagnostic::ConfigDiagnostic::default();
         gui_config_diagnostic.sync_own(config.diagnostic().as_deref());
@@ -145,6 +146,7 @@ impl SheprdWindow {
             activation_deadline: None,
             active: window.is_window_active(),
             activity: Default::default(),
+            agent_group: None,
             agent_sort: preferences::AgentSort::default(),
             agent_sort_modified: false,
             app_update_notes: Default::default(),
@@ -189,6 +191,7 @@ impl SheprdWindow {
             dispatch_setups: Default::default(),
             editor_open: None,
             editor_panes: Vec::new(),
+            editor_returns: Vec::new(),
             endpoints: vec![endpoint::Endpoint::new(
                 endpoint::LOCAL.into(),
                 // i18n: data
@@ -227,10 +230,12 @@ impl SheprdWindow {
             listening_ports: Default::default(),
             live: LiveState::default(),
             local_error: error,
+            local_ports: Default::default(),
             mark_layer,
             marked: String::new(),
             marked_selection: None,
             menu,
+            menu_bar_visible,
             merged_cleanup: Default::default(),
             mod_panel_width: crate::panel_resize::MOD_PANEL,
             mods: Default::default(),

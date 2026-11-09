@@ -2,13 +2,14 @@
 //! terminal tabs, projected from a snapshot. Pure, so it is tested without
 //! a daemon.
 
-use sheprd_chat_protocol::{EndpointId, TOKEN};
+use sheprd_chat_protocol::{Agent, EndpointId, TOKEN};
 use sheprd_client::protocol::{
     AgentStatus, ClientShellAgent, ClientShellSnapshot, ClientShellWorktree,
 };
 use std::collections::HashSet;
 
-/// The most chats one daemon may list; the rest are left out.
+/// The most chats one Herdr daemon may list, and all its sessions together:
+/// the rest are left out. Each listed chat holds a thread here.
 pub(crate) const MAX_CHATS: usize = 64;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -33,6 +34,9 @@ pub(crate) struct Workspace {
     /// The repository checkout it is, which groups a repository's linked
     /// worktrees under it as Sheprd's sidebar does.
     pub(crate) worktree: Option<ClientShellWorktree>,
+    /// The Herdr 1 session it is in, when its name is known; `None` for a
+    /// Herdr 2 workspace.
+    pub(crate) session: Option<String>,
     pub(crate) chats: Vec<Chat>,
     pub(crate) terminals: Vec<Terminal>,
 }
@@ -61,6 +65,12 @@ pub(crate) struct Terminal {
     /// The agent Herdr detects in it, such as `claude` run in a shell: the
     /// most pressing when several panes hold one.
     pub(crate) agent: Option<TerminalAgent>,
+    /// Every pane's agent, in the snapshot's order: what each one does,
+    /// which the tab's one agent above cannot say for a split.
+    pub(crate) agents: Vec<TerminalAgent>,
+    /// The pane whose agent its menu offers to move into a chat, with that
+    /// agent; `None` when none can (`sheprd_client::herdr::convert`).
+    pub(crate) convert: Option<(String, Agent)>,
 }
 
 /// An agent Herdr detects in a terminal tab, outside any chat.
@@ -108,6 +118,13 @@ impl Layout {
 
     pub(crate) fn workspace(&self, id: &str) -> Option<&Workspace> {
         self.workspaces.iter().find(|workspace| workspace.id == id)
+    }
+
+    /// Names `session` as the Herdr 1 session every workspace listed is in.
+    pub(crate) fn name_session(&mut self, session: &str) {
+        for workspace in &mut self.workspaces {
+            workspace.session = Some(session.to_owned());
+        }
     }
 
     /// The terminal tab holding `pane`, with its workspace.
@@ -171,13 +188,31 @@ fn agent_title(agent: &ClientShellAgent) -> Option<&str> {
         .find_map(|title| sheprd_client::text::caption(title))
 }
 
-/// The workspaces of `snapshot` in its order, each with its chat panes (one
-/// per pane, at most [`MAX_CHATS`] in all) and the tabs that hold none.
+/// How a daemon's chat panes are listed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Chats {
+    /// As chats: their programs' endpoints can be reached from here.
+    Linked,
+    /// As the terminal tabs they also are: their programs listen inside a
+    /// WSL distribution, where nothing here can connect.
+    Terminals,
+}
+
+/// [`project_with`] for a daemon whose chats can be reached.
+#[cfg(test)]
 pub(crate) fn project(snapshot: &ClientShellSnapshot) -> Layout {
+    project_with(snapshot, Chats::Linked)
+}
+
+/// The workspaces of `snapshot` in its order, each with its chat panes (one
+/// per pane, at most [`MAX_CHATS`] in all, listed as `listed` says) and the
+/// tabs that hold none.
+pub(crate) fn project_with(snapshot: &ClientShellSnapshot, listed: Chats) -> Layout {
     let mut seen = HashSet::new();
     let chats: Vec<(String, Chat)> = snapshot
         .agents
         .iter()
+        .filter(|_| listed == Chats::Linked)
         .filter_map(|agent| {
             let endpoint = endpoint(&agent.tokens)?;
             seen.insert(agent.pane_id.clone()).then(|| {
@@ -232,18 +267,22 @@ pub(crate) fn project(snapshot: &ClientShellSnapshot) -> Layout {
                             focused: pane.focused,
                         })
                         .collect();
-                    let agent = snapshot
+                    let agents: Vec<TerminalAgent> = snapshot
                         .agents
                         .iter()
                         .filter(|agent| agent.tab_id == tab.tab_id)
-                        .max_by_key(|agent| urgency(agent.agent_status))
                         .map(|agent| TerminalAgent {
                             name: agent_kind(agent),
                             status: agent.agent_status,
                             pane: agent.pane_id.clone(),
                             title: agent_title(agent).map(str::to_owned),
                             changed_ms: None,
-                        });
+                        })
+                        .collect();
+                    let agent = agents
+                        .iter()
+                        .max_by_key(|agent| urgency(agent.status))
+                        .cloned();
                     let terminal = Terminal {
                         tab: tab.tab_id.clone(),
                         label: sheprd_client::text::tab_label(snapshot, tab).to_owned(),
@@ -251,6 +290,9 @@ pub(crate) fn project(snapshot: &ClientShellSnapshot) -> Layout {
                         zoomed: tab.zoomed,
                         panes,
                         agent,
+                        agents,
+                        convert: sheprd_client::herdr::convert::tab_pane(snapshot, id, &tab.tab_id)
+                            .map(|(pane, agent)| (pane.to_owned(), agent)),
                     };
                     let cwd = terminal.first_pane()?.cwd.clone();
                     Some(Terminal { cwd, ..terminal })
@@ -262,6 +304,7 @@ pub(crate) fn project(snapshot: &ClientShellSnapshot) -> Layout {
                 branch: workspace.branch.clone(),
                 cwd: workspace.new_workspace_cwd.clone(),
                 worktree: workspace.worktree.clone(),
+                session: None,
                 chats,
                 terminals,
             }

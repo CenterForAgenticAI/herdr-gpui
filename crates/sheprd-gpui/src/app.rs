@@ -134,7 +134,7 @@ fn open_window_placed(
             window_min_size: Some(size(px(640.), px(400.))),
             titlebar: Some(titlebar::options(WINDOW_TITLE)),
             app_owns_titlebar_drag: cfg!(target_os = "macos"),
-            app_id: Some(crate::constants::APP_ID.into()),
+            app_id: Some(crate::constants::LINUX_APP_ID.into()),
             ..Default::default()
         },
         |window, cx| {
@@ -181,6 +181,8 @@ pub(crate) fn install_services(personal: bool, cx: &mut App) {
     let language = cx.global::<InitialAppearance>().config.language.clone();
     crate::i18n::install(&language, cx);
     app_icon::install();
+    #[cfg(target_os = "macos")]
+    crate::accessibility::window_focus::install();
     crate::caffeine::install(cx);
     crate::endpoint::watch_network();
     #[cfg(any(target_os = "macos", windows))]
@@ -278,8 +280,15 @@ pub(crate) fn run() -> std::process::ExitCode {
     if let Some(exit) = crate::setup_relay::run_helper(&args) {
         return exit;
     }
+    // The exec relays below read their provider's table, so they need the
+    // loader too; setting it reads nothing yet.
+    sheprd_remote::config::set_loader(Config::load_remote);
     #[cfg(feature = "azure")]
     if let Some(exit) = crate::azure::sandbox::relay::run_helper(&args) {
+        return exit;
+    }
+    #[cfg(feature = "boxd")]
+    if let Some(exit) = crate::boxd::relay::run_helper(&args) {
         return exit;
     }
     #[cfg(feature = "sprites")]
@@ -398,7 +407,6 @@ pub(crate) fn run() -> std::process::ExitCode {
     // SSH children use the login shell's `ssh` and agent, as the daemon does:
     // launchd's would miss keys such as a security key held by another agent.
     sheprd_client::set_command_environment(crate::login_env::apply);
-    sheprd_remote::config::set_loader(Config::load_remote);
     tracing::info!(
         version = APP_VERSION,
         os = std::env::consts::OS,
@@ -428,7 +436,7 @@ pub(crate) fn run() -> std::process::ExitCode {
     };
     let failed = startup_failed.clone();
     let stores = Stores::load(mode == LaunchMode::Normal);
-    gpui_platform::application()
+    crate::composition::application(appearance.dark.config.backdrop.translucent())
         .with_assets(icons::Icons)
         .run(move |cx| {
             let window_count = stores.window_count();

@@ -1,5 +1,6 @@
 //! Shared fixtures: a scripted core on the other end of a socket pair.
 
+mod agent;
 mod backend;
 mod connection;
 mod endpoint;
@@ -8,6 +9,8 @@ mod frame;
 mod hello;
 mod labels;
 mod live;
+#[cfg(unix)]
+mod live_bridge;
 
 use crate::frame::{Decoder, Frame, Kind, encode};
 use serde_json::{Value, json};

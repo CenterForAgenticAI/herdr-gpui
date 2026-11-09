@@ -1,6 +1,6 @@
 //! The background monitors the window polls as it ticks: plan usage, system
-//! load, listening ports, agent checkpoints, and port forwards, each on the
-//! hosts it watches.
+//! load, listening ports, this computer's ports, agent checkpoints, and port
+//! forwards, each on the hosts it watches.
 // i18n: migrated
 
 use super::{Flash, SheprdWindow};
@@ -60,13 +60,31 @@ impl SheprdWindow {
             return self.listening_ports.poll(Vec::new());
         }
         let hosts = self.watched_hosts();
-        let changed = self.listening_ports.poll(hosts);
+        let mut changed = self.listening_ports.poll(hosts);
+        // The shell shown in place of Herdr 1 is in the shown host's
+        // stand-in workspace, when that host is this computer.
+        let fallback = (!self.selected_is_remote())
+            .then(|| crate::browser::scope(&self.endpoints[self.selected_endpoint]));
+        changed |= self
+            .listening_ports
+            .place_terminals(self.core_terminals.terminal_workspaces(fallback));
         // A tunnel lives as long as its remote port is listed at the address
         // it dials and its SSH child runs; either ending removes its close
         // button.
         let ports = &self.listening_ports;
         let closed = self.tunnels.retain(|key| ports.tunnels_to(key));
         changed || closed
+    }
+
+    /// This computer's ports are listed while the Ports section is shown,
+    /// or a command line request asked for them recently.
+    pub(super) fn update_local_ports(&mut self) -> bool {
+        let shown = self.activity_section() == Some(crate::sidebar::ActivityPanel::Ports);
+        // The bar's count needs a scan only while the bar shows Ports.
+        self.local_ports.counted = self.config.sidebar_style.ports_count
+            && self.activity_bar_shown()
+            && self.activity_panel_listed(crate::sidebar::ActivityPanel::Ports);
+        self.local_ports.poll(shown, std::time::Instant::now())
     }
 
     /// The machines background monitors watch: this one always, a remote
@@ -111,19 +129,45 @@ impl SheprdWindow {
             } else {
                 &endpoint.live
             };
-            let (true, true, Some(host), Some(snapshot)) = (
+            let (true, true, Some(host), Some((boot, session))) = (
                 enabled,
                 endpoint.enabled && live.status.is_connected(),
                 checkpoint::host_for(&endpoint.connection.target, live.local_daemon_peer),
-                live.latest_snapshot(),
+                live.latest_session(),
             ) else {
                 continue;
             };
-            self.checkpoints.observe(&endpoint.id, &host, snapshot);
-            watched.push(endpoint.id.as_str());
+            self.checkpoints
+                .observe(&endpoint.id, &host, boot, &session);
+            watched.push(endpoint.id.clone());
+        }
+        // Herdr 2's agents on this computer, whichever host is shown, watched
+        // as an endpoint of their own so a turn is told apart from Herdr 1's.
+        if let (true, Some(host), Some(index)) = (
+            enabled,
+            checkpoint::host_for(&sheprd_client::ConnectTarget::Local, true),
+            self.core_host(),
+        ) {
+            let mut sessions = self.sessions(index);
+            // A Herdr 2 tab in a Herdr 1 workspace borrows that workspace's
+            // checkout, which Git then reads here: only a daemon proven to
+            // run on this computer may name one.
+            let live = if index == self.selected_endpoint {
+                &self.live
+            } else {
+                &self.endpoints[index].live
+            };
+            if !names_local_checkouts(&self.endpoints[index].connection.target, live) {
+                sessions.herdr_1 = None;
+            }
+            if let Some(session) = crate::session_model::core_with_checkouts(&sessions) {
+                let watch = format!("{}/herdr-2", self.endpoints[index].id);
+                self.checkpoints.observe(&watch, &host, "herdr-2", &session);
+                watched.push(watch);
+            }
         }
         self.checkpoints
-            .retain_endpoints(|endpoint| watched.contains(&endpoint));
+            .retain_endpoints(|endpoint| watched.iter().any(|watched| watched == endpoint));
         let (changed, restored) = self.checkpoints.poll();
         for restored in restored {
             let flash = match restored.result {
@@ -189,6 +233,15 @@ impl SheprdWindow {
             }
         }
     }
+}
+
+/// Whether the checkouts `target`'s Herdr 1 names are on this computer, so
+/// Git may run on them here: a socket may forward another machine's daemon.
+pub(super) fn names_local_checkouts(
+    target: &sheprd_client::ConnectTarget,
+    live: &crate::state::LiveState,
+) -> bool {
+    checkpoint::host_for(target, live.local_daemon_peer) == Some(crate::usage::Host::Local)
 }
 
 /// Why a restore failed: the error's message, then the cause a failed Git

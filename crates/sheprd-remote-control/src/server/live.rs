@@ -2,12 +2,14 @@
 //! call for is paced per chat, then sent to every device that registered
 //! tokens: the push-to-start token to start an activity, the activity's own
 //! token to update or end it. A token APNs calls invalid is forgotten.
+//! What each device gets is cut to what the computer and that phone allow
+//! just before sending, so a held update follows the phone's latest choice.
 
 use super::notifier::waiting;
 use crate::{
-    apns::{DeviceToken, Event, Live, Outcome, Pacer, Registration, decide},
+    apns::{DeviceToken, Event, Live, Outcome, Pacer, Registration, decide, decide_terminal},
     control::DeviceId,
-    push::Chat,
+    push::{Chat, Moved, SeenAgent},
     web::{State, now_ms},
 };
 use sheprd_chat_protocol::{Change, Status, Transcript};
@@ -75,6 +77,27 @@ impl LiveActivities {
         }
     }
 
+    /// Considers a settled status change of a terminal agent; `agent` is it
+    /// as the layout shows it now, `None` once its pane left.
+    pub(super) fn terminal(
+        &mut self,
+        state: &Arc<State>,
+        moved: &Moved,
+        agent: Option<&SeenAgent<'_>>,
+        now: u64,
+    ) {
+        if state.apns.is_none() {
+            return;
+        }
+        let Some(live) = decide_terminal(moved, agent, &state.computer, &state.fingerprint, now)
+        else {
+            return;
+        };
+        if let Some(live) = self.pacer.offer(live, now) {
+            self.dispatch(state, live);
+        }
+    }
+
     /// Sends the updates the pacer held back whose time came.
     pub(super) fn tick(&mut self, state: &Arc<State>) {
         if state.apns.is_none() {
@@ -98,7 +121,10 @@ impl LiveActivities {
             // a start replaces.
             self.held.remove(&key);
             match route(&live, &registration) {
-                Route::Send(token) => send(state, key.0, token.clone(), live.clone()),
+                Route::Send(token) => {
+                    let shown = shown(state, live.clone(), &registration);
+                    send(state, key.0, token.clone(), shown);
+                }
                 Route::Hold => {
                     self.held.insert(
                         key,
@@ -126,20 +152,31 @@ impl LiveActivities {
             if now.saturating_sub(held.since_ms) > HOLD_MS {
                 return false;
             }
-            let token = registrations
+            let found = registrations
                 .iter()
                 .find(|(registered, _)| registered == device)
-                .and_then(|(_, registration)| registration.activity(pane));
-            let Some(token) = token else {
+                .and_then(|(_, registration)| Some((registration, registration.activity(pane)?)));
+            let Some((registration, token)) = found else {
                 return true;
             };
             let mut live = held.live.clone();
             live.state.waiting = waiting;
             live.state.working = working;
-            send(state, device.clone(), token.clone(), live);
+            send(
+                state,
+                device.clone(),
+                token.clone(),
+                shown(state, live, registration),
+            );
             false
         });
     }
+}
+
+/// `live` as the device behind `registration` may see it.
+fn shown(state: &State, live: Live, registration: &Registration) -> Live {
+    let detail = state.live_activities.stricter(registration.activity_detail);
+    live.redacted(state.privacy, detail)
 }
 
 /// What to do with an update for one device.
@@ -170,15 +207,23 @@ fn route<'a>(live: &Live, registration: &'a Registration) -> Route<'a> {
     }
 }
 
-/// Chats with a turn running now, for the Dynamic Island's count.
+/// Chats with a turn running now, and terminal agents working, for the
+/// Dynamic Island's count.
 fn working(state: &State) -> u32 {
     let layout = state.hub.layout();
-    let count = layout
+    let chats = layout
         .chats()
         .filter_map(|chat| state.hub.chat(&chat.pane))
         .filter(|link| link.summary().status == Status::Working)
         .count();
-    u32::try_from(count).unwrap_or(u32::MAX)
+    let terminals = layout
+        .workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.terminals)
+        .flat_map(|terminal| &terminal.agents)
+        .filter(|agent| agent.status == sheprd_client::protocol::AgentStatus::Working)
+        .count();
+    u32::try_from(chats + terminals).unwrap_or(u32::MAX)
 }
 
 /// Every device's non-empty APNs registration, read under one lock: the
@@ -208,12 +253,16 @@ fn send(state: &Arc<State>, device: DeviceId, token: DeviceToken, live: Live) {
         let Some(sender) = &state.apns else {
             return;
         };
-        let outcome = sender.send(&token, &live, now_ms() / 1000).await;
+        let now_s = now_ms() / 1000;
+        let outcome = match live.push(now_s) {
+            Ok(push) => sender.post(&token, &push, now_s).await.ok(),
+            Err(_) => None,
+        };
         let ended = matches!(live.event, Event::End { .. });
-        if !matches!(outcome, Ok(Outcome::Gone)) && !ended {
+        let gone = outcome == Some(Outcome::Gone);
+        if !gone && !ended {
             return;
         }
-        let gone = matches!(outcome, Ok(Outcome::Gone));
         let pane = live.pane.clone();
         let _ = tokio::task::spawn_blocking(move || {
             let mut auth = state.auth();

@@ -137,7 +137,7 @@ fn report(outcomes: &[(Identity, Outcome)]) -> String {
 }
 
 /// Share of one core: whole percents once they are large.
-pub(super) fn cpu_text(cpu: Option<f32>) -> String {
+pub(crate) fn cpu_text(cpu: Option<f32>) -> String {
     match cpu {
         None => "–".into(),
         Some(cpu) if cpu < 9.95 => format!("{cpu:.1}%"),
@@ -145,7 +145,7 @@ pub(super) fn cpu_text(cpu: Option<f32>) -> String {
     }
 }
 
-pub(super) fn memory_text(bytes: u64) -> String {
+pub(crate) fn memory_text(bytes: u64) -> String {
     const MIB: f64 = (1u64 << 20) as f64;
     let mib = bytes as f64 / MIB;
     if mib >= 1024. {
@@ -168,7 +168,11 @@ impl SheprdWindow {
         let Some(daemon) = pane.daemon.clone() else {
             return;
         };
-        match Watch::start(daemon, pane.target.pane.clone()) {
+        let source = crate::processes::Source::Herdr {
+            daemon,
+            pane: pane.target.pane.clone(),
+        };
+        match Watch::start(source) {
             Ok(watch) => self.show_pane_processes(watch, cx),
             Err(error) => {
                 pane.error = Some(describe(&error));
