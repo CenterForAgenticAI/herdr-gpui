@@ -275,6 +275,23 @@ async fn a_new_tab_in_a_named_session_names_the_session_apart() {
     fake.server.join().unwrap();
 }
 
+#[tokio::test]
+async fn a_second_tab_in_a_phones_new_workspace_joins_it_by_folder() {
+    let records = vec![record("t1"), record("t9")];
+    let (source, fake) = fake_with_doc(false, Value::Null, records);
+    let mut layout = source.poll().unwrap();
+    // Listed under its first pane until Sheprd keeps a workspace for it.
+    let new = new_workspace_id("t1");
+    layout.workspaces.push(workspace(&new, "/code/one"));
+    let hub = hub_on(&source, layout);
+    hub.new_core_tab(&new).await.unwrap().unwrap();
+    let labels = &request(&fake)["params"]["labels"];
+    assert_eq!(labels[sheprd_session::NEW_WORKSPACE_LABEL], "/code/one");
+    assert!(labels.get(sheprd_session::WORKSPACE_LABEL).is_none());
+    drop((hub, source));
+    fake.server.join().unwrap();
+}
+
 #[test]
 fn closing_ends_one_named_terminal_and_refuses_a_tab_of_several() {
     let (source, fake) = fake();

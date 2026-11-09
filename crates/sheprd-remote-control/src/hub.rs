@@ -292,7 +292,7 @@ impl Hub {
             // Labelled for its workspace, so Sheprd puts it in a tab there.
             let workspace = workspace.to_owned();
             return on_core(move || {
-                core.open_chat(agent, &program, &cwd, Some(labelled(&workspace)))
+                core.open_chat(agent, &program, &cwd, Some(place(&workspace, &folder)))
             })
             .await;
         }
@@ -432,7 +432,7 @@ impl Hub {
             .workspace(workspace)
             .map_or_else(String::new, |workspace| workspace.cwd.clone());
         let workspace = workspace.to_owned();
-        let pane = on_core(move || core.open_shell(&cwd, Some(labelled(&workspace)))).await?;
+        let pane = on_core(move || core.open_shell(&cwd, Some(place(&workspace, &cwd)))).await?;
         let mut layout = self.layout.clone();
         let listed = layout.wait_for(|layout| layout.terminal(&pane).is_some());
         // An unlisted tab is still made: the phone reloads and finds it.
@@ -604,9 +604,14 @@ fn locate_named_program(program: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// A phone-facing workspace id as the labels name it: its own id, and its
-/// Herdr 1 session when it is a named one's.
-fn labelled(workspace: &str) -> core::Place<'_> {
+/// Where new work in the phone-facing `workspace` goes, as its labels name
+/// it: its own id, and its Herdr 1 session when it is a named one's. A
+/// phone's new workspace Sheprd keeps none for yet is its `folder`, so more
+/// work there joins the workspace Sheprd keeps for it.
+fn place<'a>(workspace: &'a str, folder: &'a str) -> core::Place<'a> {
+    if core::is_new_workspace(workspace) {
+        return core::Place::New(folder);
+    }
     let (session, id) = sessions::split_id(workspace);
     core::Place::Workspace(sheprd_session::Labelled { id, session })
 }
