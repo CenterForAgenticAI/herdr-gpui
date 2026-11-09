@@ -13,6 +13,7 @@ mod daemon;
 mod layout;
 mod recency;
 mod sessions;
+mod wake;
 
 pub(crate) use api::ApiMethod;
 pub(crate) use attach::TermHold;
@@ -102,6 +103,9 @@ pub(crate) struct Hub {
     /// without restarting it. Tests leave it off.
     search_program: bool,
     sessions: Arc<sessions::Sessions>,
+    /// Held while this machine's core starts, so phones start one at most;
+    /// when the last start failed.
+    waking: tokio::sync::Mutex<Option<std::time::Instant>>,
     /// Where new checkouts go for work on a core.
     worktrees: Option<PathBuf>,
 }
@@ -158,6 +162,7 @@ impl Hub {
             program: locate_program(),
             search_program: true,
             sessions,
+            waking: tokio::sync::Mutex::default(),
             worktrees: core::worktree::root(),
         });
         // A daemon started from a copy of its binary finds no program, and
@@ -245,6 +250,7 @@ impl Hub {
             program: None,
             search_program: false,
             sessions: sessions::Sessions::offline(),
+            waking: tokio::sync::Mutex::default(),
             worktrees: None,
         }
     }
@@ -297,7 +303,7 @@ impl Hub {
             .ok_or(Error::UnknownWorkspace)?
             .cwd
             .clone();
-        if let Some(core) = self.active_core() {
+        if let Some(core) = self.core_for_work().await? {
             let (cwd, program) = (cwd.unwrap_or(&folder).to_owned(), program.to_owned());
             return on_core(move || core.open_chat(agent, &program, &cwd)).await;
         }
@@ -343,7 +349,7 @@ impl Hub {
         }
         let program = self.program().ok_or(Error::ProgramMissing)?;
         let program = program.as_path();
-        if let Some(core) = self.active_core() {
+        if let Some(core) = self.core_for_work().await? {
             let (cwd, program) = (cwd.to_owned(), program.to_owned());
             let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
             let pane = on_core(move || match branch {
@@ -428,7 +434,7 @@ impl Hub {
         if sessions::in_wsl(workspace) {
             return Ok(None);
         }
-        let Some(core) = self.active_core() else {
+        let Some(core) = self.core_for_work().await? else {
             return Ok(None);
         };
         let cwd = self
@@ -590,15 +596,22 @@ const PROGRAM: &str = if cfg!(windows) {
 /// a service's `PATH` often lacks them), else the first on `PATH`.
 fn locate_program() -> Option<PathBuf> {
     let renamed = PROGRAM.replacen("herdr-", "sheprd-", 1);
+    [renamed.as_str(), PROGRAM].into_iter().find_map(locate)
+}
+
+/// The first runnable `program` where [`program_dirs`] looks.
+fn locate(program: &str) -> Option<PathBuf> {
+    locate_on(program, std::env::var_os("PATH").as_deref())
+}
+
+/// [`locate`] with `path` searched in place of this process's `PATH`.
+fn locate_on(program: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok();
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path = std::env::var_os("PATH");
-    let dirs = program_dirs(exe.as_deref(), home.as_deref(), path.as_deref());
-    [renamed.as_str(), PROGRAM].into_iter().find_map(|program| {
-        dirs.iter()
-            .map(|dir| dir.join(program))
-            .find(|candidate| runnable(candidate))
-    })
+    program_dirs(exe.as_deref(), home.as_deref(), path)
+        .into_iter()
+        .map(|dir| dir.join(program))
+        .find(|candidate| runnable(candidate))
 }
 
 /// Whether `path` is a file this user may run: one left without the

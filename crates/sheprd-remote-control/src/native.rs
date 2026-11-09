@@ -75,6 +75,7 @@ fn home(state: &Shared) -> Home {
 
 /// `GET /api/v2/home`.
 pub(crate) async fn get_home(State(state): State<Shared>, _device: Device) -> Json<Home> {
+    state.hub.wake_for_phone();
     Json(home(&state))
 }
 

@@ -6,8 +6,9 @@ chats, answers agent questions, and receives push notifications. The plan is
 `docs/remote-control-plan.md`.
 
 The daemon is a user service that Sheprd installs when Remote control is
-turned on, and it keeps running when the app quits. It never starts, stops,
-or upgrades a Herdr daemon.
+turned on, and it keeps running when the app quits. It never stops or
+upgrades a Herdr daemon, and starts only herdr-core, only on a machine
+without Herdr 1 (below).
 
 ## Herdr 1 sessions
 
@@ -55,8 +56,17 @@ so it joins the same core even when its service environment differs.
 A foreground daemon discovers herdr-core through
 `HC_SOCKET`, the core's configured socket, or its default session socket.
 `HC_SESSION` selects the session. Explicit `--core-socket PATH --core-session NAME`
-arguments override discovery. Remote control only joins an existing core.
-It never starts the bundled core or runs `hc server start`.
+arguments override discovery. Remote control joins an existing core. When
+no core answers and Herdr 1 neither answers nor is installed (no `herdr`
+beside the daemon, in `~/.herdr/bin`, `~/.cargo/bin`, `~/.local/bin`, or on
+`PATH`), a phone opening its home view, or asking for a new tab, chat, or
+workspace, runs `herdr-core server start --json` from those folders first,
+as on a cloud machine set up with only the pinned core. A failed start is
+tried again from a view at most once a minute, and new work reports why it
+failed. A core with nothing in it, and nothing else answering, lists an
+empty **Herdr 2** workspace in the home folder, so a phone can start a chat
+or offer that folder for a new workspace. Where Herdr 1 is installed, moving to Herdr 2 stays
+the user's choice, and nothing is started.
 
 Herdr 1 workspaces and chats keep their existing behavior.
 
