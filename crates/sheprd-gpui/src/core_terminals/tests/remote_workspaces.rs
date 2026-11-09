@@ -127,18 +127,19 @@ fn a_saved_host_keeps_herdr_2_workspaces_of_its_own(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_tab_in_a_saved_hosts_herdr_workspace_names_its_session(cx: &mut TestAppContext) {
+fn a_tab_in_a_saved_hosts_herdr_workspace_starts_there_naming_none(cx: &mut TestAppContext) {
     let (view, cx) = window(cx, true);
     let spawn = spawn_for(&view, cx, "w0");
-    // Where the workspace started on that host, and its daemon by session.
+    // Where the workspace started on that host.
     assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/home/me/app")));
-    assert_eq!(env(&spawn, "HERDR_WORKSPACE_ID"), Some("w0"));
-    assert_eq!(env(&spawn, "HERDR_SESSION"), Some("work"));
+    // Its daemon's socket is under that host's home, unknown here, and an
+    // inherited one cannot be cleared, so no Herdr workspace is named.
+    assert_eq!(env(&spawn, "HERDR_WORKSPACE_ID"), Some(""));
+    assert_eq!(env(&spawn, "HERDR_SESSION"), None);
     assert_eq!(env(&spawn, "HERDR_SOCKET_PATH"), None);
-    // A workspace that host's Herdr does not list names none.
+    // A workspace that host's Herdr does not list has no folder to give.
     let spawn = spawn_for(&view, cx, "w99");
     assert_eq!(spawn.cwd, None);
-    assert_eq!(env(&spawn, "HERDR_WORKSPACE_ID"), Some(""));
 }
 
 #[gpui::test]
