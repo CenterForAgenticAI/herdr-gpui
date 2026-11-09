@@ -155,7 +155,7 @@ rcgen                = { default-features = false, features = ["crypto", "pem", 
 x509-parser          = { default-features = false, version = "0.18" }
 # Checks the remote control daemon's mobileconfig profile in tests.
 roxmltree            = "0.21"
-rusqlite             = { features = ["bundled"], version = "0.40" }
+rusqlite             = { features = ["bundled"], version = "0.41" }
 rodio                = { default-features = false, features = ["playback", "symphonia-mp3", "tracing"], version = "0.22.2" }
 rustix               = { features = ["event", "fs", "process", "pty", "termios"], version = "=1.1.6" }
 secrecy              = { features = ["serde"], version = "=0.10.3" }
