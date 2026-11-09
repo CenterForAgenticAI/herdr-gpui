@@ -1,6 +1,7 @@
 //! The emulator: alacritty's `Term` and vte's parser behind a small, pure,
 //! deterministic API. It never writes to the PTY, opens links, or touches the
-//! clipboard; herdr-core answers terminal queries itself.
+//! clipboard: an OSC 52 write comes out as an [`Event`] for the caller to
+//! apply. herdr-core answers terminal queries itself.
 
 use crate::{
     MAX_SCROLLBACK_CELLS, MAX_SCROLLBACK_LINES, Size, cells,
@@ -21,11 +22,16 @@ use sheprd_protocol::{ClientPaneInputEvent, FrameData, SurfaceGraphicsScene};
 use std::{fmt, time::Duration};
 
 /// Something the program did that is not on screen. Taking events coalesces
-/// them: at most one title change and one bell count per take.
+/// them: at most one title change, one clipboard write, and one bell count
+/// per take.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The bell rang `count` times.
     Bell { count: u32 },
+    /// The program set the clipboard with OSC 52: UTF-8 text of at most
+    /// [`crate::MAX_CLIPBOARD_BYTES`]. Reading the clipboard is never
+    /// allowed.
+    Clipboard(String),
     /// The title changed; `None` is a reset to the default.
     Title(Option<String>),
 }
@@ -102,6 +108,7 @@ impl Dimensions for Dims {
 
 pub struct Emulator {
     bells: u32,
+    clipboard: Option<String>,
     damage: Tracker,
     graphics: Graphics,
     listener: Listener,
@@ -132,6 +139,7 @@ impl Emulator {
         let term = Term::new(config, &Dims(size), listener.clone());
         Self {
             bells: 0,
+            clipboard: None,
             damage: Tracker::default(),
             graphics: Graphics::default(),
             listener,
@@ -335,6 +343,9 @@ impl Emulator {
         if std::mem::take(&mut self.title_changed) {
             events.push(Event::Title(self.title.clone()));
         }
+        if let Some(text) = self.clipboard.take() {
+            events.push(Event::Clipboard(text));
+        }
         let count = std::mem::take(&mut self.bells);
         if count > 0 {
             events.push(Event::Bell { count });
@@ -349,6 +360,9 @@ impl Emulator {
             self.title = title;
         }
         self.bells = self.bells.saturating_add(inbox.bells);
+        if inbox.clipboard.is_some() {
+            self.clipboard = inbox.clipboard;
+        }
     }
 }
 
@@ -401,7 +415,7 @@ fn config(size: Size, scrollback_lines: usize) -> Config {
             blinking: false,
         },
         kitty_keyboard: true,
-        osc52: Osc52::Disabled,
+        osc52: Osc52::OnlyCopy,
         ..Config::default()
     }
 }

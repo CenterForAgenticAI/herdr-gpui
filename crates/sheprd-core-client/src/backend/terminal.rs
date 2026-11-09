@@ -200,6 +200,7 @@ impl sheprd_backend::Terminal for CoreTerminal {
             .into_iter()
             .map(|event| match event {
                 Event::Bell { .. } => SurfaceUpdate::Bell,
+                Event::Clipboard(text) => SurfaceUpdate::Clipboard(text),
                 Event::Title(title) => SurfaceUpdate::Title(title.unwrap_or_default()),
             })
             .collect();

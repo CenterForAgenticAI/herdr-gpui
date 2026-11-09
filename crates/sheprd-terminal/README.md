@@ -9,8 +9,10 @@ wraps Zed's fork of `alacritty_terminal` and turns its grid into the same
 It is pure and deterministic: no GPUI, I/O, threads, or clock. The same bytes
 give the same frame however they are split across `Emulator::feed` calls.
 It never answers terminal queries (herdr-core does), writes to the
-clipboard, or opens hyperlinks. Images a program sends with the kitty
-graphics protocol come out as Herdr's graphics scene for the app's painter.
+clipboard, or opens hyperlinks. An OSC 52 clipboard write comes out as an
+event with its decoded UTF-8 text for the caller to apply; reads are refused.
+Images a program sends with the kitty graphics protocol come out as Herdr's
+graphics scene for the app's painter.
 
 ## Use
 
@@ -21,8 +23,8 @@ graphics protocol come out as Herdr's graphics scene for the app's painter.
   changed rows as `PaneSurfacePatchRow` plus the cursor. Rows only index
   hyperlinks the last full frame listed; a new link makes the take full.
 - `frame()` is the viewport at any time; it does not reset damage.
-- `modes()`, `title()`, `take_events()` (one coalesced title change and a
-  bell count), `scroll()` and `scroll_metrics()`.
+- `modes()`, `title()`, `take_events()` (one coalesced title change, the
+  latest OSC 52 clipboard write, and a bell count), `scroll()` and `scroll_metrics()`.
 - `encode(&ClientPaneInputEvent)` (or `input::encode` with `Modes`) turns the
   app's semantic input into PTY bytes: xterm keys, the kitty keyboard
   protocol, Win32 input records (DECSET 9001), mouse reports, and bracketed
@@ -43,7 +45,8 @@ graphics protocol come out as Herdr's graphics scene for the app's painter.
 Everything is bounded: sizes (`Size` from herdr-backend, with `MAX_SIDE`
 and `MAX_CELLS`), history
 (`MAX_SCROLLBACK_LINES`, `MAX_SCROLLBACK_CELLS`), OSC strings
-(`MAX_OSC_BYTES`, longer ones are dropped whole), graphics commands
+(`MAX_OSC_BYTES`, longer ones are dropped whole; an OSC 52 write may carry
+up to `MAX_CLIPBOARD_BYTES` of text), graphics commands
 (`MAX_GRAPHICS_COMMAND_BYTES`), images (count, bytes, sides) and placements,
 and repeats
 (`input::MAX_REPEAT`).

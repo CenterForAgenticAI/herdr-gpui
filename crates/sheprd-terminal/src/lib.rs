@@ -38,6 +38,9 @@ pub const MAX_OSC_BYTES: usize = 8 * 1024;
 /// The longest kitty graphics command the emulator reads, one chunk of an
 /// image or a whole one sent unchunked; longer ones are dropped whole.
 pub const MAX_GRAPHICS_COMMAND_BYTES: usize = 8 * 1024 * 1024;
+/// The most text one OSC 52 clipboard write may carry, decoded. Its OSC
+/// string may hold the base64 for this much, past [`MAX_OSC_BYTES`].
+pub const MAX_CLIPBOARD_BYTES: usize = 2 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests;
