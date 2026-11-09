@@ -445,6 +445,11 @@ impl Store {
         })
     }
 
+    /// How many more tabs the app can hold.
+    pub(crate) fn room(&self) -> usize {
+        MAX_TABS.saturating_sub(self.tabs.len())
+    }
+
     pub(super) fn restore_tab(&mut self, mut tab: Tab) -> Option<TabId> {
         if self.tabs.len() >= MAX_TABS {
             return None;

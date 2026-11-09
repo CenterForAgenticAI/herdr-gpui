@@ -12,8 +12,16 @@ use sheprd_backend::TerminalId;
 use sheprd_vcs::git::Identity;
 use std::path::Path;
 
+// Pull requests are only looked up for an absolute checkout, which a path
+// without a drive is not on Windows.
+#[cfg(not(windows))]
 const FOLDER: &str = "/src/app-feature";
+#[cfg(not(windows))]
 const KEY: &str = "/src/app/.git";
+#[cfg(windows)]
+const FOLDER: &str = r"C:\src\app-feature";
+#[cfg(windows)]
+const KEY: &str = r"C:\src\app\.git";
 
 fn window(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestContext, String) {
     let (fixture, cx) = cx.add_window_view(|window, cx| {

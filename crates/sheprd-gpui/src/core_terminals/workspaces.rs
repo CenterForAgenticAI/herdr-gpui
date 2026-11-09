@@ -85,6 +85,7 @@ impl SheprdWindow {
                 workspace: id,
             },
             spawn,
+            cx,
         );
     }
 
