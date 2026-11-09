@@ -11,5 +11,9 @@ return style {
 		[".activity-tile:hover"] = { background = "secondary" },
 		[".status-item:hover"] = { opacity = 0.75 },
 		[".sheprd-link:hover"] = { opacity = 0.75 },
+		-- The left pane's edge: a hairline, lit as a split's handle is while
+		-- the pointer is over it, to say it can be dragged.
+		[".sheprd-left-edge-line"] = { background = "border" },
+		[".sheprd-left-edge:hover"] = { background = "accent/40" },
 	},
 }

@@ -239,7 +239,6 @@ local function classic_row(workspace: any, last: boolean, layout: any, theme: an
 		carry = carry(workspace),
 		accept = accept(workspace),
 		drop = drop_at(workspace),
-		tooltip = workspace.branch,
 		ui.row {
 			align = "center",
 			style = { gap = gap },
@@ -286,7 +285,6 @@ local function superset_row(workspace: any, layout: any, theme: any)
 		carry = carry(workspace),
 		accept = accept(workspace),
 		drop = drop_at(workspace),
-		tooltip = workspace.branch,
 		ui.row {
 			align = "center",
 			style = { gap = 8 },
@@ -334,7 +332,6 @@ local function orca_row(workspace: any, theme: any)
 		carry = carry(workspace),
 		accept = accept(workspace),
 		drop = drop_at(workspace),
-		tooltip = workspace.branch,
 		ui.row {
 			align = "center",
 			style = { gap = 6 },
@@ -365,7 +362,6 @@ local function minimal_row(workspace: any, layout: any, theme: any)
 		carry = carry(workspace),
 		accept = accept(workspace),
 		drop = drop_at(workspace),
-		tooltip = workspace.branch,
 		ui.row {
 			align = "center",
 			style = { gap = layout.gap or 6 },

@@ -208,11 +208,19 @@ impl SheprdWindow {
                 let Some(endpoint) = self.hosted_endpoint(endpoint) else {
                     return;
                 };
-                if self.navigate_endpoint(&endpoint, NavigationTarget::Workspace(&workspace), cx) {
-                    self.open_workspace_menu(&workspace, anchor, window, cx);
-                    self.menu.opening_right_click =
-                        self.menu.page == Some(crate::menu::Page::Workspace);
+                // The sheet opens over the row without selecting it; a row on
+                // another device only switches the device first, as the sheet
+                // acts on the selected one.
+                let on_selected = self
+                    .endpoints
+                    .get(self.selected_endpoint)
+                    .is_some_and(|selected| selected.id == endpoint);
+                if !on_selected && !self.select_endpoint(&endpoint, cx) {
+                    return;
                 }
+                self.open_workspace_menu(&workspace, anchor, window, cx);
+                self.menu.opening_right_click =
+                    self.menu.page == Some(crate::menu::Page::Workspace);
             }
         }
     }

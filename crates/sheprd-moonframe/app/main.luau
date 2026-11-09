@@ -64,13 +64,16 @@ return mod {
 							ui.mount "agents",
 							-- Its edge resizes it, as Sheprd's does; a double click
 							-- puts back the default width.
-							ui.column {
+							ui.row {
 								class = "sheprd-left-edge",
 								float = "right",
-								width = 5,
+								width = 7,
+								justify = "end",
 								cursor = "ew-resize",
+								tooltip = "Drag to resize, double-click to reset",
 								pointer = { sidebar_width = true },
 								to = "provider:sheprd",
+								ui.column { class = "sheprd-left-edge-line", width = 1, grow = true, self_align = "stretch" },
 							},
 						},
 					},

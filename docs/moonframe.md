@@ -77,7 +77,7 @@ Send a message with `to = "provider:sheprd"`:
 | `{ focus_workspace = id }` | Focuses a workspace |
 | `{ focus_pane = id }` | Focuses a pane |
 | `{ panel = id }` | Shows an activity panel |
-| `{ menu = "workspace", workspace = id }` | Opens Sheprd's own popover for a workspace at the pointer: its details, actions (close, delete the worktree, rename, mute, note, teleport, ...) and pull request. Send it as a row's `context`, so a right click opens it |
+| `{ menu = "workspace", workspace = id }` | Opens Sheprd's own popover for a workspace at the pointer, without selecting it: its details, actions (close, delete the worktree, rename, mute, note, teleport, ...) and pull request. Send it as a row's `context`, so a right click opens it |
 | `{ menu = "agent", pane = id }` | Opens an agent's pane menu at the pointer |
 | `{ menu = "device", endpoint = id }` | Opens a device's menu at the pointer |
 | `{ note = id }` | Edits the note on a workspace's checkout |
@@ -86,7 +86,7 @@ Send a message with `to = "provider:sheprd"`:
 | `{ toggle_device = id }`, `{ select_device = id }` | Folds a device's header, or selects the device |
 | `{ toggle_agent_sort = true }` | Switches the agents between grouped and by priority |
 | `{ move_workspace = id, target = id, after = bool }` | Moves a workspace of the selected device before (or after) another, as dropping its row there does; the worktrees mod sends it when a row with `carry` is dropped on one with `accept` |
-| `{ sidebar_width = true }` as a `pointer` | Resizes the sidebar from a drag of its edge (`phase`, `dx`); a double click puts back the default width |
+| `{ sidebar_width = true }` as a `pointer` | Resizes the sidebar from a drag of its edge (`phase`, `dx`); a double click puts back the default width. The shell draws the edge as a hairline lit on hover (`.sheprd-left-edge` in `style.luau`) |
 | `{ open_build_pr = true }` | Opens the pull request a worktree build came from |
 
 A row on another device adds `endpoint = id` to its message; without it the
