@@ -139,7 +139,7 @@ curl -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 60 --max-time 60
 tar -xzf "$work/core.tar.gz" -C "$work" herdr-core || exit 1
 dir={dir}
 mkdir -p "$dir" || exit 1
-chmod 755 "$work/herdr-core" && mv -f "$work/herdr-core" "$dir/herdr-core.new" && mv -f "$dir/herdr-core.new" "$dir/herdr-core" || exit 1
+chmod 755 "$work/herdr-core" && mv -f "$work/herdr-core" "$dir/herdr-core.new.$$" && mv -f "$dir/herdr-core.new.$$" "$dir/herdr-core" || exit 1
 [ -e "$dir/hc" ] || [ -L "$dir/hc" ] || ln -s herdr-core "$dir/hc" 2>/dev/null || :
 echo {INSTALLED}"#
     ))
