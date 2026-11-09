@@ -68,7 +68,7 @@ impl Source {
     }
 
     /// A chat as [`Self::open_chat`], in a new worktree of `cwd` on `branch`
-    /// under `root`.
+    /// under `root`. Answers its pane and the new checkout's folder.
     pub(in crate::hub) fn open_worktree_chat(
         &self,
         agent: Agent,
@@ -76,7 +76,7 @@ impl Source {
         cwd: &str,
         branch: &str,
         root: Option<&Path>,
-    ) -> Result<String> {
+    ) -> Result<(String, String)> {
         let root = root.ok_or(worktree::Error::NoHome).map_err(Error::from)?;
         let repository = Path::new(cwd);
         let checkout =
@@ -84,18 +84,18 @@ impl Source {
         // A new workspace of its own, in the new checkout.
         let checkout = checkout.to_string_lossy().into_owned();
         let started = self.open_chat(agent, program, &checkout, Some(Place::New(&checkout)));
-        let checkout = Path::new(&checkout);
+        let folder = Path::new(&checkout);
         if let Err(error) = &started {
             // A retry must find the branch free, but only a start that
             // surely ran nothing may go: a chat may be working in the
             // checkout after any other failure.
             if !ran_nothing(error) {
                 tracing::warn!(%error, %branch, "A worktree stayed: its chat may have started");
-            } else if let Err(error) = worktree::remove(repository, checkout, branch) {
+            } else if let Err(error) = worktree::remove(repository, folder, branch) {
                 tracing::warn!(%error, %branch, "A worktree without a chat stayed");
             }
         }
-        started
+        started.map(|pane| (pane, checkout))
     }
 
     fn run(&self, run: &Run<'_>) -> Result<String> {

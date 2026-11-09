@@ -161,8 +161,11 @@ async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
         .await
         .unwrap();
     // Listed apart until Sheprd keeps a workspace for the new checkout.
-    assert_eq!(created.workspace, new_workspace_id(&created.pane));
     let checkout = root.join("project").join("topic");
+    assert_eq!(
+        created.workspace,
+        new_workspace_id(checkout.to_str().unwrap())
+    );
     assert!(checkout.join(".git").exists());
     let params = &request(&fake)["params"];
     assert_eq!(params["cwd"], checkout.to_str().unwrap());
@@ -301,8 +304,8 @@ async fn a_second_tab_in_a_phones_new_workspace_joins_it_by_folder() {
     let records = vec![record("t1"), record("t9")];
     let (source, fake) = fake_with_doc(false, Value::Null, records);
     let mut layout = source.poll().unwrap();
-    // Listed under its first pane until Sheprd keeps a workspace for it.
-    let new = new_workspace_id("t1");
+    // Listed under its folder until Sheprd keeps a workspace for it.
+    let new = new_workspace_id("/code/one");
     layout.workspaces.push(workspace(&new, "/code/one"));
     let hub = hub_on(&source, layout);
     hub.new_core_tab(&new).await.unwrap().unwrap();
@@ -329,8 +332,7 @@ fn work_in_a_phones_new_workspace_is_listed_in_one_row() {
         .filter(|row| row.cwd == "/code/one")
         .collect();
     assert_eq!(rows.len(), 1, "one workspace for the folder");
-    // Named for a pane listed there.
-    assert!(rows[0].id.starts_with(&new_workspace_id("")));
+    assert_eq!(rows[0].id, new_workspace_id("/code/one"));
     assert_eq!(rows[0].terminals.len(), 2);
     drop(source);
     fake.server.join().unwrap();

@@ -80,7 +80,7 @@ pub(super) fn project(
         if let Some(cwd) = sheprd_session::new_workspace(&record.labels) {
             // A phone's new workspace, until Sheprd keeps one for it.
             if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
-                add_new_workspace(&mut layout, &tab, cwd, terminal);
+                add_new_workspace(&mut layout, cwd, terminal);
             }
             continue;
         }
@@ -112,14 +112,10 @@ pub(super) fn lead_kept(layout: &mut Layout, saved: Option<&SavedTabs>, scope: O
 }
 
 /// A phone's new workspace in `cwd`, named for its folder, listed apart.
-/// More work there joins it: its id is its first pane's, and the rest are
-/// labelled with the same folder.
-fn add_new_workspace(layout: &mut Layout, pane: &str, cwd: &str, terminal: Terminal) {
-    if let Some(row) = layout
-        .workspaces
-        .iter_mut()
-        .find(|row| super::is_new_workspace(&row.id) && row.cwd == cwd)
-    {
+/// More work there, labelled with the same folder, joins it.
+fn add_new_workspace(layout: &mut Layout, cwd: &str, terminal: Terminal) {
+    let id = super::new_workspace_id(cwd);
+    if let Some(row) = layout.workspaces.iter_mut().find(|row| row.id == id) {
         row.terminals.push(terminal);
         return;
     }
@@ -132,7 +128,7 @@ fn add_new_workspace(layout: &mut Layout, pane: &str, cwd: &str, terminal: Termi
         branch: None,
         chats: Vec::new(),
         cwd: cwd.to_owned(),
-        id: super::new_workspace_id(pane),
+        id,
         label,
         session: None,
         terminals: vec![terminal],

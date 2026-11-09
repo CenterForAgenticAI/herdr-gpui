@@ -351,17 +351,19 @@ impl Hub {
         if let Some(core) = self.active_core() {
             let (cwd, program) = (cwd.to_owned(), program.to_owned());
             let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
-            let pane = on_core(move || match branch {
+            let (pane, folder) = on_core(move || match branch {
                 Some(branch) => {
                     core.open_worktree_chat(agent, &program, &cwd, &branch, root.as_deref())
                 }
                 // Sheprd keeps a workspace for it, in this folder.
-                None => core.open_chat(agent, &program, &cwd, Some(core::Place::New(&cwd))),
+                None => core
+                    .open_chat(agent, &program, &cwd, Some(core::Place::New(&cwd)))
+                    .map(|pane| (pane, cwd)),
             })
             .await?;
             // Listed apart until Sheprd keeps its workspace.
             return Ok(CreatedWorkspace {
-                workspace: core::new_workspace_id(&pane),
+                workspace: core::new_workspace_id(&folder),
                 pane,
             });
         }

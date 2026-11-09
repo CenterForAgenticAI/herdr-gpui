@@ -122,7 +122,25 @@ fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
     let records = [serde_json::from_value(phone).unwrap()];
     let layout = projection::project("fake-core", &records, None, None);
     let row = &layout.workspaces[0];
-    assert_eq!(row.id, new_workspace_id(&id("t1")));
+    assert_eq!(row.id, new_workspace_id("/code/api"));
     assert_eq!((row.label.as_str(), row.cwd.as_str()), ("api", "/code/api"));
     assert_eq!(row.terminals.len(), 1);
+}
+
+#[test]
+fn a_phones_new_workspace_keeps_its_id_when_its_first_pane_closes() {
+    let labelled = |address: &str| {
+        let mut record = record(address);
+        record["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/api"});
+        serde_json::from_value(record).unwrap()
+    };
+    let both = [labelled("t1"), labelled("t9")];
+    let before = projection::project("fake-core", &both, None, None);
+    // The first chat closes; the tab added after it stays.
+    let after = projection::project("fake-core", &[labelled("t9")], None, None);
+    assert_eq!(before.workspaces[0].id, after.workspaces[0].id);
+    assert_eq!(after.workspaces[0].terminals.len(), 1);
+    // Another folder is another workspace, and an id fits in a path.
+    assert_ne!(new_workspace_id("/code/api"), new_workspace_id("/code/web"));
+    assert!(!new_workspace_id("/code/api").contains('/'));
 }
