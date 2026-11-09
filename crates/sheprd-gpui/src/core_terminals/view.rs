@@ -102,6 +102,11 @@ pub(crate) struct CoreTerminalView {
 }
 
 impl CoreTerminalView {
+    /// The terminal it shows.
+    pub(crate) fn terminal(&self) -> &TerminalId {
+        &self.id
+    }
+
     pub(crate) fn new(
         id: TerminalId,
         link: Link,

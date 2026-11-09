@@ -219,9 +219,16 @@ impl SheprdWindow {
         target: NavigationTarget<&str>,
         cx: &mut Context<Self>,
     ) -> bool {
+        if let NavigationTarget::Workspace(id) = target
+            && self.focus_kept_workspace(id, cx)
+        {
+            return true;
+        }
         if !self.input_ready() {
             return false;
         }
+        // Anything of Herdr 1's brings its focused workspace back in front.
+        self.leave_kept_workspace();
         self.note_editor_navigation(target.as_deref());
         let queued = self.request_focus_change(
             &fl!("window-notices-navigate"),
@@ -522,6 +529,13 @@ impl SheprdWindow {
                 self.new_core_terminal(window, cx);
                 return;
             }
+            // A new workspace starts where the one in front is.
+            Command::Workspace if self.new_workspaces_use_core() => {
+                let cwd = self.front_workspace_cwd();
+                self.dismiss_menu(window, cx);
+                self.new_kept_workspace(None, cwd, cx);
+                return;
+            }
             Command::Tab | Command::Workspace if self.open_name_prompt(command, window, cx) => {
                 return;
             }
@@ -601,6 +615,14 @@ impl SheprdWindow {
                 self.status_bar_visible = !self.status_bar_visible;
                 window.focus(&self.focus, cx);
                 cx.notify();
+                return;
+            }
+            Command::ToggleMenuBar => {
+                if crate::menus::IN_WINDOW {
+                    self.menu_bar_visible = !self.menu_bar_visible;
+                    window.focus(&self.focus, cx);
+                    cx.notify();
+                }
                 return;
             }
             Command::ToggleModPanel => {
@@ -778,19 +800,33 @@ impl SheprdWindow {
             command,
             Command::PreviousAgent | Command::NextAgent | Command::AgentNumber(_)
         );
-        let rows = if agents {
-            self.sidebar_agents()
+        let workspaces = if agents {
+            Vec::new()
         } else {
             self.sidebar_workspaces()
         };
+        let rows: Vec<(usize, &str)> = if agents {
+            self.sidebar_agents()
+        } else {
+            workspaces
+                .iter()
+                .map(|(host, id)| (*host, id.as_str()))
+                .collect()
+        };
         let selected = self.selected_endpoint;
-        let focused = self.live.snapshot.as_ref().and_then(|snapshot| {
-            if agents {
-                snapshot.focused_pane_id.as_deref()
-            } else {
-                snapshot.focused_workspace_id.as_deref()
-            }
-        });
+        // The workspace in front may be one the app keeps for Herdr 2.
+        let front = (!agents)
+            .then(|| self.browser_key())
+            .flatten()
+            .map(|(_, workspace)| workspace);
+        let focused = if agents {
+            self.live
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.focused_pane_id.as_deref())
+        } else {
+            front.as_deref()
+        };
         let current = rows
             .iter()
             .position(|&(host, id)| host == selected && Some(id) == focused);

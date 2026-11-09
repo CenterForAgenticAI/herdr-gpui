@@ -5,7 +5,8 @@ mod links;
 mod owner;
 mod profiles;
 pub(crate) use profiles::ProfileAvatars;
-use sheprd_client::{ConnectTarget, protocol::ClientShellWorkspace};
+use sheprd_client::ConnectTarget;
+use sheprd_session::Workspace;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, mpsc},
@@ -48,19 +49,19 @@ impl<'a> Checkout<&'a str> {
     pub(crate) fn of(
         local: bool,
         target: &'a ConnectTarget,
-        workspace: &'a ClientShellWorkspace,
+        workspace: &'a Workspace,
     ) -> Option<Self> {
         match target {
             ConnectTarget::Ssh { target, .. } => {
                 let dir = match (&workspace.worktree, &workspace.branch) {
                     (Some(tree), _) => &tree.key,
                     // Without a branch it is no Git checkout: nothing to dial for.
-                    (None, Some(_)) => &workspace.new_workspace_cwd,
+                    (None, Some(_)) => &workspace.cwd,
                     (None, None) => return None,
                 };
                 Some(Self::Ssh { target, dir })
             }
-            _ if local => Some(Self::Local(&workspace.new_workspace_cwd)),
+            _ if local => Some(Self::Local(&workspace.cwd)),
             _ => None,
         }
     }
