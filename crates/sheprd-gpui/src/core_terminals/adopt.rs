@@ -155,15 +155,35 @@ impl SheprdWindow {
     }
 
     /// This computer's endpoint for the Herdr 1 session `name`, or for the
-    /// window's own session when `None`.
-    fn endpoint_of_session(&self, name: Option<&str>) -> Option<usize> {
+    /// remote control daemon's primary session when `None`: work there has
+    /// no session label, whichever session the window shows.
+    pub(super) fn endpoint_of_session(&self, name: Option<&str>) -> Option<usize> {
         let Some(name) = name else {
-            return self.core_host();
+            return self.primary_endpoint();
         };
         self.endpoints.iter().position(|endpoint| {
             matches!(&endpoint.connection.target,
                 ConnectTarget::Session { name: session, .. } if session == name)
         })
+    }
+}
+
+impl SheprdWindow {
+    /// The endpoint of the session the remote control daemon follows as its
+    /// primary: the one at the socket `ConnectTarget::Local` finds, as the
+    /// daemon's service is installed with. A window opened on an explicit
+    /// socket has no such endpoint, and its first local one stands in.
+    fn primary_endpoint(&self) -> Option<usize> {
+        let local = |endpoint: &crate::endpoint::Endpoint| !endpoint.connection.target.is_remote();
+        let primary = ConnectTarget::Local.socket_path().ok();
+        primary
+            .and_then(|primary| {
+                self.endpoints.iter().position(|endpoint| {
+                    local(endpoint)
+                        && endpoint.connection.target.socket_path().ok().as_ref() == Some(&primary)
+                })
+            })
+            .or_else(|| self.endpoints.iter().position(local))
     }
 }
 

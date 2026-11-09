@@ -177,3 +177,30 @@ fn a_phones_new_terminal_finds_its_workspace_while_another_host_is_shown(cx: &mu
     assert_eq!(tabs_of(cx, "t5"), kept);
     assert_eq!(tabs_of(cx, "t6"), kept);
 }
+
+#[gpui::test]
+fn primary_session_work_goes_to_the_primary_whichever_session_is_shown(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx);
+    cx.update(|_, cx| {
+        view.update(cx, |view, _| {
+            let session = |id: &str, target| {
+                crate::endpoint::Endpoint::new(id.into(), id.into(), target, false)
+            };
+            // The daemon's primary, then a named session the window shows.
+            view.endpoints = vec![
+                session("primary", sheprd_client::ConnectTarget::Local),
+                session(
+                    "dev",
+                    sheprd_client::ConnectTarget::Session {
+                        name: "dev-shown".into(),
+                        development: false,
+                    },
+                ),
+            ];
+            view.selected_endpoint = 1;
+            assert_eq!(view.core_host(), Some(1), "the shown session");
+            assert_eq!(view.endpoint_of_session(None), Some(0));
+            assert_eq!(view.endpoint_of_session(Some("dev-shown")), Some(1));
+        })
+    });
+}
