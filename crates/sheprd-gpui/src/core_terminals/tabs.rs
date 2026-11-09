@@ -62,12 +62,19 @@ impl SheprdWindow {
             let shown = match self.core_terminals.tabs.entry(tab.id) {
                 std::collections::hash_map::Entry::Occupied(shown) => shown.into_mut(),
                 std::collections::hash_map::Entry::Vacant(place) => {
-                    let Some(restored) = TabPanes::restore(Host::of(&tab.scope), location) else {
+                    let Some(mut restored) = TabPanes::restore(Host::of(&tab.scope), location)
+                    else {
                         continue;
                     };
+                    restored.saved = Some(location.clone());
                     place.insert(restored)
                 }
             };
+            // Each window holds its own copy: one another window saved over
+            // is read again before this one can save.
+            if shown.saved.as_ref() != Some(location) {
+                shown.refresh(location);
+            }
             missing.extend(
                 shown
                     .panes
@@ -210,17 +217,7 @@ impl SheprdWindow {
             .core_terminals
             .tabs
             .iter()
-            .filter_map(|(tab, shown)| {
-                // A name the user gave stands over the program's title.
-                if let Some(name) = &shown.name {
-                    return Some((*tab, name.clone()));
-                }
-                let view = self
-                    .core_terminals
-                    .views
-                    .get(&(*tab, shown.active.clone()))?;
-                Some((*tab, view.read(cx).title()?.to_owned()))
-            })
+            .filter_map(|(tab, shown)| Some((*tab, self.core_tab_title(*tab, shown, cx)?)))
             .collect();
         for (tab, title) in titles {
             let stale = cx
@@ -231,6 +228,20 @@ impl SheprdWindow {
                 Store::update(cx, |store| store.visited(tab, None, Some(&title)));
             }
         }
+    }
+
+    /// What `tab`'s strip shows: the name the user gave the tab, else that
+    /// of its pane in use, else the title its program set, if any.
+    pub(super) fn core_tab_title(&self, tab: TabId, shown: &TabPanes, cx: &App) -> Option<String> {
+        (shown.name.clone())
+            .or_else(|| shown.names.get(&shown.active).cloned())
+            .or_else(|| {
+                let view = self
+                    .core_terminals
+                    .views
+                    .get(&(tab, shown.active.clone()))?;
+                view.read(cx).title().map(str::to_owned)
+            })
     }
 
     /// Puts a started terminal of `host`'s core beside `at` in `tab`, and
@@ -318,11 +329,21 @@ impl SheprdWindow {
         let Some(backend) = self.core_terminals.backend_of(host).cloned() else {
             return;
         };
+        let unended = std::sync::Arc::clone(&self.core_terminals.unended);
+        let host = host.clone();
         let ended = std::thread::Builder::new()
             .name("herdr-core-kill".into())
             .spawn(move || {
-                if let Err(error) = backend.kill(&terminal) {
-                    tracing::warn!(%error, %terminal, "Could not end a herdr-core terminal");
+                let Err(error) = backend.kill(&terminal) else {
+                    return;
+                };
+                tracing::warn!(%error, %terminal, "Could not end a herdr-core terminal");
+                // The core's refusal, as for a terminal already gone, is
+                // its answer; anything else did not reach it.
+                if !matches!(error, sheprd_core_client::Error::Refused { .. })
+                    && let Ok(mut unended) = unended.lock()
+                {
+                    unended.push((host, terminal));
                 }
             });
         if let Err(error) = ended {
@@ -333,6 +354,13 @@ impl SheprdWindow {
     /// Ends the terminals of closed tabs, joining the core to do it when
     /// the window is not connected yet.
     pub(super) fn end_closed_core_terminals(&mut self, cx: &mut Context<Self>) {
+        let unended = match self.core_terminals.unended.lock() {
+            Ok(mut unended) => std::mem::take(&mut *unended),
+            Err(_) => Vec::new(),
+        };
+        if !unended.is_empty() {
+            Store::update(cx, |store| store.end_terminals(unended));
+        }
         if !cx
             .try_global::<Store>()
             .is_some_and(|store| store.has_ending())
@@ -364,7 +392,11 @@ impl SheprdWindow {
             .tabs
             .iter_mut()
             .filter_map(|(tab, shown)| {
-                std::mem::take(&mut shown.unsaved).then(|| (*tab, shown.location()))
+                std::mem::take(&mut shown.unsaved).then(|| {
+                    let location = shown.location();
+                    shown.saved = Some(location.clone());
+                    (*tab, location)
+                })
             })
             .collect();
         for (tab, location) in changed {

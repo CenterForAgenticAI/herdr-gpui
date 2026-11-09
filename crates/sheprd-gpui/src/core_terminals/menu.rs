@@ -271,10 +271,15 @@ impl SheprdWindow {
             },
         }
         shown.unsaved = true;
-        // The strip shows a tab's new name at once rather than next tick.
-        if let (Target::Tab(_), Some(name)) = (target, name) {
-            Store::update(cx, |store| store.visited(tab, None, Some(&name)));
-        }
+        // The strip shows the new title at once rather than next tick. With
+        // the name cleared and no title from the program yet, the tab reads
+        // as it did when it opened.
+        let Some(shown) = self.core_terminals.tabs.get(&tab) else {
+            return;
+        };
+        let title = (self.core_tab_title(tab, shown, cx))
+            .unwrap_or_else(|| shown.location().default_title());
+        Store::update(cx, |store| store.visited(tab, None, Some(&title)));
     }
 
     pub(crate) fn core_menu_key(

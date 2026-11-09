@@ -7,6 +7,7 @@ mod keys;
 mod menus;
 mod pane_keys;
 mod paste;
+mod refresh;
 mod restore;
 mod saved_tabs;
 mod screen;

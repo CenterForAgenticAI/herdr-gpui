@@ -112,6 +112,34 @@ fn rename_opens_on_the_focused_tab_and_a_name_stands_over_the_title(cx: &mut Tes
     assert_ne!(label, "tests");
 }
 
+#[gpui::test]
+fn the_strip_shows_the_pane_in_use_by_name_and_a_cleared_name_goes(cx: &mut TestAppContext) {
+    let (view, cx, tab) = window_with_split(cx, &["t1", "t2"]);
+    let title = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| cx.global::<Store>().get(tab).unwrap().title.clone())
+    };
+    let opened = title(cx);
+    let pane = Target::Pane {
+        tab,
+        terminal: id("t1"),
+    };
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&pane, clean_name("api"), cx)
+        })
+    });
+    assert_eq!(title(cx), "api", "the pane in use names its tab");
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.set_core_name(&Target::Tab(tab), clean_name("build"), cx);
+            view.set_core_name(&Target::Tab(tab), None, cx);
+            view.set_core_name(&pane, None, cx);
+        })
+    });
+    // No program title came, so the tab reads as it opened.
+    assert_eq!(title(cx), opened);
+}
+
 #[test]
 fn a_name_is_one_bounded_line() {
     assert_eq!(clean_name(" a\u{202e}b\n"), Some("ab".into()));
