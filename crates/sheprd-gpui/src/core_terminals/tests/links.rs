@@ -459,3 +459,21 @@ fn an_address_that_fills_its_row_ends_at_a_newline() {
         RowTarget::Web("https://example.com/next".into())
     );
 }
+
+#[gpui::test]
+fn the_modifier_held_over_another_pane_hovers_nothing_here(cx: &mut TestAppContext) {
+    let (view, cx, _, _) = shown(cx, &[&format!("{URL} at the edge")], false);
+    let link = at(&view, cx, 2, 0);
+    cx.simulate_mouse_move(link, None, link_modifier());
+    cx.update(|_, cx| assert!(!view.read(cx).link_rows().is_empty()));
+    // Leaving the pane drops the underline: moves off it reach it no more.
+    let away = link - point(px(200.), px(0.));
+    cx.simulate_mouse_move(away, None, link_modifier());
+    cx.update(|_, cx| assert!(view.read(cx).link_rows().is_empty()));
+    // The modifier pressed with the pointer over a pane beside this one,
+    // left of its first column, where the cell lookup would hold the
+    // pointer on the address there.
+    let beside = cx.update(|_, cx| view.read(cx).bounds().unwrap().origin) - point(px(5.), px(0.));
+    cx.update(|_, cx| view.update(cx, |view, cx| view.hover_at(beside, link_modifier(), cx)));
+    cx.update(|_, cx| assert!(view.read(cx).link_rows().is_empty()));
+}
