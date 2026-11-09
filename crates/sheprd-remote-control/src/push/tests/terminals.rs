@@ -89,8 +89,23 @@ fn a_run_keeps_its_start_while_it_asks_and_works_again() {
             (Some(Working), Some(1000)),
         ]
     );
+    // The run's end keeps when it began, for the finished activity's timer.
     let moved = walk(&mut agents, 20_000, &[Done, Done, Done]);
-    assert_eq!(moved[0].started_ms, None);
+    assert_eq!(moved[0].started_ms, Some(1000));
+    // The next run starts its own clock.
+    let moved = walk(&mut agents, 40_000, &[Working, Working, Working]);
+    assert_eq!(moved[0].started_ms, Some(40_000));
+}
+
+#[test]
+fn a_pane_that_leaves_mid_run_keeps_its_start() {
+    use AgentStatus::Working;
+    let mut agents = TerminalAgents::default();
+    let moved = walk(&mut agents, 0, &[Working]);
+    assert!(moved.is_empty());
+    let moved = agents.step([], 5_000);
+    assert_eq!(moved[0].to, None);
+    assert_eq!(moved[0].started_ms, Some(0));
 }
 
 #[test]

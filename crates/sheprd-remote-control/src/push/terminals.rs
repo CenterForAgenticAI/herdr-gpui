@@ -33,7 +33,9 @@ pub(crate) struct Moved {
     pub from: AgentStatus,
     /// `None` when the pane left the layout.
     pub to: Option<AgentStatus>,
-    /// When the run in progress began, while it is working or asking.
+    /// When the run in progress began, while it is working or asking, and
+    /// when the run that just ended began, so a finished Live Activity
+    /// keeps its elapsed time.
     pub started_ms: Option<u64>,
 }
 
@@ -101,16 +103,18 @@ impl Agents {
                 continue;
             }
             let from = std::mem::replace(&mut tracked.settled, status);
+            let run = tracked.started_ms;
             tracked.started_ms = match (is_running(from), is_running(status)) {
                 (_, false) => None,
                 (false, true) => Some(since),
-                (true, true) => tracked.started_ms,
+                (true, true) => run,
             };
             moved.push(Moved {
                 pane: pane.to_owned(),
                 from,
                 to: Some(status),
-                started_ms: tracked.started_ms,
+                // A run that ended reports when it began.
+                started_ms: tracked.started_ms.or(run),
             });
         }
         self.panes.retain(|pane, tracked| {
@@ -120,7 +124,7 @@ impl Agents {
                     pane: pane.clone(),
                     from: tracked.settled,
                     to: None,
-                    started_ms: None,
+                    started_ms: tracked.started_ms,
                 });
             }
             kept

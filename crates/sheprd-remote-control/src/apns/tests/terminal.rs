@@ -71,10 +71,38 @@ fn finishing_lingers_and_anything_else_ends_at_once() {
         }
     );
     assert_eq!(live.state.phase, Phase::Finished);
+    assert_eq!(
+        live.state.started_at,
+        (NOW_MS - 30_000) / 1000,
+        "the finished timer keeps the run's start"
+    );
     for to in [Some(Idle), None] {
         let live = decide(Blocked, to).unwrap();
         assert_eq!(live.event, Event::End { dismissal_s: now_s });
     }
+}
+
+#[test]
+fn a_finished_run_stepped_through_keeps_its_elapsed_time() {
+    let mut agents = crate::push::TerminalAgents::default();
+    let mut moved = Vec::new();
+    for (at, status) in [(0, Idle), (1, Working), (2, Working), (3, Working)]
+        .into_iter()
+        .chain([(60, Done), (61, Done), (62, Done)])
+    {
+        let seen = SeenAgent {
+            chat: CHAT,
+            status,
+            task: None,
+        };
+        moved.extend(agents.step([seen], NOW_MS + at * 1000));
+    }
+    let done = moved.last().unwrap();
+    let agent = agent(None);
+    let live = decide_terminal(done, Some(&agent), "studio", FINGERPRINT, NOW_MS + 62_000);
+    let live = live.unwrap();
+    assert_eq!(live.state.phase, Phase::Finished);
+    assert_eq!(live.state.started_at, NOW_MS / 1000 + 1);
 }
 
 #[test]
