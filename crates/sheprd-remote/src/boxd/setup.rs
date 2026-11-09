@@ -107,6 +107,9 @@ fn prepare(
             return Err(cloud::Error::Install(install::Failure::Missing).into());
         }
     }
+    if approved {
+        install::add_core(relay_command(settings, id), &cancelled)?;
+    }
     Ok(())
 }
 

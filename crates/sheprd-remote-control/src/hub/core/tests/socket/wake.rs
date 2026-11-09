@@ -12,6 +12,7 @@ fn unjoined(socket: &std::path::Path) -> Source {
             socket: socket.to_owned(),
             session: "phone".into(),
         }),
+        holds: AtomicU64::new(0),
         poller: Mutex::default(),
         scope: None,
         state: Mutex::default(),

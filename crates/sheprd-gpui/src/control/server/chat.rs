@@ -32,7 +32,7 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
                     .then(|| view.core_chat_group_tab(None, cx))
                     .flatten();
                 let started = match core {
-                    Some(tab) => view.start_core_chat(agent, tab),
+                    Some(tab) => view.start_core_chat(agent, tab, cx),
                     None => view.start_chat(agent, beside.as_deref()),
                 };
                 match started {

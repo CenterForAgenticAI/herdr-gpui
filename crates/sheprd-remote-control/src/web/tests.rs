@@ -23,6 +23,7 @@ mod empty_core;
 mod handoff;
 mod hosts;
 mod indicators;
+mod layout;
 mod nearby;
 mod origins;
 mod pace;

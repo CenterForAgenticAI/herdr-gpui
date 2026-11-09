@@ -220,6 +220,8 @@ fn media_files_are_left_to_the_system() {
 }
 
 mod back;
+#[cfg(unix)]
+mod core;
 
 // The editor starts from a Unix shell; see `SUPPORTED`.
 #[cfg(unix)]

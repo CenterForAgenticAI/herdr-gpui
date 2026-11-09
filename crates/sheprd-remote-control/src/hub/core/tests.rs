@@ -122,6 +122,7 @@ mod socket {
     };
 
     mod chat_recovery;
+    mod holds;
     mod new_work;
     mod recovery;
     mod screens;
@@ -132,7 +133,26 @@ mod socket {
         _dir: tempfile::TempDir,
         attaches: mpsc::Receiver<Value>,
         inputs: mpsc::Receiver<Vec<u8>>,
+        resizes: mpsc::Receiver<(u16, u16)>,
         server: thread::JoinHandle<()>,
+    }
+
+    /// A client that has gone away resets the socket rather than closing it
+    /// when it still held unread replies, which ends the fake as EOF would.
+    fn gone(error: &std::io::Error) -> bool {
+        matches!(
+            error.kind(),
+            std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+        )
+    }
+
+    /// Writes a reply, or says the client has gone.
+    fn reply(socket: &mut UnixStream, bytes: &[u8]) -> bool {
+        match socket.write_all(bytes) {
+            Ok(()) => true,
+            Err(error) if gone(&error) => false,
+            Err(error) => panic!("{error}"),
+        }
     }
 
     fn receive(socket: &mut UnixStream, decoder: &mut Decoder) -> Option<Frame> {
@@ -143,6 +163,7 @@ mod socket {
             }
             match socket.read(&mut bytes) {
                 Ok(0) => return None,
+                Err(error) if gone(&error) => return None,
                 Ok(count) => decoder.push(&bytes[..count]),
                 Err(error)
                     if matches!(
@@ -171,6 +192,7 @@ mod socket {
         let listener = UnixListener::bind(&path).unwrap();
         let (sent, inputs) = mpsc::channel();
         let (attached, attaches) = mpsc::channel();
+        let (resized, resizes) = mpsc::channel();
         let server = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             socket
@@ -187,6 +209,11 @@ mod socket {
             let mut decoder = Decoder::default();
             let mut channel = 6;
             while let Some(frame) = receive(&mut socket, &mut decoder) {
+                if frame.kind == Kind::Resize {
+                    let side =
+                        |at: usize| u16::from_le_bytes([frame.payload[at], frame.payload[at + 1]]);
+                    resized.send((side(0), side(2))).unwrap();
+                }
                 if frame.kind != Kind::Data {
                     continue;
                 }
@@ -195,11 +222,10 @@ mod socket {
                     if close {
                         assert!(frame.channel > 7, "typed on the closed channel");
                     }
-                    socket
-                        .write_all(
-                            &encode(frame.channel, Kind::Data, b"\r\x1b[2Kreceived").unwrap(),
-                        )
-                        .unwrap();
+                    let echo = encode(frame.channel, Kind::Data, b"\r\x1b[2Kreceived").unwrap();
+                    if !reply(&mut socket, &echo) {
+                        return;
+                    }
                     continue;
                 }
                 let request: Value = serde_json::from_slice(&frame.payload).unwrap();
@@ -214,7 +240,6 @@ mod socket {
                         json!({"value": doc, "version": if doc.is_null() { 0 } else { 1 }})
                     }
                     "terminal.attach" => {
-                        assert_eq!(request["params"]["cols"], 80);
                         attached.send(request["params"].clone()).unwrap();
                         channel += 1;
                         json!({"channel": channel, "terminal": record("t1")})
@@ -225,48 +250,52 @@ mod socket {
                     }
                     method => panic!("unexpected method {method}"),
                 };
-                let response = if request["params"]["cwd"]
+                // A cwd ending in `/refused`, or an attach 13 columns wide,
+                // is refused.
+                let refused = request["params"]["cwd"]
                     .as_str()
                     .is_some_and(|cwd| cwd.ends_with("/refused"))
-                {
+                    || request["params"]["cols"] == 13;
+                let response = if refused {
                     json!({"jsonrpc": "2.0", "id": request["id"],
                         "error": {"code": -32000, "message": "refused"}})
                 } else {
                     json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
                 };
-                socket
-                    .write_all(
-                        &encode(0, Kind::Data, &serde_json::to_vec(&response).unwrap()).unwrap(),
-                    )
-                    .unwrap();
+                if !reply(
+                    &mut socket,
+                    &encode(0, Kind::Data, &serde_json::to_vec(&response).unwrap()).unwrap(),
+                ) {
+                    return;
+                }
                 if request["method"] == "events.subscribe" {
                     let event = json!({"jsonrpc": "2.0", "method": "event", "params":
                         {"seq": 1, "type": "title", "terminal": "t1", "data": {"title": "new"}}});
                     let line = format!("{event}\n");
-                    socket
-                        .write_all(&encode(channel, Kind::Data, line.as_bytes()).unwrap())
-                        .unwrap();
+                    if !reply(
+                        &mut socket,
+                        &encode(channel, Kind::Data, line.as_bytes()).unwrap(),
+                    ) {
+                        return;
+                    }
                 }
-                if request["method"] == "terminal.attach" {
-                    socket
-                        .write_all(
-                            &encode(
-                                channel,
-                                Kind::Data,
-                                if channel == 7 {
-                                    b"\x1b[31mhello\x1b[0m\x1b[?2004h"
-                                } else {
-                                    b"recovered"
-                                },
-                            )
-                            .unwrap(),
-                        )
-                        .unwrap();
+                let screen = if channel == 7 {
+                    &b"\x1b[31mhello\x1b[0m\x1b[?2004h"[..]
+                } else {
+                    b"recovered"
+                };
+                if request["method"] == "terminal.attach"
+                    && !refused
+                    && !reply(&mut socket, &encode(channel, Kind::Data, screen).unwrap())
+                {
+                    return;
                 }
-                if close && request["method"] == "terminal.attach" && channel == 7 {
-                    socket
-                        .write_all(&encode(7, Kind::Close, b"").unwrap())
-                        .unwrap();
+                if close
+                    && request["method"] == "terminal.attach"
+                    && channel == 7
+                    && !reply(&mut socket, &encode(7, Kind::Close, b"").unwrap())
+                {
+                    return;
                 }
             }
         });
@@ -278,6 +307,7 @@ mod socket {
         let source = Arc::new(Source {
             connected: AtomicBool::new(false),
             endpoint: Default::default(),
+            holds: AtomicU64::new(0),
             poller: Mutex::default(),
             scope: None,
             state: Mutex::new(State {
@@ -292,6 +322,7 @@ mod socket {
                 _dir: dir,
                 attaches,
                 inputs,
+                resizes,
                 server,
             },
         )
@@ -406,11 +437,14 @@ mod socket {
     }
 }
 
+mod checkouts;
 mod state_context;
 
 mod empty_core;
+mod kept_workspaces;
 mod poller;
 mod saved_beside_spaces;
+mod screen_history;
 
 #[test]
 fn an_unreachable_core_stays_with_the_core_source() {
@@ -420,6 +454,7 @@ fn an_unreachable_core_stays_with_the_core_source() {
             socket: "/nonexistent/core.sock".into(),
             session: "test".into(),
         }),
+        holds: AtomicU64::new(0),
         poller: Mutex::default(),
         scope: None,
         state: Mutex::new(State::default()),

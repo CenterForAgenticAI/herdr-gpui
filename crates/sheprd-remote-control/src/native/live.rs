@@ -12,7 +12,7 @@ use crate::{
     control::DeviceId,
     hub::{Chat, Event},
     web::attention::Watching,
-    web::{Shared, now_ms, read_screen},
+    web::{Shared, now_ms},
 };
 use secrecy::{ExposeSecret as _, SecretString};
 use sheprd_chat_protocol::{Change, Cursor, EntryKind, Transcript};
@@ -131,7 +131,7 @@ pub(crate) async fn run(
         tokio::select! {
             message = inbound.recv() => match message {
                 Some(message) => {
-                    if let Some(error) = handle(&state, &mut views, message, &outbound) {
+                    if let Some(error) = handle(&state, &device, &mut views, message, &outbound) {
                         let message = ServerMessage::Error { message: error.to_owned() };
                         if outbound.send(message).await.is_err() {
                             return;
@@ -152,6 +152,7 @@ pub(crate) async fn run(
 /// Starts or stops a view; what the phone is told when it cannot.
 fn handle(
     state: &Shared,
+    device: &DeviceId,
     views: &mut Views,
     message: ClientMessage,
     outbound: &Outbound,
@@ -204,7 +205,7 @@ fn handle(
                 let (size, follow) = watch::channel(size);
                 let (scrolls, scrolled) = mpsc::channel(SCROLL_QUEUE);
                 let watching = Watching::new(&state, &pane);
-                let term = follow_term(state, pane.clone(), follow, scrolled, out);
+                let term = follow_term(state, device.clone(), pane.clone(), follow, scrolled, out);
                 views.start(view, async move {
                     let _watching = watching;
                     term.await;
@@ -465,12 +466,13 @@ async fn follow_chat(state: Shared, link: Arc<Chat>, since: Option<Cursor>, out:
 /// and `scrolls` scroll it.
 async fn follow_term(
     state: Shared,
+    device: DeviceId,
     pane: String,
     mut size: watch::Receiver<Option<TermSize>>,
     mut scrolls: mpsc::Receiver<i32>,
     out: Outbound,
 ) {
-    let mut pace = state.typed.pace(&pane);
+    let mut pace = state.typed.pace_for(&pane, &device);
     let reload = ServerMessage::Reload {
         view: View::Term { pane: pane.clone() },
     };
@@ -487,7 +489,7 @@ async fn follow_term(
         }
         let wanted = *size.borrow_and_update();
         sizing.apply(&state, &pane, wanted).await;
-        match read_screen(&state, &pane).await {
+        match sizing.read(&state, &pane).await {
             Ok(text) => {
                 failures = 0;
                 if last.as_ref() != Some(&text) {
@@ -512,7 +514,13 @@ async fn follow_term(
             }
         }
         tokio::select! {
-            () = pace.wait() => {}
+            () = pace.wait() => {
+                // What this phone types shows at the live screen, as
+                // typing into a scrolled terminal does.
+                if pace.typed_here() {
+                    sizing.live();
+                }
+            }
             () = out.closed() => return,
             // Subscribed again: the screen goes out again, at the new size.
             changed = size.changed() => {
@@ -522,7 +530,7 @@ async fn follow_term(
                 last = None;
             }
             Some(lines) = scrolls.recv() => {
-                if sizing.scroll(lines) {
+                if sizing.scroll(&pane, lines) {
                     // Read at once and again shortly, as after typing.
                     state.typed.typed(&pane);
                 } else if !told {
