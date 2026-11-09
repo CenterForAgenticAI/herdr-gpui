@@ -34,6 +34,7 @@ fn terminal(pane: &str, status: AgentStatus) -> Terminal {
             title: None,
             changed_ms: None,
         }),
+        agents: Vec::new(),
         convert: None,
     }
 }

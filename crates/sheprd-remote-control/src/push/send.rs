@@ -62,8 +62,8 @@ impl Delivery {
     pub(crate) fn for_notification(notification: &Notification) -> Self {
         let ttl_s = match (notification.clear, notification.kind) {
             (true, _) => 60 * 60,
-            (false, Kind::Question) => 24 * 60 * 60,
-            (false, Kind::Error | Kind::TurnEnded) => 60 * 60,
+            (false, Kind::Question | Kind::TerminalAsking) => 24 * 60 * 60,
+            (false, Kind::Error | Kind::TerminalDone | Kind::TurnEnded) => 60 * 60,
         };
         Self {
             topic: Some(Topic::from_tag(&notification.tag)),

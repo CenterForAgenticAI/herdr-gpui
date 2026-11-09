@@ -39,6 +39,16 @@ impl Infos {
             .find(|info| info.name.as_deref() == Some(name))
     }
 
+    /// How many of the core's terminals run an agent that is working.
+    pub(super) fn working(&self) -> u32 {
+        let working = self
+            .known
+            .values()
+            .filter(|info| info.agent == sheprd_client::protocol::AgentStatus::Working)
+            .count();
+        u32::try_from(working).unwrap_or(u32::MAX)
+    }
+
     /// Every terminal the core last reported.
     pub(super) fn all(&self) -> impl Iterator<Item = &TerminalInfo> {
         self.known.values()
