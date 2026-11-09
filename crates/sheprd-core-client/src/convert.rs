@@ -15,7 +15,7 @@
 //! herdr-core to carry a session reference (for instance in their OSC 7501
 //! records).
 
-use crate::{Core, Result, agent_kind, backend::info};
+use crate::{Core, Result, agent_kind, backend::info, wire::Terminal};
 use serde::Deserialize;
 use sheprd_backend::{AgentStatus, Process, TerminalId, TerminalInfo};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN, restore};
@@ -90,11 +90,15 @@ fn runs(process: &Process, agent: Agent) -> bool {
         .is_some_and(|kind| kind.name() == agent.name())
 }
 
-/// Whether the agent has left and the shell that started it is in front.
-pub fn shell_in_front(info: &TerminalInfo, agent: Agent) -> bool {
-    info.foreground
-        .as_ref()
-        .is_some_and(|process| !runs(process, agent))
+/// Whether the shell the terminal started has it again: the process in
+/// front is the terminal's own program. Any other program in front, such as
+/// one the agent's command line runs after it (`claude; less log`), must not
+/// get the chat's line.
+pub fn shell_back(record: &Terminal) -> bool {
+    record
+        .pid
+        .zip(record.foreground.as_ref())
+        .is_some_and(|(pid, front)| front.pid == pid)
 }
 
 /// What Claude Code writes about one running CLI.
@@ -175,15 +179,18 @@ pub fn chat_line(
     sheprd_client::quoted_line(&words).ok_or(convert::Error::Line)
 }
 
+/// What the core reports of `terminal` now, as it sends it.
+fn record(core: &Core, terminal: &TerminalId) -> Result<Terminal> {
+    core.list(false)?
+        .terminals
+        .into_iter()
+        .find(|record| record.address == terminal.as_str())
+        .ok_or_else(|| convert::Error::Moved.into())
+}
+
 /// What the core reports of `terminal` now.
 fn current(core: &Core, terminal: &TerminalId) -> Result<TerminalInfo> {
-    let listed = core.list(false)?;
-    let record = listed
-        .terminals
-        .iter()
-        .find(|record| record.address == terminal.as_str())
-        .ok_or(convert::Error::Moved)?;
-    info(record)
+    info(&record(core, terminal)?)
 }
 
 /// Blocking: moves the agent in `terminal`, which a client last saw as
@@ -208,7 +215,7 @@ pub fn run(
     let line = chat_line(&resume, program, &endpoint)?;
     convert::stop(
         agent,
-        || current(core, terminal).map(|now| shell_in_front(&now, agent)),
+        || record(core, terminal).map(|now| shell_back(&now)),
         || core.keys(terminal.as_str(), &["ctrl+c"]),
         || std::thread::sleep(convert::POLL),
         cancelled,
