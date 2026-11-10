@@ -24,6 +24,7 @@ mod links;
 mod menus;
 mod moves;
 mod mutes;
+mod note_targets;
 mod open_terminal;
 mod pane_keys;
 mod paste;

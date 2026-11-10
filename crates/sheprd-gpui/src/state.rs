@@ -11,6 +11,7 @@ mod agent_recency;
 mod projection;
 
 use agent_recency::AgentRecency;
+pub(crate) use agent_recency::StatusRecency;
 
 pub(crate) type DialogResponse = Result<serde_json::Value, Arc<crate::Error>>;
 

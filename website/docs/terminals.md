@@ -35,7 +35,7 @@ A Herdr 2 pane keeps 10,000 lines of scrollback by default. **Settings > Tabs > 
 herdr_2_scrollback = 50000
 ```
 
-**Mirror Herdr 2 Pane** opens a watch-only view of the focused pane in a new tab. In the sidebar, a Herdr 2 list under the agents shows each pane of the workspace's Herdr 2 tabs with its status.
+**Mirror Herdr 2 Pane** opens a watch-only view of the focused pane in a new tab. Agents in Herdr 2 panes are listed with Herdr 1's in the sidebar, in every workspace and wherever the agents placement puts them, sorted and numbered together, so **Previous Agent**, **Next Agent**, and the agent numbers step through both.
 
 ## Splits
 
