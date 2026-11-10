@@ -157,7 +157,7 @@ The panel shows archive download progress and an animated bar for work without a
 known percentage. Homebrew-managed installs use `brew upgrade --cask` on their cask;
 if the installed version is behind the offer, `brew update` refreshes metadata
 before one retry. Linux distribution installs download the signed package matching
-the owning package manager and invoke APT, DNF, or pacman through PolicyKit.
+the owning package manager and invoke APT, DNF, zypper, or pacman through PolicyKit.
 Package-manager upgrades cannot be cancelled mid-install and offer **Restart**
 on completion. Standalone installs restart as part of installation.
 The existing UI timer polls the updater mailbox; workers own blocking work, and
