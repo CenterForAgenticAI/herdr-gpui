@@ -41,8 +41,15 @@ pub(crate) fn kept_candidates<'a, R: std::ops::Deref<Target = PullRequest>>(
             .worktree
             .as_ref()
             .filter(|tree| tree.linked && workspace.keeper == Keeper::App)?;
-        let input = key_input(&tree.key, workspace.branch.as_deref()).ok()?;
+        let mut input = key_input(&tree.key, workspace.branch.as_deref()).ok()?;
         let pr = pull_request(&input).filter(|pr| pr.state == State::Merged)?;
+        // The PR cache is keyed by repository and branch, but the probe
+        // must inspect this workspace's folder, not another checkout now
+        // holding its cached branch.
+        if workspace.cwd.is_empty() {
+            return None;
+        }
+        input.checkout = Some(workspace.cwd.clone());
         Some(Candidate {
             workspace: workspace.id.clone(),
             number: pr.number,
@@ -168,8 +175,11 @@ impl SheprdWindow {
                 let (id, path) = (workspace.id.clone(), workspace.cwd.clone());
                 // A removal that is refused, such as for files that appeared
                 // after the check, is tried again later, never with force.
-                self.merged_cleanup.kept.ledger.settle(candidate, retry);
-                self.remove_kept_checkout(id, path, false, cx);
+                self.merged_cleanup
+                    .kept
+                    .ledger
+                    .settle(candidate.clone(), retry);
+                self.remove_merged_kept_checkout(id, path, candidate, cx);
             }
         }
         cx.notify();

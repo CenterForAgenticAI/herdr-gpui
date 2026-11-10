@@ -5,7 +5,7 @@ use super::*;
 use crate::merged_cleanup::kept::kept_candidates;
 use sheprd_session::{Keeper, Workspace, Worktree};
 
-fn kept(id: &str, linked: bool, keeper: Keeper) -> Workspace {
+pub(super) fn kept(id: &str, linked: bool, keeper: Keeper) -> Workspace {
     Workspace {
         ahead_behind: None,
         branch: Some("feature".into()),

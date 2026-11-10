@@ -197,6 +197,22 @@ pub(crate) struct Cleanup {
     kept: kept::Kept,
 }
 
+/// Revalidate the exact folder immediately before background removal.
+/// Cached workspace metadata must never authorize deleting another branch.
+pub(crate) fn verify_kept_removal(
+    candidate: &Candidate,
+    path: &str,
+    cancelled: &AtomicBool,
+) -> crate::Result<()> {
+    if candidate.input.checkout.as_deref() != Some(path) {
+        return Err(crate::Error::StaleWorkspace);
+    }
+    let report = probe(&candidate.input, cancelled)?;
+    decide_status(candidate, &report, AgentStatus::Idle, false)
+        .map(|_| ())
+        .map_err(|_| crate::Error::StaleWorkspace)
+}
+
 /// Read the checkout's head, status, and archive script. Blocking: call only
 /// on the background executor.
 fn probe(input: &Input, cancelled: &AtomicBool) -> crate::Result<Report> {

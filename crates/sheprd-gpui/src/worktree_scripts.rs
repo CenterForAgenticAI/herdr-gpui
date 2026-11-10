@@ -252,6 +252,9 @@ impl SheprdWindow {
         result: crate::Result<Option<Config>>,
         cx: &mut Context<Self>,
     ) {
+        if !self.worktree_script_current() {
+            return self.fail_worktree_script(crate::Error::StaleConnection, cx);
+        }
         let Some(job) = &self.worktree_script else {
             return;
         };
@@ -311,6 +314,9 @@ impl SheprdWindow {
         config: &Config,
         cx: &mut Context<Self>,
     ) -> crate::Result<()> {
+        if !self.worktree_script_current() {
+            return Err(crate::Error::StaleConnection);
+        }
         let Some(job) = &mut self.worktree_script else {
             return Ok(());
         };

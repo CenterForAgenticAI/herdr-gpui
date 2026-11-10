@@ -450,7 +450,7 @@ impl SheprdWindow {
         let request = format!("kept-{}", uuid::Uuid::new_v4().simple());
         deletion.pending = Some(request.clone());
         self.menu.error = None;
-        self.remove_kept_checkout_for(request, workspace, path, force, cx);
+        self.remove_kept_checkout_for(request, workspace, path, force, None, cx);
     }
 
     /// Removes the kept linked checkout at `path` off the UI thread, as no
@@ -465,7 +465,18 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         let request = format!("kept-{}", uuid::Uuid::new_v4().simple());
-        self.remove_kept_checkout_for(request, workspace, path, force, cx);
+        self.remove_kept_checkout_for(request, workspace, path, force, None, cx);
+    }
+
+    pub(crate) fn remove_merged_kept_checkout(
+        &mut self,
+        workspace: String,
+        path: String,
+        candidate: crate::merged_cleanup::Candidate,
+        cx: &mut Context<Self>,
+    ) {
+        let request = format!("kept-{}", uuid::Uuid::new_v4().simple());
+        self.remove_kept_checkout_for(request, workspace, path, false, Some(candidate), cx);
     }
 
     fn remove_kept_checkout_for(
@@ -474,6 +485,7 @@ impl SheprdWindow {
         workspace: String,
         path: String,
         force: bool,
+        merged: Option<crate::merged_cleanup::Candidate>,
         cx: &mut Context<Self>,
     ) {
         // Kept for this computer, whichever host is shown when it finishes.
@@ -481,7 +493,11 @@ impl SheprdWindow {
         let scope = crate::browser::scope(&self.endpoints[index]);
         let removed = cx.background_executor().spawn(async move {
             let host = this_computer()?;
-            work::remove(&host, &path, force, &AtomicBool::new(false)).map_err(crate::Error::from)
+            let cancelled = AtomicBool::new(false);
+            if let Some(candidate) = merged {
+                crate::merged_cleanup::verify_kept_removal(&candidate, &path, &cancelled)?;
+            }
+            work::remove(&host, &path, force, &cancelled).map_err(crate::Error::from)
         });
         cx.spawn(async move |this, cx| {
             let result = removed.await;

@@ -107,7 +107,7 @@ impl SheprdWindow {
             labels,
             name: Some(launch.kind.name().to_owned()),
         };
-        self.start_in_kept_workspace(&launch.workspace, spawn, cx);
+        self.start_in_kept_workspace(&launch.workspace, spawn, cx)?;
         if archive {
             self.kept_scripts.archives.push(Archive {
                 attempt,

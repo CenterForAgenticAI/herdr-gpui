@@ -18,13 +18,16 @@ impl SheprdWindow {
         id: &str,
         spawn: Spawn,
         cx: &mut Context<Self>,
-    ) {
-        self.focus_kept_workspace(id, cx);
+    ) -> crate::Result<()> {
+        if !self.focus_kept_workspace(id, cx) {
+            return Err(crate::Error::StaleWorkspace);
+        }
         let purpose = Purpose::Tab {
             scope: scope_of(self),
             workspace: id.to_owned(),
         };
         self.start_core_program(purpose, spawn, cx);
+        Ok(())
     }
 
     /// The terminal of this computer's core that `key` labels `value`.
