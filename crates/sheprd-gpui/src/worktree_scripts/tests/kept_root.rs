@@ -20,7 +20,6 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?}");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_linked_checkout_names_its_main_checkout() {
     let temp = tempfile::tempdir().unwrap();

@@ -630,7 +630,7 @@ impl SheprdWindow {
             .orchestrator_repository(&request.workspace_id)
             .and_then(|(key, label)| {
                 let origin = self.dispatch_origin(&request.workspace_id, &key, &label)?;
-                let destination = self.dispatch_destination(endpoint)?;
+                let destination = self.herdr_1_destination(endpoint)?;
                 let target = self
                     .endpoints
                     .iter()
@@ -727,7 +727,9 @@ impl SheprdWindow {
             self.refresh_core_session(cx);
         }
         let shown = match self.kept_workspace_at(&path) {
-            Some(id) => self.focus_kept_workspace(&id, cx),
+            // The workspace may predate the agent, or the agent's tab may
+            // have moved: show the run's own terminal either way.
+            Some(id) => self.show_terminal_in_kept_workspace(&id, terminal, window, cx),
             None => {
                 // The tab drives the terminal, as a Herdr 1 pane does its
                 // agent: closing it ends the agent, and so does a tab that

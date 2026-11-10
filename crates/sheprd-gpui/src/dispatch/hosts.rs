@@ -204,6 +204,19 @@ impl SheprdWindow {
     /// repositories its snapshot shows when it is connected, or on this
     /// computer keeping its workspaces for Herdr 2, the kept ones.
     pub(crate) fn dispatch_destination(&self, endpoint_id: &str) -> Option<HostRepositories> {
+        self.destination_of(endpoint_id, self.dispatch_keeps(endpoint_id))
+    }
+
+    /// The host `endpoint_id` with only the repositories Herdr 1's snapshot
+    /// shows there, for callers that create through Herdr 1's CLI on it
+    /// (Teleport, fan-out, the orchestrator): a kept workspace's ID means
+    /// nothing to `herdr worktree create`, even on this computer when it
+    /// keeps its new workspaces for Herdr 2.
+    pub(crate) fn herdr_1_destination(&self, endpoint_id: &str) -> Option<HostRepositories> {
+        self.destination_of(endpoint_id, false)
+    }
+
+    fn destination_of(&self, endpoint_id: &str, kept: bool) -> Option<HostRepositories> {
         let index = self.endpoints.iter().position(|e| e.id == endpoint_id)?;
         let endpoint = &self.endpoints[index];
         Some(HostRepositories {
@@ -212,7 +225,7 @@ impl SheprdWindow {
                 label: endpoint.label.clone(),
                 host: host_for(&endpoint.connection.target).ok()?,
             },
-            repositories: if self.dispatch_keeps(endpoint_id) {
+            repositories: if kept {
                 Some(self.kept_repositories(index))
             } else {
                 self.endpoint_snapshot(index).map(open_repositories)

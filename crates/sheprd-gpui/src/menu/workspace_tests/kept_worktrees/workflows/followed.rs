@@ -136,3 +136,118 @@ fn a_kept_archive_is_given_its_main_checkout(cx: &mut TestAppContext) {
         })
     });
 }
+
+/// A terminal this computer's core lists, labelled as an archive attempt.
+fn archive_terminal(name: &str, attempt: &str) -> sheprd_backend::TerminalInfo {
+    sheprd_backend::TerminalInfo {
+        agent: sheprd_backend::AgentStatus::Unknown,
+        cwd: None,
+        foreground: None,
+        id: TerminalId::new(name).unwrap(),
+        labels: [("sheprd.worktree_archive".to_owned(), attempt.to_owned())].into(),
+        name: None,
+        reporter: None,
+        state: sheprd_backend::RunState::Running,
+        title: None,
+    }
+}
+
+/// Starts a trusted archive of the fixture's workspace.
+fn start_archive(
+    view: &mut SheprdWindow,
+    id: &str,
+    folder: &str,
+    cx: &mut gpui::Context<SheprdWindow>,
+) {
+    let text = "[scripts]\narchive = \"make clean\"\n";
+    let config = crate::worktree_scripts::Config::parse(text.as_bytes()).unwrap();
+    let launch = Launch {
+        requested: true,
+        ..kept_launch(view, ScriptKind::Archive, id, folder)
+    };
+    trust(cx, &launch, &config);
+    view.start_archive_script(launch, config, cx).unwrap();
+}
+
+#[gpui::test]
+fn a_retried_archive_follows_its_own_terminal_only(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().display().to_string();
+    write_scripts(dir.path(), "[scripts]\narchive = \"make clean\"\n");
+    let (view, cx, id) = window(cx, &folder, Some(true));
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            start_archive(view, &id, &folder, cx);
+            let (attempt, _) = view.kept_archive_attempt(&id).unwrap();
+            // An earlier attempt's terminal, labelled the old way or its own.
+            let host = crate::core_terminals::Host::Local;
+            view.core_terminals
+                .record_for_test(&host, archive_terminal("old", &id));
+            view.core_terminals
+                .record_for_test(&host, archive_terminal("older", "an-earlier-attempt"));
+            view.poll_kept_scripts(cx);
+            assert_eq!(
+                view.kept_archive_attempt(&id),
+                Some((attempt.clone(), None))
+            );
+            view.core_terminals
+                .record_for_test(&host, archive_terminal("mine", &attempt));
+            view.poll_kept_scripts(cx);
+            let (_, terminal) = view.kept_archive_attempt(&id).unwrap();
+            assert_eq!(terminal, Some(TerminalId::new("mine").unwrap()));
+        })
+    });
+}
+
+#[gpui::test]
+fn an_archive_whose_tab_never_shows_is_cancelled(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().display().to_string();
+    write_scripts(dir.path(), "[scripts]\narchive = \"make clean\"\n");
+    let (view, cx, id) = window(cx, &folder, Some(true));
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            start_archive(view, &id, &folder, cx);
+            let (attempt, _) = view.kept_archive_attempt(&id).unwrap();
+            let host = crate::core_terminals::Host::Local;
+            view.core_terminals
+                .record_for_test(&host, archive_terminal("closed", &attempt));
+            view.poll_kept_scripts(cx);
+            assert!(view.follows_kept_archive(&id), "its tab may still open");
+            // No tab shows it: closed, or never opened.
+            view.age_kept_archives();
+            view.poll_kept_scripts(cx);
+            assert!(!view.follows_kept_archive(&id), "the attempt is let go");
+            assert!(view.kept_worktree_done.is_empty(), "nothing is removed");
+            assert!(view.is_kept_workspace(&id));
+            // The next archive of the workspace is not refused as busy.
+            start_archive(view, &id, &folder, cx);
+            assert!(view.follows_kept_archive(&id));
+        })
+    });
+}
+
+#[gpui::test]
+fn a_queued_setup_runs_under_the_selection_of_its_start(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().display().to_string();
+    write_scripts(dir.path(), "[scripts]\nsetup = \"npm ci\"\n");
+    let (view, cx, _) = window(cx, &folder, Some(true));
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            let mut stale = kept_launch(view, ScriptKind::Setup, "", &folder);
+            // Queued before the user looked at another host and came back.
+            stale.endpoint.0 = view.selection_epoch.wrapping_sub(3);
+            view.queue_kept_setup(stale);
+            view.poll_kept_scripts(cx);
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.poll_worktree_script(window, cx);
+            assert!(view.local_error.is_none(), "{:?}", view.local_error);
+            assert_eq!(view.menu.page, Some(Page::WorktreeScript));
+        })
+    });
+}

@@ -266,8 +266,8 @@ impl Job {
     }
 
     /// A job already done with `result`, for tests that land a dispatch
-    /// without running its scripts.
-    #[cfg(test)]
+    /// without running its scripts. Only POSIX clients dispatch.
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
     pub(crate) fn finished(host: &str, repo: &str, result: crate::Result<Dispatched>) -> Self {
         let (sender, events) = mpsc::channel();
         let _ = sender.send(Event::Done(result));

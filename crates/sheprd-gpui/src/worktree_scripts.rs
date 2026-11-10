@@ -482,8 +482,9 @@ impl SheprdWindow {
         )
     }
 
-    /// The main checkout the script job in hand runs with, if any.
-    #[cfg(test)]
+    /// The main checkout the script job in hand runs with, if any, for the
+    /// kept workspaces' tests, which need host scripts.
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
     pub(crate) fn worktree_script_root(&self) -> Option<&str> {
         self.worktree_script
             .as_ref()?

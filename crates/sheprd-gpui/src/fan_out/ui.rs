@@ -205,7 +205,7 @@ impl SheprdWindow {
             .map(|fan_out| fan_out.lane_hosts())
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|endpoint| self.dispatch_destination(&endpoint))
+            .filter_map(|endpoint| self.herdr_1_destination(&endpoint))
             .collect();
         // A restored fan-out's other worktrees are removed only once each is
         // confirmed to still be its lane's.

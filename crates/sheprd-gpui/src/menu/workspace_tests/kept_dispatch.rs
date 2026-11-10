@@ -206,3 +206,41 @@ fn a_herdr_1_dispatch_still_follows_its_workspace(cx: &mut TestAppContext) {
         assert!(view.kept_workspace_at(Path::new(NEW)).is_none());
     });
 }
+
+#[gpui::test]
+fn herdr_1_callers_never_get_kept_workspace_ids(cx: &mut TestAppContext) {
+    let (view, cx, _) = window(cx, false);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            // Herdr 1 runs here too, with the repository open, while new
+            // workspaces are kept for Herdr 2.
+            view.config.herdr_2_terminals = true;
+            view.live.missing_installation = false;
+            view.live.status = crate::state::ConnectionStatus::Connected;
+            view.live.snapshot = Some(std::sync::Arc::new(sidebar::layout_tests::snapshot(7)));
+            view.refresh_core_session(cx);
+            let local = view.endpoints[0].id.clone();
+            assert!(view.dispatch_keeps(&local));
+            let kept = view
+                .dispatch_destination(&local)
+                .unwrap()
+                .repositories
+                .unwrap();
+            assert!(
+                kept.iter()
+                    .all(|repo| crate::browser::is_kept_id(&repo.workspace_id))
+            );
+            let herdr_1 = view
+                .herdr_1_destination(&local)
+                .unwrap()
+                .repositories
+                .unwrap();
+            assert!(!herdr_1.is_empty(), "Herdr 1's repositories stay reachable");
+            assert!(
+                herdr_1
+                    .iter()
+                    .all(|repo| !crate::browser::is_kept_id(&repo.workspace_id))
+            );
+        })
+    });
+}
