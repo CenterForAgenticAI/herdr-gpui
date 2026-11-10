@@ -257,13 +257,14 @@ fn a_workspace_in_a_subfolder_shows_the_checkouts_paths_and_their_diffs() {
 
 #[test]
 fn colors_and_patterns_in_names_leave_a_diff_as_git_wrote_it() {
-    for name in [
-        // Both patterns match a.txt unless Git treats the path literally.
-        // Brackets are valid Windows filename characters; a star is not.
+    // Both patterns match a.txt unless Git treats the path literally.
+    // Brackets are valid Windows filename characters; a star is not.
+    let names: &[&str] = &[
         "[a].txt",
         #[cfg(unix)]
         "a*.txt",
-    ] {
+    ];
+    for &name in names {
         let dir = tempfile::tempdir().unwrap();
         let repository = repository(dir.path());
         run(&repository, &["config", "color.diff", "always"]);
