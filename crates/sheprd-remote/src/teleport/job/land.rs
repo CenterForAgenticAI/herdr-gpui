@@ -137,11 +137,13 @@ fn reclaim(
 ) -> Result<Landing> {
     let backup = reference.replacen("refs/herdr-teleport/", "refs/herdr-teleport/backup/", 1);
     if let Keeping::App { checkout } = keeping {
-        git::reclaim(to, checkout, reference, &backup, cancelled)?;
+        // Its folder may be a subfolder; the whole checkout comes back.
+        let checkout = git::toplevel(to, checkout, Step::Restore, cancelled)?;
+        git::reclaim(to, &checkout, reference, &backup, cancelled)?;
         return Ok(Landing {
             workspace: Landed::Workspace(workspace_id.to_owned()),
             herdr1: None,
-            checkout: checkout.clone(),
+            checkout,
             first: None,
             stale_tabs: Vec::new(),
         });

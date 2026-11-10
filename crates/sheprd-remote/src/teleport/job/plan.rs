@@ -159,9 +159,12 @@ pub(in crate::teleport) fn plan_action(
 pub fn review(source: &Source, destination: &Candidate, cancelled: &AtomicBool) -> Result<Review> {
     let host = &source.place.host;
     // A workspace the app keeps has no Herdr 1 tabs, and Herdr 1 may not
-    // even be installed; the app names its checkout.
+    // even be installed; its folder, perhaps a subfolder, names the checkout.
     let (snapshot, checkout) = match &source.keeping {
-        Keeping::App { checkout } => (HostSnapshot::default(), checkout.clone()),
+        Keeping::App { checkout } => (
+            HostSnapshot::default(),
+            git::toplevel(host, checkout, Step::Review, cancelled)?,
+        ),
         Keeping::Herdr1 => {
             let snapshot: SnapshotResult =
                 host.herdr(Step::Review, &["api", "snapshot"], cancelled)?;
