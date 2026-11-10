@@ -237,12 +237,22 @@ esac"#,
         prompt: Some("go"),
     };
     let error = start_agent(&fixture.host(), &worktree, &agent, &never()).unwrap_err();
+    // The agent runs, so its terminal is named for the caller to show.
+    let Error::Unprompted { started, source } = error else {
+        panic!("{error:?}");
+    };
+    assert_eq!(
+        started,
+        Started::Herdr2 {
+            terminal: "t2".into()
+        }
+    );
     assert!(
         matches!(
-            error,
+            *source,
             Error::Agent(sheprd_core_client::Error::AgentNotReady { .. })
         ),
-        "{error:?}"
+        "{source:?}"
     );
     assert!(!fixture.calls().iter().any(|call| call.ends_with(" go")));
 }
@@ -324,4 +334,54 @@ fn porcelain_records_become_checkouts() {
             },
         ]
     );
+}
+
+#[test]
+fn a_shell_whose_agent_never_started_is_ended() {
+    let fixture = Fixture::new();
+    fixture.program(
+        "herdr-core",
+        r#"case "$1" in
+run) echo '{"address":"t4"}' ;;
+send) exit 1 ;;
+kill) echo '{}' ;;
+esac"#,
+    );
+    let worktree = Worktree {
+        path: "/w".into(),
+        opened: Opened::Herdr2,
+    };
+    let agent = Agent {
+        kind: AgentKind::Claude,
+        name: "claude-3",
+        prompt: None,
+    };
+    let error = start_agent(&fixture.host(), &worktree, &agent, &never()).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::Script {
+                step: Step::StartAgent,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(fixture.calls().last().unwrap(), "kill --json -- t4");
+}
+
+#[test]
+fn a_checkout_is_removed_from_any_of_its_folders() {
+    let fixture = Fixture::new();
+    let host = fixture.host();
+    let new = NewWorktree {
+        branch: "deep",
+        base: "HEAD",
+        label: None,
+    };
+    let created = create(&host, &fixture.herdr2(), &new, &never()).unwrap();
+    let inner = Path::new(&created.path).join("src");
+    fs::create_dir(&inner).unwrap();
+    remove(&host, &inner.display().to_string(), false, &never()).unwrap();
+    assert!(!Path::new(&created.path).exists());
 }

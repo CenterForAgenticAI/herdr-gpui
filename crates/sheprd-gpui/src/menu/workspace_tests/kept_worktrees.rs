@@ -330,3 +330,27 @@ fn another_hosts_kept_workspace_offers_no_local_git(cx: &mut TestAppContext) {
         })
     });
 }
+
+#[gpui::test]
+fn a_kept_dialog_outlives_the_tick_without_herdr_1(cx: &mut TestAppContext) {
+    let (view, cx, id) = window(cx, LINKED, Some(true));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_workspace_dialog_for(
+                &id,
+                WorkspaceAction::DeleteWorktree,
+                gpui::Point::default(),
+                window,
+                cx,
+            );
+            // No Herdr 1 daemon or boot to wait on: the window's tick must
+            // leave the confirmation for the user.
+            view.update_workspace_dialog(window, cx);
+            assert!(view.menu.deletion.is_some());
+            assert_eq!(
+                view.menu.page,
+                Some(Page::Dialog(WorkspaceAction::DeleteWorktree))
+            );
+        })
+    });
+}
