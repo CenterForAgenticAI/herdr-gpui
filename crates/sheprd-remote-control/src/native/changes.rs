@@ -9,6 +9,7 @@ mod mailbox;
 pub(crate) use error::Error;
 pub(crate) use mailbox::Mailbox;
 
+use crate::hub::Keeper;
 use crate::{
     control::{
         changes::{Answer, CheckLog, Checks, Failure, FileDiff, FileList, MAX_PATH, Scope, Wanted},
@@ -84,6 +85,21 @@ pub(crate) async fn change_layout(
         Ok(Some(layout::Answer::Split(_))) => Err(mismatch()),
         Ok(Some(layout::Answer::Failed(failure))) => Err(Error::Layout(failure).into()),
         Ok(None) | Err(_) => Err(Error::TimedOut.into()),
+    }
+}
+
+/// Makes `op` where `keeper` says: Sheprd's saved tab is Sheprd's to
+/// change while it is open, and this daemon's otherwise.
+pub(crate) async fn arrange(
+    state: &Shared,
+    keeper: Keeper,
+    op: layout::Op,
+) -> Result<Option<String>, ApiError> {
+    match keeper {
+        Keeper::Saved { tab, terminal } if state.changes.open() => {
+            change_layout(state, tab, terminal, op).await
+        }
+        keeper => Ok(state.hub.arrange(keeper, op).await?),
     }
 }
 
