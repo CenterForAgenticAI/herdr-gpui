@@ -34,9 +34,6 @@ struct Pending {
     boot: String,
     closed: ClosedHerdrTab,
     due: Instant,
-    /// Whether a snapshot showed the window's groups moved off the tab, so
-    /// one showing it again was focused by the user.
-    left: bool,
 }
 
 impl Pending {
@@ -105,12 +102,13 @@ impl SheprdWindow {
             boot: snapshot.boot_id.clone(),
             closed: closed.clone(),
             due: Instant::now() + undo.window,
-            left: false,
         };
         let pick = pending.pick();
         self.leave_tab(&pick, cx);
         // Alone in its group, the tab had no neighbour to show instead, and
         // hiding it would leave it on screen to close under the user.
+        // From here no group shows it, so one that does later was moved to
+        // it: by the user, or by another client's focus.
         if self.group_shows(&pick) {
             return false;
         }
@@ -160,8 +158,8 @@ impl SheprdWindow {
         let now = Instant::now();
         let pending = std::mem::take(&mut self.browser.undo.pending);
         let mut kept = Vec::with_capacity(pending.len());
-        for mut entry in pending {
-            match self.settle_undo_close(&mut entry, now, cx) {
+        for entry in pending {
+            match self.settle_undo_close(&entry, now, cx) {
                 Outcome::Wait => kept.push(entry),
                 Outcome::Done => {}
                 Outcome::Restore => self.browser.hidden.show(&entry.key(), &entry.pick()),
@@ -198,7 +196,7 @@ impl SheprdWindow {
 
     fn settle_undo_close(
         &mut self,
-        entry: &mut Pending,
+        entry: &Pending,
         now: Instant,
         cx: &mut Context<Self>,
     ) -> Outcome {
@@ -227,12 +225,11 @@ impl SheprdWindow {
         if !snapshot.tabs.iter().any(|open| open.tab_id == tab) {
             return Outcome::Done;
         }
-        if index == self.selected_endpoint && self.browser_key() == Some(entry.key()) {
-            let shown = self.group_shows(&entry.pick());
-            if entry.left && shown {
-                return Outcome::Restore;
-            }
-            entry.left |= !shown;
+        if index == self.selected_endpoint
+            && self.browser_key() == Some(entry.key())
+            && self.group_shows(&entry.pick())
+        {
+            return Outcome::Restore;
         }
         if now < entry.due {
             return Outcome::Wait;

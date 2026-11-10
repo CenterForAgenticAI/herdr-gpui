@@ -102,7 +102,6 @@ fn a_hidden_tab_focused_again_is_listed_and_kept(cx: &mut TestAppContext) {
             // A poll sees the window moved off it, then the user goes back.
             view.browser.undo.pending[0].due = Instant::now() + Duration::from_secs(60);
             view.poll_undo_close(cx);
-            view.browser.undo.pending[0].left = true;
             let pick = Pick::Herdr(SECOND.into());
             let group = view
                 .ensure_layout()
@@ -170,4 +169,30 @@ fn a_daemon_restart_drops_the_close_and_shows_the_tab_again(cx: &mut TestAppCont
     });
     assert!(!view.read_with(cx, |view, _| view.undo_waits(FIRST)));
     assert!(!hidden(&view, cx, FIRST), "the new boot's tab is shown");
+}
+
+#[gpui::test]
+fn a_tab_focused_again_before_the_first_poll_is_listed_and_kept(cx: &mut TestAppContext) {
+    let (view, cx, _peer) = window(cx, 2, on(Duration::ZERO));
+    assert!(close(&view, cx, SECOND));
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            // Another client focuses it before this window ever polls.
+            let mut snapshot: ClientShellSnapshot =
+                (**view.live.snapshot.as_ref().unwrap()).clone();
+            snapshot.focused_tab_id = Some(SECOND.into());
+            for tab in &mut snapshot.tabs {
+                tab.focused = tab.tab_id == SECOND;
+            }
+            for pane in &mut snapshot.panes {
+                pane.focused = pane.tab_id == SECOND;
+            }
+            view.live.snapshot = Some(Arc::new(snapshot));
+            view.terminal_focus_moved(SECOND, false, cx);
+            assert!(view.group_shows(&Pick::Herdr(SECOND.into())));
+            view.poll_undo_close(cx);
+        })
+    });
+    assert!(!hidden(&view, cx, SECOND));
+    assert!(!view.read_with(cx, |view, _| view.undo_waits(SECOND)));
 }
