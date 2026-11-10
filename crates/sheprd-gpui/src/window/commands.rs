@@ -364,6 +364,19 @@ impl SheprdWindow {
         {
             return;
         }
+        // A workspace the app keeps has no Herdr 1 panes: a pane command no
+        // herdr-core pane took must not reach Herdr 1's focused one. A review
+        // in front still searches its changes.
+        let searches_review = matches!(
+            command,
+            Command::Find | Command::FindNext | Command::FindPrevious
+        ) && self.focused_review(window, cx).is_some();
+        if self.kept_in_front().is_some()
+            && crate::core_terminals::acts_on_panes(command)
+            && !searches_review
+        {
+            return;
+        }
         match command {
             Command::OpenNotificationTarget => {
                 if let Some((endpoint, id)) = self.endpoints.iter().find_map(|e| {

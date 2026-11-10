@@ -276,6 +276,20 @@ pub(crate) enum Answer {
 }
 
 impl LiveState {
+    /// Whether the host has no Herdr 1 that can serve this window: none
+    /// installed on this computer, none a saved host's bridge found, or one
+    /// too old for this client that is not connected. Such a host runs its
+    /// terminals in herdr-core alone, while its core answers.
+    pub(crate) fn herdr_1_unavailable(&self) -> bool {
+        let outdated = matches!(
+            self.version_mismatch,
+            Some(sheprd_client::VersionMismatch::DaemonOutdated { .. })
+        ) && !self.status.is_connected();
+        self.missing_installation
+            || self.ssh_failure == Some(sheprd_client::SshFailure::HerdrMissing)
+            || outdated
+    }
+
     fn answer_slot(&mut self, answer: Answer) -> &mut Option<(String, Option<DialogResponse>)> {
         match answer {
             Answer::Cleanup => &mut self.cleanup_response,
@@ -623,6 +637,8 @@ impl LiveState {
                             welcome.capabilities.iter().any(|value| value == capability)
                         });
                 self.missing_installation = false;
+                // A host that answers again is no longer missing Herdr.
+                self.ssh_failure = None;
                 self.version_mismatch = None;
                 // The daemon reports the mode to each new connection.
                 self.keyboard_report_all = false;

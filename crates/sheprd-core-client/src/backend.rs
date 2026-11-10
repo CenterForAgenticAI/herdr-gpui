@@ -36,6 +36,16 @@ impl CoreBackend {
     pub fn core(&self) -> &Core {
         &self.core
     }
+
+    /// Sets the scrollback lines of terminals attached from now on; those
+    /// attached already keep theirs.
+    pub fn set_scrollback(&mut self, scrollback: usize) {
+        self.scrollback = scrollback;
+    }
+
+    pub fn scrollback(&self) -> usize {
+        self.scrollback
+    }
 }
 
 impl sheprd_backend::Backend for CoreBackend {

@@ -783,6 +783,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         menu: crate::menu::MenuState::new(cx),
         settings: Default::default(),
         integrations: Default::default(),
+        kept_worktree_done: Vec::new(),
         install_warning_shown: false,
         version_notice_shown: false,
         collapsed_repos: Default::default(),

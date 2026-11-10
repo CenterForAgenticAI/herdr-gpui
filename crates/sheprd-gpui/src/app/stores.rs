@@ -30,16 +30,25 @@ impl Stores {
         fn read<T: Default>(personal: bool, load: impl FnOnce() -> T) -> T {
             if personal { load() } else { T::default() }
         }
+        let browser_tabs = read(personal, crate::browser::Store::load);
+        let mut notification_mutes = read(personal, crate::notification_mutes::Mutes::load);
+        // A closed Herdr 2 tab's ID can come back on a new tab after a restart:
+        // its mute goes first.
+        notification_mutes.forget_closed_tabs(|scope, id| {
+            browser_tabs
+                .tabs()
+                .any(|tab| tab.scope.as_str() == scope && tab.id.to_string() == id)
+        });
         Self {
             agent_skill: read(personal, crate::agent_skill::AgentSkill::load),
-            browser_tabs: read(personal, crate::browser::Store::load),
+            browser_tabs,
             dispatch_history: read(personal, crate::dispatch::History::load),
             fan_out_journal: read(personal, crate::fan_out::Journal::load),
             group_layouts: read(personal, crate::browser::Layouts::load),
             #[cfg(windows)]
             jump_list: personal.then(crate::jump_list::JumpList::load),
             keychain_grants: read(personal, crate::usage::KeychainGrants::load),
-            notification_mutes: read(personal, crate::notification_mutes::Mutes::load),
+            notification_mutes,
             overview_marks: read(personal, crate::overview::Marks::load),
             palette_frecency: read(personal, crate::palette::Frecency::load),
             review_viewed: read(personal, crate::review::Viewed::load),

@@ -144,6 +144,17 @@ impl CoreTerminals {
             .collect()
     }
 
+    /// Says what Git would of the folder `cwd`, for tests outside this
+    /// module that keep workspaces in checkouts without running Git.
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+    pub(crate) fn seed_checkout_for_test(
+        &mut self,
+        cwd: &str,
+        identity: Option<sheprd_vcs::git::Identity>,
+    ) {
+        self.checkouts.seed(cwd, identity);
+    }
+
     /// Uses `hub` for the core of the host `scope` names, as the first ask
     /// for it would, so a test never dials a real host.
     #[cfg(test)]
@@ -292,10 +303,12 @@ impl SheprdWindow {
     /// attached anew; nothing is started or replayed.
     pub(super) fn poll_core_hubs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = self.forget_stale_core_hosts();
+        let scrollback = self.config.herdr_2_scrollback;
         for host in self.core_terminals.hosts() {
             let Some(hub) = self.core_terminals.hub_of_mut(&host) else {
                 continue;
             };
+            hub.set_scrollback(scrollback);
             let connected = hub.backend().is_some();
             if !hub.poll() {
                 continue;
@@ -366,6 +379,15 @@ impl SheprdWindow {
                 cx,
             );
             return;
+        }
+        // A saved host's stand-in workspace whose first shell did not start
+        // goes while empty, so it is kept and its shell tried again once the
+        // core may be dialled again.
+        if let Purpose::Tab { scope, workspace } = &purpose
+            && !scope.is_local()
+            && workspace == super::WORKSPACE
+        {
+            self.forget_empty_kept_workspace(scope, workspace, window, cx);
         }
         // Only while the workspace the tab was asked for is still the one
         // shown, since the Herdr tab opens in the focused workspace.
