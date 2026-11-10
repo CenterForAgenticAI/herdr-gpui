@@ -167,6 +167,15 @@ impl Hub {
         };
     }
 
+    /// Whether the last attempt failed within the retry interval, so asking
+    /// again now would dial too soon.
+    pub(crate) fn cooling(&self) -> bool {
+        matches!(self.state, State::Unavailable(_))
+            && self
+                .failed
+                .is_some_and(|failed| failed.elapsed() < self.retry)
+    }
+
     /// Forgets the last attempt and its outcome, so the next ask dials anew,
     /// as for a core just installed. An attempt in flight is left to end
     /// unread.

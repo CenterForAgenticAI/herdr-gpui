@@ -369,6 +369,15 @@ impl SheprdWindow {
             );
             return;
         }
+        // A saved host's stand-in workspace whose first shell did not start
+        // goes while empty, so it is kept and its shell tried again once the
+        // core may be dialled again.
+        if let Purpose::Tab { scope, workspace } = &purpose
+            && !scope.is_local()
+            && workspace == super::WORKSPACE
+        {
+            self.forget_empty_kept_workspace(scope, workspace, window, cx);
+        }
         // Only while the workspace the tab was asked for is still the one
         // shown, since the Herdr tab opens in the focused workspace.
         if error.core_missing()
