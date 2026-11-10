@@ -1,7 +1,8 @@
 //! Herdr 2 agents asking for the user. herdr-core sends no notifications, only
 //! each program's status, so the app hears the changes itself: an agent that
 //! becomes blocked plays the request sound, one whose turn ends plays the done
-//! sound, and either counts on the Dock or taskbar badge. Herdr 1 decides this
+//! sound, and either counts on the Dock or taskbar badge and posts a system
+//! notification when notices go to the OS. Herdr 1 decides this
 //! in its daemon; the sound settings, their delay, and the rule that a finished
 //! turn in the tab in front stays quiet are the same.
 
@@ -9,7 +10,7 @@ use crate::SheprdWindow;
 use gpui::{prelude::*, *};
 use sheprd_backend::{AgentStatus, TerminalId, TerminalInfo};
 use sheprd_client::herdr::AgentKind;
-use sheprd_client::protocol::SemanticNotificationSound;
+use sheprd_client::protocol::{SemanticNotificationKind, SemanticNotificationSound};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
@@ -44,6 +45,14 @@ impl News {
         }
     }
 
+    /// The notice it is, for the system notification it posts.
+    fn kind(self) -> SemanticNotificationKind {
+        match self {
+            Self::NeedsYou => SemanticNotificationKind::NeedsAttention,
+            Self::Finished => SemanticNotificationKind::Finished,
+        }
+    }
+
     fn sound(self) -> SemanticNotificationSound {
         match self {
             Self::NeedsYou => SemanticNotificationSound::Request,
@@ -65,7 +74,11 @@ const STALE: Duration = Duration::from_secs(5);
 #[derive(Default)]
 pub(crate) struct Heard {
     agents: HashMap<TerminalId, Agent>,
+    /// News waiting out the sound delay.
     due: VecDeque<(Instant, TerminalId, News)>,
+    /// The same news waiting out the notification delay, which the user
+    /// may set apart from the sound's.
+    posts: VecDeque<(Instant, TerminalId, News)>,
     /// The terminals each window shows while it is the active one.
     front: HashMap<WindowId, HashSet<TerminalId>>,
 }
@@ -119,11 +132,13 @@ impl Heard {
     /// Queues `news` heard at `heard`, replacing what waited for the same
     /// terminal.
     pub(super) fn push(&mut self, heard: Instant, terminal: TerminalId, news: News) {
-        self.due.retain(|(_, waiting, _)| *waiting != terminal);
-        if self.due.len() == MAX_DUE {
-            self.due.pop_front();
+        for queue in [&mut self.due, &mut self.posts] {
+            queue.retain(|(_, waiting, _)| *waiting != terminal);
+            if queue.len() == MAX_DUE {
+                queue.pop_front();
+            }
+            queue.push_back((heard, terminal.clone(), news));
         }
-        self.due.push_back((heard, terminal, news));
     }
 
     /// Records the terminals `window` shows in front: none unless it is
@@ -150,10 +165,35 @@ impl Heard {
         now: Instant,
         delay: Duration,
     ) -> Vec<(TerminalId, News, Option<AgentKind>)> {
-        let mut play = Vec::new();
-        for (heard, terminal, news) in std::mem::take(&mut self.due) {
+        let mut due = std::mem::take(&mut self.due);
+        let play = self.take(&mut due, now, delay);
+        self.due = due;
+        play
+    }
+
+    /// Takes the news to post as system notifications at `now`, as
+    /// [`Self::take_due`] takes what to play, past the notification delay.
+    pub(super) fn take_posts(
+        &mut self,
+        now: Instant,
+        delay: Duration,
+    ) -> Vec<(TerminalId, News, Option<AgentKind>)> {
+        let mut posts = std::mem::take(&mut self.posts);
+        let post = self.take(&mut posts, now, delay);
+        self.posts = posts;
+        post
+    }
+
+    fn take(
+        &self,
+        queue: &mut VecDeque<(Instant, TerminalId, News)>,
+        now: Instant,
+        delay: Duration,
+    ) -> Vec<(TerminalId, News, Option<AgentKind>)> {
+        let mut taken = Vec::new();
+        for (heard, terminal, news) in std::mem::take(queue) {
             if now < heard + delay {
-                self.due.push_back((heard, terminal, news));
+                queue.push_back((heard, terminal, news));
                 continue;
             }
             let Some(agent) = self
@@ -167,10 +207,10 @@ impl Heard {
                 && self.front.values().any(|shown| shown.contains(&terminal));
             if !seen && now <= heard + delay + STALE {
                 let kind = agent.kind;
-                play.push((terminal, news, kind));
+                taken.push((terminal, news, kind));
             }
         }
-        play
+        taken
     }
 }
 
@@ -276,17 +316,28 @@ impl SheprdWindow {
             .collect();
         let heard = cx.default_global::<Heard>();
         heard.show(id, shown, |window| open.contains(&window));
-        if !connected || heard.due.is_empty() {
+        if !connected || (heard.due.is_empty() && heard.posts.is_empty()) {
             return;
         }
+        let now = Instant::now();
         // Until the settings load, the default delay of a second.
         let delay = Duration::from_secs(self.sound.delay().unwrap_or(1));
-        for (terminal, news, kind) in heard.take_due(Instant::now(), delay) {
+        for (terminal, news, kind) in heard.take_due(now, delay) {
             self.sound.play_agent(
                 news.sound(),
                 kind.map(|kind| kind.name()),
                 terminal.as_str(),
             );
+        }
+        // Banners wait out the notification delay the app resolved, which
+        // may differ from the sound's.
+        let delay = Duration::from_secs(self.config.notifications.delay_seconds);
+        let posts = cx.default_global::<Heard>().take_posts(now, delay);
+        let Some(handle) = crate::window::main_window::MainWindow::of(window, cx) else {
+            return;
+        };
+        for (terminal, news, _) in posts {
+            self.post_core_notification(handle.clone(), &terminal, news.kind(), cx);
         }
     }
 }

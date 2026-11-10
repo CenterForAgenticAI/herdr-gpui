@@ -133,7 +133,7 @@ impl SheprdWindow {
             Action::FoldAll(fold) => self.fold_all_repositories(fold, cx),
             Action::FocusPane { endpoint, pane } => {
                 if let Some(endpoint) = self.hosted_endpoint(endpoint) {
-                    self.navigate_endpoint(&endpoint, NavigationTarget::Pane(&pane), cx);
+                    self.focus_listed_agent(&endpoint, &pane, window, cx);
                 }
             }
             Action::FocusWorkspace {
@@ -181,6 +181,35 @@ impl SheprdWindow {
                 if let Some(endpoint) = self.hosted_endpoint(endpoint) {
                     self.toggle_repository(&endpoint, &key, cx);
                 }
+            }
+        }
+    }
+
+    /// Shows the agent the agents list lists as `id` on `endpoint`, as a click
+    /// on its row does: a Herdr 1 pane, or a herdr-core terminal in its tab.
+    /// An id no longer listed is still tried as a Herdr 1 pane.
+    fn focus_listed_agent(
+        &mut self,
+        endpoint: &str,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = self
+            .panel_agents()
+            .into_iter()
+            .find(|(index, agent)| {
+                agent.id() == id
+                    && self
+                        .endpoints
+                        .get(*index)
+                        .is_some_and(|listed| listed.id == endpoint)
+            })
+            .map(|(_, agent)| agent.target());
+        match target {
+            Some(target) => self.open_listed_agent(endpoint, &target, window, cx),
+            None => {
+                self.navigate_endpoint(endpoint, NavigationTarget::Pane(id), cx);
             }
         }
     }

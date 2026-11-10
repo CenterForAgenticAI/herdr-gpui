@@ -10,13 +10,13 @@ pub use actions::{Action, Drag, Menu};
 
 use super::{
     ActivityPanel, SidebarMetrics,
-    agents::{agent_name, agent_place, pane_name, state_label, status_style, status_text},
+    agents::{listed::Listed, status_style, status_text},
     layout::{HeaderCase, Highlight},
 };
 use crate::{config::Theme, preferences::AgentSort, system_load::Sample, window::SheprdWindow};
 use gpui::App;
 use serde_json::{Value, json};
-use sheprd_client::protocol::{AgentStatus, ClientShellAgent, ClientShellSnapshot};
+use sheprd_client::protocol::{AgentStatus, ClientShellSnapshot};
 use std::sync::Arc;
 
 /// Backgrounds below this relative luminance, about mid gray, take light text.
@@ -130,27 +130,30 @@ fn panel_id(panel: ActivityPanel) -> &'static str {
 /// workspace, and its tab when that earns a place), its pane's name, and the
 /// word its integration chose for its status.
 fn agent_state(
-    agent: &ClientShellAgent,
-    snapshot: &ClientShellSnapshot,
+    agent: &Listed<'_>,
     show_state: bool,
     (endpoint, host): (&str, Option<&str>),
 ) -> Value {
-    let name = agent_name(agent);
-    let place = agent_place(agent, snapshot);
-    let status = status_text(agent.agent_status);
+    let place = agent.place();
+    let status = status_text(agent.status());
+    let title = match agent {
+        Listed::Herdr1 { agent, .. } => agent.title.as_deref(),
+        Listed::Core(_) => None,
+    };
     json!({
+        "core": agent.is_core(),
         "endpoint": endpoint,
-        "focused": agent.focused,
+        "focused": agent.focused(),
         "host": host,
-        "kind": agent.agent,
-        "name": name,
-        "pane": agent.pane_id,
-        "pane_name": pane_name(agent, snapshot, name),
-        "state": show_state.then(|| state_label(agent, &status)),
-        "status": status_name(agent.agent_status),
+        "kind": agent.identity(),
+        "name": agent.name(),
+        "pane": agent.id(),
+        "pane_name": agent.pane(),
+        "state": show_state.then(|| agent.state_label(&status)),
+        "status": status_name(agent.status()),
         "tab": place.and_then(|(_, tab)| tab),
-        "title": agent.title,
-        "workspace": agent.workspace_id,
+        "title": title,
+        "workspace": agent.workspace(),
         "workspace_label": place.map(|(workspace, _)| workspace),
     })
 }
@@ -250,19 +253,13 @@ impl SheprdWindow {
             .into_iter()
             .filter_map(|(index, agent)| {
                 let endpoint = self.endpoints.get(index)?;
-                let live = if index == self.selected_endpoint {
-                    &self.live
-                } else {
-                    &endpoint.live
-                };
-                let snapshot = live.snapshot.as_deref()?;
                 let shows = self
                     .config
                     .sidebar_layout
                     .agents
-                    .shows_status_text(agent.agent.as_deref());
+                    .shows_status_text(agent.identity());
                 let host = multi.then_some(endpoint.label.as_str());
-                Some(agent_state(agent, snapshot, shows, (&endpoint.id, host)))
+                Some(agent_state(&agent, shows, (&endpoint.id, host)))
             })
             .collect()
     }

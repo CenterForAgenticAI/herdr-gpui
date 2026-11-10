@@ -384,6 +384,9 @@ pub(crate) struct CoreTerminals {
     look: Option<Look>,
     /// The kept workspace the user brought to the front, by its host.
     in_front: Option<(Scope, String)>,
+    /// When each agent of `sessions` last changed state, to order it among
+    /// Herdr 1's agents, per core: terminal IDs are unique only within one.
+    pub(crate) recency: HashMap<Scope, crate::state::StatusRecency>,
     /// A kept workspace just came to the front: show one of its tabs.
     reveal: bool,
     /// The sessions over herdr-core, by the scope of their workspaces: this
@@ -446,7 +449,7 @@ impl CoreTerminals {
     /// What `host`'s core last reported of `terminal`, while it answers. A
     /// lost core's last list may name agents that have since stopped, so
     /// none is reported until it answers again.
-    pub(super) fn reported(&self, host: &Host, terminal: &TerminalId) -> Option<&TerminalInfo> {
+    pub(crate) fn reported(&self, host: &Host, terminal: &TerminalId) -> Option<&TerminalInfo> {
         self.backend_of(host)?;
         self.infos_of(host)?.get(terminal)
     }
