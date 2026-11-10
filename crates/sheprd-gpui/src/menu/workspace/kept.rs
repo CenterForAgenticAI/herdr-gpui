@@ -1,7 +1,8 @@
 //! The menu of a workspace the app keeps for Herdr 2. The app carries out
 //! what it asks, with no daemon to answer, so it offers what the app can do
-//! itself: renaming and closing the workspace, and new and removed
-//! worktrees of its repository, which Git makes (`kept_worktrees.rs`).
+//! itself: muting, renaming, and closing the workspace, and new and
+//! removed worktrees of its repository, which Git makes
+//! (`kept_worktrees.rs`).
 
 use super::{Ask, Label, Page, Source, WorkspaceAction, WorkspaceMenuAction, WorkspaceTarget};
 use crate::{SheprdWindow, i18n::Localize};
@@ -10,8 +11,9 @@ use sheprd_client::protocol::ClientShellWorktree;
 use sheprd_session::Keeper;
 
 /// The rows a kept workspace's menu shows: a note and its checkpoints too
-/// once Git says which checkout and branch its folder is, and new and
-/// removed worktrees of its repository, which the app makes with Git.
+/// once Git says which checkout and branch its folder is, its mute toggle,
+/// and new and removed worktrees of its repository, which the app makes
+/// with Git.
 pub(super) fn items(
     target: &WorkspaceTarget,
     local: bool,
@@ -19,7 +21,11 @@ pub(super) fn items(
     checkpoints: bool,
     fan_out: Option<Label>,
 ) -> Vec<(WorkspaceMenuAction, Label)> {
-    let mut items = Vec::new();
+    let mut items = vec![if target.muted {
+        (WorkspaceMenuAction::Unmute, Label::UNMUTE)
+    } else {
+        (WorkspaceMenuAction::Mute, Label::MUTE)
+    }];
     // Git runs through host scripts, which need `/bin/sh`, on this
     // computer: another host's kept workspaces wait for its own Git.
     let scripts = cfg!(any(target_os = "linux", target_os = "macos"));
@@ -123,7 +129,11 @@ impl SheprdWindow {
             self.selection_epoch,
             self.endpoints[self.selected_endpoint].generation,
         );
-        self.menu.target = Some(WorkspaceTarget::kept(workspace));
+        let muted = self.muted_on_selected(crate::notification_mutes::Scope::Workspace, id, cx);
+        self.menu.target = Some(WorkspaceTarget {
+            muted,
+            ..WorkspaceTarget::kept(workspace)
+        });
         self.menu.anchor = anchor;
         self.menu.page = Some(Page::Workspace);
         self.discard_composition(cx);

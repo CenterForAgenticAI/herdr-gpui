@@ -31,7 +31,7 @@ impl SheprdWindow {
             .and_then(|(_, id)| session.workspace(id));
         let chosen = match chosen {
             Some(workspace) => Some(workspace),
-            None if self.live.missing_installation => session.workspaces.first(),
+            None if self.live.herdr_1_unavailable() => session.workspaces.first(),
             None => None,
         };
         chosen.map(|workspace| workspace.id.as_str())
@@ -271,7 +271,7 @@ impl SheprdWindow {
 
     /// Keeps a new workspace and brings it to the front, named for `label`,
     /// else its folder.
-    fn keep_new_workspace(
+    pub(super) fn keep_new_workspace(
         &mut self,
         label: Option<&str>,
         cwd: Option<&Path>,
@@ -368,6 +368,10 @@ impl SheprdWindow {
     ) {
         let host = Host::of(scope);
         let tabs = Store::update(cx, |store| store.forget_kept(scope, id));
+        let closed: Vec<String> = tabs.iter().map(|tab| tab.id.to_string()).collect();
+        crate::notification_mutes::Mutes::update(cx, |mutes| {
+            mutes.forget_kept(scope.as_str(), id, &closed)
+        });
         for location in tabs.iter().filter_map(|tab| tab.location.as_ref()) {
             self.end_location(&host, location);
         }
@@ -489,22 +493,23 @@ impl SheprdWindow {
     }
 
     /// Keeps the workspace a window with no Herdr 1 installed gathers its
-    /// tabs in, so it lists, renames, and closes like any other.
+    /// tabs in, so it lists, renames, and closes like any other. Whether it
+    /// kept it now: never once the store is full.
     pub(super) fn keep_default_workspace(
         &self,
         missing_installation: bool,
         scope: &Scope,
         cx: &mut App,
-    ) {
+    ) -> bool {
         if !missing_installation
             || cx
                 .try_global::<Store>()
                 .is_some_and(|store| store.kept_workspaces(scope).next().is_some())
         {
-            return;
+            return false;
         }
         let label = fl!("core-workspaces-default");
-        Store::update(cx, |store| store.keep_default(scope, WORKSPACE, &label));
+        Store::update(cx, |store| store.keep_default(scope, WORKSPACE, &label))
     }
 }
 
