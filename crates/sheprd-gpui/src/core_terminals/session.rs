@@ -60,16 +60,23 @@ impl SheprdWindow {
         // A saved host with no Herdr 1 gathers its tabs in a workspace of
         // its own, as this computer does, while its core is not known to be
         // missing too. Kept anew, it opens a shell there, standing in for
-        // the one Herdr 1 would show; the workspace goes again if that core
-        // turns out to be missing.
+        // the one Herdr 1 would show; the workspace goes again, still empty,
+        // if that shell does not start.
         for index in 0..self.endpoints.len() {
             let endpoint = &self.endpoints[index];
             if !endpoint.connection.target.is_remote() || !endpoint.enabled {
                 continue;
             }
             let scope = scope(endpoint);
+            let host = super::Host::of(&scope);
+            // A first shell that failed leaves no workspace behind, so it is
+            // tried again, once that host's core may be dialled again.
             let missing = self.live_at(index).herdr_1_unavailable()
-                && !self.core_terminals.lacks_core(&super::Host::of(&scope));
+                && !self.core_terminals.lacks_core(&host)
+                && !self
+                    .core_terminals
+                    .hub_of(&host)
+                    .is_some_and(super::Hub::cooling);
             if self.keep_default_workspace(missing, &scope, cx) {
                 let purpose = super::Purpose::Tab {
                     scope,
