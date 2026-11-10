@@ -40,6 +40,11 @@ impl Store {
             .find(|workspace| workspace.scope == scope.as_str() && workspace.id == id)
     }
 
+    /// How many more workspaces the app can keep, across every host.
+    pub(crate) fn kept_room(&self) -> usize {
+        MAX_WORKSPACES.saturating_sub(self.workspaces.len())
+    }
+
     /// Keeps a new workspace at the end of `scope`'s, and answers its ID, or
     /// `None` when the app already keeps the most it does. `custom` when the
     /// user gave its name, rather than the app taking its folder's.
