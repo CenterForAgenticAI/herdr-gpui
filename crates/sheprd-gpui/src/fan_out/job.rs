@@ -432,6 +432,32 @@ pub(crate) fn stats(
 /// Remove a lane's worktree, and Herdr 1's workspace with it, discarding
 /// uncommitted changes. The branch stays, so committed work stays
 /// reachable; the app closes a Herdr 2 lane's kept workspace itself.
-pub(crate) fn remove(host: &Host, worktree: &work::Worktree, cancelled: &AtomicBool) -> Result<()> {
+pub(crate) fn remove(
+    host: &Host,
+    worktree: &work::Worktree,
+    repo_key: &str,
+    branch: &str,
+    cancelled: &AtomicBool,
+) -> Result<()> {
+    if matches!(worktree.opened, work::Opened::Herdr2) {
+        if !host.is_local() {
+            return Err(Error::HostUnavailable {
+                host: host.identity(),
+            });
+        }
+        // A saved folder may now belong to another branch or repository.
+        // Check Git itself on this worker before any forced removal, even
+        // for a live lane: cached UI metadata cannot authorize discarding it.
+        let input = crate::pull_request::Input {
+            checkout: Some(worktree.path.clone()),
+            repo_key: Some(repo_key.to_owned()),
+            branch: branch.to_owned(),
+        };
+        crate::pull_request::local_checkout(
+            &input,
+            std::time::Instant::now() + std::time::Duration::from_secs(15),
+            &|| cancelled.load(Ordering::Acquire),
+        )?;
+    }
     work::discard(host, worktree, cancelled).map_err(failed)
 }

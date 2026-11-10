@@ -3,6 +3,7 @@ use crate::fan_out::error::Step;
 
 mod compare;
 mod crash_recovery;
+mod discard_identity;
 mod herdr_2;
 mod interrupt;
 mod spread;

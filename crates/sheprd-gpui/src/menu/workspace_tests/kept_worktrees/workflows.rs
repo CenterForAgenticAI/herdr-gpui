@@ -157,3 +157,4 @@ fn a_trusted_kept_archive_runs_before_its_checkout_is_removed(cx: &mut TestAppCo
 }
 
 mod followed;
+mod subfolder;

@@ -738,5 +738,22 @@ pub(crate) fn kept_root(checkout: &str, cancelled: &AtomicBool) -> Option<String
         .map(|main| main.path)
 }
 
+/// The whole checkout a kept folder belongs to, and the main checkout
+/// supplied to its scripts. Blocking, like reading the script itself.
+pub(crate) fn kept_script_checkout(
+    folder: &str,
+    cancelled: &AtomicBool,
+) -> crate::Result<Checkout> {
+    let path = crate::git::git(
+        folder,
+        &["rev-parse", "--show-toplevel"],
+        "locate worktree script checkout",
+        std::time::Instant::now() + std::time::Duration::from_secs(15),
+        &|| cancelled.load(Ordering::Acquire),
+    )?;
+    let root = kept_root(&path, cancelled);
+    Ok(Checkout { path, root })
+}
+
 #[cfg(test)]
 pub(crate) mod tests;

@@ -26,6 +26,7 @@ impl Localize for Error {
             ),
             Self::AgentUncertain => fl!("error-fan-out-agent-uncertain"),
             Self::Cancelled => fl!("error-fan-out-cancelled"),
+            Self::Checkout(error) => error.localize(),
             Self::Dispatch(error) => error.localize(),
             Self::HostUnavailable { host } => {
                 fl!("error-fan-out-host-unavailable", host = host.as_str())

@@ -584,20 +584,26 @@ impl FanOut {
             return false;
         }
         self.stop_probe();
-        let doomed: Vec<(usize, Host, work::Worktree)> = self
+        let doomed: Vec<_> = self
             .doomed(winner)
             .into_iter()
             .filter_map(|(index, worktree)| {
                 let host = self.lanes[index].checkout.as_ref()?.host.clone();
-                Some((index, host, worktree))
+                Some((index, host, worktree, self.lanes[index].lane.branch.clone()))
             })
             .collect();
         let (sender, cancelled) = (self.sender.clone(), self.work.clone());
         let (journal, id) = (self.journal.clone(), self.id);
+        let repo_key = self.origin.repo_key.clone();
         spawn(move || {
             let removed: Vec<_> = doomed
                 .into_iter()
-                .map(|(index, host, worktree)| (index, job::remove(&host, &worktree, &cancelled)))
+                .map(|(index, host, worktree, branch)| {
+                    (
+                        index,
+                        job::remove(&host, &worktree, &repo_key, &branch, &cancelled),
+                    )
+                })
                 .collect();
             // The journal follows the removals. Once all are gone the kept
             // lane is an ordinary workspace too, but a lane whose worktree

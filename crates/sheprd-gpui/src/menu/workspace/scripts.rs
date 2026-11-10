@@ -169,6 +169,7 @@ impl SheprdWindow {
             .target
             .clone();
         let (checkout, expected) = (path.clone(), path.clone());
+        let endpoint = self.menu.endpoint_target;
         // Herdr 1 names the main checkout in the daemon's answer; a kept
         // checkout's is read from Git here, for the archive's
         // `HERDR_ROOT_PATH`.
@@ -179,27 +180,43 @@ impl SheprdWindow {
             .is_some_and(|target| target.keeper == sheprd_session::Keeper::App);
         let read = cx.background_executor().spawn(async move {
             let cancelled = std::sync::atomic::AtomicBool::new(false);
-            let root = kept
-                .then(|| crate::worktree_scripts::kept_root(&checkout, &cancelled))
-                .flatten();
-            let config = crate::worktree_scripts::read_config(&target, &checkout, &cancelled);
-            (config, root)
+            let resolved = kept
+                .then(|| crate::worktree_scripts::kept_script_checkout(&checkout, &cancelled))
+                .transpose()?;
+            let path = resolved
+                .as_ref()
+                .map_or(checkout.as_str(), |checkout| checkout.path.as_str());
+            let config = crate::worktree_scripts::read_config(&target, path, &cancelled)?;
+            Ok::<_, crate::Error>((config, resolved))
         });
         cx.spawn(async move |this, cx| {
-            let (result, root) = read.await;
+            let result = read.await;
             this.update(cx, |this, cx| {
+                if this.menu.endpoint_target != endpoint || !this.menu_target_current() {
+                    return;
+                }
                 let Some(deletion) = &mut this.menu.deletion else {
                     return;
                 };
                 if deletion.path.as_deref() == Some(expected.as_str())
                     && matches!(deletion.archive, ArchiveCheck::Reading)
                 {
-                    if root.is_some() {
-                        deletion.root = root;
-                    }
                     deletion.archive = match result {
-                        Ok(config) => ArchiveCheck::Read(config),
-                        Err(error) => ArchiveCheck::Failed(error),
+                        Ok((config, resolved)) => {
+                            if let Some(checkout) = resolved {
+                                deletion.path = Some(checkout.path);
+                                deletion.root = checkout.root;
+                            }
+                            ArchiveCheck::Read(config)
+                        }
+                        Err(error) => {
+                            // An unreadable kept checkout cannot safely skip
+                            // its archive and proceed to deletion.
+                            if kept {
+                                deletion.path = None;
+                            }
+                            ArchiveCheck::Failed(error)
+                        }
                     };
                     cx.notify();
                 }

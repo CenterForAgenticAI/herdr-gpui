@@ -24,6 +24,8 @@ pub(crate) enum Error {
         "The agent may already be running, but its terminal was not saved. Keep the checkout and inspect it before starting another agent."
     )]
     AgentUncertain,
+    #[error(transparent)]
+    Checkout(#[from] sheprd_github::Error),
     #[error("{} failed: {source}", step.label())]
     Script {
         step: Step,

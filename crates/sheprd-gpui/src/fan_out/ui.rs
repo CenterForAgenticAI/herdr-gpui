@@ -61,8 +61,10 @@ impl SheprdWindow {
             let Some(checkout) = &lane.checkout else {
                 return true;
             };
-            // A Herdr 2 checkout is known by its folder, which no restart
-            // hands to another lane.
+            // Herdr 2 has no daemon workspace identity. Its saved folder,
+            // repository and branch are verified with Git by the removal
+            // worker before anything is discarded, rather than from this
+            // window's possibly stale checkout cache.
             let Some(workspace_id) = checkout.workspace_id() else {
                 return true;
             };
