@@ -118,7 +118,11 @@ fn a_terminal_started_for_a_named_sessions_workspace_is_listed_under_its_phone_i
 #[test]
 fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
     // Only an absolute folder asks for a workspace, as each system reads it.
-    let folder = if cfg!(windows) { r"C:\code\api" } else { "/code/api" };
+    let folder = if cfg!(windows) {
+        r"C:\code\api"
+    } else {
+        "/code/api"
+    };
     let mut phone = record("t1");
     phone["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: folder});
     let records = [serde_json::from_value(phone).unwrap()];
