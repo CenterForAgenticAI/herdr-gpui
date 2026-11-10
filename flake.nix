@@ -53,13 +53,9 @@
           # herdr-core is a prebuilt binary; on Linux it targets FHS and is not patched
           # for NixOS, so Linux users supply their own daemon or PATH package. On macOS,
           # Mach-O binaries use system dyld and run natively, so we bundle it into Sheprd.app.
-          herdrCoreTarget =
-            if isDarwin && pkgs.stdenv.hostPlatform.isAarch64 then
-              "macos-aarch64"
-            else
-              null;
+          herdrCoreTarget = if isDarwin && pkgs.stdenv.hostPlatform.isAarch64 then "macos-aarch64" else null;
           herdrCore =
-            if herdrCoreTarget != null && herdrCoreData.targets ? ${herdrCoreTarget} then
+            if herdrCoreTarget != null then
               let
                 entry = herdrCoreData.targets.${herdrCoreTarget};
                 tarball = pkgs.fetchurl {
@@ -73,6 +69,7 @@
               ''
             else
               null;
+          nearby = pkgs.callPackage ./macos/sheprd-nearby/package.nix { };
         in
         rustPlatform.buildRustPackage {
           pname = "sheprd";
@@ -109,6 +106,8 @@
             "sheprd-remote-control"
             "-p"
             "sheprd-automate"
+          ]
+          ++ lib.optionals isLinux [
             "-p"
             "sheprd-nearby"
           ];
@@ -154,11 +153,10 @@
                 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
                 # Relocate compiled executables into the macOS app bundle
-                for bin in sheprd sheprd-acp sheprd-remote-control sheprd-automate sheprd-nearby; do
-                  if [ -f "$out/bin/$bin" ]; then
-                    mv "$out/bin/$bin" "$app/Contents/MacOS/$bin"
-                  fi
+                for bin in sheprd sheprd-acp sheprd-remote-control sheprd-automate; do
+                  mv "$out/bin/$bin" "$app/Contents/MacOS/$bin"
                 done
+                install -Dm755 ${nearby}/bin/sheprd-nearby "$app/Contents/MacOS/sheprd-nearby"
 
                 ${lib.optionalString (herdrCore != null) ''
                   install -Dm755 ${herdrCore}/bin/herdr-core "$app/Contents/MacOS/herdr-core"
