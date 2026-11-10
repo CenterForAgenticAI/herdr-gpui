@@ -127,6 +127,11 @@ impl Heard {
         self.due.push_back((heard, terminal, news));
     }
 
+    /// Drops the news waiting for terminals `muted` names.
+    pub(super) fn forget_due(&mut self, muted: impl Fn(&TerminalId) -> bool) {
+        self.due.retain(|(_, terminal, _)| !muted(terminal));
+    }
+
     /// Records the terminals `window` shows in front: none unless it is
     /// active. Windows no longer `open` are forgotten.
     pub(super) fn show(
@@ -224,8 +229,15 @@ impl SheprdWindow {
             listed.iter().map(|(id, status, kind)| (id, *status, *kind)),
             |terminal| infos.get(terminal).is_some(),
         );
+        // News of a muted tab's agent is dropped, so unmuting before its
+        // delay ends replays nothing.
+        let heard_news: Vec<(TerminalId, News)> = news
+            .into_iter()
+            .filter(|(terminal, _)| !self.core_terminal_silenced(&super::Host::Local, terminal, cx))
+            .collect();
+        let heard = cx.default_global::<Heard>();
         let now = Instant::now();
-        for (terminal, news) in news {
+        for (terminal, news) in heard_news {
             heard.push(now, terminal, news);
         }
     }
@@ -281,14 +293,23 @@ impl SheprdWindow {
         if !connected || heard.due.is_empty() {
             return;
         }
+        // A muted tab's agent plays nothing, as a muted Herdr 1 tab's: what
+        // waits for one muted since is dropped, not kept for an unmute.
+        let waiting: Vec<TerminalId> = heard
+            .due
+            .iter()
+            .map(|(_, terminal, _)| terminal.clone())
+            .collect();
+        let muted: HashSet<TerminalId> = waiting
+            .into_iter()
+            .filter(|terminal| self.core_terminal_silenced(&super::Host::Local, terminal, cx))
+            .collect();
+        let heard = cx.default_global::<Heard>();
+        heard.forget_due(|terminal| muted.contains(terminal));
         // Until the settings load, the default delay of a second.
         let delay = Duration::from_secs(self.sound.delay().unwrap_or(1));
         let due = heard.take_due(Instant::now(), delay);
         for (terminal, news, kind) in due {
-            // A muted tab's agent plays nothing, as a muted Herdr 1 tab's.
-            if self.core_terminal_silenced(&super::Host::Local, &terminal, cx) {
-                continue;
-            }
             self.sound.play_agent(
                 news.sound(),
                 kind.map(|kind| kind.name()),

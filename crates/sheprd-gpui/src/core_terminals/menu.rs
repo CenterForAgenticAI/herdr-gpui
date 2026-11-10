@@ -307,7 +307,7 @@ impl SheprdWindow {
         let shown = self.core_terminals.tabs.get(&tab)?;
         let agent = |terminal: &TerminalId| {
             self.core_terminals
-                .reported(terminal)
+                .reported(&shown.host, terminal)
                 .is_some_and(|info| sheprd_core_client::agent_kind(info).is_some())
         };
         if agent(&shown.active) {
