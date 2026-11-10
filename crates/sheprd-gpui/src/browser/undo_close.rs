@@ -11,8 +11,11 @@
 //! Only this window hides the tab: Herdr's other clients list it until it
 //! closes. One focused again in this window, as by Next Tab, is listed
 //! again rather than closed under the user. A workspace's last tab closes at
-//! once, since Herdr closes the workspace with it. As the app quits, waiting
-//! closes are sent at once; a connection already gone leaves its tabs open.
+//! once, since Herdr closes the workspace with it, and so does a tab alone
+//! in its group, which has no neighbour to show in its place. As the app
+//! quits or the window closes, waiting closes are queued at once, but only
+//! queued: the connection drops queued work as it stops, so a close behind
+//! another request, or on a connection already gone, leaves its tab open.
 use super::{Pick, Scope, Store, view::scope};
 use crate::{SheprdWindow, browser::ClosedHerdrTab};
 use gpui::{Context, Task, Window};
@@ -55,11 +58,12 @@ pub(crate) struct UndoClose {
 }
 
 impl UndoClose {
-    /// Whether Herdr tab `tab`'s close is waiting, so it counts as closed.
-    pub(crate) fn waits(&self, tab: &str) -> bool {
+    /// Whether the close of Herdr tab `tab` on the host `scope` is waiting,
+    /// so it counts as closed. Hosts number their tabs alike.
+    pub(crate) fn waits(&self, scope: &Scope, tab: &str) -> bool {
         self.pending
             .iter()
-            .any(|pending| pending.closed.tab_id == tab)
+            .any(|pending| pending.scope == *scope && pending.closed.tab_id == tab)
     }
 }
 
@@ -85,17 +89,18 @@ impl SheprdWindow {
         let Some(snapshot) = self.live.snapshot.as_ref().filter(|_| undo.enabled) else {
             return false;
         };
+        let host = scope(&self.endpoints[self.selected_endpoint]);
         let undo_close = &self.browser.undo;
         let others = snapshot.tabs.iter().any(|tab| {
             tab.workspace_id == closed.workspace_id
                 && tab.tab_id != closed.tab_id
-                && !undo_close.waits(&tab.tab_id)
+                && !undo_close.waits(&host, &tab.tab_id)
         });
         if !others {
             return false;
         }
         let pending = Pending {
-            scope: scope(&self.endpoints[self.selected_endpoint]),
+            scope: host,
             boot: snapshot.boot_id.clone(),
             closed: closed.clone(),
             due: Instant::now() + undo.window,
@@ -103,11 +108,16 @@ impl SheprdWindow {
         };
         let pick = pending.pick();
         self.leave_tab(&pick, cx);
+        // Alone in its group, the tab had no neighbour to show instead, and
+        // hiding it would leave it on screen to close under the user.
+        if self.group_shows(&pick) {
+            return false;
+        }
         self.browser.hidden.hide(pending.key(), [pick]);
         self.browser
             .undo
             .pending
-            .retain(|old| old.closed != *closed);
+            .retain(|old| old.scope != pending.scope || old.closed != *closed);
         self.browser.undo.pending.push(pending);
         self.wake_undo_close(cx);
         cx.notify();
@@ -160,9 +170,16 @@ impl SheprdWindow {
         self.wake_undo_close(cx);
     }
 
+    /// Whether the close of `tab` on the shown host waits, for tests.
+    #[cfg(test)]
+    pub(crate) fn undo_waits(&self, tab: &str) -> bool {
+        let host = scope(&self.endpoints[self.selected_endpoint]);
+        self.browser.undo.waits(&host, tab)
+    }
+
     /// Sends every waiting close now, as the app quits or the window goes:
     /// a tab the user closed must not outlive the window that hid it. Only
-    /// queued: a connection already gone leaves its tabs open.
+    /// queued: a close the connection drops as it stops leaves its tab open.
     pub(crate) fn flush_undo_close(&mut self) {
         self.browser.undo.wake = None;
         for entry in std::mem::take(&mut self.browser.undo.pending) {

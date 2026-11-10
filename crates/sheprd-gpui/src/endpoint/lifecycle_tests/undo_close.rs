@@ -83,7 +83,7 @@ fn a_tab_reopened_in_its_undo_window_never_reaches_herdr(cx: &mut gpui::TestAppC
                 view.menu.page.is_none(),
                 "an idle tab closes without asking"
             );
-            assert!(view.browser.undo.waits("first"));
+            assert!(view.undo_waits("first"));
             view.poll_undo_close(cx);
             // Requests leave in order, so a close of `first` would come
             // before this marker.
@@ -92,7 +92,7 @@ fn a_tab_reopened_in_its_undo_window_never_reaches_herdr(cx: &mut gpui::TestAppC
             let handle = view.endpoints[0].connection.handle.as_ref().unwrap();
             handle.request(&boot, Method::TabFocus, marker).unwrap();
             view.reopen_closed_tab(window, cx);
-            assert!(!view.browser.undo.waits("first"));
+            assert!(!view.undo_waits("first"));
         })
     });
     let mut seen = Vec::new();
@@ -121,9 +121,9 @@ fn a_tab_closes_in_herdr_once_its_undo_window_passes(cx: &mut gpui::TestAppConte
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.open_tab_close("first", window, cx);
-            assert!(view.browser.undo.waits("first"));
+            assert!(view.undo_waits("first"));
             view.poll_undo_close(cx);
-            assert!(!view.browser.undo.waits("first"));
+            assert!(!view.undo_waits("first"));
         })
     });
     let requests = requests_to_close(&mut server);

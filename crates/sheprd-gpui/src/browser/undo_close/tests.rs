@@ -69,10 +69,10 @@ fn hidden(view: &gpui::Entity<SheprdWindow>, cx: &mut VisualTestContext, tab: &s
 fn a_closed_tab_hides_and_reopen_brings_the_same_tab_back(cx: &mut TestAppContext) {
     let (view, cx, _peer) = window(cx, 2, on(Duration::from_secs(10)));
     assert!(close(&view, cx, FIRST));
-    assert!(view.read_with(cx, |view, _| view.browser.undo.waits(FIRST)));
+    assert!(view.read_with(cx, |view, _| view.undo_waits(FIRST)));
     assert!(hidden(&view, cx, FIRST));
     cx.update(|window, cx| view.update(cx, |view, cx| view.reopen_closed_tab(window, cx)));
-    assert!(!view.read_with(cx, |view, _| view.browser.undo.waits(FIRST)));
+    assert!(!view.read_with(cx, |view, _| view.undo_waits(FIRST)));
     assert!(!hidden(&view, cx, FIRST));
 }
 
@@ -114,5 +114,45 @@ fn a_hidden_tab_focused_again_is_listed_and_kept(cx: &mut TestAppContext) {
         })
     });
     assert!(!hidden(&view, cx, SECOND));
-    assert!(!view.read_with(cx, |view, _| view.browser.undo.waits(SECOND)));
+    assert!(!view.read_with(cx, |view, _| view.undo_waits(SECOND)));
+}
+
+#[gpui::test]
+fn a_tab_alone_in_its_group_closes_at_once(cx: &mut TestAppContext) {
+    let (view, cx, _peer) = window(cx, 2, on(Duration::from_secs(10)));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let first = view.ensure_layout().unwrap().active();
+            view.split_group(first, window, cx);
+            let second = view.ensure_layout().unwrap().active();
+            assert_ne!(first, second, "the split opens a group");
+            view.move_tab_to_group(Pick::Herdr(SECOND.into()), second, window, cx);
+            assert!(view.group_shows(&Pick::Herdr(SECOND.into())));
+        })
+    });
+    // Nothing would show in its place, so it must not wait on screen.
+    assert!(!close(&view, cx, SECOND));
+    assert!(!hidden(&view, cx, SECOND));
+    assert!(!view.read_with(cx, |view, _| view.undo_waits(SECOND)));
+}
+
+#[gpui::test]
+fn another_hosts_waiting_tab_does_not_count_as_closed_here(cx: &mut TestAppContext) {
+    let (view, cx, _peer) = window(cx, 2, on(Duration::from_secs(10)));
+    assert!(close(&view, cx, FIRST));
+    cx.update(|_, cx| {
+        view.update(cx, |view, _| {
+            // The same tab id, waiting on another host instead.
+            view.browser.undo.pending[0].scope = Scope::endpoint("elsewhere");
+            view.browser.hidden = Default::default();
+        })
+    });
+    assert!(!view.read_with(cx, |view, _| view.undo_waits(FIRST)));
+    // This host's FIRST is still open, so SECOND is not its last tab.
+    assert!(close(&view, cx, SECOND));
+    // And the other host's close is kept beside this one.
+    assert_eq!(
+        view.read_with(cx, |view, _| view.browser.undo.pending.len()),
+        2
+    );
 }

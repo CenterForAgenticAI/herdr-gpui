@@ -1180,9 +1180,11 @@ its programs still running and its scrollback intact. Herdr's other clients,
 such as another window, the `herdr` TUI, or a phone, still list the tab until
 it closes. A tab focused again in the meantime, as by Next Tab, is shown and
 kept rather than closed. A workspace's last tab closes at once, since Herdr
-closes the workspace with it. Quitting the app, or closing the window, sends
-the waiting closes at once. If the connection is already gone by then, those
-tabs stay open in Herdr.
+closes the workspace with it, and so does a tab alone in a split group, which
+has nothing to show in its place. Quitting the app, or closing the window,
+sends the waiting closes at once, but the connection stops with the window:
+a close still queued behind another request, or on a connection already
+gone, leaves its tab open in Herdr.
 Set `remove_merged_worktrees = true` (**Settings > General > Remove worktrees
 of merged PRs**) to remove a linked worktree's checkout, and close its
 workspace and terminals, once its GitHub pull request is merged. It is off by
