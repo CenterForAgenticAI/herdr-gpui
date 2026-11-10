@@ -29,9 +29,16 @@ impl SheprdWindow {
     }
 
     pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let status = (!matches!(self.live.status, ConnectionStatus::Connected)
-            || self.local_error.is_some()
-            || self.live.error.is_some())
+        // A host with no Herdr 1 at all runs its terminals in herdr-core, so
+        // its Herdr 1 is never connected and saying so would ask the user to
+        // install one the window does not need.
+        let reports = self
+            .live
+            .reports_herdr_1(self.sessions(self.selected_endpoint).core_answers);
+        let status = (reports
+            && (!matches!(self.live.status, ConnectionStatus::Connected)
+                || self.local_error.is_some()
+                || self.live.error.is_some()))
         .then(|| self.live.status_text(self.local_error.as_deref()));
         let items = self.config.status_bar;
         let height = px(self.status_bar_height());
@@ -95,7 +102,7 @@ impl SheprdWindow {
                         .child(fl!("status-bar-resize-keys")),
                 )
             })
-            .when(!self.live.status.is_connected(), |bar| {
+            .when(reports && !self.live.status.is_connected(), |bar| {
                 bar.child(self.connection_dot())
             })
             .child(
