@@ -72,7 +72,8 @@ enum Outcome {
     Wait,
     /// Herdr was asked to close it, or it is already gone.
     Done,
-    /// Listed again: focused anew, or its close could not be sent.
+    /// Listed again: focused anew, its close could not be sent, or the
+    /// daemon restarted under it.
     Restore,
 }
 
@@ -217,8 +218,13 @@ impl SheprdWindow {
         let Some(snapshot) = live.snapshot.as_ref() else {
             return Outcome::Wait;
         };
+        // The daemon restarted: the tab it hid ended with the old boot, and
+        // one listed now under its id is another tab, which must show.
+        if snapshot.boot_id != entry.boot {
+            return Outcome::Restore;
+        }
         let tab = entry.closed.tab_id.as_str();
-        if snapshot.boot_id != entry.boot || !snapshot.tabs.iter().any(|open| open.tab_id == tab) {
+        if !snapshot.tabs.iter().any(|open| open.tab_id == tab) {
             return Outcome::Done;
         }
         if index == self.selected_endpoint && self.browser_key() == Some(entry.key()) {

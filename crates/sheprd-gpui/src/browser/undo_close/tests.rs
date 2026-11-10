@@ -156,3 +156,18 @@ fn another_hosts_waiting_tab_does_not_count_as_closed_here(cx: &mut TestAppConte
         2
     );
 }
+
+#[gpui::test]
+fn a_daemon_restart_drops_the_close_and_shows_the_tab_again(cx: &mut TestAppContext) {
+    let (view, cx, _peer) = window(cx, 2, on(Duration::from_secs(10)));
+    assert!(close(&view, cx, FIRST));
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            // The daemon restarts and lists a tab under the same id.
+            view.browser.undo.pending[0].boot = "an older boot".into();
+            view.poll_undo_close(cx);
+        })
+    });
+    assert!(!view.read_with(cx, |view, _| view.undo_waits(FIRST)));
+    assert!(!hidden(&view, cx, FIRST), "the new boot's tab is shown");
+}
