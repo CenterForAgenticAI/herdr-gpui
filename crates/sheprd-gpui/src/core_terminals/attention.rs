@@ -3,8 +3,9 @@
 //! becomes blocked plays the request sound, one whose turn ends plays the done
 //! sound, and either counts on the Dock or taskbar badge and posts a system
 //! notification when notices go to the OS. Herdr 1 decides this
-//! in its daemon; the sound settings, their delay, and the rule that a finished
-//! turn in the tab in front stays quiet are the same.
+//! in its daemon; the sound settings, their delay, the rule that a finished
+//! turn in the tab in front stays quiet, and notification mutes
+//! (`mutes.rs`) are the same.
 
 use crate::SheprdWindow;
 use gpui::{prelude::*, *};
@@ -141,6 +142,13 @@ impl Heard {
         }
     }
 
+    /// Drops the news, sounds and posts alike, waiting for terminals
+    /// `muted` names.
+    pub(super) fn forget_due(&mut self, muted: impl Fn(&TerminalId) -> bool) {
+        self.due.retain(|(_, terminal, _)| !muted(terminal));
+        self.posts.retain(|(_, terminal, _)| !muted(terminal));
+    }
+
     /// Records the terminals `window` shows in front: none unless it is
     /// active. Windows no longer `open` are forgotten.
     pub(super) fn show(
@@ -263,8 +271,15 @@ impl SheprdWindow {
             listed.iter().map(|(id, status, kind)| (id, *status, *kind)),
             |terminal| infos.get(terminal).is_some(),
         );
+        // News of a muted tab's agent is dropped, so unmuting before its
+        // delay ends replays nothing.
+        let heard_news: Vec<(TerminalId, News)> = news
+            .into_iter()
+            .filter(|(terminal, _)| !self.core_terminal_silenced(&super::Host::Local, terminal, cx))
+            .collect();
+        let heard = cx.default_global::<Heard>();
         let now = Instant::now();
-        for (terminal, news) in news {
+        for (terminal, news) in heard_news {
             heard.push(now, terminal, news);
         }
     }
@@ -283,6 +298,7 @@ impl SheprdWindow {
                 .agent_terminals(cx)
                 .filter(|_| connected)
                 .filter(|info| matches!(info.agent, AgentStatus::Blocked | AgentStatus::Done))
+                .filter(|info| !self.core_terminal_silenced(&super::Host::Local, &info.id, cx))
                 .map(|info| info.id.clone())
                 .collect();
             crate::app_badge::sync_core(id, attention, cx);
@@ -319,6 +335,21 @@ impl SheprdWindow {
         if !connected || (heard.due.is_empty() && heard.posts.is_empty()) {
             return;
         }
+        // A muted tab's agent plays and posts nothing, as a muted Herdr 1
+        // tab's: what waits for one muted since is dropped, not kept for an
+        // unmute.
+        let waiting: Vec<TerminalId> = heard
+            .due
+            .iter()
+            .chain(&heard.posts)
+            .map(|(_, terminal, _)| terminal.clone())
+            .collect();
+        let muted: HashSet<TerminalId> = waiting
+            .into_iter()
+            .filter(|terminal| self.core_terminal_silenced(&super::Host::Local, terminal, cx))
+            .collect();
+        let heard = cx.default_global::<Heard>();
+        heard.forget_due(|terminal| muted.contains(terminal));
         let now = Instant::now();
         // Until the settings load, the default delay of a second.
         let delay = Duration::from_secs(self.sound.delay().unwrap_or(1));

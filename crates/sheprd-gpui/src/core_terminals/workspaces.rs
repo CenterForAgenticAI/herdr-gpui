@@ -253,6 +253,10 @@ impl SheprdWindow {
         let scope = scope_of(self);
         let host = Host::of(&scope);
         let tabs = Store::update(cx, |store| store.forget_kept(&scope, id));
+        let closed: Vec<String> = tabs.iter().map(|tab| tab.id.to_string()).collect();
+        crate::notification_mutes::Mutes::update(cx, |mutes| {
+            mutes.forget_kept(scope.as_str(), id, &closed)
+        });
         for location in tabs.iter().filter_map(|tab| tab.location.as_ref()) {
             self.end_location(&host, location);
         }

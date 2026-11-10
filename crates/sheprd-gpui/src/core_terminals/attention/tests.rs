@@ -280,6 +280,25 @@ fn a_shell_hidden_behind_a_page_still_sounds_when_it_finishes() {
 }
 
 #[test]
+fn news_waiting_for_a_muted_terminal_never_plays() {
+    let start = Instant::now();
+    let mut heard = heard_change(start, AgentStatus::Working, AgentStatus::Blocked);
+    // Muted while the news waited out its delay, then unmuted before it ends.
+    heard.forget_due(|terminal| terminal.as_str() == "t1");
+    assert!(heard.take_due(after(start, 1_500), DELAY).is_empty());
+    assert!(
+        heard.take_posts(after(start, 60_000), DELAY).is_empty(),
+        "nor does it post a system notification"
+    );
+    let mut kept = heard_change(start, AgentStatus::Working, AgentStatus::Blocked);
+    kept.forget_due(|terminal| terminal.as_str() == "t9");
+    assert_eq!(
+        names(&kept.take_due(after(start, 1_500), DELAY)),
+        [("t1", News::NeedsYou)]
+    );
+}
+
+#[test]
 fn banners_wait_out_their_own_delay_apart_from_the_sound() {
     let start = Instant::now();
     let mut heard = heard_change(start, AgentStatus::Working, AgentStatus::Blocked);
