@@ -139,7 +139,9 @@ impl SheprdWindow {
         // Git runs through host scripts, which need `/bin/sh`, as the
         // menu's rows say.
         let scripts = cfg!(any(target_os = "linux", target_os = "macos"));
-        let linked = linked.flatten().filter(|_| scripts);
+        // Git runs on this computer, so another host's kept workspaces wait.
+        let local = !self.selected_is_remote();
+        let linked = linked.flatten().filter(|_| scripts && local);
         let action = match (shortcut, linked) {
             (_, None) => Err(Unavailable::NotGit),
             (WorktreeShortcut::Remove, Some(false)) => Err(Unavailable::MainCheckout),

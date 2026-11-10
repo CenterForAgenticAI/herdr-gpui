@@ -34,6 +34,9 @@ impl Localize for Error {
                 step = step(*at),
                 error = source.localize()
             ),
+            Self::Unprompted { source, .. } => {
+                fl!("error-remote-work-unprompted", error = source.localize())
+            }
             Self::Worktree(error) => error.localize(),
             // keep-sorted end
         }

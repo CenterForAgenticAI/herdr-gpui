@@ -14,13 +14,15 @@ use sheprd_session::Keeper;
 /// removed worktrees of its repository, which the app makes with Git.
 pub(super) fn items(
     target: &WorkspaceTarget,
+    local: bool,
     checkout: bool,
     checkpoints: bool,
 ) -> Vec<(WorkspaceMenuAction, Label)> {
     let mut items = Vec::new();
-    // Git runs through host scripts, which need `/bin/sh`.
+    // Git runs through host scripts, which need `/bin/sh`, on this
+    // computer: another host's kept workspaces wait for its own Git.
     let scripts = cfg!(any(target_os = "linux", target_os = "macos"));
-    let git = scripts && matches!(target.source, Source::Directory(_));
+    let git = scripts && local && matches!(target.source, Source::Directory(_));
     if git && target.worktree.is_some() {
         items.push((
             WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree),

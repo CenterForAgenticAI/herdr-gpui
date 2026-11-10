@@ -50,6 +50,13 @@ pub enum Error {
         #[source]
         source: sheprd_client::Error,
     },
+    /// The agent started, at `started`, but did not take its prompt.
+    #[error("The agent started but did not take its prompt: {source}")]
+    Unprompted {
+        started: super::Started,
+        #[source]
+        source: Box<Error>,
+    },
     #[error(transparent)]
     Worktree(#[from] sheprd_client::herdr::worktree::Error),
     // keep-sorted end
