@@ -648,13 +648,15 @@ impl SheprdWindow {
             return vec![];
         };
         if target.keeper == sheprd_session::Keeper::App {
-            return kept::items(
+            let mut items = kept::items(
                 target,
                 !self.selected_is_remote(),
                 self.note_checkout().is_some(),
                 self.checkpoint_checkout().is_some(),
                 self.fan_out_item(),
             );
+            items.extend(self.teleport_items());
+            return items;
         }
         let mut items = vec![if target.muted {
             (WorkspaceMenuAction::Unmute, Label::UNMUTE)
@@ -668,18 +670,7 @@ impl SheprdWindow {
             items.push((WorkspaceMenuAction::FanOut, label));
         }
         items.push((Dialog(WorkspaceAction::Rename), Label::RENAME));
-        if self.teleport_mark().is_some() {
-            items.push((WorkspaceMenuAction::GoToTeleported, Label::GO_TO_TELEPORTED));
-            items.push((
-                WorkspaceMenuAction::ClearTeleported,
-                Label::CLEAR_TELEPORTED,
-            ));
-        } else if self.can_teleport() {
-            items.push((WorkspaceMenuAction::Teleport, Label::TELEPORT));
-            if self.teleport_origin().is_some() {
-                items.push((WorkspaceMenuAction::TeleportBack, Label::TELEPORT_BACK));
-            }
-        }
+        items.extend(self.teleport_items());
         items.push((Dialog(WorkspaceAction::Close), target.close_label()));
         if self.checkpoint_checkout().is_some() {
             items.push((WorkspaceMenuAction::Checkpoints, Label::CHECKPOINTS));

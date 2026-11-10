@@ -209,7 +209,7 @@ impl SheprdWindow {
 
     /// The host `endpoint_id` with only the repositories Herdr 1's snapshot
     /// shows there, for callers that create through Herdr 1's CLI on it
-    /// (Teleport, fan-out, the orchestrator): a kept workspace's ID means
+    /// (fan-out, the orchestrator): a kept workspace's ID means
     /// nothing to `herdr worktree create`, even on this computer when it
     /// keeps its new workspaces for Herdr 2.
     pub(crate) fn herdr_1_destination(&self, endpoint_id: &str) -> Option<HostRepositories> {
@@ -231,6 +231,11 @@ impl SheprdWindow {
                 self.endpoint_snapshot(index).map(open_repositories)
             },
             retired: Vec::new(),
+            lands_in: if kept {
+                sheprd_session::Keeper::App
+            } else {
+                sheprd_session::Keeper::Herdr1
+            },
         })
     }
 

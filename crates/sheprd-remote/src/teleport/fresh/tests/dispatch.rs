@@ -132,6 +132,7 @@ fn kept_origin(fixture: &Fixture) -> Origin {
 /// This computer with the destination clone open in a kept workspace.
 fn kept_destination(fixture: &Fixture, home: &Home) -> HostRepositories {
     HostRepositories {
+        lands_in: sheprd_session::Keeper::App,
         place: Place {
             endpoint_id: "local".into(),
             label: "This Mac".into(),

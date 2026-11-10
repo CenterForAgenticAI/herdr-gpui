@@ -39,7 +39,7 @@ fn a_missing_terminal_after_starting_never_offers_a_second_agent() {
             assert_eq!(restored.resumable(0), expected);
             if expected.is_none() {
                 assert!(!restored.resume(0));
-                assert!(!restored.work.load(std::sync::atomic::Ordering::Acquire));
+                assert!(!restored.work.load(Ordering::Acquire));
             }
         }
     }
@@ -70,9 +70,6 @@ fn the_resume_worker_refuses_an_unknown_terminal_too() {
     );
     assert!(matches!(
         reports.lock().unwrap().as_slice(),
-        [Report::Lane(
-            0,
-            Progress::Failed(super::super::super::error::Error::AgentUncertain)
-        )]
+        [Report::Lane(0, Progress::Failed(Error::AgentUncertain))]
     ));
 }

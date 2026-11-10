@@ -56,7 +56,7 @@ pub(super) struct Found<'a> {
     /// The workspace as the session model has it, whichever keeps it.
     pub workspace: sheprd_session::Workspace,
     /// Herdr 1's state of it; `None` for a workspace the app keeps for
-    /// Herdr 2, which has none of what mutes, scripts, and Teleport keep.
+    /// Herdr 2, which has none of what mutes, scripts, and fan-out keep.
     pub herdr: Option<Herdr<'a>>,
 }
 

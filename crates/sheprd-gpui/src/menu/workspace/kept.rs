@@ -111,7 +111,7 @@ impl WorkspaceTarget {
 }
 
 impl SheprdWindow {
-    pub(super) fn open_kept_workspace_menu(
+    pub(crate) fn open_kept_workspace_menu(
         &mut self,
         id: &str,
         anchor: Point<Pixels>,
