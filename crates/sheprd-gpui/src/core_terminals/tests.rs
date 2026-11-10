@@ -29,6 +29,7 @@ mod phone;
 mod processes;
 mod quote;
 mod refresh;
+mod remote_workspaces;
 mod requests;
 mod resize;
 mod restore;
@@ -54,6 +55,8 @@ impl crate::SheprdWindow {
         scope: crate::browser::Scope,
         session: sheprd_session::Session,
     ) {
-        self.core_terminals.session = Some((scope, std::sync::Arc::new(session)));
+        let sessions = &mut self.core_terminals.sessions;
+        sessions.retain(|(known, _)| *known != scope);
+        sessions.push((scope, std::sync::Arc::new(session)));
     }
 }
