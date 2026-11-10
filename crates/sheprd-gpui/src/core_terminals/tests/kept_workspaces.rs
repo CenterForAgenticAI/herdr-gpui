@@ -12,7 +12,7 @@ use gpui::{Entity, TestAppContext, VisualTestContext, prelude::*};
 use sheprd_backend::TerminalId;
 use std::{path::Path, sync::Arc};
 
-fn window(
+pub(super) fn window(
     cx: &mut TestAppContext,
     herdr_1: bool,
 ) -> (Entity<SheprdWindow>, &mut VisualTestContext) {
@@ -50,7 +50,7 @@ fn listed(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext) -> Vec<String
     })
 }
 
-fn core_tab(id: &str) -> Location {
+pub(super) fn core_tab(id: &str) -> Location {
     Location::core_terminal(Panes::single(TerminalId::new(id).unwrap()), false)
 }
 
@@ -246,7 +246,8 @@ fn a_local_project_opens_in_herdr_2_while_another_host_is_shown(cx: &mut TestApp
             view.endpoints.push(remote);
             view.endpoints[0].live = std::mem::take(&mut view.live);
             view.selected_endpoint = 1;
-            assert!(!view.new_workspaces_use_core(), "the shown host is remote");
+            // Herdr 2 is chosen, and nothing says the host lacks a core.
+            assert!(view.new_workspaces_use_core(), "the shown host keeps one");
             assert!(view.local_workspaces_use_core(), "a project is local");
             view.open_local_kept_folder("api", "/src/api".into(), cx);
             assert_eq!(view.selected_endpoint, 0, "this computer is shown");

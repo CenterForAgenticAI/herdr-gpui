@@ -211,7 +211,6 @@ impl SheprdWindow {
                 host: (multi && endpoint_id != crate::endpoint::LOCAL)
                     .then_some(endpoint.label.as_str()),
             };
-            let daemon = crate::listening_ports::Daemon::of(&endpoint.connection.target);
             let live = if selected { &self.live } else { &endpoint.live };
             // Herdr 1's workspaces, then those the app keeps for Herdr 2.
             let sessions = self.sessions(endpoint_index);
@@ -419,9 +418,8 @@ impl SheprdWindow {
                     // sibling, as it runs through the row itself.
                     let trunk = rows.trunk_below(&format!("{endpoint_id}-{id}"), tree, &row_cx);
                     let ports = (self.config.show_listening_ports && !removing_row)
-                        .then_some(daemon.as_ref())
+                        .then(|| self.listed_ports(endpoint_index, &workspace.id))
                         .flatten()
-                        .and_then(|daemon| self.listening_ports.get(daemon, &workspace.id))
                         .map(|listed| {
                             div()
                                 .debug_selector(|| format!("ports-{endpoint_id}-{id}"))
@@ -581,19 +579,17 @@ impl SheprdWindow {
                     })
                     .when(carried, |row| row.cursor_grabbing());
                     let indent = layout.child_indent() * if indented { 2. } else { 1. };
-                    let agent_rows = match snapshot.filter(|_| nested_agents) {
-                        Some(snapshot) => {
-                            let (rows, focused) = self.nested_agent_rows(
-                                endpoint_index,
-                                snapshot,
-                                &workspace.id,
-                                (&row_cx, indent),
-                                cx,
-                            );
-                            nested_focus = nested_focus.or(focused);
-                            rows
-                        }
-                        None => Vec::new(),
+                    let agent_rows = if nested_agents {
+                        let (rows, focused) = self.nested_agent_rows(
+                            endpoint_index,
+                            &workspace.id,
+                            (&row_cx, indent),
+                            cx,
+                        );
+                        nested_focus = nested_focus.or(focused);
+                        rows
+                    } else {
+                        Vec::new()
                     };
                     // The note, ports and nested agents ride under their row as one
                     // list item, so the drop preview still measures one height per
@@ -860,8 +856,7 @@ impl SheprdWindow {
                                     ),
                             )
                         })
-                        .child(agents)
-                        .children(self.core_sidebar_rows(cx)),
+                        .child(agents),
                 )
             })
             .children(self.render_mod_sidebar_sections(cx))
