@@ -214,7 +214,9 @@ pub fn create_in_herdr1(
 }
 
 /// Starts `agent` in `worktree`'s first pane, or a new herdr-core shell in
-/// its folder, and sends it its prompt once it is ready.
+/// its folder, and sends it its prompt once it is ready. An agent that
+/// started but did not take its prompt is [`Error::Unprompted`], which
+/// names where it runs so the caller can still show it.
 pub fn start_agent(
     host: &Host,
     worktree: &Worktree,
@@ -259,14 +261,36 @@ pub fn start_agent(
                 .map(|arg| shell_quote(arg))
                 .collect::<Vec<_>>()
                 .join(" ");
-            send(host, &terminal, &program, Step::StartAgent, cancelled)?;
+            if let Err(error) = send(host, &terminal, &program, Step::StartAgent, cancelled) {
+                // No agent ever ran there, and no caller learns its address,
+                // so the shell is ended rather than left without a tab.
+                end(host, &terminal);
+                return Err(error);
+            }
             Started::Herdr2 { terminal }
         }
     };
-    if let Some(prompt) = agent.prompt {
-        self::prompt(host, &started, prompt, cancelled)?;
+    if let Some(prompt) = agent.prompt
+        && let Err(source) = self::prompt(host, &started, prompt, cancelled)
+    {
+        return Err(Error::Unprompted {
+            started,
+            source: Box::new(source),
+        });
     }
     Ok(started)
+}
+
+/// Ends the herdr-core terminal `terminal`, best effort: one already gone
+/// is fine.
+fn end(host: &Host, terminal: &str) {
+    let line = format!(
+        "core_cli kill --json -- {} >/dev/null\n",
+        shell_quote(terminal)
+    );
+    if let Err(error) = host.capture(&line, &AtomicBool::new(false)) {
+        tracing::warn!(%error, %terminal, "Could not end a herdr-core shell whose agent never started");
+    }
 }
 
 /// Sends `prompt` to the agent `started` runs, once it says it is ready.
@@ -367,8 +391,10 @@ printf '%s\n' "$dest"
     )
 }
 
-/// Removes a checkout through its repository, since Git will not remove
-/// the checkout it runs in, and says what happened.
+/// Removes the checkout `path` is in, from its top folder, since a
+/// workspace may have started in a subfolder, through its repository,
+/// since Git will not remove the checkout it runs in, and says what
+/// happened.
 fn remove_script(path: &str, force: bool) -> String {
     let path = shell_quote(path);
     let (check, flag) = if force {
@@ -380,7 +406,7 @@ fn remove_script(path: &str, force: bool) -> String {
         )
     };
     format!(
-        r#"tree={path}
+        r#"tree=$(git -C {path} rev-parse --show-toplevel)
 {check}common=$(git -C "$tree" rev-parse --path-format=absolute --git-common-dir)
 git --git-dir="$common" worktree remove{flag} "$tree" >&2
 echo removed

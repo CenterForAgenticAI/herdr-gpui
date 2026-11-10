@@ -21,3 +21,4 @@ error-remote-work-output = { $step ->
 error-remote-work-agent = The agent did not take its prompt: { $error }
 error-remote-work-cancelled = The work was cancelled
 error-remote-work-dirty = The worktree has uncommitted changes
+error-remote-work-unprompted = The agent started but did not take its prompt: { $error }
