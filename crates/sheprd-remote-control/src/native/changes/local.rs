@@ -343,25 +343,64 @@ fn section<'a>(text: &'a str, path: &str) -> &'a str {
     if let Some(from) = start {
         sections.push(&text[from..]);
     }
-    let names = [
-        format!("+++ b/{path}"),
-        format!("rename to {path}"),
-        format!("copy to {path}"),
-    ];
-    let deleted = format!("--- a/{path}");
+    let (new, old) = (format!("b/{path}"), format!("a/{path}"));
     let found = sections.iter().find(|section| {
         let header = section.split("\n@@").next().unwrap_or_default();
-        let mut lines = header.lines();
-        lines
-            .clone()
-            .any(|line| names.iter().any(|name| line == name))
-            || (lines.any(|line| line == deleted) && header.contains("\n+++ /dev/null"))
+        let named = |prefix: &str, name: &str| {
+            header
+                .lines()
+                .filter_map(|line| line.strip_prefix(prefix))
+                .any(|rest| unquoted(rest) == name)
+        };
+        named("+++ ", &new)
+            || named("rename to ", path)
+            || named("copy to ", path)
+            || (named("--- ", &old) && header.contains("\n+++ /dev/null"))
     });
     match (found, sections.as_slice()) {
         (Some(found), _) => found,
         (None, [only]) => only,
         (None, _) => "",
     }
+}
+
+/// A name in a diff header as Git wrote it: quoted, with C escapes, when
+/// it holds a quote, a backslash, or a control character.
+fn unquoted(name: &str) -> std::borrow::Cow<'_, str> {
+    let Some(inner) = name
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+    else {
+        return name.into();
+    };
+    let mut bytes = Vec::with_capacity(inner.len());
+    let mut rest = inner.bytes();
+    while let Some(byte) = rest.next() {
+        if byte != b'\\' {
+            bytes.push(byte);
+            continue;
+        }
+        let Some(escaped) = rest.next() else {
+            break;
+        };
+        bytes.push(match escaped {
+            b'a' => 0x07,
+            b'b' => 0x08,
+            b'f' => 0x0c,
+            b'n' => b'\n',
+            b'r' => b'\r',
+            b't' => b'\t',
+            b'v' => 0x0b,
+            b'0'..=b'7' => {
+                let digits = [Some(escaped), rest.next(), rest.next()];
+                digits.into_iter().flatten().fold(0_u8, |value, digit| {
+                    value.wrapping_mul(8).wrapping_add(digit - b'0')
+                })
+            }
+            other => other,
+        });
+    }
+    String::from_utf8_lossy(&bytes).into_owned().into()
 }
 
 /// A unified diff's lines from its first hunk on, numbered.

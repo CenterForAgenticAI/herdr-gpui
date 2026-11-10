@@ -396,3 +396,15 @@ fn a_section_is_found_by_its_new_renamed_or_deleted_name() {
     assert!(section(text, "n").contains("rename to n"));
     assert_eq!(section(text, "z"), "");
 }
+
+#[test]
+fn a_quoted_name_in_a_header_is_read_as_the_file_it_names() {
+    assert_eq!(unquoted(r#""b/say \"hi\".txt""#), r#"b/say "hi".txt"#);
+    assert_eq!(unquoted(r#""b/a\tb\\c""#), "b/a\tb\\c");
+    assert_eq!(unquoted(r#""b/\303\251""#), "b/é");
+    assert_eq!(unquoted("b/plain"), "b/plain");
+    let text = "diff --git a/o \"b/n\\\"q\"\n--- a/o\n+++ \"b/n\\\"q\"\n@@ -1 +1 @@\n-a\n+b\n\
+        diff --git a/o b/o\nnew file mode 100644\n--- /dev/null\n+++ b/o\n@@ -0,0 +1 @@\n+x\n";
+    assert!(section(text, "n\"q").contains("+b"));
+    assert!(section(text, "o").contains("+x"));
+}
