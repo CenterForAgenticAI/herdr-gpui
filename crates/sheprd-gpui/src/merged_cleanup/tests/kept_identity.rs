@@ -84,3 +84,51 @@ fn kept_cleanup_checks_its_folder_even_when_the_cached_branch_moves_elsewhere() 
         Err(crate::Error::StaleWorkspace)
     ));
 }
+
+#[test]
+fn a_kept_subfolder_cannot_hide_its_checkout_roots_archive_script() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main");
+    let linked = dir.path().join("linked");
+    std::fs::create_dir(&main).unwrap();
+    git(&main, &["init", "-b", "main"]);
+    git(&main, &["commit", "--allow-empty", "-m", "initial"]);
+    git(
+        &main,
+        &["worktree", "add", "-b", "feature", linked.to_str().unwrap()],
+    );
+    std::fs::create_dir(linked.join(".herdr")).unwrap();
+    std::fs::write(
+        linked.join(".herdr/worktree.toml"),
+        "[scripts]\narchive = 'make clean'\n",
+    )
+    .unwrap();
+    git(&linked, &["add", ".herdr"]);
+    git(&linked, &["commit", "-m", "archive"]);
+    let folder = linked.join("src");
+    std::fs::create_dir(&folder).unwrap();
+    let path = folder.to_str().unwrap();
+    let candidate = Candidate {
+        workspace: "space-1".into(),
+        input: Input {
+            checkout: Some(path.into()),
+            repo_key: Some(main.join(".git").to_str().unwrap().into()),
+            branch: "feature".into(),
+        },
+        number: 1,
+        head: git(&linked, &["rev-parse", "HEAD"]),
+    };
+    let cancelled = AtomicBool::new(false);
+    let report = probe(&candidate.input, &cancelled).unwrap();
+    assert!(!report.dirty);
+    assert!(report.archive);
+    assert_eq!(
+        decide_status(&candidate, &report, AgentStatus::Idle, false),
+        Err(Skip::ArchiveScript)
+    );
+    assert!(matches!(
+        verify_kept_removal(&candidate, path, &cancelled),
+        Err(crate::Error::StaleWorkspace)
+    ));
+    assert!(linked.exists());
+}

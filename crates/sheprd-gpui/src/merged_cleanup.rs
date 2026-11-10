@@ -219,6 +219,16 @@ fn probe(input: &Input, cancelled: &AtomicBool) -> crate::Result<Report> {
     let deadline = Instant::now() + PROBE_DEADLINE;
     let stop = || cancelled.load(Ordering::Relaxed);
     let checkout = local_checkout(input, deadline, &stop)?;
+    // A kept workspace may start below the checkout root. Git removal
+    // removes the whole tree, so inspect that root's scripts too, after
+    // local_checkout has verified the saved folder's repository and branch.
+    let checkout = crate::git::git(
+        &checkout,
+        &["rev-parse", "--show-toplevel"],
+        "locate checkout root",
+        deadline,
+        &stop,
+    )?;
     let head = crate::git::git(
         &checkout,
         &["rev-parse", "--verify", "HEAD"],
