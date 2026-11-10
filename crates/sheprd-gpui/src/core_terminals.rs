@@ -496,6 +496,16 @@ impl CoreTerminals {
         self.tabs.insert(tab, shown);
     }
 
+    /// Takes `identity` as what Git answered for the folder `cwd`.
+    #[cfg(test)]
+    pub(crate) fn seed_checkout_for_test(
+        &mut self,
+        cwd: &str,
+        identity: Option<sheprd_vcs::git::Identity>,
+    ) {
+        self.checkouts.seed(cwd, identity);
+    }
+
     /// Places `tab` in `workspace` of `scope`, as showing the workspace does.
     #[cfg(test)]
     pub(crate) fn place_for_test(&mut self, tab: TabId, scope: Scope, workspace: &str) {
