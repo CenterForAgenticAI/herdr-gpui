@@ -13,7 +13,7 @@ use crate::{
 use gpui::{TestAppContext, point, px};
 
 #[gpui::test]
-fn a_tab_menu_offers_a_new_tab_renaming_muting_and_closing(cx: &mut TestAppContext) {
+fn a_tab_menu_offers_what_a_herdr_1_tabs_does(cx: &mut TestAppContext) {
     let (view, cx, tab) = window_with_split(cx, &["t1"]);
     let actions = cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -28,6 +28,7 @@ fn a_tab_menu_offers_a_new_tab_renaming_muting_and_closing(cx: &mut TestAppConte
         [
             Action::NewTab,
             Action::Rename,
+            Action::MoveToWorkspace,
             Action::Mute(MuteRow::Mute),
             Action::Close
         ]
@@ -79,7 +80,7 @@ fn a_mirror_pane_only_closes(cx: &mut TestAppContext) {
     run(&view, cx, Command::RenamePane);
     assert_eq!(
         flash(&view, cx),
-        Some(crate::i18n::fl!("core-terminals-unsupported"))
+        Some(crate::i18n::fl!("core-terminals-mirror-only-watches"))
     );
 }
 

@@ -53,15 +53,25 @@ impl SheprdWindow {
         // layout does not list yet: they end with it too.
         let mut closed = Vec::new();
         terminals.tabs.retain(|id, shown| {
-            let open = store.get(*id).is_some();
-            if !open && !shown.observe {
-                let host = &shown.host;
-                closed.extend(
-                    (shown.panes.terminals().into_iter())
-                        .map(|terminal| (host.clone(), terminal.clone())),
-                );
+            let Some(stored) = store.get(*id) else {
+                if !shown.observe {
+                    let host = &shown.host;
+                    closed.extend(
+                        (shown.panes.terminals().into_iter())
+                            .map(|terminal| (host.clone(), terminal.clone())),
+                    );
+                }
+                return false;
+            };
+            // A tab any window moved to another workspace is in that one
+            // now, whichever workspace this window shows.
+            if let Some((scope, workspace)) = &mut shown.workspace
+                && (*scope != stored.scope || *workspace != stored.workspace_id)
+            {
+                scope.clone_from(&stored.scope);
+                workspace.clone_from(&stored.workspace_id);
             }
-            open
+            true
         });
         let tabs = &terminals.tabs;
         terminals.views.retain(|(tab, terminal), _| {

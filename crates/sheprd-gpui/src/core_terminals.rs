@@ -47,6 +47,7 @@ mod workspaces;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;
 
+pub(crate) use commands::acts_on_panes;
 pub(crate) use error::Error;
 pub(crate) use fallback::Holder;
 pub(crate) use hosts::Host;

@@ -635,6 +635,22 @@ impl Store {
         Some(tab)
     }
 
+    /// Moves a tab to `workspace_id`, another workspace of its daemon, after
+    /// that workspace's tabs. Returns whether it moved.
+    pub(crate) fn move_to_workspace(&mut self, id: TabId, workspace_id: &str) -> bool {
+        let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
+            return false;
+        };
+        if self.tabs[index].workspace_id == workspace_id || workspace_id.is_empty() {
+            return false;
+        }
+        let mut tab = self.tabs.remove(index);
+        tab.workspace_id = workspace_id.to_owned();
+        self.tabs.push(tab);
+        self.save();
+        true
+    }
+
     /// Records where a page went and what it calls itself. Returns whether
     /// anything changed.
     pub(crate) fn visited(

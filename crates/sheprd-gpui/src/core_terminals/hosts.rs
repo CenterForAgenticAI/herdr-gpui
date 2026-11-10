@@ -292,10 +292,12 @@ impl SheprdWindow {
     /// attached anew; nothing is started or replayed.
     pub(super) fn poll_core_hubs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = self.forget_stale_core_hosts();
+        let scrollback = self.config.herdr_2_scrollback;
         for host in self.core_terminals.hosts() {
             let Some(hub) = self.core_terminals.hub_of_mut(&host) else {
                 continue;
             };
+            hub.set_scrollback(scrollback);
             let connected = hub.backend().is_some();
             if !hub.poll() {
                 continue;
