@@ -740,7 +740,7 @@ impl SheprdWindow {
         self.poll_overview(cx);
         self.poll_security(cx);
         self.poll_automations(cx);
-        self.poll_remote_updates(cx);
+        self.poll_remote_updates(window, cx);
         if self.update_system_load() {
             cx.notify();
         }

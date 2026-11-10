@@ -2,20 +2,28 @@
 //! shows, and the confirmed install.
 
 use super::{Error, HostUpdate, Install, Pill, fetch};
-use crate::{SheprdWindow, automations::Machine, endpoint::Endpoint, menu::Page};
+use crate::{
+    SheprdWindow,
+    automations::{Machine, Wanted},
+    endpoint::Endpoint,
+    menu::Page,
+    teleport::Host,
+};
 use gpui::{Context, Window};
 use std::time::Instant;
+
+#[cfg(test)]
+mod tests;
 
 impl SheprdWindow {
     /// Called on each tick: follows the machines the window reaches, and
     /// reads those that are due.
-    pub(crate) fn poll_remote_updates(&mut self, cx: &mut Context<Self>) {
-        let wanted = self
-            .automation_hosts()
-            .into_iter()
-            .filter(|wanted| !wanted.machine.is_local())
-            .collect();
+    pub(crate) fn poll_remote_updates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let wanted = self.remote_update_hosts();
         if self.remote_updates.sync(wanted) {
+            if self.remote_updates.dialog.is_none() && self.menu.page == Some(Page::RemoteUpdate) {
+                self.dismiss_menu(window, cx);
+            }
             cx.notify();
         }
         let now = Instant::now();
@@ -29,6 +37,40 @@ impl SheprdWindow {
         for machine in due {
             self.read_remote_update(&machine, cx);
         }
+    }
+
+    fn remote_update_hosts(&self) -> Vec<Wanted> {
+        let mut wanted: Vec<Wanted> = self
+            .automation_hosts()
+            .into_iter()
+            .filter(|wanted| !wanted.machine.is_local())
+            .collect();
+        // Terminal connectivity does not own an already confirmed update.
+        // Keep its reads and result through reconnects, but stop tracking a
+        // machine once all its endpoints are removed or disabled.
+        for endpoint in self.endpoints.iter().filter(|endpoint| endpoint.enabled) {
+            let Some(machine) = Machine::of(&endpoint.connection.target) else {
+                continue;
+            };
+            if wanted.iter().any(|host| host.machine == machine)
+                || !self
+                    .remote_updates
+                    .host(&machine)
+                    .is_some_and(|host| host.install.is_some())
+            {
+                continue;
+            }
+            let Ok(host) = Host::new(&endpoint.connection.target) else {
+                continue;
+            };
+            wanted.push(Wanted {
+                machine,
+                label: endpoint.label.clone(),
+                endpoint: Some(endpoint.id.clone()),
+                host,
+            });
+        }
+        wanted
     }
 
     fn read_remote_update(&mut self, machine: &Machine, cx: &mut Context<Self>) {

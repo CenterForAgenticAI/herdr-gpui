@@ -393,8 +393,10 @@ embeds, installs it, and restarts, as it does for a paired phone. Its
 daemons, terminals, and agents keep running. The pill shows **Updating…**
 until the machine reports the new version, and **Update failed**, with the
 reason and a retry, if it reports an error or takes longer than 20
-minutes. A machine whose Sheprd predates `update install` says so; update
-it there once.
+minutes. Temporary terminal disconnects preserve the confirmed update and its
+deadline; removing or disabling the machine stops tracking it. If a later read
+shows the new running version, an earlier failure clears automatically. A machine
+whose Sheprd predates `update install` says so; update it there once.
 
 The remote app refuses `--confirmed` from callers that report a Herdr pane
 or terminal, so an agent there cannot pass for the user. That identity is

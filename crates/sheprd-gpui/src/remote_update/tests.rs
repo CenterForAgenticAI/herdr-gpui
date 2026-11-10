@@ -3,6 +3,7 @@ use super::*;
 
 mod fetch;
 mod follow;
+mod recovery;
 
 pub(super) fn offered(current: &str, latest: &str) -> Remote {
     Remote {

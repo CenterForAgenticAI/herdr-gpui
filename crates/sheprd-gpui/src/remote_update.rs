@@ -138,6 +138,11 @@ fn settle(install: &mut Install, read: &Result<Remote, Arc<Error>>, now: Instant
         if moved {
             return Settle::Done;
         }
+        // A failed request may still have reached the updater. Only a new
+        // running version clears that failure; an old `current` does not.
+        if install.failed.is_some() {
+            return Settle::Running;
+        }
         let settled = install.seen_working || elapsed >= GRACE;
         match remote.phase {
             Phase::Current if settled => return Settle::Done,
@@ -236,7 +241,7 @@ impl HostUpdate {
         }
     }
 
-    /// Whether the machine is being updated, failed or not.
+    /// Whether the machine is being actively followed, before a failure.
     fn following(&self) -> bool {
         self.install
             .as_ref()
@@ -266,15 +271,13 @@ impl HostUpdate {
     fn take(&mut self, read: Result<Remote, Error>, now: Instant) {
         self.task = None;
         let read = read.map_err(Arc::new);
-        if let Some(install) = self
-            .install
-            .as_mut()
-            .filter(|install| install.failed.is_none())
-        {
+        if let Some(install) = self.install.as_mut() {
             match settle(install, &read, now) {
                 Settle::Running => {}
                 Settle::Done => self.install = None,
-                Settle::Failed(error) => install.failed = Some(Arc::new(error)),
+                Settle::Failed(error) => {
+                    install.failed.get_or_insert_with(|| Arc::new(error));
+                }
             }
         }
         // A machine restarting keeps showing what it said before.
