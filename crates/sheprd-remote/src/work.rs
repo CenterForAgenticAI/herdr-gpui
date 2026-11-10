@@ -12,7 +12,10 @@
 
 mod error;
 pub mod fanout;
+mod inspect;
 pub mod owned_agent;
+
+pub use inspect::{git, identity, open};
 
 pub use error::{Error, Result, Step};
 
@@ -156,11 +159,14 @@ pub fn create(
             cancelled,
         ),
         Repository::Herdr2 { checkout } => {
+            inspect::validate_path(host, checkout, Step::CreateWorktree)?;
             let common = host
                 .capture(&common_dir_line(checkout), cancelled)
                 .map_err(script(Step::CreateWorktree))?;
             let common = String::from_utf8_lossy(&common);
-            let folder = worktree::folder(Path::new(common.trim()), new.branch)?;
+            let common = common.trim_end_matches('\n');
+            inspect::validate_path(host, common, Step::CreateWorktree)?;
+            let folder = worktree::folder(Path::new(common), new.branch)?;
             let output = host
                 .capture(&add_script(checkout, &folder, new), cancelled)
                 .map_err(script(Step::CreateWorktree))?;
@@ -307,6 +313,7 @@ pub fn prompt(host: &Host, started: &Started, prompt: &str, cancelled: &AtomicBo
 /// Every checkout of the repository `checkout` belongs to, on a host whose
 /// worktrees Git keeps for herdr-core.
 pub fn list(host: &Host, checkout: &str, cancelled: &AtomicBool) -> Result<Vec<Checkout>> {
+    inspect::validate_path(host, checkout, Step::List)?;
     let line = format!(
         "git -C {} worktree list --porcelain -z\n",
         shell_quote(checkout)
@@ -336,6 +343,7 @@ pub fn discard(host: &Host, worktree: &Worktree, cancelled: &AtomicBool) -> Resu
 /// work stays reachable, as Herdr 1 does. Without `force`, a checkout with
 /// uncommitted changes stays and the answer is [`Error::Dirty`].
 pub fn remove(host: &Host, path: &str, force: bool, cancelled: &AtomicBool) -> Result<()> {
+    inspect::validate_path(host, path, Step::Remove)?;
     let output = host
         .capture(&remove_script(path, force), cancelled)
         .map_err(script(Step::Remove))?;
@@ -369,7 +377,13 @@ fn common_dir_line(checkout: &str) -> String {
 /// to stderr, so only the folder is read.
 fn add_script(checkout: &str, folder: &Path, new: &NewWorktree<'_>) -> String {
     let repo = shell_quote(checkout);
-    let destination = shell_quote(&Path::new(worktree::ROOT).join(folder).to_string_lossy());
+    // The script always runs on a POSIX host, even with a Windows client.
+    let folder = folder
+        .iter()
+        .map(|part| part.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    let destination = shell_quote(&format!("{}/{folder}", worktree::ROOT));
     let branch = shell_quote(new.branch);
     let base = shell_quote(new.base);
     format!(
@@ -394,14 +408,16 @@ fn remove_script(path: &str, force: bool) -> String {
         ("", " --force")
     } else {
         (
-            "if [ -n \"$(git -C \"$tree\" status --porcelain)\" ]; then echo dirty; exit 0; fi\n",
+            "status=$(git -C \"$tree\" status --porcelain --untracked-files=normal --ignore-submodules=none)\nif [ -n \"$status\" ]; then echo dirty; exit 0; fi\n",
             "",
         )
     };
     format!(
         r#"tree=$(git -C {path} rev-parse --show-toplevel)
 {check}common=$(git -C "$tree" rev-parse --path-format=absolute --git-common-dir)
-git --git-dir="$common" worktree remove{flag} "$tree" >&2
+own=$(git -C "$tree" rev-parse --path-format=absolute --git-dir)
+[ "$own" != "$common" ]
+git --git-dir="$common" worktree remove{flag} -- "$tree" >&2
 echo removed
 "#
     )

@@ -3,6 +3,8 @@ mod fanout;
 use sheprd_client::ConnectTarget;
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
 
+mod host_paths;
+
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
