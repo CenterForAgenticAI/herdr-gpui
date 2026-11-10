@@ -160,3 +160,18 @@ fn a_workspace_is_renamed_as_the_user_named_it() {
         Err(Error::Workspace)
     ));
 }
+
+#[test]
+fn zoom_gives_the_pane_the_keyboard_and_unzoom_works_from_any_pane() {
+    let (t1, t2) = (id("t1"), id("t2"));
+    let split = Change::Split {
+        at: &t1,
+        axis: Axis::Row,
+        new: t2.clone(),
+    };
+    let bytes = edit::edit_tab(&file(), "s", 1, split).unwrap();
+    let zoomed = edit::edit_tab(&bytes, "s", 1, Change::Zoom(&t2)).unwrap();
+    assert_eq!(value(&zoomed)["tabs"][0]["location"]["active"], "t2");
+    let shown = edit::edit_tab(&zoomed, "s", 1, Change::Zoom(&t1)).unwrap();
+    assert_eq!(SavedTabs::parse(&shown).unwrap().tab_zoomed("s", 1), None);
+}

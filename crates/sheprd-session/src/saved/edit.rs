@@ -23,7 +23,8 @@ pub enum Change<'a> {
         axis: Axis,
         new: TerminalId,
     },
-    /// The pane `at` fills the tab, or the split shows again.
+    /// A zoomed tab shows its split again; otherwise the pane `at` fills it
+    /// and takes the keyboard, as the app's zoom does.
     Zoom(&'a TerminalId),
     /// The tab's name; `None` gives back its program's title.
     Rename(Option<&'a str>),
@@ -80,10 +81,9 @@ pub fn edit_tab(bytes: &[u8], scope: &str, tab: u64, change: Change<'_>) -> Resu
         }
         Change::Zoom(at) => {
             present(at)?;
-            if location.get("zoomed").and_then(Value::as_str) == Some(at.as_str()) {
-                location.remove("zoomed");
-            } else {
+            if location.remove("zoomed").is_none() {
                 location.insert("zoomed".into(), at.as_str().into());
+                location.insert("active".into(), at.as_str().into());
             }
         }
         Change::Rename(name) => set(location, "name", name),

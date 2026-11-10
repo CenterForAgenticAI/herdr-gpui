@@ -184,3 +184,13 @@ fn an_empty_group_a_phone_named_shows_its_name_only_when_alone() {
     let beside = crate::hub::core::merge(&daemon, &core);
     assert!(beside.workspace(crate::hub::core::UNLISTED).is_none());
 }
+
+#[test]
+fn unzoom_from_another_pane_shows_the_split_again() {
+    let mut own = Store::default();
+    own.fit("fake-core", &records(&["t1", "t2"]), &HashSet::new());
+    own.split(&id("t1"), Axis::Row, id("t2")).unwrap();
+    own.zoom(&id("t1")).unwrap();
+    own.zoom(&id("t2")).unwrap();
+    assert_eq!(own.layouts.tabs[0].zoomed, None);
+}

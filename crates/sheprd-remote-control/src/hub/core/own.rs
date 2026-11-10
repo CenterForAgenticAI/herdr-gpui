@@ -169,13 +169,13 @@ impl Store {
             .is_none_or(|tab| tab.panes.count() < sheprd_session::panes::MAX_PANES)
     }
 
-    /// `at` fills its tab, or the split shows again.
+    /// A zoomed tab shows its split again, whichever pane asks; otherwise
+    /// `at` fills it.
     pub(super) fn zoom(&mut self, at: &TerminalId) -> Result<(), Error> {
         let tab = self.tab_mut(at)?;
-        tab.zoomed = if tab.zoomed.as_ref() == Some(at) {
-            None
-        } else {
-            Some(at.clone())
+        tab.zoomed = match tab.zoomed {
+            Some(_) => None,
+            None => Some(at.clone()),
         };
         Ok(())
     }
