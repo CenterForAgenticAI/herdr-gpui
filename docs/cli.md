@@ -44,9 +44,11 @@ Every command accepts:
   another session's window. Outside both, it acts in the frontmost window.
   From a herdr-core terminal in a workspace Sheprd keeps for Herdr 2, `work`
   notes, `checkpoint restore`, and `host pr` act on that workspace's
-  checkout; mutes, scripts, Teleport, and fan-out, which keep Herdr 1's
+  checkout; mutes, scripts, and fan-out, which keep Herdr 1's
   workspace state, exit 8 there for now, as every `work` command does from
   a terminal in no workspace the window keeps.
+  Teleport works from a workspace the app keeps for Herdr 2 on this
+  computer, as its menu does.
 
 | Exit | Meaning |
 | --- | --- |

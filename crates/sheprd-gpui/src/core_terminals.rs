@@ -55,6 +55,7 @@ pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
 pub(crate) use view::{CoreTerminalView, LinkClick, Look};
+pub(crate) use workspaces::kept_label;
 
 use crate::{
     SheprdWindow,
