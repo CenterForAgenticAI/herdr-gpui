@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{IntoElement, Render, TestAppContext};
+use gpui::{Entity, IntoElement, Render, TestAppContext};
 
 /// A host's root view, holding a main view as Moonframe does.
 struct Host {

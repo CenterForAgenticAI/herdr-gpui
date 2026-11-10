@@ -81,8 +81,9 @@ impl SheprdWindow {
             Region::Overlay => {
                 // See-through: it only holds what draws over the window.
                 let root = div().size_full().relative().flex().flex_col();
-                let root = root.child(AnyView::from(self.mark_layer.clone()));
-                self.with_overlays(root, window, cx).into_any_element()
+                let mut root = root.child(AnyView::from(self.mark_layer.clone()));
+                self.append_overlays(&mut root, window, cx);
+                root.into_any_element()
             }
             Region::Sidebar => self.render_sidebar_region(window, cx),
             Region::StatusBar if self.status_bar_visible => self
@@ -114,21 +115,21 @@ impl SheprdWindow {
     }
 
     /// What draws over the window, last so it covers the rest of `root`.
-    pub(super) fn with_overlays(
+    /// Append in place: moving a full `Div` through a builder chain keeps
+    /// extra stack slots live while a dialog renders on Windows' UI thread.
+    pub(super) fn append_overlays(
         &mut self,
-        root: Div,
+        root: &mut impl ParentElement,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Div {
-        let root = root
-            .children(self.render_tab_ghost(cx))
-            .children(self.render_core_note(cx))
-            .children(self.render_toasts(window, cx))
-            .children(self.render_file_transfer(window, cx))
-            .children(self.render_menu_leaving(window, cx));
-        match self.menu.page.is_some() {
-            true => root.child(self.render_menu(window, cx)),
-            false => root,
+    ) {
+        root.extend(self.render_tab_ghost(cx));
+        root.extend(self.render_core_note(cx).map(IntoElement::into_any_element));
+        root.extend(self.render_toasts(window, cx));
+        root.extend(self.render_file_transfer(window, cx));
+        root.extend(self.render_menu_leaving(window, cx));
+        if self.menu.page.is_some() {
+            root.extend([self.render_menu(window, cx).into_any_element()]);
         }
     }
 }

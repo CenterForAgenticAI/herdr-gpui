@@ -817,7 +817,7 @@ impl Render for SheprdWindow {
         // Zen mode keeps toasts and menus: they carry errors and what the
         // user asked for, not chrome.
         let zen = self.zen_layout();
-        let root = div()
+        let mut root = div()
             .capture_key_down(cx.listener(Self::application_menu_shortcut))
             .capture_key_down(cx.listener(Self::chrome_focus_key))
             .on_modifiers_changed(cx.listener(Self::double_shift_modifiers))
@@ -981,16 +981,19 @@ impl Render for SheprdWindow {
                                 column.children(self.zen_status_bar(cx))
                             }),
                     ),
-            )
-            // After the body, whose rows reserve the marks it draws, and under
-            // everything that covers the body.
-            .when(!self.hosted, |root| {
-                let root = root.child(AnyView::from(self.mark_layer.clone()));
-                // At the window's foot in every layout: under the traffic
-                // lights it would hide them, and one place is easier to find.
-                let root = root.when(!zen, |root| root.children(self.render_worktree_banner()));
-                self.with_overlays(root, window, cx)
-            });
+            );
+        // After the body, whose rows reserve the marks it draws, and under
+        // everything that covers the body.
+        if !self.hosted {
+            root.extend([AnyView::from(self.mark_layer.clone()).into_any_element()]);
+            // At the window's foot in every layout: under the traffic
+            // lights it would hide them, and one place is easier to find.
+            if !zen {
+                let banner = self.render_worktree_banner();
+                root.extend(banner.map(IntoElement::into_any_element));
+            }
+            self.append_overlays(&mut root, window, cx);
+        }
         crate::titlebar::frame(window, self.theme.active, root)
     }
 }

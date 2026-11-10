@@ -7,9 +7,10 @@
 
 use crate::window::SheprdWindow;
 use anyhow::{Context as _, Result};
+#[cfg(feature = "cloud")]
+use gpui::Entity;
 use gpui::{
-    AnyWindowHandle, App, AppContext, Context, Entity, Global, WeakEntity, Window, WindowHandle,
-    WindowId,
+    AnyWindowHandle, App, AppContext, Context, Global, WeakEntity, Window, WindowHandle, WindowId,
 };
 
 /// A main view and the window that shows it, used as a `WindowHandle` to it
@@ -89,6 +90,7 @@ impl MainWindow {
     }
 
     /// The main view, as `WindowHandle::entity` gives it.
+    #[cfg(feature = "cloud")]
     pub(crate) fn entity<C: AppContext>(&self, cx: &C) -> Result<Entity<SheprdWindow>> {
         match self {
             Self::Root(handle) => handle.entity(cx),
