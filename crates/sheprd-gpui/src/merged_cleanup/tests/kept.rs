@@ -5,6 +5,17 @@ use super::*;
 use crate::merged_cleanup::kept::kept_candidates;
 use sheprd_session::{Keeper, Workspace, Worktree};
 
+/// A repository key absolute on every platform: `key_input` refuses a
+/// relative one, and `/src` is relative on Windows. Nothing reads it.
+fn repo_key() -> String {
+    std::env::temp_dir()
+        .join("app")
+        .join(".git")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
 pub(super) fn kept(id: &str, linked: bool, keeper: Keeper) -> Workspace {
     Workspace {
         ahead_behind: None,
@@ -18,7 +29,7 @@ pub(super) fn kept(id: &str, linked: bool, keeper: Keeper) -> Workspace {
         tabs: Vec::new(),
         tokens: Vec::new(),
         worktree: Some(Worktree {
-            key: "/src/app/.git".into(),
+            key: repo_key(),
             label: "app".into(),
             linked,
         }),
@@ -37,7 +48,10 @@ fn only_kept_linked_checkouts_with_a_merged_pull_request_qualify() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].workspace, "kept-lane");
     assert_eq!(found[0].number, pr.number);
-    assert_eq!(found[0].input.repo_key.as_deref(), Some("/src/app/.git"));
+    assert_eq!(
+        found[0].input.repo_key.as_deref(),
+        Some(repo_key().as_str())
+    );
     let open = merged(State::Open);
     assert_eq!(kept_candidates(&workspaces, |_| Some(&open)).count(), 0);
 }
