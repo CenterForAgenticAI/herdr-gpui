@@ -2,7 +2,7 @@
 
 core-terminals-open-workspace = Open a workspace first
 # The app keeps Herdr 2 workspaces for this computer only.
-core-terminals-workspaces-local-only = Herdr 2 workspaces are only on this computer
+core-terminals-workspaces-need-core = herdr-core is not installed on this host, so it keeps no Herdr 2 workspaces. Choose Install Herdr 2 in the host's menu to add it
 # A new tab on an SSH host, cloud machine, or WSL distribution without
 # herdr-core runs in the host's Herdr instead.
 core-terminals-host-without-core = herdr-core is not installed on this host, so the tab runs in its Herdr. Choose Install Herdr 2 in the host's menu to add it

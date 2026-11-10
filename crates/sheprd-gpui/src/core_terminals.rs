@@ -390,9 +390,9 @@ pub(crate) struct CoreTerminals {
     in_front: Option<(Scope, String)>,
     /// A kept workspace just came to the front: show one of its tabs.
     reveal: bool,
-    /// The session over herdr-core of the selected host, by its scope,
-    /// while that host is this computer.
-    session: Option<(Scope, std::sync::Arc<sheprd_session::Session>)>,
+    /// The sessions over herdr-core, by the scope of their workspaces: this
+    /// computer's, then each saved host's whose workspaces the app keeps.
+    sessions: Vec<(Scope, std::sync::Arc<sheprd_session::Session>)>,
     /// A phone's split on its way, answered once it lands or fails.
     phone_split: Option<phone::Pending>,
     /// The tab the active group shows and its pane in use, as of the last
@@ -447,12 +447,24 @@ impl CoreTerminals {
             .filter_map(|terminal| self.infos.get(terminal))
     }
 
-    /// What herdr-core last reported of `terminal`, while it answers. A
+    /// What `host`'s core last reported of `terminal`, while it answers. A
     /// lost core's last list may name agents that have since stopped, so
     /// none is reported until it answers again.
-    pub(super) fn reported(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
-        self.hub.backend()?;
-        self.infos.get(terminal)
+    pub(super) fn reported(&self, host: &Host, terminal: &TerminalId) -> Option<&TerminalInfo> {
+        self.backend_of(host)?;
+        self.infos_of(host)?.get(terminal)
+    }
+
+    /// The session over the core whose workspaces `scope` names, while the
+    /// app keeps one.
+    pub(crate) fn session_of(
+        &self,
+        scope: &Scope,
+    ) -> Option<&std::sync::Arc<sheprd_session::Session>> {
+        self.sessions
+            .iter()
+            .find(|(known, _)| known == scope)
+            .map(|(_, session)| session)
     }
 
     /// The pane a new chat in `tab` opens beside: the one in use, in a tab
@@ -584,11 +596,22 @@ impl SheprdWindow {
     }
 
     /// Whether a new workspace is one the app keeps for Herdr 2: with Herdr
-    /// 2 chosen for new terminals, or with no Herdr 1 installed, on this
-    /// computer.
+    /// 2 chosen for new terminals, or with no Herdr 1 to make it. On a saved
+    /// host that is one whose core answers while its Herdr 1 does not, and
+    /// never one found to have no herdr-core.
     pub(crate) fn new_workspaces_use_core(&self) -> bool {
-        (self.config.herdr_2_terminals || self.live.missing_installation)
-            && !self.selected_is_remote()
+        if !self.selected_is_remote() {
+            return self.config.herdr_2_terminals || self.live.missing_installation;
+        }
+        let host = Host::of(&crate::browser::scope(
+            &self.endpoints[self.selected_endpoint],
+        ));
+        if self.core_terminals.lacks_core(&host) {
+            return false;
+        }
+        let herdr_1_missing =
+            self.live.snapshot.is_none() && self.core_terminals.backend_of(&host).is_some();
+        self.config.herdr_2_terminals || herdr_1_missing
     }
 
     /// The `new_core_terminal` command: starts a shell in herdr-core and
