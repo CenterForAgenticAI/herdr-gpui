@@ -147,3 +147,35 @@ fn a_full_workspace_list_refuses_the_move_before_it_starts(cx: &mut TestAppConte
         });
     });
 }
+
+/// A kept source keeps one idle shell, which needs a tab of its own: a move
+/// that would leave no room for it is refused before it starts.
+#[gpui::test]
+fn a_kept_sources_idle_shell_needs_room_for_its_tab(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    cx.update(|window, cx| {
+        let scope = Scope::endpoint("full");
+        Store::update(cx, |store| {
+            while store.room() > 1 {
+                store.open(scope.clone(), "w", None, None).unwrap();
+            }
+        });
+        view.update(cx, |view, cx| {
+            let source = Source {
+                keeping: Keeping::App {
+                    checkout: "/src/app-feature".into(),
+                },
+                ..source()
+            };
+            let mut teleport = Teleport::start(source, "feature".into(), Vec::new());
+            // One tab moves into Herdr 2, which fits; the shell does not.
+            teleport.stage = Stage::Ready(candidate(), Box::new(review(GitHubAccess::Direct)));
+            view.teleport = Some(teleport);
+            view.submit_teleport(window, cx);
+            assert!(
+                matches!(view.teleport.as_ref().unwrap().stage, Stage::Ready(..)),
+                "nothing started"
+            );
+        });
+    });
+}

@@ -70,12 +70,11 @@ fn another_window_finishes_a_move_whose_window_closed(cx: &mut TestAppContext) {
     // The destination as the starting window named it, which the claiming
     // window, with its own `buildbox`, must not rename.
     let destination = Scope::local(std::path::Path::new("/run/default.sock"));
-    let leftover = || {
-        (
-            destination.clone(),
-            vec![(source_tab, moved.clone())],
-            super::source(),
-        )
+    let leftover = || unclaimed::Handover {
+        scope: destination.clone(),
+        closing: vec![(source_tab, moved.clone())],
+        source: super::source(),
+        source_scope: Scope::endpoint("laptop"),
     };
 
     let (sender, receiver) = mpsc::channel();

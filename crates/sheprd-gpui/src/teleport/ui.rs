@@ -266,14 +266,19 @@ impl Teleport {
     /// Starts the move. Should its window close first, `unclaimed` takes
     /// what the app still has to do once it finishes, with the `scope` the
     /// destination's tabs belong in.
-    fn teleport(&mut self, unclaimed: Unclaimed, scope: Scope) {
+    fn teleport(&mut self, unclaimed: Unclaimed, scope: Scope, source_scope: Scope) {
         let Stage::Ready(candidate, review) = &self.stage else {
             return;
         };
         let (candidate, review) = (candidate.clone(), review.clone());
         let source = self.source.clone();
         let target = candidate.clone();
-        let leftover = (scope, self.closing.clone(), source.clone());
+        let handover = unclaimed::Handover {
+            scope,
+            closing: self.closing.clone(),
+            source: source.clone(),
+            source_scope,
+        };
         self.restart(move |sender, cancelled| {
             let result = job::run(
                 &source,
@@ -284,7 +289,7 @@ impl Teleport {
                 },
                 cancelled,
             );
-            unclaimed::deliver(sender, result, leftover, &unclaimed);
+            unclaimed::deliver(sender, result, handover, &unclaimed);
         });
         self.stage = Stage::Moving(candidate, None);
     }
@@ -369,7 +374,8 @@ impl SheprdWindow {
             self.close_browser_tab(tab, window, cx);
         }
         if retired {
-            self.retire_kept_source(&source, cx);
+            let scope = self.endpoint_scope(&source.place.endpoint_id);
+            self.retire_kept_source(&source, scope, cx);
         }
         let outcome = match result {
             Ok(outcome) => outcome,
@@ -526,13 +532,17 @@ impl SheprdWindow {
             }
             _ => None,
         };
+        let source_scope = self
+            .teleport
+            .as_ref()
+            .map(|teleport| self.endpoint_scope(&teleport.source.place.endpoint_id));
         let Some(teleport) = &mut self.teleport else {
             return;
         };
         match &teleport.stage {
             Stage::Choosing => teleport.review(),
             Stage::Ready(candidate, review) => {
-                let Some(destination) = destination else {
+                let (Some(destination), Some(source_scope)) = (destination, source_scope) else {
                     return;
                 };
                 // A move into a new workspace the app keeps must find room
@@ -546,18 +556,24 @@ impl SheprdWindow {
                 }
                 // The tabs rebuilt in Herdr 2 must all open once the move
                 // ends, when the source's own Herdr 2 tabs have closed: a
-                // program without a tab would run unseen.
+                // program without a tab would run unseen. A kept source
+                // takes one more, for the idle shell it keeps.
+                let kept_source = usize::from(matches!(
+                    teleport.source.keeping,
+                    crate::teleport::Keeping::App { .. }
+                ));
                 let opening = review
                     .tabs
                     .iter()
                     .filter(|tab| tab.into == Generation::Herdr2)
-                    .count();
+                    .count()
+                    + kept_source;
                 if opening > room.saturating_add(teleport.closing.len()) {
                     let flash = fl!("teleport-too-many-tabs", count = opening);
                     self.show_flash(Flash::warning(flash), cx);
                     return;
                 }
-                teleport.teleport(unclaimed, destination);
+                teleport.teleport(unclaimed, destination, source_scope);
             }
             Stage::Failed(_) => {
                 self.teleport = None;

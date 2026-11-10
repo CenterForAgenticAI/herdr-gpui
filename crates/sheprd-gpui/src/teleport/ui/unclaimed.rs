@@ -21,18 +21,25 @@ use std::{
     sync::{Arc, Mutex, PoisonError, mpsc},
 };
 
-/// A move that finished after its window closed.
-pub(super) struct Leftover {
-    pub(super) outcome: Outcome,
-    /// Where the destination's tabs belong, read by the window that started
-    /// the move: another window may name a different session `local`.
+/// What the app still has to do once a move finishes, as the window that
+/// started it names it: another window may name a different session
+/// `local`, so its scopes are read once, there.
+#[derive(Clone)]
+pub(super) struct Handover {
+    /// Where the destination's tabs belong.
     pub(super) scope: Scope,
     /// The source's Herdr 2 tabs and the panes that moved from each.
     pub(super) closing: Vec<(TabId, Panes)>,
     /// The workspace moved, which keeps one idle shell when the app keeps it.
     pub(super) source: Source,
-    /// Whether the move stopped the source's programs.
-    pub(super) retired: bool,
+    /// Where the source's workspace and that shell belong.
+    pub(super) source_scope: Scope,
+}
+
+/// A move that finished after its window closed.
+pub(super) struct Leftover {
+    pub(super) outcome: Outcome,
+    pub(super) handover: Handover,
 }
 
 /// Moves that finished with no window to take them, shared with the
@@ -68,17 +75,11 @@ impl Unclaimed {
 pub(super) fn deliver(
     sender: &mpsc::Sender<Event>,
     result: Result<Outcome, Error>,
-    (scope, closing, source): (Scope, Vec<(TabId, Panes)>, Source),
+    handover: Handover,
     unclaimed: &Unclaimed,
 ) {
     if let Err(mpsc::SendError(Event::Moved(Ok(outcome)))) = sender.send(Event::Moved(result)) {
-        unclaimed.push(Leftover {
-            outcome,
-            scope,
-            closing,
-            source,
-            retired: true,
-        });
+        unclaimed.push(Leftover { outcome, handover });
     }
 }
 
@@ -110,19 +111,18 @@ impl SheprdWindow {
         let Some(unclaimed) = cx.try_global::<Unclaimed>().cloned() else {
             return;
         };
-        for leftover in unclaimed.take() {
+        for Leftover { outcome, handover } in unclaimed.take() {
             let store = cx.try_global::<Store>();
             let panes = |tab| match store?.get(tab)?.location.as_ref()? {
                 Location::CoreTerminal { panes, .. } => Some(panes.clone()),
                 _ => None,
             };
-            for tab in moved_tabs(leftover.closing, panes) {
+            for tab in moved_tabs(handover.closing, panes) {
                 self.close_browser_tab(tab, window, cx);
             }
-            self.settle_teleport(&leftover.outcome, &leftover.scope, window, cx);
-            if leftover.retired {
-                self.retire_kept_source(&leftover.source, cx);
-            }
+            self.settle_teleport(&outcome, &handover.scope, window, cx);
+            // Only a finished move is left here: its programs stopped.
+            self.retire_kept_source(&handover.source, handover.source_scope, cx);
         }
     }
 
@@ -209,11 +209,15 @@ impl SheprdWindow {
 
     /// Leaves one idle shell in a kept source workspace whose programs the
     /// move stopped, as the move does in a Herdr 1 one.
-    pub(super) fn retire_kept_source(&mut self, source: &Source, cx: &mut Context<Self>) {
+    pub(super) fn retire_kept_source(
+        &mut self,
+        source: &Source,
+        scope: Scope,
+        cx: &mut Context<Self>,
+    ) {
         let Keeping::App { checkout } = &source.keeping else {
             return;
         };
-        let scope = self.endpoint_scope(&source.place.endpoint_id);
         let spawn = Spawn {
             cwd: Some(PathBuf::from(checkout)),
             ..Spawn::default()
