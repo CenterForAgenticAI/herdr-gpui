@@ -48,7 +48,7 @@ impl Until<'_> {
 
     /// How long the next wait call may take, or `None` once the deadline
     /// has passed.
-    fn check_in(&self) -> Result<Option<Duration>> {
+    pub(crate) fn check_in(&self) -> Result<Option<Duration>> {
         if self.stop.load(Ordering::Acquire) {
             return Err(Error::Stopped);
         }
