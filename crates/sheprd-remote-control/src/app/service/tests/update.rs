@@ -76,6 +76,10 @@ fn a_restart_of_an_unchanged_definition_restarts_in_place() {
         !commands.iter().any(|command| command.contains("bootout")),
         "{commands:?}"
     );
+    assert_eq!(
+        commands.last().map(String::as_str),
+        Some("launchctl kickstart -k gui/501/so.pen.herdr-gpui.remote")
+    );
 }
 
 #[test]
