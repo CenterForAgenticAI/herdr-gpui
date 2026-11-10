@@ -58,7 +58,7 @@ impl Checkout {
     }
 
     /// Where its agent runs, once known.
-    fn started(&self) -> Option<work::Started> {
+    pub(super) fn started(&self) -> Option<work::Started> {
         match &self.worktree.opened {
             work::Opened::Herdr1 { pane_id, .. } => Some(work::Started::Herdr1 {
                 pane_id: pane_id.clone(),
@@ -364,8 +364,9 @@ pub(crate) fn resume(
         (Resume::Prompt, Some(started)) => {
             send_prompt(index, checkout, &started, prompt, report, cancelled)
         }
-        // A Herdr 2 lane whose shell was never saved has no agent to prompt.
-        _ => start(index, lane, checkout, prompt, report, cancelled),
+        // Missing persistence is not evidence that the agent never ran.
+        (Resume::Prompt, None) => Err(Error::AgentUncertain),
+        (Resume::Start, _) => start(index, lane, checkout, prompt, report, cancelled),
     };
     let progress = match result {
         Ok(()) => Progress::Running,

@@ -20,6 +20,10 @@ impl Step {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
+    #[error(
+        "The agent may already be running, but its terminal was not saved. Keep the checkout and inspect it before starting another agent."
+    )]
+    AgentUncertain,
     #[error("{} failed: {source}", step.label())]
     Script {
         step: Step,

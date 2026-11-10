@@ -196,7 +196,7 @@ impl SheprdWindow {
 
     /// Follows every running archive: removes the checkout of each that
     /// succeeded, and says when one failed.
-    fn poll_kept_archives(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn poll_kept_archives(&mut self, cx: &mut Context<Self>) {
         let mut archives = std::mem::take(&mut self.kept_scripts.archives);
         let mut ended = Vec::new();
         archives.retain_mut(|archive| match self.kept_archive_state(archive, cx) {
@@ -269,6 +269,18 @@ impl SheprdWindow {
             .archives
             .iter()
             .any(|archive| archive.workspace == workspace)
+    }
+
+    pub(crate) fn follow_archive_for_test(&mut self, workspace: String, terminal: TerminalId) {
+        self.kept_scripts.archives.push(Archive {
+            attempt: "test-attempt".into(),
+            workspace,
+            path: "/nonexistent/archive-checkout".into(),
+            force: false,
+            started: Instant::now(),
+            terminal: Some(terminal),
+            shown: true,
+        });
     }
 
     /// The setup waiting longest for its kept workspace, if any.

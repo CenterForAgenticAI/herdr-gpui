@@ -24,6 +24,7 @@ impl Localize for Error {
                 agent = *agent,
                 host = host.as_str()
             ),
+            Self::AgentUncertain => fl!("error-fan-out-agent-uncertain"),
             Self::Cancelled => fl!("error-fan-out-cancelled"),
             Self::Dispatch(error) => error.localize(),
             Self::HostUnavailable { host } => {

@@ -15,6 +15,9 @@ use gpui::{AppContext as _, TestAppContext};
 use sheprd_backend::{Exit, Role, SurfaceUpdate};
 use std::{cell::RefCell, rc::Rc};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod archive_split;
+
 #[gpui::test]
 fn another_hosts_ended_terminal_never_answers_for_this_computers(cx: &mut TestAppContext) {
     let (view, cx, local) = window_with_split(cx, &["t1"]);

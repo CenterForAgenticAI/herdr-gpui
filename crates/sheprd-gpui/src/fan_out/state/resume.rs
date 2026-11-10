@@ -137,14 +137,14 @@ impl FanOut {
             }
             _ => return None,
         };
-        // A Herdr 2 lane whose agent's shell was never saved has nothing
-        // to prompt or type into twice, so its agent starts afresh.
-        Some(match from {
-            Resume::Prompt if checkout.workspace_id().is_none() && checkout.terminal.is_none() => {
-                Resume::Start
-            }
-            from => from,
-        })
+        // StartingAgent is saved before launching. A missing terminal can
+        // mean the app died after the agent started but before saving its
+        // address. Never interpret that uncertainty as permission to start
+        // another agent: the user can keep the checkout and inspect it.
+        if from == Resume::Prompt && checkout.started().is_none() {
+            return None;
+        }
+        Some(from)
     }
 
     /// Finish interrupted lane `index`, as the user asked: start its agent
