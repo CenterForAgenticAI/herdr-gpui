@@ -105,11 +105,17 @@ fn open_kept_menu(
     Ok(id.to_owned())
 }
 
+/// Refuses a flow that needs Herdr 1's state for a caller in a workspace
+/// the app keeps for Herdr 2, before any menu opens.
+fn needs_herdr(view: &SheprdWindow, caller: &Caller, what: &str) -> Result<(), Response> {
+    find(view, caller)?.herdr(what).map(|_| ())
+}
+
 /// What the caller's workspace is checked out on, for messages.
 fn branch(view: &SheprdWindow, caller: &Caller) -> String {
     find(view, caller)
         .ok()
-        .and_then(|found| found.workspace.branch.clone())
+        .and_then(|found| found.workspace.branch)
         .unwrap_or_else(|| "the checkout".to_owned())
 }
 
@@ -185,7 +191,8 @@ pub(super) fn script(
 fn launch(view: &SheprdWindow, caller: &Caller, kind: ScriptKind) -> Result<Launch, Response> {
     selected_workspace(view, caller)?;
     let found = find(view, caller)?;
-    let Some(tree) = &found.workspace.worktree else {
+    let herdr = found.herdr("a worktree script")?;
+    let Some(tree) = &herdr.workspace.worktree else {
         return Err(invalid(crate::worktree_scripts::Error::NotGit.to_string()));
     };
     // The menu offers the setup script on linked worktrees alone.
@@ -199,8 +206,8 @@ fn launch(view: &SheprdWindow, caller: &Caller, kind: ScriptKind) -> Result<Laun
         kind,
         endpoint: (view.selection_epoch, endpoint.generation),
         endpoint_id: endpoint.id.clone(),
-        boot: found.snapshot.boot_id.clone(),
-        workspace: found.workspace.workspace_id.clone(),
+        boot: herdr.snapshot.boot_id.clone(),
+        workspace: herdr.workspace.workspace_id.clone(),
         repo: tree.label.clone(),
         repo_key: tree.key.clone(),
         checkout: None,
@@ -368,6 +375,9 @@ pub(super) fn fan_out(
             "This window's last fan-out is still open for comparison; keep a lane or close it from the workspace menu first",
         );
     }
+    if let Err(response) = needs_herdr(view, caller, "fan-out") {
+        return response;
+    }
     let workspace = match open_menu(view, caller, window, cx) {
         Ok(workspace) => workspace,
         Err(response) => return response,
@@ -379,7 +389,7 @@ pub(super) fn fan_out(
         );
     }
     let repo = find(view, caller)
-        .map(|found| repository(found.workspace).to_owned())
+        .map(|found| repository(&found.workspace).to_owned())
         .unwrap_or(workspace);
     view.open_fan_out(window, cx);
     let opened = view.menu.page == Some(Page::FanOut)
