@@ -2,7 +2,7 @@
 //! host the caller names or runs on. It never updates: the user reads which
 //! release goes where and confirms in the dialog.
 
-use super::Place;
+use super::{Place, named};
 use crate::{
     SheprdWindow,
     automations::Machine,
@@ -19,25 +19,32 @@ pub(super) fn ask(
     cx: &mut Context<SheprdWindow>,
 ) -> Response {
     let machine = match host {
-        Some(name) => match view.remote_updates.named(name) {
-            Some(host) => host.machine.clone(),
-            None => {
+        Some(name) => {
+            let endpoint = match named(view, name) {
+                Ok(endpoint) => endpoint,
+                Err(response) => return response,
+            };
+            if !endpoint.enabled {
                 return Response::error(
-                    ErrorCode::NotFound,
-                    format!("No connected SSH or cloud host is named {name}"),
+                    ErrorCode::InvalidRequest,
+                    format!(
+                        "Host {} is turned off; turn it on in the sidebar first",
+                        endpoint.label
+                    ),
                 );
             }
-        },
-        None => match callers(view, caller) {
-            Some(machine) => machine,
-            None => {
-                return Response::error(
-                    ErrorCode::Unsupported,
-                    "This computer's Sheprd updates from its own update dialog; \
-                     `sheprd update` checks it",
-                );
-            }
-        },
+            // Profiles name endpoints, but sessions on one machine share
+            // the same app and its update state.
+            Machine::of(&endpoint.connection.target).filter(|machine| !machine.is_local())
+        }
+        None => callers(view, caller),
+    };
+    let Some(machine) = machine else {
+        return Response::error(
+            ErrorCode::Unsupported,
+            "This computer's Sheprd updates from its own update dialog; \
+             `sheprd update` checks it",
+        );
     };
     let Some(host) = view.remote_updates.host(&machine) else {
         return Response::error(ErrorCode::NotFound, "That host is not connected");

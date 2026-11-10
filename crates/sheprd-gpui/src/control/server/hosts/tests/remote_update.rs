@@ -9,6 +9,24 @@ use crate::menu::Page;
 use crate::remote_update::{Error, Phase, Remote};
 use crate::teleport::Host;
 
+mod profiles;
+
+fn profile(view: &mut SheprdWindow, id: &str, label: &str, target: &str, session: &str) {
+    let mut endpoint = crate::endpoint::Endpoint::new(
+        id.into(),
+        label.into(),
+        sheprd_client::ConnectTarget::Ssh {
+            target: target.into(),
+            session: session.into(),
+        },
+        true,
+    );
+    endpoint.never_connect();
+    endpoint.live.status = crate::state::ConnectionStatus::Connected;
+    endpoint.live.snapshot = view.live.snapshot.clone();
+    view.endpoints.push(endpoint);
+}
+
 fn studio() -> Wanted {
     Wanted {
         machine: Machine::Ssh("studio".into()),
@@ -34,6 +52,13 @@ fn read(phase: Phase) -> Remote {
 fn install(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext, read: Result<Remote, Error>) {
     cx.update(|_, cx| {
         view.update(cx, |view, _| {
+            if !view
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.id == "ssh:studio")
+            {
+                profile(view, "ssh:studio", "Studio", "studio", "default");
+            }
             view.remote_updates.install_for_test(studio(), read)
         });
     });

@@ -314,14 +314,6 @@ impl RemoteUpdates {
         self.hosts.iter_mut().find(|host| host.machine == *machine)
     }
 
-    /// The machine a host named by endpoint ID, or else by label, reaches.
-    pub(crate) fn named(&self, name: &str) -> Option<&HostUpdate> {
-        self.hosts
-            .iter()
-            .find(|host| host.endpoint.as_deref() == Some(name))
-            .or_else(|| self.hosts.iter().find(|host| host.label == name))
-    }
-
     /// Keeps the machines the window reaches now, and what was read of
     /// those it already had. Whether anything changed.
     fn sync(&mut self, wanted: Vec<crate::automations::Wanted>) -> bool {

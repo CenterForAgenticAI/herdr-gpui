@@ -386,7 +386,9 @@ shows nothing.
 
 When that app offers a newer release, the host's sidebar header shows an
 **Update** pill. Clicking it, or `sheprd host update HOST`, opens a
-confirmation naming the machine and both versions. Confirming runs
+confirmation naming the machine and both versions. `HOST` accepts any enabled
+saved profile's ID or label from `host list`; profiles for different sessions on
+the same SSH machine share its update state. Confirming runs
 `sheprd update install --confirmed --json` there. The remote app's own
 updater then downloads the release, checks it against the key that build
 embeds, installs it, and restarts, as it does for a paired phone. Its
