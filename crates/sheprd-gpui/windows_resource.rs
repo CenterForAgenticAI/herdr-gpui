@@ -32,15 +32,6 @@ pub fn embed(manifest: &Path, worktree: bool) -> std::io::Result<()> {
     if std::env::var_os("CARGO_CFG_TARGET_OS").is_none_or(|os| os != "windows") {
         return Ok(());
     }
-    // GPUI's nested render/layout calls run on the main thread. The Windows
-    // linker's 1 MiB default overflows while drawing the native sidebar and
-    // dialogs in debug builds. Reserve 8 MiB (committed on demand), as on
-    // the Unix desktops; RUST_MIN_STACK only affects spawned Rust threads.
-    if std::env::var_os("CARGO_CFG_TARGET_ENV").is_some_and(|env| env == "msvc") {
-        println!("cargo:rustc-link-arg-bin=sheprd=/STACK:8388608");
-    } else {
-        println!("cargo:rustc-link-arg-bin=sheprd=-Wl,--stack,8388608");
-    }
     println!("cargo:rerun-if-env-changed=HERDR_RELEASE_VERSION");
     let workspace = manifest.join("../..");
     for file in [ICON, WORKTREE_ICON, MANIFEST] {
