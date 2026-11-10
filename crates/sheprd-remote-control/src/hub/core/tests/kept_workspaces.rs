@@ -2,6 +2,14 @@
 
 use super::*;
 
+/// The folder a phone asks a new workspace for: absolute on this platform,
+/// as a new workspace's label must be.
+const FOLDER: &str = if cfg!(windows) {
+    r"C:\code\api"
+} else {
+    "/code/api"
+};
+
 #[test]
 fn kept_workspaces_lead_in_their_order_with_their_names_even_when_empty() {
     let saved = serde_json::from_value(json!({
@@ -117,19 +125,13 @@ fn a_terminal_started_for_a_named_sessions_workspace_is_listed_under_its_phone_i
 
 #[test]
 fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
-    // Only an absolute folder asks for a workspace, as each system reads it.
-    let folder = if cfg!(windows) {
-        r"C:\code\api"
-    } else {
-        "/code/api"
-    };
     let mut phone = record("t1");
-    phone["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: folder});
+    phone["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: FOLDER});
     let records = [serde_json::from_value(phone).unwrap()];
     let layout = projection::project("fake-core", &records, None, None);
     let row = &layout.workspaces[0];
-    assert_eq!(row.id, new_workspace_id(folder));
-    assert_eq!((row.label.as_str(), row.cwd.as_str()), ("api", folder));
+    assert_eq!(row.id, new_workspace_id(FOLDER));
+    assert_eq!((row.label.as_str(), row.cwd.as_str()), ("api", FOLDER));
     assert_eq!(row.terminals.len(), 1);
 }
 
@@ -137,7 +139,7 @@ fn a_phones_new_workspace_is_listed_apart_and_named_for_its_folder() {
 fn a_phones_new_workspace_keeps_its_id_when_its_first_pane_closes() {
     let labelled = |address: &str| {
         let mut record = record(address);
-        record["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: "/code/api"});
+        record["labels"] = json!({sheprd_session::NEW_WORKSPACE_LABEL: FOLDER});
         serde_json::from_value(record).unwrap()
     };
     let both = [labelled("t1"), labelled("t9")];

@@ -3,7 +3,7 @@
 //! unique within one core, so each host keeps its own hub and its own list
 //! of what that core reports.
 
-use super::{CoreTerminals, Error, Hub, Purpose, State, infos::Infos};
+use super::{CoreTerminalView, CoreTerminals, Error, Hub, Purpose, State, infos::Infos};
 use crate::{
     SheprdWindow,
     browser::{Scope, TabId},
@@ -11,7 +11,7 @@ use crate::{
     i18n::fl,
     window::Flash,
 };
-use gpui::{Context, Window};
+use gpui::{Context, Entity, Window};
 use sheprd_backend::{TerminalId, TerminalInfo};
 use sheprd_client::ConnectTarget;
 use sheprd_core_client::CoreBackend;
@@ -78,6 +78,11 @@ impl CoreTerminals {
         self.hub_of(host)?.backend()
     }
 
+    /// Whether `host`'s core is connected now.
+    pub(crate) fn answers(&self, host: &Host) -> bool {
+        self.backend_of(host).is_some()
+    }
+
     pub(super) fn infos_of(&self, host: &Host) -> Option<&Infos> {
         match host {
             Host::Local => Some(&self.infos),
@@ -103,6 +108,33 @@ impl CoreTerminals {
     /// What `tab`'s core reports of `terminal`.
     pub(crate) fn info(&self, tab: TabId, terminal: &TerminalId) -> Option<&TerminalInfo> {
         self.infos_of(&self.tabs.get(&tab)?.host)?.get(terminal)
+    }
+
+    /// Whether `tab` types into its terminals, on any host: a tab rather
+    /// than a watch-only mirror.
+    pub(crate) fn types_into(&self, tab: TabId) -> bool {
+        self.tabs.get(&tab).is_some_and(|shown| !shown.observe)
+    }
+
+    /// The core of `host`, while it answers.
+    pub(crate) fn host_backend(&self, host: &Host) -> Option<&CoreBackend> {
+        self.backend_of(host)
+    }
+
+    /// Every terminal of `tab`, the panes a zoom hides included.
+    pub(crate) fn tab_terminals(&self, tab: TabId) -> Vec<&TerminalId> {
+        self.tabs
+            .get(&tab)
+            .map(|shown| shown.panes.terminals())
+            .unwrap_or_default()
+    }
+
+    /// The tab and terminal `view` shows, if it is one of the tabs' panes.
+    pub(crate) fn view_key(&self, view: &Entity<CoreTerminalView>) -> Option<(TabId, TerminalId)> {
+        self.views
+            .iter()
+            .find(|(_, shown)| *shown == view)
+            .map(|(key, _)| key.clone())
     }
 
     /// Every host whose core the window knows of, this computer first.
@@ -321,6 +353,20 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A workspace the app keeps has no Herdr to make the tab instead:
+        // one left empty goes, and the host keeps new workspaces in its
+        // Herdr from now on, as it lacks a core.
+        if error.core_missing()
+            && let Purpose::Tab { scope, workspace } = &purpose
+            && crate::browser::is_kept_id(workspace)
+        {
+            self.forget_empty_kept_workspace(scope, workspace, window, cx);
+            self.show_flash(
+                Flash::warning(fl!("core-terminals-workspaces-need-core")),
+                cx,
+            );
+            return;
+        }
         // Only while the workspace the tab was asked for is still the one
         // shown, since the Herdr tab opens in the focused workspace.
         if error.core_missing()
