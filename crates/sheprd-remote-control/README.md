@@ -1,6 +1,6 @@
 # Remote control daemon
 
-`herdr-remote-control` serves this machine's `sheprd-acp` chats to paired phones over
+`sheprd-remote-control` serves this machine's `sheprd-acp` chats to paired phones over
 HTTPS: a mobile web app (installable as a PWA) that lists workspaces, follows
 chats, answers agent questions, and receives push notifications. The plan is
 `docs/remote-control-plan.md`.
@@ -136,9 +136,17 @@ it has been idle for 5 seconds.
 While a core answers, new work from a phone starts there, even from a Herdr 1
 pane or workspace: new tabs, chats, and workspaces. Herdr 1 terminals stay listed
 and keep working, and a failure is shown rather than retried on Herdr 1. New
-work appears in **Herdr 2**, because the desktop owns its spaces. The core has no
-worktrees, so a new workspace on a branch is refused. Without a core, new work
-goes to Herdr 1.
+work carries workspace labels so it appears in the selected workspace or a new
+workspace for its folder. For a new chat on a branch, the daemon creates the Git
+worktree itself (`hub::core::create::Source::open_worktree_chat`), then starts the
+chat there. A failed start removes the checkout only when it is certain that
+nothing started; an ambiguous failure retains it. Without a core, new work goes
+to Herdr 1.
+
+This is not full backend parity. Desktop-closed split/zoom, standalone GitHub
+checks and chat-process recovery have separate limitations below. The repository's
+[acceptance matrix](../../docs/herdr2-acceptance.md) tracks source evidence and
+pending runtime checks; an implementation entry is not a native test result.
 
 Phone-created shells recover in place after program loss. Chats do not: if
 `sheprd-acp` is lost, the terminal finishes rather than recovering as a shell
