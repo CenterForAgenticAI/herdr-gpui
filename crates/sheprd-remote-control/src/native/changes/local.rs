@@ -246,7 +246,8 @@ fn diff(cwd: &Path, scope: Scope, path: &str) -> Result<FileDiff, Failure> {
     args.push(path);
     let (text, cut) =
         git_bounded(cwd, &args, MAX_DIFF_BYTES as u64 * 2).map_err(|_| Failure::Unreadable)?;
-    let mut diff = FileDiff::bounded(path, parse_diff(&String::from_utf8_lossy(&text)));
+    let text = String::from_utf8_lossy(&text);
+    let mut diff = FileDiff::bounded(path, parse_diff(section(&text, path)));
     diff.truncated |= cut;
     Ok(diff)
 }
@@ -322,6 +323,45 @@ fn parse_numstat(text: &str) -> Vec<(String, Option<u32>, Option<u32>)> {
         counts.push((path.to_owned(), added.parse().ok(), removed.parse().ok()));
     }
     counts
+}
+
+/// The part of a diff of several files that is `path`'s: naming a
+/// rename's old path can bring in a new file now at that path. A section
+/// is `path`'s when its header gives it as the new or renamed name, or as
+/// the deleted one. One section whose names are quoted is taken as is.
+fn section<'a>(text: &'a str, path: &str) -> &'a str {
+    let mut sections = Vec::new();
+    let mut start = None;
+    for (at, _) in text.match_indices("diff --git ") {
+        if at != 0 && text.as_bytes()[at - 1] != b'\n' {
+            continue;
+        }
+        if let Some(from) = start.replace(at) {
+            sections.push(&text[from..at]);
+        }
+    }
+    if let Some(from) = start {
+        sections.push(&text[from..]);
+    }
+    let names = [
+        format!("+++ b/{path}"),
+        format!("rename to {path}"),
+        format!("copy to {path}"),
+    ];
+    let deleted = format!("--- a/{path}");
+    let found = sections.iter().find(|section| {
+        let header = section.split("\n@@").next().unwrap_or_default();
+        let mut lines = header.lines();
+        lines
+            .clone()
+            .any(|line| names.iter().any(|name| line == name))
+            || (lines.any(|line| line == deleted) && header.contains("\n+++ /dev/null"))
+    });
+    match (found, sections.as_slice()) {
+        (Some(found), _) => found,
+        (None, [only]) => only,
+        (None, _) => "",
+    }
 }
 
 /// A unified diff's lines from its first hunk on, numbered.

@@ -363,3 +363,36 @@ fn a_name_with_a_replacement_character_in_it_is_still_read() {
     assert_eq!((odd.shown, odd.added), (Shown::Text, Some(1)));
     assert_eq!(diff_of(&repository, "odd\u{FFFD}.txt").lines[1].text, "x");
 }
+
+#[test]
+fn a_rename_whose_old_name_was_reused_shows_its_own_diff() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository = repository(dir.path());
+    run(&repository, &["mv", "old.txt", "moved.txt"]);
+    std::fs::write(repository.join("old.txt"), "replacement\n").unwrap();
+    run(&repository, &["add", "old.txt"]);
+    let moved = diff_of(&repository, "moved.txt");
+    assert!(
+        moved.lines.iter().all(|line| line.text != "replacement"),
+        "{moved:?}"
+    );
+    let reused = diff_of(&repository, "old.txt");
+    assert!(
+        reused
+            .lines
+            .iter()
+            .any(|line| line.text.contains("replacement")),
+        "{reused:?}"
+    );
+}
+
+#[test]
+fn a_section_is_found_by_its_new_renamed_or_deleted_name() {
+    let text = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n\
+        diff --git a/y b/y\ndeleted file mode 100644\n--- a/y\n+++ /dev/null\n@@ -1 +0,0 @@\n-y\n\
+        diff --git a/o b/n\nsimilarity index 100%\nrename from o\nrename to n\n";
+    assert!(section(text, "x").contains("+b"));
+    assert!(section(text, "y").contains("-y"));
+    assert!(section(text, "n").contains("rename to n"));
+    assert_eq!(section(text, "z"), "");
+}
