@@ -29,6 +29,11 @@ on unshown terminals remain intentionally non-replayable. No browser server is
 started remotely. Cloud and WSL use the same core reply route; cloud loopback
 URLs still need a separately reachable address, while SSH uses the existing
 port forward and WSL uses localhost integration.
+Annotation screenshots are transferred to that caller's host before delivery,
+with caller/connection revalidation and cleanup of unaccepted uploads. A failed
+or unsupported transfer warns in the app and returns text without local paths.
+SSH/cloud screenshot transfer requires a Linux/macOS desktop; WSL mapping is
+supported by the Windows desktop.
 
 A few commands work from files alone and
 need no running app; they say so below.

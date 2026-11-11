@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -31,13 +32,17 @@ elif args[0] == "get":
     mode = os.environ.get("MODE", "notes")
     if mode == "disconnect":
         sys.exit(1)
+    if mode == "oversized":
+        print("x" * (1024 * 1024 + 1))
+        sys.exit(0)
     for key, value in list(labels.items()):
         if value.startswith("feedback-"):
             reply = "sheprd-reply-" + key[len("herdr-gpui-"):]
             if mode == "cancel":
                 labels.pop(key)
-            else:
+            elif mode != "interrupt" and (mode != "delayed" or (home / "polled").exists()):
                 labels[reply] = json.dumps({"notes": None if mode == "empty" else "Remote café\nsecond line"})
+    (home / "polled").touch()
     path.write_text(json.dumps(labels))
     print(json.dumps({"address": "t3", "state": "live", "labels": labels}))
 '''
@@ -53,8 +58,24 @@ class FeedbackProtocol(unittest.TestCase):
             binary.chmod(0o755)
             env = {"HOME": directory, "PATH": os.path.dirname(sys.executable) + ":/usr/bin:/bin",
                    "HC_TERMINAL_ID": "t3", "MODE": mode}
-            result = subprocess.run(["/bin/sh", str(SHIM), "browser", "feedback", "--json", *args],
-                                    env=env, capture_output=True, text=True, timeout=5)
+            command = ["/bin/sh", str(SHIM), "browser", "feedback", "--json", *args]
+            if mode == "interrupt":
+                child = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    deadline = time.monotonic() + 3
+                    while not (home / "polled").exists():
+                        if time.monotonic() >= deadline or child.poll() is not None:
+                            self.fail("feedback caller did not reach its read loop")
+                        time.sleep(0.01)
+                    child.terminate()
+                    stdout, stderr = child.communicate(timeout=3)
+                    result = subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                    child.wait(timeout=3)
+            else:
+                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
             calls = home / "calls.jsonl"
             labels = home / "labels.json"
             return (result, [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else [],
@@ -74,6 +95,12 @@ class FeedbackProtocol(unittest.TestCase):
         self.assertEqual(result.returncode, 4, result.stderr)
         self.assertEqual(json.loads(result.stdout), {"notes": None})
 
+    def test_wait_collects_a_later_reply_without_resubmitting(self):
+        result, calls, _ = self.run_shim("delayed", args=("--wait", "1"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sum(call[0] == "get" for call in calls), 2)
+        self.assertEqual(sum(any("=feedback-" in arg for arg in call) for call in calls), 1)
+
     def test_disconnect_and_cancellation_do_not_acknowledge_notes(self):
         for mode in ("disconnect", "cancel"):
             with self.subTest(mode=mode):
@@ -88,6 +115,19 @@ class FeedbackProtocol(unittest.TestCase):
             result, calls, _ = self.run_shim(args=("--wait", wait))
             self.assertEqual(result.returncode, 2)
             self.assertEqual(calls, [])
+
+    def test_terminating_the_caller_cancels_its_request_without_ack(self):
+        result, calls, labels = self.run_shim("interrupt", args=("--wait", "600"))
+        self.assertEqual(result.returncode, 130, result.stderr)
+        self.assertEqual(labels, {})
+        self.assertFalse(any(arg.endswith("=ack") for call in calls for arg in call))
+
+    def test_oversized_core_response_is_refused_and_cleaned(self):
+        result, calls, labels = self.run_shim("oversized")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("1 MiB", json.loads(result.stdout)["error"]["message"])
+        self.assertEqual(labels, {})
+        self.assertFalse(any(arg.endswith("=ack") for call in calls for arg in call))
 
 
 if __name__ == "__main__":

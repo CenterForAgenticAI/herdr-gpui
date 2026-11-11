@@ -5,7 +5,7 @@
 
 use crate::{
     SheprdWindow,
-    browser::{Batch, Feedback, FeedbackKey, Scope},
+    browser::{Feedback, FeedbackKey, FeedbackLease, Scope},
 };
 use gpui::{Context, Global, Window};
 use sheprd_backend::TerminalId;
@@ -28,7 +28,7 @@ struct Pending {
     reply: String,
     until: Instant,
     phase: Phase,
-    text: Option<String>,
+    notes: Option<FeedbackLease>,
 }
 
 #[derive(Default)]
@@ -51,12 +51,13 @@ impl Pending {
         let acknowledged = matches!(self.phase, Phase::Offered) && value == Some("ack");
         let keep = match &self.phase {
             Phase::Waiting if value.is_some_and(|value| value.starts_with("feedback-")) => {
-                self.text = feedback.take(&self.target);
-                if self.text.is_none() && now < self.until {
+                self.notes = feedback.take_lease(&self.target);
+                if self.notes.is_none() && now < self.until {
                     true
-                } else if let Some(receiver) =
-                    write(serde_json::json!({"notes": self.text}).to_string())
-                {
+                } else if let Some(receiver) = write(
+                    serde_json::json!({"notes": self.notes.as_ref().map(FeedbackLease::text)})
+                        .to_string(),
+                ) {
                     self.phase = Phase::Writing(receiver);
                     self.until = now + ACK_WAIT;
                     true
@@ -77,12 +78,9 @@ impl Pending {
         };
         if !keep
             && !acknowledged
-            && let Some(text) = self.text.take()
+            && let Some(notes) = self.notes.take()
         {
-            feedback.keep_again(Batch {
-                target: self.target.clone(),
-                text,
-            });
+            feedback.restore_lease(notes);
         }
         keep
     }
@@ -119,7 +117,7 @@ impl SheprdWindow {
             reply: format!("sheprd-reply-{id}"),
             until: Instant::now() + Duration::from_secs(wait_seconds.min(600)),
             phase: Phase::Waiting,
-            text: None,
+            notes: None,
         });
     }
 

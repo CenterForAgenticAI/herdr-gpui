@@ -37,10 +37,13 @@ impl CoreTerminals {
     }
 
     pub(crate) fn browser_caller_live(&self, scope: &Scope, origin: &str) -> bool {
-        self.browser_terminal(scope, origin).is_some()
-            && self
-                .backend_of(&Host::Remote(scope.clone()))
-                .is_some_and(|backend| !backend.core().is_lost())
+        self.browser_backend(scope, origin).is_some()
+    }
+
+    pub(crate) fn browser_backend(&self, scope: &Scope, origin: &str) -> Option<&CoreBackend> {
+        self.browser_terminal(scope, origin)?;
+        self.backend_of(&Host::Remote(scope.clone()))
+            .filter(|backend| !backend.core().is_lost())
     }
 
     pub(crate) fn browser_request_value(

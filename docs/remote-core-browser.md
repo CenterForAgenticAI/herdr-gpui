@@ -45,10 +45,17 @@ validate its operations and preserve the app's confirmation requirements.
 
 ## Scope and remaining validation
 
-- Supported: remote open, background open, reload, and textual annotation
-  feedback, including bounded wait and returned notes, without Herdr 1.
-- Annotation screenshot transfer is a follow-up consuming the file-images
-  host transfer adapter; the text-only path never returns local screenshot paths.
+- Supported: remote open, background open, reload, and annotation feedback,
+  including bounded wait and returned notes, without Herdr 1.
+- Annotation screenshots use the file-images host transfer adapter (#1288).
+  The batch is limited to 16 MiB before saving/uploading; the original caller,
+  backend connection, host configuration and page are revalidated before
+  delivering quoted remote paths. Unaccepted copies are removed using the
+  original host and unmodified returned paths. WSL maps private local artifacts,
+  which remain in the existing age-cleaned annotation directory. Failed
+  transfers return textual notes with a native warning, never local file paths.
+  SSH/cloud image uploads currently require a Linux/macOS desktop client;
+  Windows supports the WSL path and reports unsupported SSH/cloud transfers.
 - SSH loopback pages use the existing SSH forward; WSL uses localhost
   integration. Cloud endpoints without an SSH forward require reachable URLs.
 - Remote file URLs, beside placement, arbitrary local control commands, and

@@ -23,6 +23,11 @@ mod window;
 
 pub(crate) use window::Forwarding;
 
+/// The command installed on the caller's host, never the desktop executable.
+pub(crate) fn reload_command() -> String {
+    format!("{} browser reload", install::SHIM_COMMAND)
+}
+
 use crate::browser::Scope;
 use gpui::Global;
 use std::collections::VecDeque;
