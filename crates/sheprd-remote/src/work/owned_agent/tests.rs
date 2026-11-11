@@ -13,6 +13,7 @@ fn select(list: List, path: &str, token: &str, expected: Option<&str>) -> Result
         &["claude".into()],
         expected,
         false,
+        crate::teleport::AgentKind::Claude,
     )
 }
 
@@ -21,7 +22,7 @@ fn list(values: serde_json::Value) -> List {
 }
 
 fn terminal(token: &str, path: &str, address: &str) -> serde_json::Value {
-    serde_json::json!({"address": address, "cwd": path, "argv": ["claude"], "state": "live", "labels": {OWNER: token}})
+    serde_json::json!({"address": address, "cwd": path, "argv": ["claude"], "state": "live", "foreground": {"name":"claude", "argv":["claude"], "pid":42}, "labels": {OWNER: token}})
 }
 
 #[test]
@@ -75,10 +76,26 @@ fn cleanup_can_inspect_a_finished_owned_terminal_but_never_an_unknown_state() {
                 owner,
                 &["claude".into()],
                 Some("t7"),
-                true
+                true,
+                crate::teleport::AgentKind::Claude
             )
             .is_ok(),
             accepted
         );
     }
+}
+
+#[test]
+fn a_kept_shell_does_not_inherit_the_original_agents_ownership() {
+    let mut shell = terminal("lane-a", "/work/a", "t7");
+    shell["foreground"] = serde_json::json!({"name":"sh", "argv":["/bin/sh"], "pid":43});
+    assert!(matches!(
+        select(
+            list(serde_json::json!([shell])),
+            "/work/a",
+            "lane-a",
+            Some("t7")
+        ),
+        Err(Error::Uncertain)
+    ));
 }
