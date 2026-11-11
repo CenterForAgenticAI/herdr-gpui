@@ -102,6 +102,7 @@ impl AgentProcess {
     pub(crate) fn owned(&self) -> OwnedAgent {
         OwnedAgent(self.clone())
     }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Child> {
         self.child.lock().unwrap_or_else(PoisonError::into_inner)
     }

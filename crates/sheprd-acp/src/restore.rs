@@ -149,6 +149,13 @@ impl Keeper {
             eprintln!("sheprd-acp: could not persist the chat closure: {error:#}");
         }
         restore::remove(&self.dir, &self.endpoint);
+        core::agent_ended(&self.dir, &self.endpoint);
+    }
+
+    /// Keeps the agent this chat started, which a later restore must find
+    /// gone. Only a core chat's explicit restore reads it.
+    pub(crate) fn agent_started(&self, pid: u32) -> anyhow::Result<()> {
+        core::agent_started(&self.dir, &self.endpoint, pid)
     }
 }
 
