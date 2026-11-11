@@ -1,6 +1,5 @@
 //! Chat: how agent chats draw (layout, width, scrolling), where tab strips
-//! start them, the environment they start with, and how their code blocks
-//! start out. Every row needs ACP chats, which General turns on.
+//! start them, and how their code blocks start out. Every row needs ACP chats, which General turns on.
 // i18n: migrated
 use super::{SettingsWindow, on_value, ui};
 use crate::settings_window::inputs::NumberField;
@@ -128,7 +127,6 @@ impl SettingsWindow {
                         }),
                     )),
             )
-            .children(self.render_chat_env_controls(cx))
     }
 
     fn chat_width_controls(&self, cx: &mut Context<Self>) -> Div {

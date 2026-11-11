@@ -13,8 +13,8 @@ pub(super) enum Section {
     Indicators,
     Fonts,
     StatusBar,
-    Tabs,
     Chat,
+    Tabs,
     Code,
     Notifications,
     TextShortcuts,
@@ -78,8 +78,8 @@ impl Section {
         Self::Indicators,
         Self::Fonts,
         Self::StatusBar,
-        Self::Tabs,
         Self::Chat,
+        Self::Tabs,
         Self::Code,
         Self::Notifications,
         Self::TextShortcuts,
@@ -144,10 +144,13 @@ impl Section {
     pub(super) fn group(self) -> Option<Group> {
         match self {
             Self::General => None,
-            Self::Theme | Self::Sidebar | Self::Indicators | Self::Fonts | Self::StatusBar => {
-                Some(Group::Appearance)
-            }
-            Self::Tabs | Self::Chat | Self::Code | Self::Notifications | Self::TextShortcuts => {
+            Self::Theme
+            | Self::Sidebar
+            | Self::Indicators
+            | Self::Fonts
+            | Self::StatusBar
+            | Self::Chat => Some(Group::Appearance),
+            Self::Tabs | Self::Code | Self::Notifications | Self::TextShortcuts => {
                 Some(Group::Behaviour)
             }
             Self::Integrations | Self::Plugins => Some(Group::Connect),

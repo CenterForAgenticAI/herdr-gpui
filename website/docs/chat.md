@@ -64,7 +64,7 @@ sheprd config unset chat.max_width    # restore the default
 
 ### Company endpoints
 
-Variables in `[chat.env]` go into the environment of every chat's tab, on this machine or an SSH host. Settings > Chat edits them as `NAME=value` pairs while ACP chats are on.
+Variables in `[chat.env]` go into the environment of every chat's tab, on this machine or an SSH host. Settings > General edits them as `NAME=value` pairs while ACP chats are on.
 
 ```toml
 [chat.env]

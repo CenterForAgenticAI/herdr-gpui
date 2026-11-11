@@ -705,7 +705,7 @@ impl SettingsWindow {
             self.open_code_page(window, cx);
             self.open_px0_settings(cx);
         }
-        if section == Section::Chat {
+        if section == Section::General {
             self.open_chat_env_settings(cx);
         }
         if section == Section::TextShortcuts {

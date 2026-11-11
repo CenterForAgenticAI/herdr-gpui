@@ -79,13 +79,13 @@ fn the_card_shows_only_while_chats_are_on(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn opening_the_chat_page_draws_the_environment_field(cx: &mut TestAppContext) {
+fn opening_the_general_page_draws_the_environment_field(cx: &mut TestAppContext) {
     let (view, cx) = cx.add_window_view(skill_fixture);
     cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(3200.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.config.features.acp_chats = true;
-            view.select_section(crate::settings_window::Section::Chat, window, cx);
+            view.select_section(crate::settings_window::Section::General, window, cx);
         })
     });
     cx.update(|window, cx| crate::sidebar::layout_tests::full_draw(window, cx).clear(cx));
