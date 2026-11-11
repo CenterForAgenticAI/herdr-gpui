@@ -7,7 +7,9 @@ use sheprd_client::shell_quote;
 use sheprd_core_client::wire::{List, TerminalState};
 use std::sync::atomic::AtomicBool;
 
+mod end;
 mod error;
+pub use end::{checkout_idle, end, end_verified};
 pub use error::{Error, Result};
 
 /// A caller's namespace and durable operation identity, attached atomically.
@@ -57,10 +59,7 @@ pub fn start(
             cancelled,
         )?);
     }
-    let mut argv = agent.kind.start_argv(None);
-    if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
-        argv.extend(["--model".into(), model.into()]);
-    }
+    let argv = command(agent);
     let program = argv
         .iter()
         .map(|arg| shell_quote(arg))
@@ -121,10 +120,7 @@ pub fn inspect(
             step: Step::List,
             source,
         })?;
-    let mut argv = agent.kind.start_argv(None);
-    if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
-        argv.extend(["--model".into(), model.into()]);
-    }
+    let argv = command(agent);
     select(
         list,
         &tree.path,
@@ -170,6 +166,14 @@ fn select(
     Ok(Started::Herdr2 {
         terminal: terminal.address,
     })
+}
+
+fn command(agent: &Agent<'_>) -> Vec<String> {
+    let mut argv = agent.kind.start_argv(None);
+    if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
+        argv.extend(["--model".into(), model.into()]);
+    }
+    argv
 }
 
 #[cfg(test)]
