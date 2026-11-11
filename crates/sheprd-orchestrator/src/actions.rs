@@ -451,7 +451,10 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
         // Undo the checkout of a run that never got going; the branch stays.
         // A checkout that would not go keeps its session, which names the
         // host, so Remove can try again; one that went is no longer the run's.
-        let mut kept = None;
+        let mut kept = store
+            .sessions()?
+            .into_iter()
+            .find(|session| session.run_id == run.id);
         if let Some((host, worktree)) = created {
             let removed = match &worktree.opened {
                 Opened::Herdr1 { workspace_id, .. } => herdr(
@@ -468,6 +471,7 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
             };
             if removed.is_ok() {
                 run.workspace = None;
+                kept = None;
             } else {
                 kept = store
                     .sessions()?

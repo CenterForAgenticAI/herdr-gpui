@@ -18,8 +18,8 @@ use std::sync::atomic::AtomicBool;
 
 /// Makes the run's worktree from `checkout`, starts its agent there, and
 /// sends it the prompt once it is ready, recording each step in `store`.
-/// The worktree made is left in `created` for the caller to undo on failure;
-/// an agent that started but failed to take its prompt is ended here.
+/// Only a checkout with no known terminal remains eligible for rollback.
+/// Once a terminal exists, even an uncertain send keeps it and its checkout.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn launch(
     destination: &Destination,
@@ -60,7 +60,20 @@ pub(super) fn launch(
         model: request.model.as_deref(),
         prompt: None,
     };
-    let started = work::start_agent(host, &worktree, &agent, cancelled)?;
+    let (started, failure) = match work::start_agent(host, &worktree, &agent, cancelled) {
+        Ok(started) => (started, None),
+        Err(work::Error::Unprompted { started, source }) => {
+            let failure = work::Error::Unprompted {
+                started: started.clone(),
+                source,
+            };
+            (started, Some(failure))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    // No later failure proves that the agent did not start. In particular,
+    // neither a lost send reply nor a failed journal write permits deletion.
+    *created = None;
     let Started::Herdr2 { terminal } = &started else {
         return Err(Error::Output {
             operation: "Starting the agent",
@@ -76,7 +89,11 @@ pub(super) fn launch(
         agent_name: name.to_owned(),
         updated_at: Utc::now(),
     };
-    let outcome = prompt(
+    store.update_run(run, Some(&herdr_session))?;
+    if let Some(error) = failure {
+        return Err(error.into());
+    }
+    prompt(
         host,
         &started,
         request,
@@ -84,12 +101,7 @@ pub(super) fn launch(
         store,
         &herdr_session,
         cancelled,
-    );
-    if outcome.is_err() {
-        // Its worktree goes next; an agent left typing in it would not.
-        end(host, terminal);
-    }
-    outcome
+    )
 }
 
 fn prompt(
@@ -101,7 +113,6 @@ fn prompt(
     herdr_session: &HerdrSession,
     cancelled: &AtomicBool,
 ) -> Result<()> {
-    store.update_run(run, Some(herdr_session))?;
     work::prompt(host, started, &request.prompt, cancelled)?;
     run.state = RunState::Running;
     run.updated_at = Utc::now();
