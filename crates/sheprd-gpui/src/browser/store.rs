@@ -284,6 +284,7 @@ fn own(path: &std::path::Path, wait: std::time::Duration) -> std::io::Result<std
             Err(std::fs::TryLockError::WouldBlock) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::WouldBlock,
+                    // i18n: data
                     "Saved tabs are being changed by another client; try opening Sheprd again shortly",
                 ));
             }
