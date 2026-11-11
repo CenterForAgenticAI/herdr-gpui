@@ -16,7 +16,7 @@ const ACK_WAIT: Duration = Duration::from_secs(30);
 
 enum Phase {
     Waiting,
-    Writing(crossbeam_channel::Receiver<sheprd_core_client::Result<()>>),
+    Writing(std::sync::mpsc::Receiver<sheprd_core_client::Result<()>>),
     Offered,
 }
 
@@ -43,10 +43,7 @@ impl Pending {
         value: Option<&str>,
         now: Instant,
         feedback: &mut Feedback,
-        write: impl FnOnce(
-            String,
-        )
-            -> Option<crossbeam_channel::Receiver<sheprd_core_client::Result<()>>>,
+        write: impl FnOnce(String) -> Option<std::sync::mpsc::Receiver<sheprd_core_client::Result<()>>>,
     ) -> bool {
         let acknowledged = matches!(self.phase, Phase::Offered) && value == Some("ack");
         let keep = match &self.phase {
@@ -71,8 +68,8 @@ impl Pending {
                     self.phase = Phase::Offered;
                     true
                 }
-                Err(crossbeam_channel::TryRecvError::Empty) => true,
-                Ok(Err(_)) | Err(crossbeam_channel::TryRecvError::Disconnected) => false,
+                Err(std::sync::mpsc::TryRecvError::Empty) => true,
+                Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
             },
             Phase::Offered => value.is_some() && !acknowledged && now < self.until,
         };

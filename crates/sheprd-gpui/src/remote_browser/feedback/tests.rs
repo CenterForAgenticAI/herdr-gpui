@@ -35,7 +35,7 @@ fn keep(feedback: &mut Feedback, target: &FeedbackKey, text: &str) {
 
 fn offered(pending: &mut Pending, feedback: &mut Feedback, now: Instant) -> String {
     let mut wire = String::new();
-    let (send, recv) = crossbeam_channel::bounded(1);
+    let (send, recv) = std::sync::mpsc::sync_channel(1);
     assert!(
         pending.advance(Some("feedback-600"), now, feedback, |text| {
             wire = text;
@@ -99,7 +99,7 @@ fn a_failed_writer_or_early_ack_never_consumes_notes() {
         let mut request = pending("wsl:Ubuntu", now);
         let mut feedback = Feedback::default();
         keep(&mut feedback, &request.target, "keep me");
-        let (send, recv) = crossbeam_channel::bounded(1);
+        let (send, recv) = std::sync::mpsc::sync_channel(1);
         assert!(request.advance(Some("feedback-600"), now, &mut feedback, |_| Some(recv)));
         drop(send);
         assert!(!request.advance(
