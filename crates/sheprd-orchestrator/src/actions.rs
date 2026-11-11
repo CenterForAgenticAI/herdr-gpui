@@ -265,7 +265,11 @@ fn remove_worktree(
     const READING: &str = "Reading the workspaces";
     let host = host_of(site, session)?;
     if let Pane::Herdr2 { terminal } = &session.pane {
-        herdr2::end(&host, terminal);
+        herdr2::end(&host, terminal, cancelled)?;
+        // Another program working there is not the run's to delete under.
+        if let Some(path) = workspace.path.as_deref() {
+            herdr2::idle(&host, path, cancelled)?;
+        }
         return remove_checkout(&host, workspace, cancelled);
     }
     let alive = host_snapshot(&host, READING, cancelled)?;
@@ -484,10 +488,16 @@ fn start_run(
                     &AtomicBool::new(false),
                 )
                 .map(drop),
-                Opened::Herdr2 => {
+                // A start whose reply was lost may have left a shell there.
+                Opened::Herdr2 => herdr2::idle(
+                    &host,
+                    std::path::Path::new(&worktree.path),
+                    &AtomicBool::new(false),
+                )
+                .and_then(|()| {
                     work::remove(&host, &worktree.path, true, &AtomicBool::new(false))
                         .map_err(Error::from)
-                }
+                }),
             };
             if removed.is_ok() {
                 run.workspace = None;

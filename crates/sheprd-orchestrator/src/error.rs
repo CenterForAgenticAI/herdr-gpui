@@ -3,6 +3,8 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)]
+    OwnedAgent(#[from] sheprd_remote::work::owned_agent::Error),
     #[error("No state directory is available for orchestrator state")]
     NoDataDirectory,
     #[error(transparent)]
