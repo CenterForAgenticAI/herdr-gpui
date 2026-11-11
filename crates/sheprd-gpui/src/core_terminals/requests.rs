@@ -42,8 +42,16 @@ impl CoreTerminals {
         terminal: &TerminalId,
         name: &str,
     ) -> Option<&str> {
+        let host = Host::Remote(scope.clone());
+        if !self
+            .tabs
+            .values()
+            .any(|tab| tab.host == host && !tab.observe && tab.panes.contains(terminal))
+        {
+            return None;
+        }
         let remote = self.remote.get(scope)?;
-        self.backend_of(&Host::Remote(scope.clone()))
+        self.backend_of(&host)
             .filter(|backend| !backend.core().is_lost())?;
         remote
             .infos
