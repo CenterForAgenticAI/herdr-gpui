@@ -30,7 +30,7 @@ use sheprd_chat_protocol::EntryId;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
-    rc::Rc,
+    sync::Arc,
 };
 
 /// How tall a page draws in a message.
@@ -41,7 +41,7 @@ const MAX_LIVE: usize = 4;
 
 /// Where in the transcript a page shows: the part of an agent message that
 /// holds the fence, or [`PageKey::TOOL`] under a tool call.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PageKey {
     pub(crate) entry: EntryId,
     pub(crate) part: usize,
@@ -72,7 +72,7 @@ impl ChatPage {
 #[derive(Clone, Debug)]
 pub(crate) enum PageSource {
     /// An HTML fence's source.
-    Html(Rc<str>),
+    Html(Arc<str>),
     /// An HTML file on the chat's machine.
     File(PathBuf),
 }
@@ -117,6 +117,29 @@ impl SheprdWindow {
             });
         })
         .detach();
+    }
+
+    /// Loads the pages `render_html = "always"` asked for while the chat
+    /// drew, once the frame is done.
+    pub(crate) fn load_queued_pages(
+        &mut self,
+        pane_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pane) = self.chats.pane_mut(pane_id) else {
+            return;
+        };
+        let queued = pane.code.take_queued();
+        if queued.is_empty() {
+            return;
+        }
+        let pane_id = pane_id.to_owned();
+        cx.defer_in(window, move |this, window, cx| {
+            for (key, page) in queued {
+                this.show_chat_page(&pane_id, key, PageSource::Html(page), window, cx);
+            }
+        });
     }
 
     fn chat_page_failed(&mut self, pane_id: &str, error: String, cx: &mut Context<Self>) {

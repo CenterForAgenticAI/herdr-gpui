@@ -704,7 +704,7 @@ impl SettingsWindow {
             self.open_code_page(window, cx);
             self.open_px0_settings(cx);
         }
-        if section == Section::General {
+        if section == Section::Chat {
             self.open_chat_env_settings(cx);
         }
         if section == Section::RemoteControl {

@@ -50,6 +50,7 @@ fn every_catalog_id_is_unique_and_belongs_to_its_section() {
             Section::Fonts => "fonts-",
             Section::General => "general-",
             Section::Tabs => "tabs-",
+            Section::Chat => "chat-",
             Section::Notifications => "notif-",
             Section::StatusBar => "status-",
             Section::Code => "code-",

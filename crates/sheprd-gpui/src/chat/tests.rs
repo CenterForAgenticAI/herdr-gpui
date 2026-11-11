@@ -19,6 +19,7 @@ mod activity;
 mod attachments;
 mod chats;
 mod code;
+mod code_options;
 mod composer;
 mod controls;
 mod convert;

@@ -464,7 +464,7 @@ is off, chat panes show their terminal and `chat new` exits 8.
 
 Set the reading width with `sheprd config set chat.max_width 1200`, or use
 `0` for the full available width. Bounded widths range from 320 to 4000 logical
-pixels; the default is 800. Settings > General offers the same width slider and
+pixels; the default is 800. Settings > Chat offers the same width slider and
 **Full-width chat** switch.
 
 A chat on an SSH host shows in the native chat view like a local one. Sheprd

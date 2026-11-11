@@ -119,6 +119,8 @@ pub(crate) enum SendButton {
 pub(crate) struct ChatPane {
     /// Files the next prompt carries, in the order they were added.
     pub(crate) attachments: Vec<std::path::PathBuf>,
+    /// What this chat's buttons chose for its code blocks and HTML fences.
+    pub(crate) code: super::code_choices::CodeChoices,
     /// Which slash-command completion is selected.
     pub(crate) completion: usize,
     pub(crate) composer: Option<Entity<MultilineInput>>,
@@ -242,6 +244,7 @@ impl ChatPane {
         prepared.set_remote_links(!target.is_local());
         Self {
             attachments: Vec::new(),
+            code: Default::default(),
             completion: 0,
             composer: None,
             error: None,
@@ -543,6 +546,9 @@ pub(crate) struct Chats {
     pub(crate) launcher_deck: Option<LauncherDeck>,
     /// The layout the lists' rows were last measured in.
     measured: crate::config::ChatLayoutMode,
+    /// The `[chat]` code defaults that change a row's height, as the lists'
+    /// rows were last measured with: wrapping, line numbers, HTML fences.
+    measured_code: (bool, bool, crate::config::HtmlRender),
     /// The locale the panes' prepared text was last drawn in.
     measured_locale: Option<sheprd_i18n::Locale>,
     measured_width: u16,
@@ -616,6 +622,20 @@ impl Chats {
             return false;
         }
         self.measured = layout;
+        for pane in &self.panes {
+            pane.list.remeasure();
+        }
+        true
+    }
+
+    /// Measures every list's rows again once a code default that changes
+    /// their height changed. Says whether it did.
+    pub(crate) fn recode(&mut self, chat: &crate::config::chat::ChatConfig) -> bool {
+        let code = (chat.wrap_code, chat.code_line_numbers, chat.render_html);
+        if self.measured_code == code {
+            return false;
+        }
+        self.measured_code = code;
         for pane in &self.panes {
             pane.list.remeasure();
         }
