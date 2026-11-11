@@ -24,7 +24,9 @@ impl Error {
     pub(crate) fn status(&self) -> StatusCode {
         match self {
             Self::Busy => StatusCode::TOO_MANY_REQUESTS,
-            Self::Failed(Failure::RateLimited) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Failed(Failure::RateLimited | Failure::GitHubPending) => {
+                StatusCode::TOO_MANY_REQUESTS
+            }
             Self::Failed(Failure::GitHubSignIn | Failure::GitHubScope) => StatusCode::CONFLICT,
             Self::Failed(Failure::Gone | Failure::NoFile) => StatusCode::NOT_FOUND,
             Self::Failed(

@@ -181,7 +181,16 @@ impl Reader {
         }) {
             Some(index) => index,
             None => {
-                cache.reserve(now)?;
+                let known_identity = cache.entries.iter().any(|entry| {
+                    entry.input == input && entry.head == head && entry.repository == repository
+                });
+                cache.reserve(now).map_err(|failure| {
+                    if known_identity {
+                        failure
+                    } else {
+                        Failure::GitHubPending
+                    }
+                })?;
                 let result = load(&input);
                 let value = result.map_err(|error| {
                     cache.pause(&error);
@@ -369,6 +378,7 @@ fn replaces_badge(
             | Ok(Err(Failure::Gone
                 | Failure::NoRepository
                 | Failure::GitHubSignIn
+                | Failure::GitHubPending
                 | Failure::GitHubScope))
     )
 }

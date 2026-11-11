@@ -371,6 +371,25 @@ fn remote_changes_clear_old_badges_even_during_account_backoff() {
     // Invalidating the presentation never bypasses the actual account pause.
     assert_eq!(
         reader.answer(cwd, &Wanted::Checks),
-        Err(Failure::RateLimited)
+        Err(Failure::GitHubPending)
     );
+    // An on-demand read may have consumed the invalidation before the
+    // background badge tick. Absence of a verified identity still clears it.
+    assert!(replaces_badge(&Ok(reader.pull_request(cwd, "feature"))));
+}
+
+#[test]
+fn an_expired_but_matching_identity_preserves_its_badge_during_backoff() {
+    let dir = repository();
+    let cwd = dir.path().to_str().unwrap();
+    let reader = Reader::new(true);
+    populate(&reader, cwd);
+    {
+        let mut cache = reader.cache.lock().unwrap();
+        cache.entries[0].until = Instant::now();
+        cache.pause(&sheprd_github::Error::RateLimit { reset: None });
+    }
+    let answer = reader.pull_request(cwd, "feature");
+    assert!(matches!(answer, Err(Failure::RateLimited)));
+    assert!(!replaces_badge(&Ok(answer)));
 }

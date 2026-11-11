@@ -99,6 +99,8 @@ impl Answer {
 #[serde(rename_all = "snake_case")]
 pub enum Failure {
     // keep-sorted start
+    #[error("GitHub data for this checkout is not available yet; try again shortly")]
+    GitHubPending,
     #[error("GitHub denied repository or Actions read access on this computer")]
     GitHubScope,
     #[error("sign in with gh auth login on this computer, then enable remote GitHub CLI reads")]
