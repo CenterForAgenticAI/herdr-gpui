@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn custom_herdr_socket_keeps_local_core_files_without_authorizing_herdr_commands() {
+    let target = ConnectTarget::Socket("/forwarded/herdr.sock".into());
+    assert!(Host::new(&target).is_err());
+    let host = host_for_kept(&target).unwrap();
+    assert!(host.is_local());
+    assert_eq!(
+        host.identity(),
+        Host::new(&ConnectTarget::Local).unwrap().identity()
+    );
+}
+
+#[test]
 fn opening_checks_the_repository_on_the_supplied_host() {
     let fixture = Fixture::new();
     let other = Fixture::new();
