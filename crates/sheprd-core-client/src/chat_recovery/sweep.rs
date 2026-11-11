@@ -68,8 +68,12 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
                 .any(|terminal| terminal.address == record.terminal)
         {
             // Keep the durable forward receipt even when the replacement
-            // ended before a client saved its rewritten layout.
-            publish_mapping(core, &record)?;
+            // ended before a client saved its rewritten layout. Best effort:
+            // a removed retired shell must never keep the kills below from
+            // ending a replacement the close outlived.
+            if let Err(error) = publish_mapping(core, &record) {
+                tracing::debug!(%error, "closed chat receipts deferred");
+            }
         }
         // A close can race a run already in flight. Its ACP startup guard
         // refuses the tombstone; also end any replacement that claimed first.
@@ -107,7 +111,7 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
     }
     if record.state == State::Live {
         if !lost(&record, original) {
-            if !record.previous.is_empty() && replaces(&original.labels) != record.previous {
+            if receipts_missing(&record, original, terminals) {
                 publish_mapping(core, &record)?;
             }
             return Ok(());
@@ -176,6 +180,21 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
         ..Run::default()
     })?;
     Ok(())
+}
+
+/// Whether either receipt of the last replacement is missing: the
+/// replacement's `replaces`, or the retired shell's `replaced_by`, which
+/// keeps readers from adopting that shell again as a workspace tab. A
+/// retired shell that is gone needs no receipt.
+fn receipts_missing(record: &Record, replacement: &Terminal, terminals: &[Terminal]) -> bool {
+    let Some(previous) = record.previous.last() else {
+        return false;
+    };
+    replaces(&replacement.labels) != record.previous
+        || terminals
+            .iter()
+            .find(|terminal| terminal.address == *previous)
+            .is_some_and(|retired| retired.labels.get(REPLACED_BY_LABEL) != Some(&record.terminal))
 }
 
 fn lost(record: &Record, terminal: &Terminal) -> bool {
