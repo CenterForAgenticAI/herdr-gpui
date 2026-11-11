@@ -2401,13 +2401,20 @@ seconds, then holds still so the tiles do not move under the pointer.
 Choosing another host creates the checkout there through the same scripts as
 Teleport: the repository is found by remote (or opened, or cloned, as Teleport
 does), the base commit is resolved here and shipped as a Git bundle only when
-that host lacks it, and that host's own daemon creates the worktree from it.
+that host lacks it, and the selected backend creates the worktree from it.
+Herdr 2 destinations use Git directly and keep their workspace in the app;
+they do not need a Herdr 1 snapshot or workspace. The picker connects to saved
+hosts' cores and samples their working agents even without an open terminal
+tab. Checkouts already open in either backend can be reused. Hosts whose core
+is disconnected stay unavailable until it answers.
 Closing the dialog does not stop it; the result arrives as a flash, and the
 window switches to the new workspace. Once it is shown, a new worktree runs the
 repository's setup script there, asking for trust as a local creation does.
 Setups of several such worktrees wait their turn; one whose host is not shown
 within two minutes is given up on, with a warning. A
-new workspace opens the repository's main checkout on that host.
+new workspace opens the repository's main checkout on that host. Completion
+checks the captured host identity before opening a folder: if the saved device
+changed, the checkout stays on its original host and the app reports its path.
 
 Once you have a container device (see [Containers](#containers-docker-or-podman)),
 a Daytona sandbox, a sprite, or an OpenSandbox sandbox, the dialogs also offer
@@ -2415,13 +2422,21 @@ a **New container**, **New sprite**, or **New sandbox** tile, even with one
 host connected. A container or Daytona sandbox starts from the repository's
 [sandbox image](#sandbox-images) when it has a recipe, building it first if
 needed.
-Creating with it makes a container with the `[container]` settings and Herdr
-installed, starts Herdr's server in it, saves it as a device, then creates the
+Creating with it makes a container with the `[container]` settings and the
+chosen terminal backend installed, saves it as a device, then creates the
 checkout there as above, cloning the repository first; the dialog shows each
-step. The container stays a device if a later step fails, so you can retry on
+step. With Herdr 2 selected for new workspaces, provisioning requires herdr-core
+and neither installs nor starts Herdr 1. Project images get a required-core
+layer with a separate content key; a failed core installation fails setup.
+The container stays a device if a later step fails, so you can retry on
 it or remove it. It runs the cloud setup script once it is shown, like one made
 in Settings. Fan-out lanes are not offered new containers yet: a new container
 has no signed-in agent to start.
+
+On Windows, dispatch between SSH and WSL hosts uses their POSIX shells. A native
+Windows local checkout cannot be a dispatch source or destination because the
+Git transfer scripts require a POSIX shell. Cloud provisioning remains subject
+to each platform's cloud-device availability.
 
 The fan-out dialog offers Spread agents across hosts. Each lane then goes to
 the host with the most room left, a lane counting as a core, and its host chip
