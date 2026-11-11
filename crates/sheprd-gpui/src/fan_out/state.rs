@@ -160,6 +160,7 @@ pub(super) enum Kept {
     /// The checkout of a Herdr 2 lane, whose kept workspace is found by it.
     Herdr2 {
         endpoint: String,
+        host: Host,
         label: String,
         path: String,
     },
@@ -170,6 +171,7 @@ pub(super) enum Kept {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Shown {
     pub(super) endpoint: String,
+    pub(super) host: Host,
     pub(super) label: String,
     pub(super) path: String,
     pub(super) terminal: String,
@@ -210,7 +212,7 @@ pub(crate) struct FanOut {
     /// Herdr 2 agent shells the window has yet to show; see [`Self::take_kept`].
     shown: Vec<Shown>,
     /// Removed Herdr 2 lanes' folders whose kept workspaces have yet to close.
-    closed: Vec<(String, String)>,
+    closed: Vec<Checkout>,
 }
 
 impl Drop for FanOut {
@@ -652,7 +654,7 @@ impl FanOut {
     /// asked: Herdr 2 lanes whose agent's shell started, to show each in a
     /// kept workspace of its own, and the folders of removed lanes, whose
     /// kept workspaces close.
-    pub(super) fn take_kept(&mut self) -> (Vec<Shown>, Vec<(String, String)>) {
+    pub(super) fn take_kept(&mut self) -> (Vec<Shown>, Vec<Checkout>) {
         (
             std::mem::take(&mut self.shown),
             std::mem::take(&mut self.closed),
@@ -698,6 +700,7 @@ impl FanOut {
                                 checkout.terminal = Some(terminal.clone());
                                 self.shown.push(Shown {
                                     endpoint: checkout.endpoint_id.clone(),
+                                    host: checkout.host.clone(),
                                     label: lane.lane.branch.clone(),
                                     path: checkout.path().to_owned(),
                                     terminal,
@@ -767,9 +770,7 @@ impl FanOut {
                                         .as_ref()
                                         .filter(|c| c.workspace_id().is_none())
                                 });
-                                self.closed.extend(
-                                    kept.map(|c| (c.endpoint_id.clone(), c.path().to_owned())),
-                                );
+                                self.closed.extend(kept.cloned());
                                 removed.push(index);
                             }
                             Err(error) => {
@@ -788,6 +789,7 @@ impl FanOut {
                                 },
                                 None => Kept::Herdr2 {
                                     endpoint: checkout.endpoint_id.clone(),
+                                    host: checkout.host.clone(),
                                     label: lane.lane.branch.clone(),
                                     path: checkout.path().to_owned(),
                                 },
