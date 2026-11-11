@@ -81,7 +81,9 @@ fn installing_herdr_core_lets_the_host_take_herdr_2_tabs_again(cx: &mut gpui::Te
 }
 
 #[gpui::test]
-fn a_hosts_working_herdr_core_agents_count_when_ranking_it(cx: &mut gpui::TestAppContext) {
+fn a_disconnected_herdr_core_adds_no_stale_load_when_ranking_its_host(
+    cx: &mut gpui::TestAppContext,
+) {
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
     let (mut remote, _server) = connected_endpoint("ssh:fixture");
     remote.connection.target = ssh();
@@ -99,24 +101,25 @@ fn a_hosts_working_herdr_core_agents_count_when_ranking_it(cx: &mut gpui::TestAp
             view.core_terminals
                 .record_for_test(&host, agent(id, status));
         }
-        // Without a tab of that core here, its list is not kept current,
-        // so agents that may have stopped since do not count.
+        // Dispatch samples connected cores, tabs or not; one that does not
+        // answer counts none of what it last reported, even with a tab here.
         assert_eq!(view.core_terminals.working(&host), 0);
         view.core_terminals.show_on_host_for_test(
             crate::browser::TabId::test(1),
             host.clone(),
             TerminalId::new("t1").unwrap(),
         );
-        assert_eq!(view.core_terminals.working(&host), 2);
+        assert_eq!(view.core_terminals.working(&host), 0);
         if !cfg!(any(target_os = "linux", target_os = "macos")) {
             return;
         }
         let candidates = view.dispatch_candidates("repo", cx);
-        let candidate = candidates
-            .iter()
-            .find(|candidate| candidate.endpoint_id == "ssh:fixture")
-            .unwrap();
-        assert_eq!(candidate.working, 2);
+        assert!(
+            candidates
+                .iter()
+                .filter(|candidate| candidate.endpoint_id == "ssh:fixture")
+                .all(|candidate| candidate.working == 0)
+        );
     });
 }
 

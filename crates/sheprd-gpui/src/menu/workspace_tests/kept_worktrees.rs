@@ -41,6 +41,9 @@ fn window<'a>(
         view.update(cx, |view, cx| {
             view.live.snapshot = None;
             view.live.missing_installation = true;
+            // This computer, which fan-out's host fence can name; the
+            // layout fixture's custom socket has no host.
+            view.endpoints[0].connection.target = sheprd_client::ConnectTarget::Local;
             view.core_terminals.seed_checkout_for_test(
                 folder,
                 linked.map(|linked| Identity {

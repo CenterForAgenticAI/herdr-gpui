@@ -212,63 +212,6 @@ impl SheprdWindow {
             .map(|workspace| workspace.id.clone())
     }
 
-    /// Closes the workspace this computer keeps at `cwd`, without showing
-    /// this computer; whether there was one.
-    pub(crate) fn close_local_kept_folder(
-        &mut self,
-        cwd: &Path,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(scope) = self.local_kept_scope() else {
-            return false;
-        };
-        let Some(id) = self.kept_workspace_in(&scope, cwd, cx) else {
-            return false;
-        };
-        self.close_kept_workspace_in(&scope, &id, window, cx);
-        true
-    }
-
-    /// Keeps a new workspace on this computer for a checkout at `cwd` whose
-    /// first tab shows `location`, leaving whatever is in front, and which
-    /// host is shown, as they are, as Herdr 1 opens a fan-out lane's
-    /// workspace without focusing it. Answers its ID, or `None`, with a
-    /// flash, when it could not be kept or its tab not opened, which ends
-    /// the terminals `location` drives.
-    pub(crate) fn open_kept_workspace_behind(
-        &mut self,
-        label: &str,
-        cwd: &Path,
-        location: Location,
-        cx: &mut Context<Self>,
-    ) -> Option<String> {
-        let kept = self.local_kept_scope().and_then(|scope| {
-            Some((
-                self.keep_workspace_in(&scope, Some(label), Some(cwd), cx)?,
-                scope,
-            ))
-        });
-        let Some((id, scope)) = kept else {
-            self.end_location(&Host::Local, &location);
-            return None;
-        };
-        let shown = location.clone();
-        let tab = Store::update(cx, |store| {
-            store.open(scope.clone(), &id, Some(shown), None)
-        });
-        if tab.is_none() {
-            Store::update(cx, |store| store.forget_kept(&scope, &id));
-            self.refresh_core_session(cx);
-            self.end_location(&Host::Local, &location);
-            self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
-            return None;
-        }
-        self.sync_core_views(cx);
-        cx.notify();
-        Some(id)
-    }
-
     /// Keeps a new workspace and brings it to the front, named for `label`,
     /// else its folder.
     pub(super) fn keep_new_workspace(
