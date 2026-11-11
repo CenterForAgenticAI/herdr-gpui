@@ -195,8 +195,7 @@ impl CoreTerminals {
     }
 
     /// Shows `terminal` of `host`'s core in `tab`, as a restored tab would.
-    // Only the lifecycle tests, which need Unix sockets, use it.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn show_on_host_for_test(&mut self, tab: TabId, host: Host, terminal: TerminalId) {
         let panes = super::panes::Panes::single(terminal);
         self.tabs

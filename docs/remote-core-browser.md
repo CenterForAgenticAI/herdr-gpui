@@ -13,6 +13,11 @@ existing first-snapshot and unshown-terminal fences. The desktop derives the
 scope, workspace, and terminal from the connected backend and driving tab. It
 ignores a pane claimed by the request. `chat::core_pane::key_on` qualifies the
 origin with the host, so `t3` on two machines is never one recipient.
+Shared review/note delivery and the desktop control feedback lookup use the
+same exact driving-pane lookup for remote core keys, independently of the
+selected Herdr 1 session. An unheld remote key cannot fall back to that session
+or alias a local `core:t3`. The remote shim continues to use its authenticated
+terminal-label route, rather than creating a local caller.
 
 The existing `herdr-gpui-ID` header accepts `open`, `open-background`, and
 `reload`. URLs remain split into up to twelve `_N` labels. Reload only targets
