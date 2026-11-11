@@ -16,9 +16,6 @@ fn non_claude_conversion_uses_the_bound_session_and_configuration() {
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path().to_str().unwrap().to_owned();
         let pid = std::process::id();
-        // Conversion refuses a folder that is gone, so the agent runs in one that exists.
-        let work = tempfile::tempdir().unwrap();
-        let cwd = work.path().to_str().unwrap().to_owned();
         let mut environment = BTreeMap::new();
         if kind == AgentKind::Codex {
             environment.insert("CODEX_HOME".into(), "/custom/codex".into());
