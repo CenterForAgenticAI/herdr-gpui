@@ -8,18 +8,18 @@ use sheprd_client::{herdr::worktree, shell_quote};
 use std::{path::Path, sync::atomic::AtomicBool};
 
 pub fn plan(host: &Host, checkout: &str, branch: &str, cancelled: &AtomicBool) -> Result<Worktree> {
+    crate::work::inspect::validate_path(host, checkout, Step::CreateWorktree)?;
     let common = host
         .capture(&super::super::common_dir_line(checkout), cancelled)
         .map_err(script(Step::CreateWorktree))?;
-    let folder = worktree::folder(Path::new(String::from_utf8_lossy(&common).trim()), branch)
-        .map_err(crate::work::Error::from)?;
-    let relative = Path::new(worktree::ROOT).join(folder);
+    let common = String::from_utf8_lossy(&common);
+    let common = common.trim_end_matches('\n');
+    crate::work::inspect::validate_path(host, common, Step::CreateWorktree)?;
+    let folder = worktree::folder(Path::new(common), branch).map_err(crate::work::Error::from)?;
+    let relative = relative(&folder);
     let output = host
         .capture(
-            &format!(
-                "printf '%s/%s\\n' \"$HOME\" {}\n",
-                shell_quote(&relative.to_string_lossy())
-            ),
+            &format!("printf '%s/%s\\n' \"$HOME\" {}\n", shell_quote(&relative)),
             cancelled,
         )
         .map_err(script(Step::CreateWorktree))?;
@@ -32,6 +32,21 @@ pub fn plan(host: &Host, checkout: &str, branch: &str, cancelled: &AtomicBool) -
         opened: Opened::Herdr2,
     })
 }
+
+/// The script runs on a POSIX host, even from a Windows client.
+fn relative(folder: &Path) -> String {
+    std::iter::once(worktree::ROOT.to_owned())
+        .chain(
+            folder
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned()),
+        )
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(test)]
+mod tests;
 
 pub fn create(
     host: &Host,
