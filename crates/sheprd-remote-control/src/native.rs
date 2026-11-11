@@ -67,6 +67,7 @@ fn home(state: &Shared) -> Home {
         load: *state.load.borrow(),
         summaries,
         pull_requests: &pull_requests,
+        shortcuts_ms: state.shortcuts.current().updated_ms,
         tags: state.tags.current(),
         version: crate::server::version(),
         waiting: state.attention().len(),

@@ -253,39 +253,101 @@ final class TagFilterStore {
     }
 }
 
-/// The composer's text shortcuts, kept on this phone.
+/// The composer's text shortcuts: one list this phone shares with every
+/// paired computer, and through them with Sheprd on the desktop
+/// (`ShortcutSync`). Saved here too, so it works offline and beside
+/// computers too old to keep shortcuts.
 @MainActor
 @Observable
 final class ShortcutStore {
-    private static let key = "textShortcuts"
+    private static let key = "sharedTextShortcuts"
+    /// Where the list was saved before it synced, with no edit time. Left in
+    /// place, so an earlier build still finds its list.
+    private static let legacyKey = "textShortcuts"
+
     private(set) var shortcuts: [TextShortcut]
+    @ObservationIgnored private var sync: ShortcutSync
+    /// Fetches from and offers to the computers; the app model sets it.
+    @ObservationIgnored var perform: (([ShortcutSync.Action]) -> Void)?
 
     init() {
-        shortcuts = TextShortcut.load(UserDefaults.standard.data(forKey: Self.key))
+        let defaults = UserDefaults.standard
+        let (saved, migrated) = TextShortcuts.load(
+            defaults.data(forKey: Self.key), legacy: defaults.data(forKey: Self.legacyKey), now: Self.nowMs
+        )
+        sync = ShortcutSync(local: saved)
+        shortcuts = saved.shortcuts
+        if migrated { persist() }
     }
+
+    /// No more fit: computers keep at most `TextShortcuts.maxCount`.
+    var isFull: Bool { shortcuts.count >= TextShortcuts.maxCount }
 
     /// Adds the shortcut, or replaces the one with its id.
     func save(_ shortcut: TextShortcut) {
-        if let index = shortcuts.firstIndex(where: { $0.id == shortcut.id }) {
-            shortcuts[index] = shortcut
+        var edited = shortcuts
+        if let index = edited.firstIndex(where: { $0.id == shortcut.id }) {
+            edited[index] = shortcut
         } else {
-            shortcuts.append(shortcut)
+            edited.append(shortcut)
         }
-        persist()
+        edit(edited)
     }
 
     func delete(at offsets: IndexSet) {
-        shortcuts.remove(atOffsets: offsets)
-        persist()
+        var edited = shortcuts
+        edited.remove(atOffsets: offsets)
+        edit(edited)
     }
 
     func move(from offsets: IndexSet, to destination: Int) {
-        shortcuts.move(fromOffsets: offsets, toOffset: destination)
-        persist()
+        var edited = shortcuts
+        edited.move(fromOffsets: offsets, toOffset: destination)
+        edit(edited)
+    }
+
+    /// A computer's home reported when its copy was edited.
+    func reported(_ updatedMs: UInt64?, by device: String) {
+        run { $0.home(updatedMs, from: device, now: Self.nowMs) }
+    }
+
+    /// A computer's copy, as fetched, or as it stood after `offered`.
+    func received(_ copy: TextShortcuts, offered: TextShortcuts?, from device: String) {
+        let now = Self.nowMs
+        run { sync in
+            guard let offered else { return sync.fetched(copy, from: device, now: now) }
+            return sync.answered(copy, offered: offered, by: device, now: now)
+        }
+    }
+
+    func fetchFailed(_ device: String) {
+        run { $0.fetchFailed(device) }
+    }
+
+    func offline(_ device: String) {
+        sync.offline(device)
+    }
+
+    private func edit(_ edited: [TextShortcut]) {
+        run { $0.edit(edited, now: Self.nowMs) }
+    }
+
+    /// Runs one step of the sync, keeps the list it leaves, and does what
+    /// the computers need.
+    private func run(_ step: (inout ShortcutSync) -> [ShortcutSync.Action]) {
+        let before = sync.local
+        let actions = step(&sync)
+        if sync.local != before {
+            if shortcuts != sync.local.shortcuts { shortcuts = sync.local.shortcuts }
+            persist()
+        }
+        if !actions.isEmpty { perform?(actions) }
     }
 
     private func persist() {
-        guard let data = try? TextShortcut.save(shortcuts) else { return }
+        guard let data = try? sync.local.save() else { return }
         UserDefaults.standard.set(data, forKey: Self.key)
     }
+
+    private static var nowMs: UInt64 { UInt64(Date.now.timeIntervalSince1970 * 1000) }
 }

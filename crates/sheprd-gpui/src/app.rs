@@ -172,6 +172,7 @@ pub(crate) fn install_services(personal: bool, cx: &mut App) {
         // Nor do they install or ask the remote control service.
         crate::remote::Supervisor::install(cx);
         crate::device_tags::DeviceTags::install(cx);
+        crate::text_shortcuts::Store::install(cx);
         #[cfg(feature = "cloud")]
         crate::cloud::install_idle_checks(cx);
         // Nor do they follow the user's saved SSH host choices.

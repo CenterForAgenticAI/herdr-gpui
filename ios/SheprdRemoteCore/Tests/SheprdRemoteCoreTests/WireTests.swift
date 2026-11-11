@@ -33,6 +33,7 @@ struct WireTests {
         #expect(home.workspaces[1].pullRequest == nil)
         #expect(workspace.unopenedCommits == nil)
         #expect(home.workspaces[2].unopenedCommits == 3)
+        #expect(home.shortcutsMs == 1_770_000_000_000)
     }
 
     @Test func decodesChatSnapshotAndTheRestEndpoint() throws {
