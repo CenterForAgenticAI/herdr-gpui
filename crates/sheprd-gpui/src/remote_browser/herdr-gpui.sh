@@ -199,15 +199,15 @@ reload_pages() {
 core_feedback() {
     core_terminal || unavailable
     command -v python3 >/dev/null 2>&1 || fail 8 unsupported "Remote feedback requires python3."
-    python3 - "$json" "$@" <<'PY'
+    exec python3 - "$json" "$@" <<'PY'
 import json
 import os
 import secrets
+import selectors
 import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 
 as_json = sys.argv[1] == "1"
@@ -227,16 +227,33 @@ key = "herdr-gpui-" + secrets.token_hex(6)
 reply = "sheprd-reply-" + key[len("herdr-gpui-"):]
 deadline = time.monotonic() + wait + 30
 
-def call(*arguments):
-    # Bound memory even if a broken peer prints an oversized terminal record.
-    with tempfile.TemporaryFile() as output:
-        subprocess.run([core, *arguments], stdout=output, stderr=subprocess.DEVNULL,
-                       check=True, timeout=min(10, max(0.1, deadline - time.monotonic())))
-        output.seek(0)
-        data = output.read(1024 * 1024 + 1)
-    if len(data) > 1024 * 1024:
-        raise ValueError("Core response exceeds 1 MiB")
-    return data
+def call(*arguments, cleanup=False):
+    # Bound both memory and time while reading, without an unbounded disk spool.
+    command = [core, *arguments]
+    until = time.monotonic() + 2 if cleanup else min(deadline, time.monotonic() + 10)
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as child:
+        try:
+            data = bytearray()
+            with selectors.DefaultSelector() as ready:
+                ready.register(child.stdout, selectors.EVENT_READ)
+                while True:
+                    remaining = until - time.monotonic()
+                    if remaining <= 0 or not ready.select(remaining):
+                        raise subprocess.TimeoutExpired(command, 10)
+                    chunk = os.read(child.stdout.fileno(), 65536)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if len(data) > 1024 * 1024:
+                        raise ValueError("Core response exceeds 1 MiB")
+            status = child.wait(timeout=max(0.1, until - time.monotonic()))
+            if status:
+                raise subprocess.CalledProcessError(status, command)
+            return bytes(data)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=2)
 
 def interrupted(signum, frame):
     raise KeyboardInterrupt
@@ -276,7 +293,7 @@ except (OSError, ValueError, KeyError, subprocess.SubprocessError, TimeoutError)
 finally:
     if not acknowledged:
         try:
-            call("label", terminal, key + "=", reply + "=")
+            call("label", terminal, key + "=", reply + "=", cleanup=True)
         except (OSError, subprocess.SubprocessError, ValueError):
             pass
 sys.exit(status)

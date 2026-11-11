@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::browser::Batch;
 
 fn pending(scope: &str, now: Instant) -> Pending {
     let terminal = TerminalId::new("t3").unwrap();
@@ -18,7 +19,7 @@ fn pending(scope: &str, now: Instant) -> Pending {
         reply: "sheprd-reply-a1".into(),
         until: now + Duration::from_secs(600),
         phase: Phase::Waiting,
-        text: None,
+        notes: None,
     }
 }
 
@@ -127,4 +128,32 @@ fn expired_wait_returns_empty_and_cancelled_wait_never_takes_notes() {
     keep(&mut feedback, &request.target, "stay");
     assert!(!request.advance(None, now, &mut feedback, |_| panic!("cancelled")));
     assert!(feedback.has(&request.target));
+}
+
+#[test]
+fn an_unacknowledged_reply_retains_and_restores_each_pages_pending_marker() {
+    use std::sync::Arc;
+    let now = Instant::now();
+    let mut request = pending("ssh:one", now);
+    let mut feedback = Feedback::default();
+    let marker = Arc::new(());
+    let weak = Arc::downgrade(&marker);
+    feedback.keep(
+        Batch {
+            target: request.target.clone(),
+            text: "withdraw me".into(),
+        },
+        Some(marker),
+    );
+    offered(&mut request, &mut feedback, now);
+    assert_eq!(
+        weak.strong_count(),
+        1,
+        "the in-flight reply retains the pending send"
+    );
+    assert!(!request.advance(None, now, &mut feedback, |_| panic!("cancelled")));
+    assert!(feedback.holds(&weak));
+    assert!(feedback.withdraw(&weak));
+    assert!(!feedback.has(&request.target));
+    assert_eq!(weak.strong_count(), 0);
 }
