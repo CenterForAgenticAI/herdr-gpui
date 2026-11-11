@@ -42,7 +42,7 @@ impl SheprdWindow {
     /// Gives every pane of the focused workspace's herdr-core tabs a view,
     /// once the hub is connected, and drops the views of closed tabs and
     /// panes.
-    pub(super) fn sync_core_views(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sync_core_views(&mut self, cx: &mut Context<Self>) {
         let Some(store) = cx.try_global::<Store>() else {
             self.core_terminals.views.clear();
             self.core_terminals.tabs.clear();
