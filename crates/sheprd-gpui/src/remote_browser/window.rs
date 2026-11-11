@@ -88,6 +88,8 @@ impl SheprdWindow {
     ) {
         let Request { pane, action, .. } = request;
         let (address, focus) = match action {
+            // Only the core bridge has an authenticated return route.
+            Action::Feedback { .. } => return,
             Action::Reload => {
                 let Some(pane) = pane else {
                     return;

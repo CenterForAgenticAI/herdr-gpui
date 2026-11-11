@@ -10,7 +10,7 @@ use crate::{
     agent_skill::{AgentSkill, Choice},
 };
 use gpui::{Context, Global};
-use sheprd_client::{ScriptHost, ScriptLimits, SshLane, run_script};
+use sheprd_client::{ConnectTarget, ScriptHost, ScriptLimits, run_script};
 use std::{collections::HashSet, sync::atomic::AtomicBool, time::Duration};
 
 pub(super) const SHIM: &str = include_str!("herdr-gpui.sh");
@@ -69,18 +69,34 @@ const LIMITS: ScriptLimits = ScriptLimits {
 /// not it worked: a host without a POSIX shell is not asked again on every
 /// tick, while a changed choice is applied again.
 #[derive(Default)]
-struct Tried(HashSet<(String, Choice)>);
+struct Tried(HashSet<(crate::browser::Scope, Choice)>);
 
 impl Global for Tried {}
 
 /// Blocking: short SSH sessions. Run off the UI thread.
-fn apply(target: &str, choice: Choice) -> crate::Result<()> {
-    let host = ScriptHost::Ssh(target, SshLane::Quick);
+enum InstallHost {
+    Remote(sheprd_remote::teleport::Host),
+    Wsl(String),
+}
+
+fn apply(host: &InstallHost, choice: Choice) -> crate::Result<()> {
     let never = AtomicBool::new(false);
     let run = |script: &str, input: &[u8]| {
-        run_script(host, script, input, std::io::sink(), LIMITS, &never)
-            .map(drop)
-            .map_err(crate::Error::RemoteAgentTools)
+        match host {
+            InstallHost::Remote(host) => {
+                host.stream(script, input, std::io::sink(), LIMITS, &never)
+            }
+            InstallHost::Wsl(distro) => run_script(
+                ScriptHost::Wsl(distro),
+                script,
+                input,
+                std::io::sink(),
+                LIMITS,
+                &never,
+            ),
+        }
+        .map(drop)
+        .map_err(crate::Error::RemoteAgentTools)
     };
     match choice {
         Choice::Installed => {
@@ -109,8 +125,15 @@ impl SheprdWindow {
             } else {
                 &endpoint.live
             };
-            let Some((target, _)) = endpoint.saved_ssh() else {
-                continue;
+            let host = match endpoint.saved_target() {
+                ConnectTarget::Wsl { distro, .. } => InstallHost::Wsl(distro.clone()),
+                target if target.is_remote() => {
+                    let Ok(host) = sheprd_remote::teleport::Host::new(target) else {
+                        continue;
+                    };
+                    InstallHost::Remote(host)
+                }
+                _ => continue,
             };
             // Connected to its Herdr, or to its herdr-core alone.
             let connected = live.snapshot.is_some()
@@ -122,14 +145,13 @@ impl SheprdWindow {
             if !endpoint.enabled || !connected {
                 continue;
             }
-            let key = (target.to_owned(), choice);
+            let key = (crate::browser::scope(endpoint), choice);
             if !cx.default_global::<Tried>().0.insert(key) {
                 continue;
             }
-            let target = target.to_owned();
             cx.background_executor()
                 .spawn(async move {
-                    match apply(&target, choice) {
+                    match apply(&host, choice) {
                         Ok(()) => tracing::info!(?choice, "Updated the agent tools on an SSH host"),
                         Err(error) => {
                             tracing::warn!(%error, ?choice, "Cannot update the agent tools on an SSH host");

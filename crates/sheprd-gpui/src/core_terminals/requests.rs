@@ -26,6 +26,67 @@ pub(crate) struct LabelRequests {
 }
 
 impl CoreTerminals {
+    pub(crate) fn browser_terminal(&self, scope: &Scope, origin: &str) -> Option<TerminalId> {
+        let host = Host::Remote(scope.clone());
+        self.tabs
+            .values()
+            .filter(|tab| tab.host == host && !tab.observe)
+            .flat_map(|tab| tab.panes.terminals())
+            .find(|terminal| crate::chat::core_pane::key_on(&host, terminal) == origin)
+            .cloned()
+    }
+
+    pub(crate) fn browser_request_value(
+        &self,
+        scope: &Scope,
+        terminal: &TerminalId,
+        name: &str,
+    ) -> Option<&str> {
+        let remote = self.remote.get(scope)?;
+        self.backend_of(&Host::Remote(scope.clone()))
+            .filter(|backend| !backend.core().is_lost())?;
+        remote
+            .infos
+            .all()
+            .find(|info| info.id == *terminal)?
+            .labels
+            .get(name)
+            .map(String::as_str)
+    }
+
+    /// Writes a bounded reply on the existing authenticated core connection.
+    /// The UI retains the notes until the caller acknowledges reading it.
+    pub(crate) fn browser_reply(
+        &self,
+        scope: &Scope,
+        terminal: &TerminalId,
+        name: String,
+        value: String,
+    ) -> Option<crossbeam_channel::Receiver<sheprd_core_client::Result<()>>> {
+        let backend = self.backend_of(&Host::Remote(scope.clone()))?.clone();
+        let terminal = terminal.clone();
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        let spawned = std::thread::Builder::new()
+            .name("browser-reply".into())
+            .spawn(move || {
+                let result = backend
+                    .core()
+                    .label(
+                        terminal.as_str(),
+                        &BTreeMap::from([(name.as_str(), value.as_str())]),
+                    )
+                    .map(drop);
+                let _ = sender.send(result);
+            });
+        match spawned {
+            Ok(_) => Some(receiver),
+            Err(error) => {
+                tracing::warn!(%error, "Could not start browser reply worker");
+                None
+            }
+        }
+    }
+
     /// Every request label on terminals of other hosts' cores that this
     /// window shows in a tab driving them, each once: a request is served
     /// only the first time it is listed, and never when it predates the

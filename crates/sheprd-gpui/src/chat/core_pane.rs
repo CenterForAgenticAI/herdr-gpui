@@ -29,7 +29,20 @@ const PANE_ENV: &str = "HERDR_PANE_ID";
 /// The window's key for the chat in `terminal`. Herdr pane ids have no
 /// `core:` workspace, and a clash is dropped rather than shared.
 pub(crate) fn key(terminal: &TerminalId) -> String {
-    format!("core:{terminal}")
+    key_on(&crate::core_terminals::Host::Local, terminal)
+}
+
+/// A core terminal's chat identity, scoped to its owning host. The length
+/// prefix keeps colons in saved host scopes or terminal IDs unambiguous.
+pub(crate) fn key_on(host: &crate::core_terminals::Host, terminal: &TerminalId) -> String {
+    match host {
+        crate::core_terminals::Host::Local => format!("core:{terminal}"),
+        crate::core_terminals::Host::Remote(scope) => format!(
+            "core@{}:{}:{terminal}",
+            scope.as_str().len(),
+            scope.as_str()
+        ),
+    }
 }
 
 /// The herdr-core terminal a [`key`] names, if it is one.
