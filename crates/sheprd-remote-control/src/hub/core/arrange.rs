@@ -142,6 +142,15 @@ impl Source {
             return Ok(None);
         }
         let at = TerminalId::new(address).map_err(Error::from)?;
+        // The phone names a recovered chat's replacement, which a file saved
+        // before the recovery does not: rebind it within the same edit.
+        let replacements = lock(&self.poller).replacements.clone();
+        let remapped = |bytes: &[u8]| -> std::result::Result<Vec<u8>, edit::Error> {
+            if replacements.is_empty() {
+                return Ok(bytes.to_vec());
+            }
+            edit::remap(bytes, scope, &replacements)
+        };
         if let Some(axis) = axis(op) {
             let record = self.record(address)?;
             let workspace = lock(&self.poller).saved_workspace(scope, tab);
@@ -160,7 +169,7 @@ impl Source {
                             axis,
                             new: id,
                         };
-                        edit::edit_tab(bytes, scope, tab, change)
+                        edit::edit_tab(&remapped(bytes)?, scope, tab, change)
                     })
                 });
             if let Err(error) = split {
@@ -181,7 +190,9 @@ impl Source {
                 return Err(super::Error::Unsupported.into());
             }
         };
-        edit_file(path, |bytes| edit::edit_tab(bytes, scope, tab, change))?;
+        edit_file(path, |bytes| {
+            edit::edit_tab(&remapped(bytes)?, scope, tab, change)
+        })?;
         Ok(None)
     }
 
