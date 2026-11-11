@@ -2,6 +2,20 @@ use super::*;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
+/// A lock is released once every copy of its descriptor closes. A process
+/// another test thread forks holds a copy until it execs (the descriptor is
+/// close-on-exec), so the release can trail `drop` briefly. Bounded.
+fn relock(dir: &Path, id: &EndpointId) -> File {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match lock_in(dir, id) {
+            Ok(file) => return file,
+            Err(error) if std::time::Instant::now() >= deadline => panic!("{error:#}"),
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    }
+}
+
 #[test]
 fn an_endpoint_has_one_owner_until_it_exits_not_until_a_timeout() {
     let dir = tempfile::tempdir().unwrap();
@@ -9,7 +23,7 @@ fn an_endpoint_has_one_owner_until_it_exits_not_until_a_timeout() {
     let first = lock_in(dir.path(), &id).unwrap();
     assert!(lock_in(dir.path(), &id).is_err());
     drop(first);
-    let next = lock_in(dir.path(), &id).unwrap();
+    let next = relock(dir.path(), &id);
     assert!(lock_in(dir.path(), &id).is_err());
     drop(next);
     assert!(dir.path().join(format!("{ID}.lock")).exists());
