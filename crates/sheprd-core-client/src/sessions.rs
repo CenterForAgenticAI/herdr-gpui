@@ -31,7 +31,7 @@ pub(crate) fn claude_record(pid: u32, home: &std::path::Path) -> Result<String> 
     let mut stamp = Vec::new();
     sheprd_client::run_script(
         sheprd_client::ScriptHost::Local,
-        &format!("LC_ALL=C TZ=UTC ps -o lstart= -p {pid}"),
+        &format!("LC_ALL=C TZ=UTC ps -o lstart= -p {pid}\nLC_ALL=C ps -o lstart= -p {pid}"),
         &[][..],
         &mut stamp,
         sheprd_client::ScriptLimits {
@@ -42,8 +42,22 @@ pub(crate) fn claude_record(pid: u32, home: &std::path::Path) -> Result<String> 
     )
     .map_err(Error::Probe)?;
     let mut bytes = Vec::new();
-    std::fs::File::open(crate::convert::claude_record(home, pid))?
-        .take(sessions::MAX_RECORD as u64 + 1)
+    let path = crate::convert::claude_record(home, pid);
+    #[cfg(unix)]
+    let file = std::fs::File::from(
+        rustix::fs::open(
+            &path,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(std::io::Error::from)?,
+    );
+    #[cfg(not(unix))]
+    let file = std::fs::File::open(&path)?;
+    if !file.metadata()?.is_file() {
+        return Err(Error::Identity.into());
+    }
+    file.take(sessions::MAX_RECORD as u64 + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() > sessions::MAX_RECORD {
         return Err(Error::Evidence(sessions::Error::TooLarge).into());
@@ -51,7 +65,9 @@ pub(crate) fn claude_record(pid: u32, home: &std::path::Path) -> Result<String> 
     let record: Record = serde_json::from_slice(&bytes)?;
     let normalize = |value: &str| value.split_whitespace().collect::<Vec<_>>().join(" ");
     if record.pid != pid
-        || normalize(&record.started) != normalize(&String::from_utf8_lossy(&stamp))
+        || !String::from_utf8_lossy(&stamp)
+            .lines()
+            .any(|stamp| normalize(&record.started) == normalize(stamp))
         || before.started != process::read(pid)?.started
         || !sheprd_chat_protocol::restore::session_id_is_plain(&record.session)
     {
@@ -99,14 +115,57 @@ fn document(terminal: &str) -> String {
 /// Blocking, owning host only. A helper on a remote host calls this there,
 /// never against a locally numbered process from another host's terminal.
 pub fn discover(core: &Core, terminal: &str, agent: AgentKind) -> Result<Binding> {
+    discover_in(core, terminal, agent, std::env::home_dir().as_deref())
+}
+
+pub(crate) fn discover_in(
+    core: &Core,
+    terminal: &str,
+    agent: AgentKind,
+    home: Option<&std::path::Path>,
+) -> Result<Binding> {
     let before = record(core, terminal, agent)?;
     let value = core.doc_get(&document(terminal))?.value;
-    if value.is_null() {
+    if value.is_null() && agent != AgentKind::Claude {
         return Err(Error::Absent.into());
     }
     let expected = identity(core, &before)?;
-    let bytes = serde_json::to_vec(&value)?;
-    let binding = Binding::parse(&bytes, &expected, agent).map_err(Error::Evidence)?;
+    let old_process = serde_json::from_value::<Binding>(value.clone())
+        .ok()
+        .is_some_and(|old| {
+            old.identity.core == expected.core
+                && old.identity.terminal == expected.terminal
+                && (old.identity.pid != expected.pid || old.identity.started != expected.started)
+        });
+    let binding = if value.is_null() || (agent == AgentKind::Claude && old_process) {
+        let home = home.ok_or(Error::Absent)?;
+        let session = match claude_record(expected.pid, home) {
+            Ok(session) => session,
+            Err(crate::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Error::Absent.into());
+            }
+            Err(error) => return Err(error),
+        };
+        Binding {
+            version: 1,
+            sequence: 0,
+            identity: expected.clone(),
+            agent: agent.name().into(),
+            session: Some(
+                sessions::reference(agent, SessionKind::Id, session).map_err(Error::Evidence)?,
+            ),
+            environment: BTreeMap::from([(
+                "CLAUDE_CONFIG_DIR".into(),
+                home.join(".claude")
+                    .to_str()
+                    .ok_or(Error::Identity)?
+                    .to_owned(),
+            )]),
+        }
+    } else {
+        let bytes = serde_json::to_vec(&value)?;
+        Binding::parse(&bytes, &expected, agent).map_err(Error::Evidence)?
+    };
     let after = record(core, terminal, agent)?;
     if before.foreground != after.foreground || expected != identity(core, &after)? {
         return Err(Error::Identity.into());
@@ -121,6 +180,18 @@ pub fn discover(core: &Core, terminal: &str, agent: AgentKind) -> Result<Binding
 /// or TUI plugin. Inherited HC_TERMINAL_ID only routes the report: the reporter
 /// must also descend from the current foreground agent process.
 pub fn report(core: &Core, terminal: &str, agent: AgentKind, input: &[u8]) -> Result<()> {
+    for attempt in 0..3 {
+        match report_once(core, terminal, agent, input) {
+            Err(crate::Error::Refused {
+                kind: Some(kind), ..
+            }) if kind == "conflict" && attempt < 2 => continue,
+            result => return result,
+        }
+    }
+    Err(Error::Sequence.into())
+}
+
+fn report_once(core: &Core, terminal: &str, agent: AgentKind, input: &[u8]) -> Result<()> {
     if input.len() > sessions::MAX_RECORD {
         return Err(Error::Evidence(sessions::Error::TooLarge).into());
     }
@@ -128,6 +199,11 @@ pub fn report(core: &Core, terminal: &str, agent: AgentKind, input: &[u8]) -> Re
     let mut selection = selection(agent, &payload)?;
     let before = record(core, terminal, agent)?;
     let expected = identity(core, &before)?;
+    if sequenced(agent)
+        && payload.get("pid").and_then(serde_json::Value::as_u64) != Some(u64::from(expected.pid))
+    {
+        return Err(Error::Identity.into());
+    }
     if let Some(pid) = payload.get("pid").and_then(serde_json::Value::as_u64)
         && pid != u64::from(expected.pid)
     {
@@ -143,7 +219,18 @@ pub fn report(core: &Core, terminal: &str, agent: AgentKind, input: &[u8]) -> Re
         .get("sequence")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0);
-    if agent == AgentKind::Opencode
+    if sequenced(agent)
+        && sequence > 0
+        && previous_binding.as_ref().is_some_and(|old| {
+            old.identity == expected
+                && old.sequence == sequence
+                && old.agent == agent.name()
+                && old.session == selection
+        })
+    {
+        return Ok(());
+    }
+    if sequenced(agent)
         && (sequence == 0
             || previous_binding
                 .as_ref()
@@ -154,7 +241,7 @@ pub fn report(core: &Core, terminal: &str, agent: AgentKind, input: &[u8]) -> Re
     // SessionStart hooks have no monotonic selection revision. Conflicting
     // events in one process cannot be ordered safely: permanently clear that
     // process's evidence, rather than letting a delayed hook restore an old ID.
-    if agent != AgentKind::Opencode
+    if !sequenced(agent)
         && previous_binding.as_ref().is_some_and(|old| {
             old.identity == expected && (old.session.is_none() || old.session != selection)
         })
@@ -194,6 +281,36 @@ fn selection(
     agent: AgentKind,
     payload: &serde_json::Value,
 ) -> Result<Option<sheprd_client::herdr::snapshot::AgentSession>> {
+    if matches!(agent, AgentKind::Pi | AgentKind::Omp) {
+        return match payload.get("session_path") {
+            Some(serde_json::Value::Null) => Ok(None),
+            Some(serde_json::Value::String(path)) => {
+                sessions::reference(agent, SessionKind::Path, path.clone())
+                    .map(Some)
+                    .map_err(|error| Error::Evidence(error).into())
+            }
+            _ => Err(Error::Event.into()),
+        };
+    }
+    if agent == AgentKind::Letta {
+        let id = payload
+            .get("conversation_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(Error::Event)?;
+        let id = if id == "default" {
+            let agent = payload
+                .get("agent_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or(Error::Event)?;
+            format!("default:{agent}")
+        } else {
+            id.to_owned()
+        };
+        return sessions::reference(agent, SessionKind::Id, id)
+            .map(Some)
+            .map_err(|error| Error::Evidence(error).into());
+    }
     let id = payload
         .get("session_id")
         .or_else(|| payload.get("sessionId"));
@@ -233,6 +350,10 @@ fn selection(
     sessions::reference(agent, SessionKind::Id, id.to_owned())
         .map(Some)
         .map_err(|error| Error::Evidence(error).into())
+}
+
+fn sequenced(agent: AgentKind) -> bool {
+    matches!(agent, AgentKind::Opencode | AgentKind::Pi | AgentKind::Omp)
 }
 
 #[cfg(test)]

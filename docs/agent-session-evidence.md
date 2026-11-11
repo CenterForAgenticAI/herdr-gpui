@@ -14,6 +14,9 @@ On the machine running the agent, using that installation's `sheprd-acp`:
 sheprd-acp session-install codex
 sheprd-acp session-install copilot
 sheprd-acp session-install opencode
+sheprd-acp session-install pi
+sheprd-acp session-install omp
+sheprd-acp session-install letta
 ```
 
 Run only the commands for integrations you want installed, then restart those
@@ -21,8 +24,9 @@ agents. Installation preserves other hooks and settings, uses separately named
 Sheprd assets, and is idempotent. Codex uses `CODEX_HOME`, Copilot uses
 `COPILOT_HOME`, and OpenCode's TUI config uses `XDG_CONFIG_HOME`. Invalid JSON,
 JSONC comments and unexpected config shapes are refused before writing assets;
-they are not rewritten as empty configurations. POSIX hooks currently support
-Linux and macOS, not native Windows. No integration is installed automatically.
+they are not rewritten as empty configurations. Linux/macOS use POSIX hooks;
+Windows reporters use PowerShell and CIM birth tokens. Windows native conversion
+still lacks the matching shell launch policy. No integration is installed automatically.
 
 The installer pins its own helper executable path. Reinstall after moving or
 removing that binary. Installation on SSH/cloud/WSL machines must use the helper
@@ -42,7 +46,9 @@ on that machine, with the intended agent configuration environment.
 `AgentKind::accepts` recognizes this provenance without pretending it came from
 Herdr 1. Reference kinds include IDs and Pi/OMP session paths. Producers currently
 exist for Codex/Copilot SessionStart events and OpenCode V2 TUI selection. The
-typed contract covers additional agents; their producers are **not implemented**.
+Pi/OMP extensions report exact session-manager paths with selection sequences;
+Letta's direct hook reports explicit conversations and qualifies default ones
+with their agent ID. Claude also has an opt-in reporter for custom config roots.
 
 The reporter verifies that it descends from the current foreground agent, with
 only shell hook launchers intervening. Inherited `HC_TERMINAL_ID` alone is not
@@ -54,7 +60,7 @@ clear evidence for that process rather than guessing which event is newest.
 Host-local helper commands:
 
 ```sh
-sheprd-acp session-report AGENT       # hook JSON on stdin; HC_TERMINAL_ID required
+sheprd-acp session-report AGENT       # hook JSON on stdin; injected HC_TERMINAL_ID/SOCKET required
 sheprd-acp session-discover TERMINAL AGENT
 sheprd-acp session-convert TERMINAL AGENT
 ```
@@ -63,6 +69,8 @@ Discovery prints binding JSON and exits 0; absent or explicitly cleared evidence
 exits 3; invalid/stale evidence or transport failures exit 1; CLI errors exit 2.
 Use the same `HC_SOCKET`/`HC_SESSION` as the owning core. Routed addresses are
 rejected: execute the helper on the owning host instead of reading a local PID.
+Reporting is different: it requires and uses the injected `HC_TERMINAL_SOCKET`,
+ignoring shell endpoint/session overrides so it reports to its actual owner.
 Remote callers must clear unrelated inherited `HC_SOCKET`/`HC_SESSION` before
 selecting the intended endpoint, and set `SHEPRD_EXPECT_CORE` to the core ID from
 their captured connection. A different core fails before discovery or mutation.
@@ -80,12 +88,13 @@ exact bound session, including a custom Codex home. Pure tests cover scope and
 birth mismatch, bounds, explicit clears, provenance, config-variable filtering,
 installer preservation and idempotence, and CLI parsing. Native agent hook runs,
 phone end-to-end, remote conversion and live OpenCode plugin loading still need
-verification. Pi/OMP/Letta producers, native Windows reporters, remote OpenCode
-service attribution, and full agent flag mapping remain incomplete. Unsupported
+verification. Native Windows conversion, remote OpenCode service attribution,
+and full agent flag mapping remain incomplete. Unsupported
 server flags refuse conversion rather than silently changing launch policy.
 
-Linux birth tokens use `/proc/PID/stat` start ticks. macOS currently uses `ps`
-birth seconds, so it does not prove identity against same-second PID reuse.
+Linux birth tokens use `/proc/PID/stat` start ticks. macOS uses the kernel's
+microsecond birth stamp through the maintained safe `libproc` wrapper; Windows
+uses CIM creation ticks. These are opaque identity tokens, not mutation locks.
 Claude's legacy PID file requires a matching `procStart`; custom config roots
 need explicit reporting rather than a guessed file location.
 

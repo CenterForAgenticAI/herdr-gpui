@@ -16,7 +16,6 @@
 //! protocol currently provides no such mutation fence.
 
 use crate::{Core, Result, agent_kind, backend::info, wire::Terminal};
-use serde::Deserialize;
 use sheprd_backend::{AgentStatus, Process, TerminalId, TerminalInfo};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN, restore};
 use sheprd_client::herdr::{
@@ -24,7 +23,6 @@ use sheprd_client::herdr::{
     convert::{self, Resume},
 };
 use std::{
-    io,
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
 };
@@ -118,67 +116,11 @@ fn agent_is_program(record: &Terminal, agent: Agent) -> bool {
         .is_some_and(|(pid, front)| front.pid == pid && front_runs(front, agent))
 }
 
-/// What Claude Code writes about one running CLI.
-#[derive(Deserialize)]
-struct ClaudeRecord {
-    pid: u32,
-    #[serde(rename = "sessionId")]
-    session_id: String,
-}
-
 /// Where Claude Code records the CLI with process ID `pid`.
 pub fn claude_record(home: &Path, pid: u32) -> PathBuf {
     home.join(".claude")
         .join("sessions")
         .join(format!("{pid}.json"))
-}
-
-/// The session the agent in `process` runs, from what `read` finds in the
-/// record the agent keeps of itself. Only Claude Code keeps one; a record
-/// of another process, or a session no line can carry, is none.
-pub fn session(
-    agent: Agent,
-    process: &Process,
-    home: &Path,
-    read: impl FnOnce(&Path) -> io::Result<String>,
-) -> Result<String, convert::Error> {
-    let none = || convert::Error::NoCoreSession(agent);
-    if agent != Agent::Claude {
-        return Err(none());
-    }
-    let text = read(&claude_record(home, process.pid)).map_err(|_| none())?;
-    let record: ClaudeRecord = serde_json::from_str(&text).map_err(|_| none())?;
-    (record.pid == process.pid && restore::session_id_is_plain(&record.session_id))
-        .then_some(record.session_id)
-        .ok_or_else(none)
-}
-
-/// What continues the conversation, read from the running agent.
-pub fn resume(
-    info: &TerminalInfo,
-    agent: Agent,
-    home: &Path,
-    read: impl FnOnce(&Path) -> io::Result<String>,
-) -> Result<Resume, convert::Error> {
-    let process = agent_process(info, agent)?;
-    let session = session(agent, process, home, read)?;
-    let cwd = info
-        .cwd
-        .as_deref()
-        .and_then(Path::to_str)
-        .filter(|cwd| !cwd.is_empty())
-        .ok_or(convert::Error::NotRunning(agent))?
-        .to_owned();
-    let flags = match agent {
-        Agent::Claude => AgentKind::Claude.kept_flags(&process.argv),
-        _ => Vec::new(),
-    };
-    Ok(Resume {
-        agent,
-        cwd,
-        flags,
-        session,
-    })
 }
 
 /// The line that starts `program` on `resume`'s session at `endpoint` in a
@@ -218,6 +160,11 @@ pub fn run(
     home: &Path,
     cancelled: &AtomicBool,
 ) -> Result<EndpointId> {
+    if cfg!(windows) {
+        // The shared launch line targets a POSIX shell. The CLI helper must
+        // enforce the same platform boundary as desktop and phone callers.
+        return Err(convert::Error::Unsupported(agent).into());
+    }
     // This entry point reads local process records and starts a local binary.
     // A routed address must never borrow a same-numbered local process.
     if terminal.as_str().contains('/') {
@@ -233,11 +180,8 @@ pub fn run(
         return Err(convert::Error::NoShell(agent).into());
     }
     let kind = AgentKind::parse(agent.name()).ok_or(convert::Error::NoAgent)?;
-    let binding = match crate::sessions::discover(core, terminal.as_str(), kind) {
-        Ok(binding) => Some(binding),
-        Err(crate::Error::Sessions(crate::sessions::Error::Absent)) if agent == Agent::Claude => {
-            None
-        }
+    let binding = match crate::sessions::discover_in(core, terminal.as_str(), kind, Some(home)) {
+        Ok(binding) => binding,
         Err(crate::Error::Sessions(
             crate::sessions::Error::Absent | crate::sessions::Error::Cleared,
         )) => {
@@ -245,7 +189,7 @@ pub fn run(
         }
         Err(error) => return Err(error),
     };
-    let resume = if let Some(binding) = &binding {
+    let resume = {
         let process = agent_process(&found, agent)?;
         let selected = binding
             .selected()
@@ -266,34 +210,12 @@ pub fn run(
             flags: flags::chat(kind, &process.argv)?,
             session: selected.value.clone(),
         }
-    } else {
-        let process = agent_process(&found, agent)?;
-        let session = crate::sessions::claude_record(process.pid, home)
-            .map_err(|_| convert::Error::NoCoreSession(agent))?;
-        Resume {
-            agent,
-            session,
-            cwd: found
-                .cwd
-                .as_deref()
-                .and_then(Path::to_str)
-                .filter(|cwd| !cwd.is_empty())
-                .ok_or(convert::Error::NotRunning(agent))?
-                .to_owned(),
-            flags: AgentKind::Claude.kept_flags(&process.argv),
-        }
     };
     let endpoint = EndpointId::random();
-    let line = if let Some(binding) = &binding {
-        bound_line(&resume, program, &endpoint, &binding.environment)?
-    } else {
-        chat_line(&resume, program, &endpoint)?
-    };
+    let line = bound_line(&resume, program, &endpoint, &binding.environment)?;
     // Read again after constructing the line; selection can change without
     // changing the foreground PID (notably OpenCode's session tabs).
-    if let Some(binding) = &binding
-        && crate::sessions::discover(core, terminal.as_str(), kind)? != *binding
-    {
+    if crate::sessions::discover_in(core, terminal.as_str(), kind, Some(home))? != binding {
         return Err(convert::Error::Moved.into());
     }
     convert::stop(
@@ -302,6 +224,9 @@ pub fn run(
         || {
             let now = record(core, terminal)?;
             unchanged(&raw, &now, agent)?;
+            if crate::sessions::discover_in(core, terminal.as_str(), kind, Some(home))? != binding {
+                return Err(convert::Error::Moved.into());
+            }
             core.keys(terminal.as_str(), &["ctrl+c"])
         },
         || std::thread::sleep(convert::POLL),

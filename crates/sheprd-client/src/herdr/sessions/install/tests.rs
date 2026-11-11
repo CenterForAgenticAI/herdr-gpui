@@ -2,7 +2,6 @@
 use super::*;
 
 #[test]
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn custom_homes_preserve_settings_hooks_and_are_idempotent() {
     for (agent, key, filename) in [
         (AgentKind::Codex, "CODEX_HOME", "hooks.json"),
@@ -46,16 +45,18 @@ fn custom_homes_preserve_settings_hooks_and_are_idempotent() {
         }
         run(agent, temp.path(), env).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), first);
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 }
 
 #[test]
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn comments_and_wrong_shapes_are_refused_before_writing_assets() {
     let temp = tempfile::tempdir().unwrap();
     let directory = temp.path().join(".copilot");
@@ -75,7 +76,6 @@ fn comments_and_wrong_shapes_are_refused_before_writing_assets() {
 }
 
 #[test]
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn invalid_toml_prevents_partial_install() {
     let temp = tempfile::tempdir().unwrap();
     let directory = temp.path().join(".codex");
@@ -86,4 +86,60 @@ fn invalid_toml_prevents_partial_install() {
     assert!(matches!(error, Error::Toml { .. }));
     assert!(!directory.join("hooks.json").exists());
     assert!(!directory.join("sheprd-session-report").exists());
+}
+
+#[test]
+fn moving_the_helper_replaces_only_its_owned_registration() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join(".copilot");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("settings.json");
+    let unrelated = json!({"type":"command","bash":"echo keep","timeoutSec":5});
+    std::fs::write(
+        &path,
+        json!({"hooks":{"SessionStart":[unrelated]}}).to_string(),
+    )
+    .unwrap();
+    for name in ["first-helper", "second-helper"] {
+        let program = temp.path().join(name);
+        run(AgentKind::Copilot, temp.path(), |key| {
+            (key == "SHEPRD_ACP_BINARY").then(|| program.clone().into_os_string())
+        })
+        .unwrap();
+    }
+    let text = std::fs::read_to_string(path).unwrap();
+    let config: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(config["hooks"]["SessionStart"][0], unrelated);
+    assert_eq!(config["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
+    assert!(!text.contains("first-helper"));
+    // On Windows the helper path is pinned inside the installed PowerShell asset.
+    if !cfg!(windows) {
+        assert!(text.contains("second-helper"));
+    }
+}
+
+#[test]
+fn carried_extension_agents_get_separately_named_producers() {
+    let temp = tempfile::tempdir().unwrap();
+    for (agent, path) in [
+        (AgentKind::Pi, ".pi/agent/extensions/sheprd-pi-session.ts"),
+        (
+            AgentKind::Omp,
+            ".omp/agent/extensions/sheprd-omp-session.ts",
+        ),
+    ] {
+        run(agent, temp.path(), |_| None).unwrap();
+        let source = std::fs::read_to_string(temp.path().join(path)).unwrap();
+        assert!(source.contains(&format!("const AGENT = \"{}\"", agent.name())));
+        assert!(!source.contains("__AGENT__"));
+    }
+    run(AgentKind::Letta, temp.path(), |_| None).unwrap();
+    let config: Value = serde_json::from_str(
+        &std::fs::read_to_string(temp.path().join(".letta/settings.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        config["hooks"]["SessionStart"][0]["hooks"][0]["quiet"],
+        true
+    );
 }

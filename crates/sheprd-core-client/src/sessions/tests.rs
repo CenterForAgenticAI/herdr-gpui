@@ -3,6 +3,8 @@ use serde_json::json;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod conversion;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod reporting;
 
 #[test]
 fn session_events_are_explicit_and_not_prompts() {
@@ -45,4 +47,28 @@ fn home_clears_an_opencode_selection() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn carried_sessions_use_explicit_paths_and_qualified_letta_defaults() {
+    for agent in [AgentKind::Pi, AgentKind::Omp] {
+        let selected = selection(agent, &json!({"session_path":"/sessions/exact.jsonl"}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.kind, SessionKind::Path);
+        assert!(selection(agent, &json!({"session_path":"relative.jsonl"})).is_err());
+        assert!(
+            selection(agent, &json!({"session_path":null}))
+                .unwrap()
+                .is_none()
+        );
+    }
+    let selected = selection(
+        AgentKind::Letta,
+        &json!({"conversation_id":"default","agent_id":"agent-123"}),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(selected.value, "default:agent-123");
+    assert!(selection(AgentKind::Letta, &json!({"conversation_id":"default"})).is_err());
 }
