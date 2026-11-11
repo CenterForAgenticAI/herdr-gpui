@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { setup } from "../opencode/reporter.mjs";
 
-function fixture(env = { HC_TERMINAL_ID: "terminal" }) {
+function fixture(env = { HC_TERMINAL_ID: "terminal", HC_TERMINAL_SOCKET: "/owning.sock" }) {
   let route = { type: "home" };
   let poll;
   const children = [];
@@ -21,6 +21,8 @@ function fixture(env = { HC_TERMINAL_ID: "terminal" }) {
     clearTimeout(fn) { deadlines.delete(fn); },
     spawn(program, args, options) {
       const child = new EventEmitter();
+      const emit = child.emit;
+      child.emit = (event, ...args) => emit.call(child, event, ...(event === "close" && args.length === 0 ? [0] : args));
       child.stdin = new EventEmitter();
       child.stdin.end = (payload) => { child.payload = JSON.parse(payload); };
       child.kill = () => { child.killed = true; };
@@ -97,7 +99,7 @@ test("requires core routing and honors only an absolute managed override", () =>
     [undefined, "sheprd-acp"], ["relative", "sheprd-acp"],
     ["/managed path/sheprd-acp", "/managed path/sheprd-acp"],
   ]) {
-    const f = fixture({ HC_TERMINAL_ID: "core", SHEPRD_ACP_BINARY: override });
+    const f = fixture({ HC_TERMINAL_ID: "core", HC_TERMINAL_SOCKET: "/owning.sock", SHEPRD_ACP_BINARY: override });
     const stop = f.start();
     assert.equal(f.children[0].program, expected);
     assert.deepEqual(f.children[0].args, ["session-report", "opencode"]);
@@ -118,6 +120,7 @@ test("deadline kills only the reporter and error/close finish at most once", () 
   f.children[0].stdin.emit("error", new Error("broken pipe"));
   f.children[0].emit("error", new Error("missing binary"));
   f.children[0].emit("close");
+  f.tick();
   assert.equal(f.children.length, 2);
   f.children[1].emit("close");
   stop();
@@ -131,4 +134,22 @@ test("synchronous spawn failure is nonfatal", () => {
   const stop = f.start();
   assert.doesNotThrow(() => f.select({ type: "session", sessionID: "a" }));
   assert.doesNotThrow(stop);
+});
+
+test("failed selection and clear are retried without reverting to an older route", () => {
+  const f = fixture();
+  const stop = f.start();
+  f.children[0].emit("close");
+  f.select({ type: "session", sessionID: "a" });
+  f.children[1].emit("close");
+  f.select({ type: "session", sessionID: "b" });
+  f.children[2].emit("close", 1);
+  f.tick();
+  assert.deepEqual(f.children[3].payload, f.children[2].payload);
+  f.children[3].emit("close");
+  stop();
+  f.children[4].emit("close", 1);
+  [...f.deadlines][0]();
+  assert.equal(f.children[5].payload.session_id, null);
+  f.children[5].emit("close");
 });

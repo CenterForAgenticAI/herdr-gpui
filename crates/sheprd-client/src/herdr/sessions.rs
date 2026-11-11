@@ -76,6 +76,7 @@ impl Binding {
                 || value.is_empty()
                 || value.len() > 4096
                 || value.chars().any(char::is_control)
+                || (key != "PI_CONFIG_DIR" && !absolute(value))
         }) {
             return Err(Error::Environment);
         }
@@ -87,6 +88,15 @@ impl Binding {
     pub fn selected(&self) -> Option<&AgentSession> {
         self.session.as_ref()
     }
+}
+
+fn absolute(value: &str) -> bool {
+    value.starts_with('/')
+        || value.as_bytes().get(..3).is_some_and(|prefix| {
+            prefix[0].is_ascii_alphabetic()
+                && prefix[1] == b':'
+                && matches!(prefix[2], b'/' | b'\\')
+        })
 }
 
 /// Configuration paths only. Credentials and unrelated inherited variables

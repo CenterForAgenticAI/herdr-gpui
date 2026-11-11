@@ -119,7 +119,7 @@ Usage:
                          (run at its shell prompt after unexpected loss)
   sheprd-acp session-report AGENT
                         Report bounded session JSON from stdin for HC_TERMINAL_ID.
-  sheprd-acp session-install codex|copilot|opencode
+  sheprd-acp session-install claude|codex|copilot|opencode|pi|omp|letta
                         Explicitly install this host's session reporter (Linux/macOS).
   sheprd-acp session-discover TERMINAL AGENT
                         Print the local terminal's verified session binding as JSON.
