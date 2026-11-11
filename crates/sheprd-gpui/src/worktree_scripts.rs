@@ -218,7 +218,7 @@ impl SheprdWindow {
             .clone();
         // Herdr 1 names a kept checkout's main checkout for its scripts;
         // here Git does, as for the kept workspace's other worktree work.
-        let resolve = job.launch.kept();
+        let resolve = job.launch.kept() && checkout.root.is_none();
         let token = job.cancel.clone();
         let cancel = job.cancel.clone();
         let read = cx.background_executor().spawn(async move {
@@ -731,23 +731,25 @@ fn script_lines(script: &str) -> Vec<String> {
 
 /// The repository's main checkout, as Git lists it first, for a kept
 /// checkout's `HERDR_ROOT_PATH`. Blocking; `None` when Git cannot say.
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 pub(crate) fn kept_root(checkout: &str, cancelled: &AtomicBool) -> Option<String> {
     kept_root_on(&sheprd_client::ConnectTarget::Local, checkout, cancelled)
+        .ok()
+        .flatten()
 }
 
 fn kept_root_on(
     target: &sheprd_client::ConnectTarget,
     checkout: &str,
     cancelled: &AtomicBool,
-) -> Option<String> {
-    let host = sheprd_remote::teleport::Host::new(target).ok()?;
-    let listed = sheprd_remote::work::list(&host, checkout, cancelled).ok()?;
-    listed
+) -> crate::Result<Option<String>> {
+    let host = sheprd_remote::work::host_for_kept(target)?;
+    let listed = sheprd_remote::work::list(&host, checkout, cancelled)?;
+    Ok(listed
         .into_iter()
         .next()
         .filter(|main| !main.bare)
-        .map(|main| main.path)
+        .map(|main| main.path))
 }
 
 /// The whole checkout a kept folder belongs to, and the main checkout
@@ -757,10 +759,10 @@ pub(crate) fn kept_script_checkout(
     folder: &str,
     cancelled: &AtomicBool,
 ) -> crate::Result<Checkout> {
-    let host = sheprd_remote::teleport::Host::new(target)?;
+    let host = sheprd_remote::work::host_for_kept(target)?;
     let path =
         sheprd_remote::work::git(&host, folder, &["rev-parse", "--show-toplevel"], cancelled)?;
-    let root = kept_root_on(target, &path, cancelled);
+    let root = kept_root_on(target, &path, cancelled)?;
     Ok(Checkout { path, root })
 }
 

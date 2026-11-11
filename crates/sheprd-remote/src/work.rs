@@ -10,12 +10,28 @@
 //! Every function runs host scripts and blocks: call them from a background
 //! worker, never the UI thread.
 
+mod deadline;
 mod error;
+pub mod fanout;
 mod inspect;
+pub mod owned_agent;
 
+pub use deadline::identity_before;
 pub use inspect::{git, identity, open};
 
 pub use error::{Error, Result, Step};
+
+/// The host of an app-kept Herdr 2 workspace. A custom Herdr 1 socket does
+/// not relocate the app's local core or files. This is deliberately
+/// separate from `Host::new`: a socket still cannot route Herdr 1 commands.
+pub fn host_for_kept(
+    target: &sheprd_client::ConnectTarget,
+) -> Result<Host, crate::teleport::Error> {
+    match target {
+        sheprd_client::ConnectTarget::Socket(_) => Host::new(&sheprd_client::ConnectTarget::Local),
+        _ => Host::new(target),
+    }
+}
 
 use crate::teleport::{AgentKind, Envelope, Host, WorktreeCreated};
 use error::script;
@@ -268,10 +284,13 @@ pub fn start_agent(
                 .collect::<Vec<_>>()
                 .join(" ");
             if let Err(error) = send(host, &terminal, &program, Step::StartAgent, cancelled) {
-                // No agent ever ran there, and no caller learns its address,
-                // so the shell is ended rather than left without a tab.
-                end(host, &terminal);
-                return Err(error);
+                // A failed acknowledgement can follow a successful send.
+                // Preserve the terminal and its identity for inspection;
+                // killing it could terminate an agent that already ran.
+                return Err(Error::Unprompted {
+                    started: Started::Herdr2 { terminal },
+                    source: Box::new(error),
+                });
             }
             Started::Herdr2 { terminal }
         }
@@ -285,18 +304,6 @@ pub fn start_agent(
         });
     }
     Ok(started)
-}
-
-/// Ends the herdr-core terminal `terminal`, best effort: one already gone
-/// is fine.
-fn end(host: &Host, terminal: &str) {
-    let line = format!(
-        "core_cli kill --json -- {} >/dev/null\n",
-        shell_quote(terminal)
-    );
-    if let Err(error) = host.capture(&line, &AtomicBool::new(false)) {
-        tracing::warn!(%error, %terminal, "Could not end a herdr-core shell whose agent never started");
-    }
 }
 
 /// Sends `prompt` to the agent `started` runs, once it says it is ready.

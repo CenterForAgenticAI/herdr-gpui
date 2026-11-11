@@ -44,6 +44,10 @@ pub(crate) struct Kept {
 /// removed once the script succeeds, and stays when it fails.
 #[derive(Debug)]
 struct Archive {
+    /// Preserve a known exit while checkout metadata is unavailable; the
+    /// terminal view may be pruned before its host answers Git again.
+    ended: Option<Ended>,
+    identity: Option<(String, Option<String>)>,
     scope: crate::browser::Scope,
     target: sheprd_client::ConnectTarget,
     /// This attempt's own label value, so a retry never takes the terminal
@@ -60,6 +64,7 @@ struct Archive {
 }
 
 /// What became of a followed archive this tick.
+#[derive(Clone, Copy, Debug)]
 enum Ended {
     /// Its terminal never showed up, or its workspace closed: let it go.
     Gone,
@@ -112,6 +117,13 @@ impl SheprdWindow {
         self.start_in_kept_workspace(&launch.workspace, spawn, cx)?;
         if archive {
             self.kept_scripts.archives.push(Archive {
+                ended: None,
+                identity: Some((
+                    launch.repo_key.clone(),
+                    self.sessions(self.selected_endpoint)
+                        .workspace(&launch.workspace)
+                        .and_then(|workspace| workspace.branch.clone()),
+                )),
                 scope: crate::browser::scope(&self.endpoints[self.selected_endpoint]),
                 target: self.endpoints[self.selected_endpoint]
                     .connection
@@ -172,6 +184,13 @@ impl SheprdWindow {
         let mut waiting = VecDeque::with_capacity(setups.len());
         let mut ready = None;
         for (launch, queued, target) in setups {
+            // Expiry also applies once the workspace exists: a setup must
+            // not run hours later merely because its host was not selected.
+            if queued.elapsed() > SETUP_WAIT {
+                self.local_error = Some(super::Error::SetupExpired.localize());
+                cx.notify();
+                continue;
+            }
             if !self.endpoints.iter().any(|endpoint| {
                 endpoint.id == launch.endpoint_id && endpoint.connection.target == target
             }) {
@@ -189,8 +208,6 @@ impl SheprdWindow {
                     ready = Some((launch, queued, target, workspace))
                 }
                 Some(_) => waiting.push_back((launch, queued, target)),
-                // The agent it lands with did not start.
-                None if queued.elapsed() > SETUP_WAIT => {}
                 None => waiting.push_back((launch, queued, target)),
             }
         }
@@ -265,29 +282,12 @@ impl SheprdWindow {
 
     /// How `archive` ended, `None` while it runs.
     fn kept_archive_state(&self, archive: &mut Archive, cx: &Context<Self>) -> Option<Ended> {
-        if !self.endpoints.iter().any(|endpoint| {
+        let Some(index) = self.endpoints.iter().position(|endpoint| {
             crate::browser::scope(endpoint) == archive.scope
                 && endpoint.connection.target == archive.target
-        }) {
+        }) else {
             return Some(Ended::Gone);
-        }
-        let host = crate::core_terminals::Host::of(&archive.scope);
-        if archive.terminal.is_none() {
-            archive.terminal = self.host_terminal_labelled(&host, ARCHIVE_LABEL, &archive.attempt);
-        }
-        let Some(terminal) = &archive.terminal else {
-            return (archive.started.elapsed() > ARCHIVE_START_WAIT).then_some(Ended::Gone);
         };
-        // A tab closed on the script cancels it: nothing is removed, and
-        // the next archive of the workspace may start. One never shown
-        // within the start wait was not opened at all.
-        let shown = self.host_terminal_shown(&host, terminal);
-        if shown {
-            archive.shown = true;
-        } else if archive.shown || archive.started.elapsed() > ARCHIVE_START_WAIT {
-            return Some(Ended::Gone);
-        }
-        // Closed with its workspace: nothing is left to remove for.
         let kept = cx
             .try_global::<crate::browser::Store>()
             .is_some_and(|store| {
@@ -298,12 +298,58 @@ impl SheprdWindow {
         if !kept {
             return Some(Ended::Gone);
         }
-        let exit = self.host_terminal_exit(&host, terminal, cx)?;
-        Some(if exit.code == Some(0) {
-            Ended::Succeeded
+        let identity_ready = if let Some((key, branch)) = &archive.identity {
+            let sessions = self.sessions(index);
+            let current = sessions
+                .core
+                .as_ref()
+                .and_then(|session| session.workspace(&archive.workspace));
+            match current
+                .and_then(|workspace| workspace.worktree.as_ref().map(|tree| (workspace, tree)))
+            {
+                Some((workspace, tree))
+                    if workspace.branch != *branch || !tree.linked || tree.key != *key =>
+                {
+                    return Some(Ended::Gone);
+                }
+                Some(_) => true,
+                // A failed query is not evidence of a replacement.
+                None => false,
+            }
         } else {
-            Ended::Failed
-        })
+            true
+        };
+        let host = crate::core_terminals::Host::of(&archive.scope);
+        if archive.terminal.is_none() {
+            archive.terminal = self.host_terminal_labelled(&host, ARCHIVE_LABEL, &archive.attempt);
+        }
+        let Some(terminal) = &archive.terminal else {
+            return (archive.started.elapsed() > ARCHIVE_START_WAIT).then_some(Ended::Gone);
+        };
+        if archive.ended.is_none() {
+            archive.ended = self.host_terminal_exit(&host, terminal, cx).map(|exit| {
+                if exit.code == Some(0) {
+                    Ended::Succeeded
+                } else {
+                    Ended::Failed
+                }
+            });
+        }
+        // A tab closed on the script cancels it: nothing is removed, and
+        // the next archive of the workspace may start. One never shown
+        // within the start wait was not opened at all.
+        let shown = self.host_terminal_shown(&host, terminal);
+        if shown {
+            archive.shown = true;
+        } else if archive.ended.is_none()
+            && (archive.shown || archive.started.elapsed() > ARCHIVE_START_WAIT)
+        {
+            return Some(Ended::Gone);
+        }
+        match archive.ended {
+            Some(Ended::Succeeded) if !identity_ready => None,
+            ended => ended,
+        }
     }
 }
 
@@ -319,7 +365,27 @@ impl SheprdWindow {
     }
 
     pub(crate) fn follow_archive_for_test(&mut self, workspace: String, terminal: TerminalId) {
+        let path = self
+            .sessions(self.selected_endpoint)
+            .core
+            .as_ref()
+            .and_then(|session| session.workspace(&workspace))
+            .map(|workspace| workspace.cwd.clone())
+            .unwrap_or_else(|| "/nonexistent/archive-checkout".into());
+        let identity = self
+            .sessions(self.selected_endpoint)
+            .core
+            .as_ref()
+            .and_then(|session| {
+                let workspace = session.workspace(&workspace)?;
+                Some((
+                    workspace.worktree.as_ref()?.key.clone(),
+                    workspace.branch.clone(),
+                ))
+            });
         self.kept_scripts.archives.push(Archive {
+            ended: None,
+            identity,
             scope: crate::browser::scope(&self.endpoints[self.selected_endpoint]),
             target: self.endpoints[self.selected_endpoint]
                 .connection
@@ -327,7 +393,7 @@ impl SheprdWindow {
                 .clone(),
             attempt: "test-attempt".into(),
             workspace,
-            path: "/nonexistent/archive-checkout".into(),
+            path,
             force: false,
             started: Instant::now(),
             terminal: Some(terminal),
@@ -371,5 +437,13 @@ impl SheprdWindow {
             .iter()
             .map(|(launch, _, _)| launch)
             .collect()
+    }
+
+    pub(crate) fn age_kept_setups(&mut self) {
+        if let Some(aged) = Instant::now().checked_sub(SETUP_WAIT * 2) {
+            for (_, queued, _) in &mut self.kept_scripts.setups {
+                *queued = aged;
+            }
+        }
     }
 }

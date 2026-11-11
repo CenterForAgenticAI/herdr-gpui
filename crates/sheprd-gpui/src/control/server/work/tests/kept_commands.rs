@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     browser::{Location, Store},
-    control::protocol::work::Reply,
+    control::protocol::work::{Reply, Script},
     core_terminals::panes::Panes,
     notification_mutes::{Mutes, Scope},
 };
@@ -132,11 +132,100 @@ fn a_kept_caller_cannot_mute_in_a_window_that_does_not_hold_it(cx: &mut gpui::Te
     let (own, own_cx) = cx.add_window_view(fixture_window);
     let here = own_cx.update(|window, cx| own.update(cx, |view, cx| kept(view, window, cx)));
     let (other, other_cx) = cx.add_window_view(fixture_window);
-    other.update(other_cx, |view, cx| {
-        let response = mute::set(view, &here, true, cx);
+    let id = other_cx.update(|window, _| window.window_handle().window_id().as_u64());
+    let wrong_window = Caller {
+        window: Some(id),
+        ..here.clone()
+    };
+    cx.update(|cx| {
+        let response = in_window(&wrong_window, cx, |view, _, cx| {
+            mute::set(view, &wrong_window, true, cx)
+        });
         assert!(error_code(&response).is_some(), "{response:?}");
     });
-    own.read_with(own_cx, |view, cx| {
+    let _ = other;
+    own.read_with(cx, |view, cx| {
         assert!(matches!(mute::status(view, &here, cx), Response::Work { reply: Reply::Mute { mute } } if !mute.muted));
+    });
+}
+
+#[gpui::test]
+fn scripts_and_worktree_dialogs_refuse_a_callers_unselected_host(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = cx.add_window_view(fixture_window);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let here = kept(view, window, cx);
+            view.endpoints.push(crate::endpoint::Endpoint::new(
+                "ssh:box".into(),
+                "Box".into(),
+                sheprd_client::ConnectTarget::Ssh {
+                    target: "nobody@invalid.invalid".into(),
+                    session: "default".into(),
+                },
+                true,
+            ));
+            view.selected_endpoint = 1;
+            for kind in [Script::Setup, Script::Run] {
+                let response = flows::script(view, &here, kind, cx);
+                assert_eq!(
+                    error_code(&response),
+                    Some(ErrorCode::InvalidRequest),
+                    "{response:?}"
+                );
+                assert!(view.worktree_script.is_none());
+            }
+            for dialog in [
+                worktrees::Dialog::Create(None),
+                worktrees::Dialog::Open,
+                worktrees::Dialog::Delete,
+            ] {
+                let response = worktrees::dialog(view, &here, dialog, window, cx);
+                assert_eq!(
+                    error_code(&response),
+                    Some(ErrorCode::InvalidRequest),
+                    "{response:?}"
+                );
+                assert!(view.menu.page.is_none());
+            }
+        })
+    });
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[gpui::test]
+fn kept_worktree_commands_open_confirmation_with_a_valid_branch_selection(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = cx.add_window_view(fixture_window);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let here = kept(view, window, cx);
+            let branch = "x";
+            let response = worktrees::dialog(
+                view,
+                &here,
+                worktrees::Dialog::Create(Some(branch.into())),
+                window,
+                cx,
+            );
+            assert!(matches!(response, Response::Done { .. }), "{response:?}");
+            let input = view.menu.input.as_ref().unwrap();
+            assert_eq!(input.text, branch);
+            assert!(input.selection.end <= branch.len());
+            assert_eq!(
+                view.menu.page,
+                Some(Page::Dialog(crate::menu::WorkspaceAction::NewWorktree)),
+                "the user confirms creation"
+            );
+            view.dismiss_menu(window, cx);
+            let response = worktrees::dialog(view, &here, worktrees::Dialog::Open, window, cx);
+            assert!(matches!(response, Response::Done { .. }), "{response:?}");
+            assert!(view.worktree_listing());
+            assert_eq!(
+                view.menu.page,
+                Some(Page::Dialog(crate::menu::WorkspaceAction::NewWorktree)),
+                "the user picks a checkout"
+            );
+        })
     });
 }
