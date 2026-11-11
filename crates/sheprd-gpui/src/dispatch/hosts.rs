@@ -87,9 +87,8 @@ impl SheprdWindow {
     fn dispatch_source_keeper(&self) -> sheprd_session::Keeper {
         let kept = self
             .menu
-            .target
-            .as_ref()
-            .is_some_and(|target| self.is_kept_workspace(&target.id))
+            .target_workspace()
+            .is_some_and(|workspace| self.is_kept_workspace(workspace))
             || self.kept_in_front().is_some();
         if kept {
             sheprd_session::Keeper::App
