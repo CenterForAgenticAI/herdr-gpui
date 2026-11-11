@@ -295,13 +295,10 @@ impl OrchestratorView {
             Some(repo) => (
                 &repo.snapshot,
                 repo.request.workspace_id.clone(),
-                // herdr-core runs this machine's terminals, not an SSH host's
-                // yet: those stay on Herdr 1.
-                if repo.request.target.is_remote() {
-                    Terminals::Herdr1
-                } else {
-                    self.local_terminals
-                },
+                self.terminals
+                    .iter()
+                    .find(|(target, _)| target == &repo.request.target)
+                    .map_or(Terminals::Herdr1, |(_, terminals)| *terminals),
             ),
             None => (&self.blank, String::new(), Terminals::Herdr1),
         };
@@ -559,6 +556,7 @@ impl OrchestratorView {
             .unwrap_or(sheprd_client::ConnectTarget::Local)
         {
             sheprd_client::ConnectTarget::Ssh { target, .. } => target.clone(),
+            sheprd_client::ConnectTarget::Wsl { distro, .. } => distro,
             _ => fl!("orchestrator-this-machine"),
         };
         let section = |title: String, body: AnyElement| {
