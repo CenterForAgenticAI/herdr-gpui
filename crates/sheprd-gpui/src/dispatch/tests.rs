@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod arrival;
+
 mod history;
 mod picker;
 mod rank;

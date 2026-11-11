@@ -20,7 +20,7 @@ use std::{
 };
 
 /// The newest schema this build reads and writes.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// How long a write waits for the other application's transaction.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -351,7 +351,7 @@ impl Store {
     pub fn sessions(&self) -> Result<Vec<HerdrSession>> {
         let mut statement = self.connection.prepare(
             "SELECT run_id, host, session, workspace_id, pane_id, terminal, agent_name, \
-             updated_at FROM herdr_sessions",
+             updated_at, target_json, pending FROM herdr_sessions",
         )?;
         let rows = statement.query_map([], |row| Ok(session_from_row(row)))?;
         rows.map(|row| row?).collect()
@@ -431,19 +431,26 @@ impl Store {
                 // A Herdr 2 session leaves Herdr 1's columns empty, which
                 // they cannot be null for, and names its terminal instead.
                 let (workspace_id, pane_id, terminal) = match &session.pane {
+                    Pane::Pending => ("", "", None),
                     Pane::Herdr1 {
                         workspace_id,
                         pane_id,
                     } => (workspace_id.as_str(), pane_id.as_str(), None),
                     Pane::Herdr2 { terminal } => ("", "", Some(terminal.as_str())),
                 };
+                let target = session
+                    .target
+                    .as_ref()
+                    .map(|target| encode("target_json", target))
+                    .transpose()?;
                 transaction.execute(
                     "INSERT INTO herdr_sessions (run_id, host, session, workspace_id, pane_id, \
-                     terminal, agent_name, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                     terminal, agent_name, updated_at, target_json, pending) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
                      ON CONFLICT(run_id) DO UPDATE SET host = excluded.host, \
                      session = excluded.session, workspace_id = excluded.workspace_id, \
                      pane_id = excluded.pane_id, terminal = excluded.terminal, \
-                     agent_name = excluded.agent_name, updated_at = excluded.updated_at",
+                     agent_name = excluded.agent_name, updated_at = excluded.updated_at, \
+                     target_json = excluded.target_json, pending = excluded.pending",
                     params![
                         run.id,
                         session.host,
@@ -453,6 +460,8 @@ impl Store {
                         terminal,
                         session.agent_name,
                         time(session.updated_at),
+                        target,
+                        matches!(session.pane, Pane::Pending),
                     ],
                 )?;
             }
@@ -587,6 +596,17 @@ fn migrate(connection: &mut Connection) -> Result<Access> {
             }
         }
     }
+    if version < 4 {
+        if !has_column(&transaction, "herdr_sessions", "target_json")? {
+            transaction.execute_batch("ALTER TABLE herdr_sessions ADD COLUMN target_json TEXT;")?;
+        }
+        if !has_column(&transaction, "herdr_sessions", "pending")? {
+            transaction.execute(
+                "ALTER TABLE herdr_sessions ADD COLUMN pending INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+    }
     if version < SCHEMA_VERSION {
         transaction.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
     }
@@ -712,13 +732,22 @@ fn session_from_row(row: &Row<'_>) -> Result<HerdrSession> {
     Ok(HerdrSession {
         run_id: row.get("run_id")?,
         host: row.get("host")?,
+        target: row
+            .get::<_, Option<String>>("target_json")?
+            .as_deref()
+            .map(|json| decode("target_json", json))
+            .transpose()?,
         session: row.get("session")?,
-        pane: match row.get::<_, Option<String>>("terminal")? {
-            Some(terminal) => Pane::Herdr2 { terminal },
-            None => Pane::Herdr1 {
-                workspace_id: row.get("workspace_id")?,
-                pane_id: row.get("pane_id")?,
-            },
+        pane: if row.get::<_, bool>("pending")? {
+            Pane::Pending
+        } else {
+            match row.get::<_, Option<String>>("terminal")? {
+                Some(terminal) => Pane::Herdr2 { terminal },
+                None => Pane::Herdr1 {
+                    workspace_id: row.get("workspace_id")?,
+                    pane_id: row.get("pane_id")?,
+                },
+            }
         },
         agent_name: row.get("agent_name")?,
         updated_at: parse_time("updated_at", row.get("updated_at")?)?,

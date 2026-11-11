@@ -116,3 +116,13 @@ fn hosts_stop_updating_once_launched() {
     assert!(!fan_out.can_spread());
     assert!(!fan_out.update_hosts(Vec::new(), Instant::now()));
 }
+
+#[test]
+fn kept_origins_use_the_same_ranked_hosts_and_explicit_assignments() {
+    let mut fan_out = spreadable();
+    fan_out.origin.checkout = Some("/work/repo".into());
+    assert!(fan_out.can_spread());
+    assert!(fan_out.toggle_spread());
+    assert!(fan_out.assign(1, "ssh:small"));
+    assert_eq!(fan_out.lane_hosts(), ["ssh:big", "ssh:small", "ssh:big"]);
+}
