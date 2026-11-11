@@ -39,7 +39,90 @@ pub(crate) fn claim_launch() -> anyhow::Result<()> {
     let terminal = std::env::var("HC_TERMINAL_ID")?;
     let socket = std::env::var_os("HC_TERMINAL_SOCKET").context("no terminal socket")?;
     let endpoint = std::env::var(ENDPOINT_ENV)?.parse::<EndpointId>()?;
-    chat_recovery::claim(&connect(socket.into())?, &endpoint, &terminal, generation)?;
+    chat_recovery::claim(
+        &connect(socket.into())?,
+        &endpoint,
+        &terminal,
+        generation,
+        old_child_gone,
+    )?;
+    Ok(())
+}
+
+/// Proof, without signalling anything, that the previous chat's agent and its
+/// process group are gone. Doubt refuses the claim, and a refused generation
+/// is never relaunched: the chat stays unrecovered rather than risk two agents
+/// on one session. Nothing here kills or adopts a process from a stored PID.
+fn old_child_gone(
+    child: &sheprd_client::herdr::sessions::Identity,
+) -> sheprd_core_client::Result<bool> {
+    if sheprd_core_client::sessions::process_birth(child.pid)?.as_deref()
+        == Some(child.started.as_str())
+    {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        // spawn() made this child the leader of its own group. Probe signal
+        // zero only: an exited leader may still have live tools in that group.
+        // Never signal or kill a process inferred from a persisted PID.
+        let pid = i32::try_from(child.pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .ok_or(chat_recovery::Error::ChildAlive)?;
+        match rustix::process::test_kill_process_group(pid) {
+            Err(rustix::io::Errno::SRCH) => Ok(true),
+            Ok(()) | Err(rustix::io::Errno::PERM) => Ok(false),
+            Err(error) => Err(std::io::Error::from(error).into()),
+        }
+    }
+    // Windows has no process group to probe, and stop() there ends only the
+    // agent itself, so a tool it started may outlive it. The exact agent is
+    // gone; anything it left is the same gap a normal Windows close has.
+    #[cfg(not(unix))]
+    {
+        Ok(true)
+    }
+}
+
+fn child_identity(
+    core: &Core,
+    terminal: &str,
+    pid: u32,
+) -> anyhow::Result<sheprd_client::herdr::sessions::Identity> {
+    let started = sheprd_core_client::sessions::process_birth(pid)?
+        .context("agent child identity is unavailable")?;
+    Ok(sheprd_client::herdr::sessions::Identity {
+        core: core.hello().core.id.clone(),
+        terminal: terminal.to_owned(),
+        pid,
+        started,
+    })
+}
+
+pub(crate) fn child_started(pid: u32) -> anyhow::Result<()> {
+    if crate::herdr::Target::from_env().is_some() {
+        return Ok(());
+    }
+    let Some(generation) =
+        std::env::var_os(chat_recovery::GENERATION_ENV).filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+    let generation = generation
+        .to_str()
+        .context("invalid recovery generation")?
+        .parse::<u32>()?;
+    let terminal = std::env::var("HC_TERMINAL_ID")?;
+    let socket = std::env::var_os("HC_TERMINAL_SOCKET").context("no terminal socket")?;
+    let endpoint = std::env::var(ENDPOINT_ENV)?.parse::<EndpointId>()?;
+    let core = connect(socket.into())?;
+    chat_recovery::child_started(
+        &core,
+        &endpoint,
+        generation,
+        child_identity(&core, &terminal, pid)?,
+    )?;
     Ok(())
 }
 
@@ -67,6 +150,13 @@ pub(super) fn opened(keeper: &super::Keeper, session: &str) -> anyhow::Result<()
             adapter: keeper.adapter,
             args: keeper.args.clone(),
             agent: keeper.agent,
+            child: child_identity(
+                &core,
+                &keeper.pane,
+                keeper
+                    .child
+                    .context("agent child identity is unavailable")?,
+            )?,
             cwd: keeper
                 .cwd
                 .to_str()

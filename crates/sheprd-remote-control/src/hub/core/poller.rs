@@ -77,6 +77,12 @@ impl Poller {
         let terminals: Vec<_> = terminals
             .iter()
             .filter(|terminal| {
+                terminal
+                    .labels
+                    .get(sheprd_core_client::chat_recovery::PENDING_LABEL)
+                    .is_none_or(String::is_empty)
+            })
+            .filter(|terminal| {
                 !replacements
                     .keys()
                     .any(|old| old.as_str() == terminal.address)

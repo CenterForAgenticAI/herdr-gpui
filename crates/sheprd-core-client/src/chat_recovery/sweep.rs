@@ -31,7 +31,12 @@ impl Sweep {
             .iter()
             .take(4096)
             .filter(|terminal| !terminal.address.contains('/'))
-            .filter_map(|terminal| terminal.labels.get(TOKEN))
+            .filter_map(|terminal| {
+                terminal
+                    .labels
+                    .get(TOKEN)
+                    .or_else(|| terminal.labels.get(PENDING_LABEL))
+            })
             .filter(|id| id.parse::<EndpointId>().is_ok())
             .cloned()
             .collect();
@@ -71,7 +76,12 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
         // Retired recovery shells are never killed: a user may be using one.
         for terminal in terminals.iter().filter(|terminal| {
             terminal.state == TerminalState::Live
-                && terminal.labels.get(TOKEN).map(String::as_str) == Some(endpoint.as_str())
+                && terminal
+                    .labels
+                    .get(TOKEN)
+                    .or_else(|| terminal.labels.get(PENDING_LABEL))
+                    .map(String::as_str)
+                    == Some(endpoint.as_str())
                 && (chat_program(terminal)
                     || terminal
                         .argv
@@ -91,6 +101,9 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
     };
     if original.state == TerminalState::Finished {
         return closed(core, endpoint);
+    }
+    if record.state == State::Starting {
+        return Ok(());
     }
     if record.state == State::Live {
         if !lost(&record, original) {
@@ -150,13 +163,9 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
     env.insert("HERDR_PANE_ID", "");
     env.insert(GENERATION_ENV, &generation);
     env.insert(OVERRIDES_ENV, &overrides);
-    let mut labels: BTreeMap<&str, &str> = record
-        .labels
-        .iter()
-        .filter(|(key, _)| ![REPLACES_LABEL, REPLACED_BY_LABEL].contains(&key.as_str()))
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect();
-    labels.insert(TOKEN, endpoint.as_str());
+    // It is not an attachable chat or adoptable workspace pane until ACP has
+    // proved the old child gone and claimed this generation on the host.
+    let labels = BTreeMap::from([(PENDING_LABEL, endpoint.as_str())]);
     core.run(&Run {
         argv: &argv,
         cwd: Some(&record.cwd),

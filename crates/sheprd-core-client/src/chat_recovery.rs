@@ -15,10 +15,12 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN, restore};
+use sheprd_client::herdr::sessions::Identity;
 use std::collections::BTreeMap;
 
 pub const GENERATION_ENV: &str = "HERDR_ACP_RECOVERY_GENERATION";
 pub const OVERRIDES_ENV: &str = "HERDR_ACP_RECOVERY_OVERRIDES";
+pub const PENDING_LABEL: &str = "sheprd.chat.pending";
 pub const REPLACES_LABEL: &str = "sheprd.chat.replaces";
 pub const REPLACED_BY_LABEL: &str = "sheprd.chat.replaced_by";
 const MAX_BYTES: usize = 32 * 1024;
@@ -30,6 +32,8 @@ struct Record {
     #[serde(default)]
     args: Vec<String>,
     agent: String,
+    #[serde(default)]
+    child: Option<Identity>,
     cwd: String,
     env: BTreeMap<String, String>,
     generation: u32,
@@ -50,6 +54,7 @@ enum State {
     Live,
     Launching,
     Closed,
+    Starting,
 }
 
 /// Exact session and launch policy supplied by the ACP process on its host.
@@ -57,6 +62,7 @@ pub struct Session {
     pub adapter: bool,
     pub args: Vec<String>,
     pub agent: Agent,
+    pub child: Identity,
     pub cwd: String,
     pub env: BTreeMap<String, String>,
     pub program: String,
@@ -165,6 +171,13 @@ pub fn run(core: &Core, run: &Run<'_>) -> Result<Terminal> {
 
 /// Publish only an actual opened session, never an inferred recent session.
 pub fn opened(core: &Core, endpoint: &EndpointId, terminal: &str, session: Session) -> Result<()> {
+    if session.child.core != core.hello().core.id
+        || session.child.terminal != terminal
+        || session.child.pid == 0
+        || session.child.started.is_empty()
+    {
+        return Err(Error::Moved.into());
+    }
     let raw = core
         .list(false)?
         .terminals
@@ -180,14 +193,17 @@ pub fn opened(core: &Core, endpoint: &EndpointId, terminal: &str, session: Sessi
         Some(_) => return Err(Error::Moved.into()),
         None => (0, Vec::new()),
     };
+    let mut labels = raw.labels;
+    labels.insert(TOKEN.to_owned(), endpoint.to_string());
     let record = Record {
         adapter: session.adapter,
         args: session.args,
         agent: session.agent.to_string(),
+        child: Some(session.child),
         cwd: session.cwd,
         env: session.env,
         generation,
-        labels: raw.labels,
+        labels,
         previous: lineage,
         program: session.program,
         root_argv: raw.argv,
@@ -202,7 +218,13 @@ pub fn opened(core: &Core, endpoint: &EndpointId, terminal: &str, session: Sessi
 
 /// Called before a replacement ACP spawns any agent, while holding its endpoint
 /// lock. A closed or superseded launch must stop even if its run reply was lost.
-pub fn claim(core: &Core, endpoint: &EndpointId, terminal: &str, generation: u32) -> Result<()> {
+pub fn claim(
+    core: &Core,
+    endpoint: &EndpointId,
+    terminal: &str,
+    generation: u32,
+    child_gone: impl FnOnce(&Identity) -> Result<bool>,
+) -> Result<()> {
     let (record, version) = read(core, endpoint)?;
     let mut record = record.ok_or(Error::Moved)?;
     if record.state == State::Closed {
@@ -211,23 +233,58 @@ pub fn claim(core: &Core, endpoint: &EndpointId, terminal: &str, generation: u32
     if record.state != State::Launching || record.generation != generation {
         return Err(Error::Moved.into());
     }
-    let raw = core
-        .list(false)?
-        .terminals
+    let child = record.child.as_ref().ok_or(Error::ChildAlive)?;
+    if child.core != core.hello().core.id || !child_gone(child)? {
+        return Err(Error::ChildAlive.into());
+    }
+    let listed = core.list(false)?.terminals;
+    if !listed
+        .iter()
+        .any(|raw| raw.address == record.terminal && raw.state == crate::wire::TerminalState::Live)
+    {
+        return Err(Error::Moved.into());
+    }
+    let raw = listed
         .into_iter()
         .find(|raw| raw.address == terminal)
         .ok_or(Error::Moved)?;
     if raw.name.as_deref() != Some(&launch_name(endpoint, generation))
-        || raw.labels.get(TOKEN).map(String::as_str) != Some(endpoint.as_str())
+        || raw.labels.get(PENDING_LABEL).map(String::as_str) != Some(endpoint.as_str())
     {
         return Err(Error::Moved.into());
     }
     record.terminal = terminal.to_owned();
     record.root_pid = raw.pid;
     record.root_argv = raw.argv;
-    record.state = State::Live;
+    // A crash between spawning and recording the replacement child must not
+    // let another worker infer cleanup of a child whose identity is unknown.
+    record.state = State::Starting;
     write(core, endpoint, &record, version)?;
     publish_mapping(core, &record)
+}
+
+/// Confirm the replacement's child before beginning the ACP handshake.
+pub fn child_started(
+    core: &Core,
+    endpoint: &EndpointId,
+    generation: u32,
+    child: Identity,
+) -> Result<()> {
+    let (record, version) = read(core, endpoint)?;
+    let mut record = record.ok_or(Error::Moved)?;
+    if record.state == State::Closed {
+        return Err(Error::Closed.into());
+    }
+    if record.state != State::Starting
+        || record.generation != generation
+        || record.terminal != child.terminal
+        || child.core != core.hello().core.id
+    {
+        return Err(Error::Moved.into());
+    }
+    record.child = Some(child);
+    record.state = State::Live;
+    write(core, endpoint, &record, version)
 }
 
 /// Durable expected-close tombstone, written BEFORE terminal.kill. A late
@@ -238,6 +295,7 @@ pub fn closed(core: &Core, endpoint: &EndpointId) -> Result<()> {
         adapter: false,
         args: Vec::new(),
         agent: String::new(),
+        child: None,
         cwd: String::new(),
         env: BTreeMap::new(),
         generation: 0,
@@ -274,10 +332,15 @@ fn publish_mapping(core: &Core, record: &Record) -> Result<()> {
         return Ok(());
     }
     let encoded = serde_json::to_string(&record.previous)?;
-    core.label(
-        &record.terminal,
-        &BTreeMap::from([(REPLACES_LABEL, encoded.as_str())]),
-    )?;
+    let mut labels: BTreeMap<&str, &str> = record
+        .labels
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    labels.remove(REPLACED_BY_LABEL);
+    labels.insert(REPLACES_LABEL, encoded.as_str());
+    labels.insert(PENDING_LABEL, "");
+    core.label(&record.terminal, &labels)?;
     if let Some(previous) = record.previous.last() {
         core.label(
             previous,

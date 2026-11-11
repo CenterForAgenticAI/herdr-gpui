@@ -2,6 +2,8 @@ use super::*;
 use crate::tests::{connected, terminal};
 use serde_json::json;
 
+mod lost_replies;
+
 fn shell() -> Terminal {
     let mut raw = terminal("t1");
     raw["keep"] = json!(true);
@@ -77,6 +79,18 @@ fn an_ambiguous_finished_launch_is_never_replayed() {
     let mut record = super::super::tests::record();
     record.state = State::Launching;
     record.generation = 1;
+    let get = peer.request();
+    peer.answer(&get, json!({"value": record, "version": 8}));
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
+fn an_interrupted_start_without_a_recorded_child_is_not_replayed() {
+    let (core, mut peer) = connected();
+    let id = "0123456789abcdef0123456789abcdef".parse().unwrap();
+    let worker = std::thread::spawn(move || recover(&core, &id, &[shell()]));
+    let mut record = super::super::tests::record();
+    record.state = State::Starting;
     let get = peer.request();
     peer.answer(&get, json!({"value": record, "version": 8}));
     worker.join().unwrap().unwrap();

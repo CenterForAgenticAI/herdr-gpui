@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("the previous chat's agent child is still alive or its cleanup is unverified")]
+    ChildAlive,
     #[error("this chat was deliberately closed")]
     Closed,
     #[error("invalid or unsupported chat recovery record")]

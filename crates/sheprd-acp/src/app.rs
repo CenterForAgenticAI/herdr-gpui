@@ -143,6 +143,8 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
     let agent = agent(&options, &cwd);
     let spawned = process::spawn(&agent.program, &agent.args, &agent.env, &cwd)?;
     let agent_process = spawned.process.clone();
+    let owned_agent = agent_process.owned();
+    crate::restore::core::child_started(agent_process.id())?;
     let (inputs, receiver) = bounded::<Input>(INPUTS);
 
     let to_session = inputs.clone();
@@ -182,7 +184,7 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
         (None, None)
     };
     let target = Target::from_env();
-    let keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
+    let mut keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
         crate::restore::Keeper::core(
             sheprd_chat_protocol::restore::restore_dir(),
             endpoint.as_ref(),
@@ -201,6 +203,9 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
             &cwd,
         )
     };
+    if let Some(keeper) = &mut keeper {
+        keeper.child = Some(agent_process.id());
+    }
     let reporter = match &target {
         Some(target) => Some(Reporter::start(
             target.clone(),
@@ -269,7 +274,7 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
     if expected && let Some(keeper) = &keeper {
         keeper.ended();
     }
-    agent_process.stop();
+    drop(owned_agent);
     if let Some(reporter) = reporter {
         reporter.close();
     }
