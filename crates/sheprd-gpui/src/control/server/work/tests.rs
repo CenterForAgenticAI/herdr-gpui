@@ -9,6 +9,7 @@ mod kept_commands;
 // Teleport needs a POSIX client, so the test only runs there.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod kept_teleport;
+mod kept_worktrees;
 mod list_budget;
 mod muting;
 
