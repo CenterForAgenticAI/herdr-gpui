@@ -149,7 +149,31 @@ fn owner(run: &Run) -> work::owned_agent::Owner<'_> {
     }
 }
 
-pub(super) fn recover(
+/// The terminal Stop and Send address: the run's agent, recovered through
+/// its ownership label. A launch whose reply was lost left its session
+/// Pending; the address found is saved so later actions use it directly.
+/// Nothing is started and the prompt is never replayed.
+pub(super) fn control(
+    host: &Host,
+    store: &mut Store,
+    run: &Run,
+    session: &mut HerdrSession,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    let Started::Herdr2 { terminal } = recover(host, run, session, cancelled)? else {
+        return Err(Error::NothingToOpen);
+    };
+    if session.pane == Pane::Pending {
+        session.pane = Pane::Herdr2 {
+            terminal: terminal.clone(),
+        };
+        session.updated_at = Utc::now();
+        store.update_run(run, Some(session))?;
+    }
+    Ok(terminal)
+}
+
+fn recover(
     host: &Host,
     run: &Run,
     session: &HerdrSession,

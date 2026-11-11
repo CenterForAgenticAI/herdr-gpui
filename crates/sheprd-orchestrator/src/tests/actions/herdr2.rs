@@ -7,6 +7,7 @@ use crate::test_executable;
 mod cleanup;
 mod legacy;
 mod ownership;
+mod pending;
 mod remote;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.

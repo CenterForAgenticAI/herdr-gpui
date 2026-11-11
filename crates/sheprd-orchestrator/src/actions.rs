@@ -141,9 +141,8 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
     match action {
         Action::Dispatch(request) => dispatch(site, request, cancelled)?,
         Action::Stop { run } => {
-            let (mut store, mut found, session, host) = own_run(site, run)?;
+            let (mut store, mut found, mut session, host) = own_run(site, run)?;
             match &session.pane {
-                Pane::Pending => return Err(Error::NothingToOpen),
                 Pane::Herdr1 { pane_id, .. } => {
                     for key in ["esc", "ctrl+c"] {
                         herdr(
@@ -154,9 +153,10 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
                         )?;
                     }
                 }
-                Pane::Herdr2 { terminal } => {
-                    herdr2::recover(&host, &found, &session, cancelled)?;
-                    herdr2::stop(&host, terminal, cancelled)?;
+                Pane::Pending | Pane::Herdr2 { .. } => {
+                    let terminal =
+                        herdr2::control(&host, &mut store, &found, &mut session, cancelled)?;
+                    herdr2::stop(&host, &terminal, cancelled)?;
                 }
             }
             found.state = RunState::Cancelled;
@@ -164,9 +164,8 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
             store.update_run(&found, Some(&session))?;
         }
         Action::Send { run, text } => {
-            let (_, found, session, host) = own_run(site, run)?;
+            let (mut store, found, mut session, host) = own_run(site, run)?;
             match &session.pane {
-                Pane::Pending => return Err(Error::NothingToOpen),
                 Pane::Herdr1 { pane_id, .. } => {
                     herdr(
                         &host,
@@ -175,9 +174,10 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
                         cancelled,
                     )?;
                 }
-                Pane::Herdr2 { terminal } => {
-                    herdr2::recover(&host, &found, &session, cancelled)?;
-                    herdr2::send(&host, terminal, text, cancelled)?;
+                Pane::Pending | Pane::Herdr2 { .. } => {
+                    let terminal =
+                        herdr2::control(&host, &mut store, &found, &mut session, cancelled)?;
+                    herdr2::send(&host, &terminal, text, cancelled)?;
                 }
             }
         }
