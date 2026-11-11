@@ -155,6 +155,11 @@ impl SheprdWindow {
             .target
             .as_ref()
             .filter(|target| target.keeper == sheprd_session::Keeper::App)?;
+        // Git runs on the shown host, so a menu left on a workspace another
+        // host keeps must not reach its folder through this one.
+        if !self.is_kept_workspace(&target.id) {
+            return None;
+        }
         match &target.source {
             super::Source::Directory(cwd) if !cwd.is_empty() => Some(cwd.clone()),
             _ => None,
