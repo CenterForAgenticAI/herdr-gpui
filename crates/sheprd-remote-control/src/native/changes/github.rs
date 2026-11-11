@@ -364,7 +364,18 @@ pub(crate) async fn badges(state: crate::web::Shared) {
             }
         }
         if snapshot.valid() && snapshot != *previous {
-            state.pull_requests.send_replace(Arc::new(snapshot));
+            state.pull_requests.send_if_modified(|current| {
+                // Desktop hints can arrive on the control thread while this
+                // worker assembles badges; retain the latest same-boot hints.
+                if current.boot_id == snapshot.boot_id {
+                    snapshot.unopened.clone_from(&current.unopened);
+                }
+                if current.as_ref() == &snapshot {
+                    return false;
+                }
+                *current = Arc::new(snapshot.clone());
+                true
+            });
         }
     }
 }

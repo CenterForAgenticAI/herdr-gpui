@@ -75,11 +75,34 @@ async fn saved_and_daemon_owned_workspaces_answer_without_desktop_or_herdr_one()
         .unwrap()
         .unwrap();
     prefetch.abort();
+    // Desktop publication may contribute +PR hints without replacing the
+    // daemon's independently fetched badge (its PR list here is empty).
+    let (stop, _) = tokio::sync::watch::channel(false);
+    let hint = crate::control::pull_requests::UnopenedBranch {
+        workspace_id: "core:owned".into(),
+        cwd: cwd.into(),
+        branch: "feature".into(),
+        commits: 3,
+    };
+    let response = crate::server::answer_for_tests(
+        &state,
+        &stop,
+        crate::control::Request::PullRequests {
+            snapshot: crate::control::pull_requests::PullRequests {
+                boot_id: "core-only".into(),
+                entries: vec![],
+                unopened: vec![hint.clone()],
+            },
+        },
+    );
+    assert_eq!(response, crate::control::Response::Done);
+    assert_eq!(state.pull_requests.borrow().unopened, vec![hint]);
     let (status, _, body) = send(&state, request(&token, "/api/v2/home")).await;
     assert_eq!(status, StatusCode::OK);
     let home: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(home["github"], true);
     assert_eq!(home["workspaces"][0]["pull_request"]["number"], 42);
+    assert_eq!(home["workspaces"][1]["unopened_commits"], 3);
     for path in ["/f/checks/core:saved", "/f/checks/core:saved/123"] {
         let (status, ..) = send(&state, get(path)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -91,6 +114,11 @@ async fn saved_and_daemon_owned_workspaces_answer_without_desktop_or_herdr_one()
                 "{body}"
             );
             assert!(!body.contains("<script>"));
+            assert!(body.contains("wrap-anywhere"));
+            assert!(
+                include_str!("../assets/app.css")
+                    .contains(".wrap-anywhere{overflow-wrap:anywhere}")
+            );
         } else {
             assert!(body.contains("Pull request #42"), "{body}");
             assert!(body.contains("Read failing log"));

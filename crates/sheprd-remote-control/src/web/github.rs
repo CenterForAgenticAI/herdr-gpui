@@ -74,7 +74,7 @@ pub(super) async fn log(
             h1 class="text-[19px] font-bold py-4" { "Failing check log" }
             a href={ (path) "/" (job) } data-nav { "Retry" }
             @match answer {
-                Ok(Answer::CheckLog(log)) => pre class="whitespace-pre-wrap break-words py-4" { (log.excerpt) },
+                Ok(Answer::CheckLog(log)) => pre class="whitespace-pre-wrap wrap-anywhere py-4" { (log.excerpt) },
                 Err(error) => p class="py-4 text-muted" role="alert" { (error.to_string()) },
                 _ => p role="alert" { "The computer returned an unexpected answer." },
             }
