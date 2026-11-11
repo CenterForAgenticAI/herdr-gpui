@@ -254,8 +254,10 @@ impl SheprdWindow {
     /// The pane a tab's menu offers to move into a chat, if this window could
     /// move one there. What only waiting fixes is left to the refusal.
     pub(crate) fn convertible_pane(&self, workspace: &str, tab: &str) -> Option<String> {
+        let route = self.chat_route()?;
         if !self.config.features.acp_chats
-            || matches!(self.chat_route()?, Route::Local if cfg!(windows))
+            || matches!(route, Route::Local if cfg!(windows))
+            || matches!(route, Route::Remote(_))
         {
             return None;
         }

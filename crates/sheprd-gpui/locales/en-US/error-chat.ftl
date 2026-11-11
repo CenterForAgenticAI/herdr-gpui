@@ -18,7 +18,7 @@ error-chat-not-attached = the chat view is not attached
 error-chat-overflow = the chat view fell behind the program
 error-chat-read = could not read from the chat program
 error-chat-read-only = This is a read-only transcript; use the agent's terminal to reply
-error-chat-remote = could not reach the chat program over SSH
+error-chat-remote = could not reach the chat program on its host
 error-chat-spawn = could not start the chat worker
 # $got and $after are positions in the chat program's stream of changes.
 error-chat-stream = chat change { $got } does not follow { $after }
