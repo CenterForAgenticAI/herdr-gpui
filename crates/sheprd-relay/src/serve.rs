@@ -147,7 +147,7 @@ pub(crate) async fn watch_ban_file(hub: Arc<Hub>, file: std::path::PathBuf, fixe
         tracing::info!(ranges = ranges.len(), "loaded the ban file");
         let all: Vec<Cidr> = fixed.iter().copied().chain(ranges).collect();
         hub.guard.set_manual(all.clone());
-        hub.kick_ranges(&all);
+        hub.sweep();
         last = Some(text);
     }
 }

@@ -329,15 +329,10 @@ impl Guard {
                     .filter(|(_, record)| !record.banned(now))
                     .min_by_key(|(_, record)| (record.points, record.updated))
                     .map(|(key, _)| *key);
-                match least {
-                    Some(least) => {
-                        wide.remove(&least);
-                    }
-                    // Tens of thousands of bans and thousands of banned
-                    // blocks at once: the rate limits still hold every
-                    // caller back.
-                    None => return None,
-                }
+                // None: tens of thousands of bans and thousands of banned
+                // blocks at once; the rate limits still hold every caller
+                // back.
+                wide.remove(&least?);
             }
         }
         let record = wide.entry(key).or_insert_with(|| Record::new(now));

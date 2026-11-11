@@ -65,7 +65,7 @@ async fn a_ban_ends_open_sessions_and_listeners_at_once() {
     let (mut dialer, mut accepted) = session(address, &mut listener, &route).await;
     let ranges = parse_list("127.0.0.0/8").0;
     hub.guard.set_manual(ranges.clone());
-    hub.kick_ranges(&ranges);
+    hub.sweep();
     assert_eq!(close_code(&mut dialer).await, Some(code::BANNED));
     assert_eq!(close_code(&mut accepted).await, Some(code::BANNED));
     assert!(close_code(&mut listener).await.is_some());
@@ -174,7 +174,7 @@ async fn a_ban_closes_open_quic_connections() {
         .unwrap();
     let ranges = parse_list("127.0.0.0/8").0;
     relay.hub.guard.set_manual(ranges.clone());
-    relay.hub.kick_ranges(&ranges);
+    relay.hub.sweep();
     let closed = tokio::time::timeout(Duration::from_secs(5), connection.closed())
         .await
         .expect("the connection stayed open");

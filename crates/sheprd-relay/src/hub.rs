@@ -237,7 +237,7 @@ impl Hub {
         let (sender, incoming) = mpsc::channel(INCOMING_QUEUE);
         let generation = self.next.fetch_add(1, Relaxed);
         let mut state = self.state();
-        // Checked under the lock `kick` sweeps with: a ban either comes
+        // Checked under the lock `sweep` takes: a ban either comes
         // first and refuses this listener, or comes after and removes it.
         if self.guard.banned(address, Instant::now()) {
             return Err(Full);
@@ -391,7 +391,7 @@ impl Hub {
         let revoke = Arc::new(Notify::new());
         let ban = Arc::new(Notify::new());
         let mut state = self.state();
-        // A ban on either side, checked under the lock `kick` sweeps with,
+        // A ban on either side, checked under the lock `sweep` takes,
         // so a session either is refused here or is there to be ended.
         let now = Instant::now();
         if self.guard.banned(slot.dialer, now) || self.guard.banned(slot.listener, now) {
@@ -435,7 +435,7 @@ impl Hub {
     pub fn offend(self: &Arc<Self>, address: IpAddr, offense: Offense) {
         self.metrics.strike(offense);
         if let Some(length) = self.guard.offend(address, offense, Instant::now()) {
-            self.banned(address, offense, length);
+            self.banned(offense, length);
         }
     }
 
@@ -444,7 +444,7 @@ impl Hub {
     pub fn charge(self: &Arc<Self>, address: IpAddr, bytes: u64) {
         if let Some(length) = self.guard.charge(address, bytes, Instant::now()) {
             self.metrics.strike(Offense::Bandwidth);
-            self.banned(address, Offense::Bandwidth, length);
+            self.banned(Offense::Bandwidth, length);
         }
     }
 
@@ -460,23 +460,28 @@ impl Hub {
         self.guard.banned(address, Instant::now())
     }
 
-    /// `address` was just banned: count it and end what it holds. The log
-    /// line, like every other, names no address.
-    fn banned(&self, address: IpAddr, offense: Offense, length: Duration) {
+    /// An address, or its wide block, was just banned: count it and end
+    /// what the ban covers. The log line, like every other, names no
+    /// address.
+    fn banned(&self, offense: Offense, length: Duration) {
         self.metrics.ban(offense);
         tracing::warn!(
             reason = offense.label(),
             minutes = length.as_secs() / 60,
             "an address was banned"
         );
-        self.kick(address);
+        self.sweep();
     }
 
-    /// Ends every session and listener whose address falls in `ranges`:
-    /// a manual ban takes effect at once. Addresses are kept as limits key
-    /// them, so IPv6 ranges match from /64 up.
-    pub fn kick_ranges(&self, ranges: &[crate::guard::Cidr]) {
-        let banned = |address: IpAddr| ranges.iter().any(|range| range.contains(address));
+    /// Ends every session and listener that a ban now covers, whatever
+    /// banned it: an address, its wide block, or a manual range. Run after
+    /// every ban, so a ban of a whole /48 also ends the work of addresses
+    /// in it other than the one that tipped it. Bans are rare, so a full
+    /// sweep is cheap; it takes the guard's locks under the state lock, in
+    /// the same order `open` and `register` do.
+    pub fn sweep(&self) {
+        let now = Instant::now();
+        let banned = |address: IpAddr| self.guard.banned(address, now);
         let mut state = self.state();
         for live in state.sessions.values() {
             if banned(live.dialer) || banned(live.listener) {
@@ -484,6 +489,7 @@ impl Hub {
             }
         }
         let before = state.listeners.len();
+        // A removed listener's channel closes, which ends its socket.
         state
             .listeners
             .retain(|_, listener| !banned(listener.address));
@@ -492,28 +498,7 @@ impl Hub {
         for _ in 0..removed {
             self.metrics.lower(Gauge::Listeners);
         }
-        let _ = self.bans.send(());
-    }
-
-    /// Ends every session and listener of `address`.
-    pub fn kick(&self, address: IpAddr) {
-        let key = source_key(address);
-        let mut state = self.state();
-        for live in state.sessions.values() {
-            if source_key(live.dialer) == key || source_key(live.listener) == key {
-                live.ban.notify_one();
-            }
-        }
-        let before = state.listeners.len();
-        // A removed listener's channel closes, which ends its socket.
-        state
-            .listeners
-            .retain(|_, listener| source_key(listener.address) != key);
-        let removed = before - state.listeners.len();
-        drop(state);
-        for _ in 0..removed {
-            self.metrics.lower(Gauge::Listeners);
-        }
+        // QUIC connections check their own address when told.
         let _ = self.bans.send(());
     }
 

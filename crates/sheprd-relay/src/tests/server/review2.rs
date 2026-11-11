@@ -68,7 +68,7 @@ async fn an_exact_ipv6_ban_ends_that_hosts_sessions_and_listener() {
     assert_eq!(hub.metrics.read(Gauge::Listeners), 1);
     let ranges = parse_list("2001:db8::5").0;
     hub.guard.set_manual(ranges.clone());
-    hub.kick_ranges(&ranges);
+    hub.sweep();
     tokio::time::timeout(Duration::from_secs(1), session.banned())
         .await
         .expect("the session was not told");
@@ -145,4 +145,27 @@ async fn a_short_transfer_is_charged_when_it_ends() {
         .fetch_add(2_000, std::sync::atomic::Ordering::Relaxed);
     crate::splice::settle(&session, &std::sync::atomic::AtomicU64::new(0));
     assert!(hub.is_banned(dialer));
+}
+
+#[tokio::test]
+async fn a_wide_ban_ends_the_whole_blocks_sessions_and_listeners() {
+    let hub = hub(0);
+    // Fill the address table with bans, so the next ban is of a block.
+    let now = std::time::Instant::now();
+    for index in 0..u32::try_from(crate::guard::MAX_RECORDS).unwrap() {
+        let address = IpAddr::from(std::net::Ipv6Addr::from(
+            (0x2001_0db8_u128 << 96) | (u128::from(index) << 64),
+        ));
+        hub.guard.offend(address, Offense::Lockout, now);
+    }
+    // A computer in 203.0.113.0/24, and a session to it.
+    let neighbour = session(&hub, ip("203.0.113.10"), ip("198.51.100.40"), 126);
+    assert_eq!(hub.metrics.read(Gauge::Listeners), 1);
+    // Another address in that /24 earns a ban, which covers the block.
+    hub.offend(ip("203.0.113.99"), Offense::Lockout);
+    assert!(hub.is_banned(ip("203.0.113.10")));
+    tokio::time::timeout(Duration::from_secs(1), neighbour.banned())
+        .await
+        .expect("the neighbour's session was not ended");
+    assert_eq!(hub.metrics.read(Gauge::Listeners), 0);
 }
