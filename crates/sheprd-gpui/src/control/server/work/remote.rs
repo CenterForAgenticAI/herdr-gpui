@@ -2,26 +2,30 @@
 use super::{Source, find, flows, mute, notes, worktrees};
 use crate::{
     SheprdWindow,
-    browser::{Location, Scope, Store, TabId},
+    browser::{Location, Store},
     control::protocol::{
         ErrorCode, Response,
         work::{WorkOp, remote::Request},
     },
     core_terminals::Host,
+    remote_work::Target,
 };
 use gpui::{Context, Window};
-use sheprd_backend::TerminalId;
 
 impl SheprdWindow {
     pub(crate) fn serve_remote_work(
         &mut self,
-        scope: &Scope,
-        tab: TabId,
-        terminal: &TerminalId,
+        target: Target<'_>,
         request: Request,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Response {
+        let Target {
+            scope,
+            tab,
+            terminal,
+            workspace,
+        } = target;
         if request
             .window
             .is_some_and(|id| id != window.window_handle().window_id().as_u64())
@@ -37,6 +41,7 @@ impl SheprdWindow {
         let driven = matches!(&stored.location, Some(Location::CoreTerminal { panes, observe: false, .. }) if panes.contains(terminal));
         if scope.is_local()
             || stored.scope != *scope
+            || stored.workspace_id != workspace
             || !driven
             || self.core_terminals.host_of(tab) != Host::Remote(scope.clone())
             || !self.core_terminals.tab_terminals(tab).contains(&terminal)

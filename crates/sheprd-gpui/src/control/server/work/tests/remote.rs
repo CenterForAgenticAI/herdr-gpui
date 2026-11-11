@@ -3,6 +3,7 @@ use crate::control::protocol::work::{Reply, remote::Request};
 use crate::{
     browser::{Location, Store},
     core_terminals::{Host, panes::Panes},
+    remote_work::Target,
 };
 use sheprd_backend::TerminalId;
 
@@ -25,17 +26,29 @@ fn remote_work_uses_its_driven_tab_and_refuses_foreign_window_scope_or_terminal(
         view.core_terminals.show_on_host_for_test(tab, Host::Remote(scope.clone()), terminal.clone());
         view.core_terminals.place_for_test(tab, scope.clone(), &id);
         let request = |window| Request { version: 1, window, operation: WorkOp::Mute { muted: true } };
+        let caller = Target { scope: &scope, tab, terminal: &terminal, workspace: &id };
         let wrong_window = window.window_handle().window_id().as_u64().saturating_add(1);
-        let response = view.serve_remote_work(&scope, tab, &terminal, request(Some(wrong_window)), window, cx);
+        let response = view.serve_remote_work(caller, request(Some(wrong_window)), window, cx);
         assert_eq!(error_code(&response), Some(ErrorCode::WorkspaceNotFound));
         let local = crate::browser::scope(&view.endpoints[0]);
-        let response = view.serve_remote_work(&local, tab, &terminal, request(None), window, cx);
+        let response = view.serve_remote_work(Target { scope: &local, ..caller }, request(None), window, cx);
         assert_eq!(error_code(&response), Some(ErrorCode::WorkspaceNotFound));
-        let response = view.serve_remote_work(&scope, tab, &TerminalId::new("t2").unwrap(), request(None), window, cx);
+        let response = view.serve_remote_work(Target { terminal: &TerminalId::new("t2").unwrap(), ..caller }, request(None), window, cx);
         assert_eq!(error_code(&response), Some(ErrorCode::WorkspaceNotFound));
-        let response = view.serve_remote_work(&scope, tab, &terminal, request(None), window, cx);
+        let response = view.serve_remote_work(caller, request(None), window, cx);
         assert!(matches!(response, Response::Work { reply: Reply::Mute { mute } } if mute.muted && mute.host == "Work host"));
         assert!(!crate::notification_mutes::Mutes::of(cx).unwrap().kept(local.as_str(), crate::notification_mutes::Scope::Workspace, &id));
+        // The request was discovered in A; moving its tab while the claim
+        // waits must not turn it into a request against B.
+        let moved = Store::update(cx, |store| {
+            let moved = store.keep_workspace(&scope, "other", "/home/me/other", true).unwrap();
+            assert!(store.move_to_workspace(tab, &moved));
+            moved
+        });
+        view.core_terminals.place_for_test(tab, scope.clone(), &moved);
+        let response = view.serve_remote_work(caller, request(None), window, cx);
+        assert_eq!(error_code(&response), Some(ErrorCode::WorkspaceNotFound));
+        assert!(!crate::notification_mutes::Mutes::of(cx).unwrap().kept(scope.as_str(), crate::notification_mutes::Scope::Workspace, &moved));
     }));
 }
 

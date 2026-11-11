@@ -4,7 +4,7 @@ mod claim;
 
 use crate::{
     SheprdWindow,
-    browser::{Scope, TabId},
+    browser::{Scope, Store, TabId},
     core_terminals::Host,
 };
 use gpui::{Context, Global, Window};
@@ -32,6 +32,7 @@ pub(crate) struct State {
 }
 
 struct Pending {
+    workspace: String,
     scope: Scope,
     terminal: TerminalId,
     tab: TabId,
@@ -42,6 +43,26 @@ struct Pending {
     started: Instant,
     endpoint: sheprd_client::ConnectTarget,
     step: Step,
+}
+
+/// Caller identity captured before the asynchronous claim starts.
+#[derive(Clone, Copy)]
+pub(crate) struct Target<'a> {
+    pub(crate) scope: &'a Scope,
+    pub(crate) terminal: &'a TerminalId,
+    pub(crate) tab: TabId,
+    pub(crate) workspace: &'a str,
+}
+
+impl Pending {
+    fn target(&self) -> Target<'_> {
+        Target {
+            scope: &self.scope,
+            terminal: &self.terminal,
+            tab: self.tab,
+            workspace: &self.workspace,
+        }
+    }
 }
 
 enum Step {
@@ -88,14 +109,9 @@ impl SheprdWindow {
                             continue;
                         };
                         let response = match request {
-                            Ok(request) => self.serve_remote_work(
-                                &pending.scope,
-                                pending.tab,
-                                &pending.terminal,
-                                request,
-                                window,
-                                cx,
-                            ),
+                            Ok(request) => {
+                                self.serve_remote_work(pending.target(), request, window, cx)
+                            }
                             Err(response) => response,
                         };
                         let response = remote::encode_reply(&response).unwrap_or_else(|_| {
@@ -127,6 +143,14 @@ impl SheprdWindow {
             self.remote_work.pending.push(pending);
         }
         for found in self.core_terminals.work_label_requests() {
+            let Some(workspace) = cx
+                .try_global::<Store>()
+                .and_then(|store| store.get(found.tab))
+                .filter(|tab| tab.scope == found.scope)
+                .map(|tab| tab.workspace_id.clone())
+            else {
+                continue;
+            };
             for (key, value) in found.tokens {
                 let Some(id) = remote::request_id(&key) else {
                     continue;
@@ -198,6 +222,7 @@ impl SheprdWindow {
                     continue;
                 };
                 self.remote_work.pending.push(Pending {
+                    workspace: workspace.clone(),
                     scope: found.scope.clone(),
                     terminal: found.terminal.clone(),
                     tab: found.tab,
