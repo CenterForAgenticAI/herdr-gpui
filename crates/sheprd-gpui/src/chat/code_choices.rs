@@ -61,6 +61,12 @@ impl CodeChoices {
         }
     }
 
+    /// Whether the user switched the fence at `key` to its code, which a
+    /// page still loading for it must not override.
+    pub(crate) fn shows_code(&self, key: PageKey) -> bool {
+        self.html_code.get(&key) == Some(&true)
+    }
+
     pub(crate) fn set_shows_code(&mut self, key: PageKey, code: bool) {
         self.html_code.insert(key, code);
     }

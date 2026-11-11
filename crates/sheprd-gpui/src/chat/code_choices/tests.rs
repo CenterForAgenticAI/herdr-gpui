@@ -55,6 +55,16 @@ fn the_switch_overrides_every_default() {
 }
 
 #[test]
+fn only_an_explicit_switch_to_code_stops_a_loading_page() {
+    let mut choices = CodeChoices::default();
+    assert!(!choices.shows_code(key(0)));
+    choices.set_shows_code(key(0), true);
+    assert!(choices.shows_code(key(0)));
+    choices.set_shows_code(key(0), false);
+    assert!(!choices.shows_code(key(0)));
+}
+
+#[test]
 fn always_loads_a_fence_once() {
     let mut choices = CodeChoices::default();
     let page: Arc<str> = "<p>hi</p>".into();

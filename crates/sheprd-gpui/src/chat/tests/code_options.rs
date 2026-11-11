@@ -175,3 +175,38 @@ fn never_draws_html_as_code_with_its_switch(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("chat-page-render").is_some());
     assert!(cx.debug_bounds("chat-html-1").is_none());
 }
+
+#[gpui::test]
+fn show_code_wins_over_a_page_still_loading(cx: &mut TestAppContext) {
+    use crate::chat::page::{PageKey, PageSource};
+    let (view, _peer, cx) = open(cx, ConnectTarget::Local);
+    let program = Program::new();
+    let _stream = attach_with(&view, &program, said("Look:\n```html\n<p>hi</p>\n```"), cx);
+    let pane = view.read_with(cx, |view, _| {
+        view.live.snapshot.as_ref().unwrap().agents[0]
+            .pane_id
+            .clone()
+    });
+    let key = PageKey {
+        entry: EntryId(1),
+        part: 1,
+    };
+    // Show code lands while the page is still being copied: both happen
+    // before any task runs, so the copy finishes after the choice.
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.show_chat_page(&pane, key, PageSource::Html("<p>hi</p>".into()), window, cx);
+            let chat = view.chats.pane_mut(&pane).unwrap();
+            chat.code.set_shows_code(key, true);
+            chat.remeasure(key.entry);
+        })
+    });
+    cx.run_until_parked();
+    poll(&view, &program, cx);
+    view.read_with(cx, |view, _| {
+        let chat = view.chats.pane(&pane).unwrap();
+        assert!(chat.pages.is_empty(), "the page did not open over the code");
+        assert_eq!(chat.error, None);
+    });
+    assert!(cx.debug_bounds("chat-html-code-1").is_some());
+}
