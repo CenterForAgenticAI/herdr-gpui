@@ -22,6 +22,7 @@ const LINKED: &str = "/src/app-feature";
 const NEW: &str = "/src/app-lane";
 
 mod remote;
+mod socket;
 
 /// A window on this computer with no Herdr 1, keeping a workspace at
 /// `LINKED`, a checkout of `app`, beside an SSH host "Box" that runs
