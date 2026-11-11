@@ -64,3 +64,30 @@ fn roots_outside_home_and_checkout_require_an_explicit_mapping() {
         Err(Error::SessionConfiguration { .. })
     ));
 }
+
+#[test]
+fn roots_that_climb_out_of_home_or_checkout_are_refused() {
+    for value in [
+        "/home/source/../../etc",
+        "/home/source/./codex",
+        "/home/source//codex",
+        "/work/source/../outside",
+        "home/source/codex",
+    ] {
+        let source = BTreeMap::from([("CODEX_HOME".into(), value.into())]);
+        assert!(
+            matches!(
+                map_roots(
+                    AgentKind::Codex,
+                    &source,
+                    "/work/source",
+                    "/work/destination",
+                    "/home/source",
+                    "/home/destination",
+                ),
+                Err(Error::SessionConfiguration { .. })
+            ),
+            "{value} was mapped"
+        );
+    }
+}

@@ -115,6 +115,13 @@ fn map_roots(
                     agent: agent.binary(),
                 });
             }
+            // `remap` matches a textual prefix: `$HOME/../etc` would pass it
+            // and still name a path outside the destination home.
+            if !plain(value) {
+                return Err(Error::SessionConfiguration {
+                    agent: agent.binary(),
+                });
+            }
             let mapped = crate::teleport::launch::remap(value, from, to)
                 .or_else(|| crate::teleport::launch::remap(value, from_home, to_home))
                 .ok_or(Error::SessionConfiguration {
@@ -123,6 +130,15 @@ fn map_roots(
             Ok((key.clone(), mapped))
         })
         .collect()
+}
+
+/// An absolute path with no `.`, `..`, or empty segments.
+fn plain(path: &str) -> bool {
+    path.strip_prefix('/').is_some_and(|rest| {
+        rest.trim_end_matches('/')
+            .split('/')
+            .all(|segment| !matches!(segment, "" | "." | ".."))
+    })
 }
 
 pub(super) fn script(body: &str, environment: Option<&BTreeMap<String, String>>) -> String {
