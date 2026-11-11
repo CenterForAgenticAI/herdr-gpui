@@ -62,10 +62,10 @@ impl CoreTerminals {
         terminal: &TerminalId,
         name: String,
         value: String,
-    ) -> Option<crossbeam_channel::Receiver<sheprd_core_client::Result<()>>> {
+    ) -> Option<std::sync::mpsc::Receiver<sheprd_core_client::Result<()>>> {
         let backend = self.backend_of(&Host::Remote(scope.clone()))?.clone();
         let terminal = terminal.clone();
-        let (sender, receiver) = crossbeam_channel::bounded(1);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         let spawned = std::thread::Builder::new()
             .name("browser-reply".into())
             .spawn(move || {
