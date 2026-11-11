@@ -22,6 +22,7 @@ use sheprd_remote::{
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 
 mod herdr2;
+mod restart;
 mod start;
 
 /// How long `herdr agent start` may wait for the agent to be ready.
@@ -81,6 +82,12 @@ impl DispatchRequest {
 
 #[derive(Clone, Debug)]
 pub enum Action {
+    Recover {
+        run: String,
+    },
+    Restart {
+        run: String,
+    },
     Dispatch(Box<DispatchRequest>),
     /// Interrupt a run's agent.
     Stop {
@@ -108,7 +115,11 @@ impl Action {
         match self {
             Self::DeleteBead { .. } => true,
             Self::Dispatch(request) => request.bead().is_some(),
-            Self::Stop { .. } | Self::Send { .. } | Self::Remove { .. } => false,
+            Self::Stop { .. }
+            | Self::Send { .. }
+            | Self::Remove { .. }
+            | Self::Recover { .. }
+            | Self::Restart { .. } => false,
         }
     }
 
@@ -116,6 +127,8 @@ impl Action {
     fn done(&self) -> Done {
         match self {
             Self::Dispatch(_) => Done::Started,
+            Self::Recover { .. } => Done::Recovered,
+            Self::Restart { .. } => Done::Started,
             Self::Stop { .. } => Done::Stopped,
             Self::Send { .. } => Done::Sent,
             Self::Remove { .. } => Done::Removed,
@@ -129,6 +142,7 @@ impl Action {
 pub enum Done {
     // keep-sorted start
     BeadDeleted,
+    Recovered,
     Removed,
     Sent,
     Started,
@@ -139,9 +153,11 @@ pub enum Done {
 /// Runs `action` to completion; what it did, or why it failed.
 pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<Done> {
     match action {
+        Action::Recover { run } => restart::recover(site, run, cancelled)?,
+        Action::Restart { run } => restart::restart(site, run, cancelled)?,
         Action::Dispatch(request) => dispatch(site, request, cancelled)?,
         Action::Stop { run } => {
-            let (mut store, mut found, session, host) = own_run(site, run)?;
+            let (mut store, mut found, session, host) = own_run(site, run, cancelled)?;
             match &session.pane {
                 Pane::Pending => return Err(Error::NothingToOpen),
                 Pane::Herdr1 { pane_id, .. } => {
@@ -164,7 +180,7 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
             store.update_run(&found, Some(&session))?;
         }
         Action::Send { run, text } => {
-            let (_, found, session, host) = own_run(site, run)?;
+            let (_, found, session, host) = own_run(site, run, cancelled)?;
             match &session.pane {
                 Pane::Pending => return Err(Error::NothingToOpen),
                 Pane::Herdr1 { pane_id, .. } => {
@@ -198,10 +214,23 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
 
 /// A run Sheprd owns, with its session and the host its agent is on,
 /// read fresh from the database.
-fn own_run(site: &Site, id: &str) -> Result<(Store, Run, HerdrSession, Host)> {
-    let (store, run, session) = owned(site, id)?;
-    let session = session.ok_or_else(|| Error::RunNotFound(id.to_owned()))?;
+fn own_run(
+    site: &Site,
+    id: &str,
+    cancelled: &AtomicBool,
+) -> Result<(Store, Run, HerdrSession, Host)> {
+    let (mut store, run, session) = owned(site, id)?;
+    let mut session = session.ok_or_else(|| Error::RunNotFound(id.to_owned()))?;
     let host = host_of(site, &session)?;
+    if matches!(session.pane, Pane::Pending) {
+        let work::Started::Herdr2 { terminal } =
+            herdr2::inspect(&host, &run, &session, true, cancelled)?
+        else {
+            return Err(Error::NothingToOpen);
+        };
+        session.pane = Pane::Herdr2 { terminal };
+        store.update_run(&run, Some(&session))?;
+    }
     Ok((store, run, session, host))
 }
 
@@ -485,6 +514,7 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
         owner: Owner::Sheprd,
     };
     store.save_run(&run, None)?;
+    store.save_prompt(&run.id, &request.prompt)?;
     let mut created: Option<(Host, Worktree)> = None;
     let outcome = destination(site, request, cancelled).and_then(|destination| {
         let outcome = launch(

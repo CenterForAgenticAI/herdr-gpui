@@ -114,7 +114,7 @@ pub(super) fn launch(
     // From the launch intent onward, a lost reply can mean the agent is
     // already working. Keep its checkout and receipt; never replay a prompt.
     *created = None;
-    let started = work::owned_agent::start(host, &worktree, &agent, owner(run), cancelled)?;
+    let started = work::owned_agent::start(host, &worktree, &agent, owner(name), cancelled)?;
     let Started::Herdr2 { terminal } = &started else {
         return Err(Error::Output {
             operation: "Starting the agent",
@@ -142,10 +142,10 @@ pub(super) fn launch(
     )
 }
 
-fn owner(run: &Run) -> work::owned_agent::Owner<'_> {
+pub(super) fn owner(token: &str) -> work::owned_agent::Owner<'_> {
     work::owned_agent::Owner {
         key: "sheprd.orchestrator.run",
-        value: &run.id,
+        value: token,
     }
 }
 
@@ -189,7 +189,7 @@ pub(super) fn inspect(
     Ok(work::owned_agent::inspect(
         host,
         &tree,
-        owner(run),
+        owner(&session.agent_name),
         &agent,
         expected,
         include_finished,

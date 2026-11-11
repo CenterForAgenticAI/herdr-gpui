@@ -158,10 +158,27 @@ pub(super) fn orchestrator(
     match command {
         OrchestratorCommand::Open { repo } => {
             let repo = repo.as_deref().map(local_folder).transpose()?;
-            let response = context.call(Request::Tab, TabOp::Orchestrator { repo })?;
+            let response = context.call(
+                Request::Tab,
+                TabOp::Orchestrator {
+                    repo,
+                    restart: None,
+                },
+            )?;
             opened("the orchestrator", response)
         }
         OrchestratorCommand::Items { repo, items } => items::list(repo.as_deref(), items),
+        OrchestratorCommand::Restart { repo, run } => {
+            let repo = repo.as_deref().map(local_folder).transpose()?;
+            let response = context.call(
+                Request::Tab,
+                TabOp::Orchestrator {
+                    repo,
+                    restart: Some(run),
+                },
+            )?;
+            opened("the restart confirmation", response)
+        }
     }
 }
 

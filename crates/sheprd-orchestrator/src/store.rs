@@ -20,7 +20,7 @@ use std::{
 };
 
 /// The newest schema this build reads and writes.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// How long a write waits for the other application's transaction.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -371,6 +371,40 @@ impl Store {
         self.write_run(run, session, true)
     }
 
+    pub(crate) fn save_prompt(&self, run: &str, prompt: &str) -> Result<()> {
+        self.writable()?;
+        self.connection.execute(
+            "INSERT INTO run_prompts(run_id, prompt) VALUES (?1, ?2)",
+            params![run, prompt],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn prompt(&self, run: &str) -> Result<String> {
+        self.connection
+            .query_row(
+                "SELECT prompt FROM run_prompts WHERE run_id = ?1",
+                [run],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(Error::NothingToOpen)
+    }
+
+    /// A restart may launch only once, even across windows. The winning
+    /// intent remains pending after a crash; absence never permits replay.
+    pub(crate) fn claim_restart(&self, run: &str, previous: &str, next: &str) -> Result<()> {
+        self.writable()?;
+        let changed = self.connection.execute(
+            "UPDATE herdr_sessions SET agent_name = ?3, terminal = NULL, pending = 1 WHERE run_id = ?1 AND agent_name = ?2 AND pending = 0",
+            params![run, previous, next],
+        )?;
+        if changed != 1 {
+            return Err(Error::Busy);
+        }
+        Ok(())
+    }
+
     fn write_run(
         &mut self,
         run: &Run,
@@ -486,6 +520,7 @@ impl Store {
         }
         transaction.execute("DELETE FROM events WHERE run_id = ?1", [id])?;
         transaction.execute("DELETE FROM herdr_sessions WHERE run_id = ?1", [id])?;
+        transaction.execute("DELETE FROM run_prompts WHERE run_id = ?1", [id])?;
         transaction.commit()?;
         Ok(())
     }
@@ -606,6 +641,9 @@ fn migrate(connection: &mut Connection) -> Result<Access> {
                 [],
             )?;
         }
+    }
+    if version < 5 {
+        transaction.execute_batch("CREATE TABLE IF NOT EXISTS run_prompts (run_id TEXT PRIMARY KEY NOT NULL, prompt TEXT NOT NULL)")?;
     }
     if version < SCHEMA_VERSION {
         transaction.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;

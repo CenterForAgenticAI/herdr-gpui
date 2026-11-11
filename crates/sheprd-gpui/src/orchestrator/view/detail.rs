@@ -662,6 +662,14 @@ impl OrchestratorView {
             .map(|workspace| workspace.branch.clone())
             .unwrap_or_default();
         let (stop_run, remove_run, agent) = (run.id.clone(), run.id.clone(), run.agent.clone());
+        let restart_run = run.id.clone();
+        let core = self.snapshot().sessions.iter().any(|session| {
+            session.run_id == run.id
+                && matches!(
+                    session.pane,
+                    crate::orchestrator::Pane::Pending | crate::orchestrator::Pane::Herdr2 { .. }
+                )
+        });
         // A failed run with no worktree is still forgotten through Remove.
         let removable =
             run.workspace.is_some() || run.state == crate::orchestrator::RunState::Failed;
@@ -670,7 +678,7 @@ impl OrchestratorView {
             .flex_wrap()
             .items_center()
             .gap_2()
-            .when(live, |el| {
+            .when(live || core, |el| {
                 el.child(
                     look.button(
                         ("orchestrator-card-open", index),
@@ -680,7 +688,7 @@ impl OrchestratorView {
                     .on_click(cx.listener(move |this, _, _, cx| this.open_run(index, cx))),
                 )
             })
-            .when(own && writable && current && live, |el| {
+            .when(own && writable && current && (live || core), |el| {
                 el.child(
                     div()
                         .flex_1()
@@ -714,6 +722,23 @@ impl OrchestratorView {
                             },
                             cx,
                         );
+                    })),
+                )
+            })
+            .when(own && writable && core, |el| {
+                el.child(
+                    look.button(
+                        ("orchestrator-card-restart", index),
+                        fl!("orchestrator-restart"),
+                        false,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ask(
+                            Confirm::Restart {
+                                run: restart_run.clone(),
+                            },
+                            cx,
+                        )
                     })),
                 )
             })

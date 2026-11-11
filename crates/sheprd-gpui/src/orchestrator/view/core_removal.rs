@@ -66,6 +66,15 @@ impl OrchestratorView {
     /// Asks the window to close the kept workspace of each followed run the
     /// worker has removed.
     pub(super) fn close_removed_core_runs(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = &self.pending_core_open {
+            let runs = Runs::new(&self.snapshot().runs, &self.snapshot().sessions, &self.live);
+            if let Some(index) = runs.runs.iter().position(|run| &run.id == id)
+                && let Some(event) = super::core_run(&runs, index)
+            {
+                cx.emit(event);
+                self.pending_core_open = None;
+            }
+        }
         let repos = &self.repos;
         let listed = |run: &str| {
             repos

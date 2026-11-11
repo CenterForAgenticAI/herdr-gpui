@@ -272,10 +272,17 @@ pub(super) fn devices(
 pub(super) fn orchestrator(
     caller: &Caller,
     repo: Option<String>,
+    restart: Option<String>,
     incoming: socket::Incoming,
     watches: &mut Watches,
     cx: &mut App,
 ) {
+    if restart
+        .as_ref()
+        .is_some_and(|run| run.is_empty() || run.len() > 128 || run.chars().any(char::is_control))
+    {
+        return incoming.respond(Response::error(ErrorCode::InvalidRequest, "Invalid run ID"));
+    }
     if let Some(repo) = &repo
         && OrchestratorRepo::new(repo.clone()).is_err()
     {
@@ -292,6 +299,16 @@ pub(super) fn orchestrator(
         |_| true,
         move |view, workspace, window, cx| {
             view.open_orchestrator_in(workspace.to_owned(), repo, window, cx);
+            if let Some(run) = &restart {
+                return if view.confirm_orchestrator_restart(run, cx) {
+                    Response::done("Showing the restart confirmation; the user must confirm")
+                } else {
+                    Response::error(
+                        ErrorCode::Failed,
+                        "This project's run is not loaded or cannot be restarted; open its Issues section and try again",
+                    )
+                };
+            }
             if view.activity.panel == crate::sidebar::ActivityPanel::Issues
                 && view.activity_section().is_some()
             {

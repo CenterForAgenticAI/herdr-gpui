@@ -7,6 +7,7 @@ use crate::test_executable;
 mod cleanup;
 mod ownership;
 mod remote;
+mod restart;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.
 fn fake_core(dir: &Path, status: &str) {
@@ -23,6 +24,8 @@ if args[0] == 'run':
     terminal = {{'address':'t9', 'cwd': args[args.index('--cwd') + 1], 'argv': args[args.index('--') + 1:], 'labels': {{label[0]: label[1]}}, 'state': 'live'}}
     terminal['foreground'] = {{'argv': terminal['argv'], 'name': 'claude', 'cwd': terminal['cwd'], 'pid': 9}}
     inventory.write_text(json.dumps({{'terminals': [terminal]}}))
+    if (home / 'lose-run-reply').exists():
+        sys.exit(1)
     print('{{"address":"t9"}}')
 elif args[0] == 'wait':
     print('{{"ended":true,"exit_code":null,"reason":"status","status":"{status}","turn":0}}')

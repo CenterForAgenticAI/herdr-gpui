@@ -65,6 +65,9 @@ impl Problem {
 /// A destructive action waiting for the user to confirm it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Confirm {
+    Restart {
+        run: String,
+    },
     Stop {
         run: String,
         agent: String,
@@ -91,6 +94,7 @@ pub(super) fn done(done: Done) -> String {
         Done::Removed => fl!("orchestrator-done-removed"),
         Done::Sent => fl!("orchestrator-done-sent"),
         Done::Started => fl!("orchestrator-done-started"),
+        Done::Recovered => fl!("orchestrator-done-recovered"),
         Done::Stopped => fl!("orchestrator-done-stopped"),
     }
 }
@@ -108,6 +112,12 @@ impl Confirm {
     /// Its title, what it does, its button, and the button's ID.
     fn text(&self) -> (String, String, String, &'static str) {
         match self {
+            Self::Restart { .. } => (
+                fl!("orchestrator-restart"),
+                fl!("orchestrator-confirm-restart-body"),
+                fl!("orchestrator-restart"),
+                "restart",
+            ),
             Self::Stop { agent, .. } => (
                 fl!("orchestrator-confirm-stop-title", agent = agent.as_str()),
                 fl!("orchestrator-confirm-stop-body"),
@@ -155,6 +165,7 @@ impl Confirm {
     /// The worker action it confirms; a merge goes through `pr_actions`.
     fn action(self) -> Option<Action> {
         match self {
+            Self::Restart { run } => Some(Action::Restart { run }),
             Self::Stop { run, .. } => Some(Action::Stop { run }),
             Self::Remove { run, .. } => Some(Action::Remove { run }),
             Self::DeleteBead { source, id } => Some(Action::DeleteBead { source, id }),
@@ -164,6 +175,27 @@ impl Confirm {
 }
 
 impl OrchestratorView {
+    pub(crate) fn confirm_restart(&mut self, run: &str, cx: &mut Context<Self>) -> bool {
+        let snapshot = self.snapshot();
+        if !snapshot
+            .runs
+            .iter()
+            .any(|found| found.id == run && found.owner == crate::orchestrator::Owner::Sheprd)
+            || !snapshot.sessions.iter().any(|session| {
+                session.run_id == run
+                    && matches!(session.pane, crate::orchestrator::Pane::Herdr2 { .. })
+            })
+        {
+            return false;
+        }
+        self.ask(
+            Confirm::Restart {
+                run: run.to_owned(),
+            },
+            cx,
+        );
+        true
+    }
     pub(crate) fn load_agents(
         &mut self,
         endpoint: Option<String>,

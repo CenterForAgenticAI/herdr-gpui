@@ -2695,7 +2695,13 @@ for the checkout and herdr-core for the agent, without needing Herdr 1. The
 recorded destination and terminal identity survive an app restart: opening,
 messaging, stopping, and removing the run keep targeting that host, even when
 another host has a checkout at the same path. Removing a run closes only its
-host's saved workspace after checkout removal succeeds. A pull
+host's saved workspace after checkout removal succeeds. A run can also be
+**Restarted** after confirmation: its checkout and
+uncommitted files stay, while a new owned agent receives the saved model and
+initial prompt. Opening a run whose launch reply was lost first looks up its
+unique ownership receipt; it never resends the initial prompt. The CLI
+`sheprd orchestrator restart RUN` opens the same confirmation for a loaded run.
+A pull
 request's **Review with agent** does the same on an `agent/review-…` branch with a
 read-only prompt: the agent verifies the pull request, reads its diff, and
 reports findings without writing to GitHub. A run's card sends it messages, stops
