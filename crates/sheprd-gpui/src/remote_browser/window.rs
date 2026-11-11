@@ -175,6 +175,18 @@ impl SheprdWindow {
             let Some(index) = self.endpoints.iter().position(|e| e.id == page.endpoint) else {
                 continue;
             };
+            if let Some(origin) = page
+                .pane
+                .as_deref()
+                .filter(|origin| origin.starts_with("core@"))
+                && !self
+                    .core_terminals
+                    .browser_caller_live(&crate::browser::scope(&self.endpoints[index]), origin)
+            {
+                // A tunnel becoming ready must not resurrect a page after its
+                // originating core tab or connection disappeared.
+                continue;
+            }
             let state = self
                 .port_forwards
                 .for_host(&page.target)
