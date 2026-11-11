@@ -1,4 +1,5 @@
 use super::*;
+mod fanout;
 use sheprd_client::ConnectTarget;
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
 
@@ -343,7 +344,7 @@ fn porcelain_records_become_checkouts() {
 }
 
 #[test]
-fn a_shell_whose_agent_never_started_is_ended() {
+fn a_lost_start_acknowledgement_retains_the_terminal_for_recovery() {
     let fixture = Fixture::new();
     fixture.program(
         "herdr-core",
@@ -367,14 +368,12 @@ esac"#,
     assert!(
         matches!(
             error,
-            Error::Script {
-                step: Step::StartAgent,
-                ..
-            }
+            Error::Unprompted { ref started, .. }
+                if *started == Started::Herdr2 { terminal: "t4".into() }
         ),
         "{error:?}"
     );
-    assert_eq!(fixture.calls().last().unwrap(), "kill --json -- t4");
+    assert!(!fixture.calls().iter().any(|call| call.starts_with("kill ")));
 }
 
 #[test]
