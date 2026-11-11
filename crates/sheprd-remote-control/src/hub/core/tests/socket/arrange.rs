@@ -4,6 +4,8 @@
 use super::*;
 use crate::control::layout::Op;
 
+mod saved;
+
 fn run_request(fake: &Fake) -> Value {
     let sent = fake.inputs.recv_timeout(Duration::from_secs(2)).unwrap();
     serde_json::from_slice(&sent).unwrap()
