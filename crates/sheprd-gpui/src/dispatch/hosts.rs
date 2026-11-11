@@ -339,7 +339,14 @@ impl SheprdWindow {
         }
         let composing = self.fan_out.as_ref().filter(|fan_out| fan_out.composing());
         if let Some(repo) = composing.map(|fan_out| fan_out.repo_label().to_owned()) {
-            let candidates = self.dispatch_candidates(&repo, cx);
+            let mut candidates = self.dispatch_candidates(&repo, cx);
+            // The fan-out consumer must adopt typed destination preparation
+            // before it can offer lanes on another host's core.
+            for candidate in &mut candidates {
+                if !candidate.current && self.dispatch_keeps(&candidate.endpoint_id) {
+                    candidate.online = false;
+                }
+            }
             if let Some(fan_out) = &mut self.fan_out
                 && fan_out.update_hosts(candidates, now)
             {
@@ -365,6 +372,20 @@ impl SheprdWindow {
                 cx.notify();
             }
             return;
+        };
+        let result = match result {
+            Ok(arrival) => {
+                let missing = matches!(&arrival, Dispatched::Kept { endpoint_id, .. }
+                    if !self.endpoints.iter().any(|endpoint| endpoint.id == *endpoint_id));
+                if !missing {
+                    Ok(arrival)
+                } else if let Some(arrival) = job.await_destination(arrival, now) {
+                    Ok(arrival)
+                } else {
+                    return;
+                }
+            }
+            result => result,
         };
         let (host, repo) = (job.host.clone(), job.repo.clone());
         self.dispatch_job = None;
