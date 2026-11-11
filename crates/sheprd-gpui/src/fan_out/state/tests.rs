@@ -6,6 +6,8 @@ mod crash_recovery;
 mod discard_identity;
 mod herdr_2;
 mod interrupt;
+#[cfg(unix)]
+mod owned_removal;
 mod spread;
 mod wanted;
 

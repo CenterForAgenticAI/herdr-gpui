@@ -590,12 +590,13 @@ impl FanOut {
             .filter_map(|(index, worktree)| {
                 let host = self.lanes[index].checkout.as_ref()?.host.clone();
                 let lane = &self.lanes[index];
-                let owner = lane
-                    .checkout
-                    .as_ref()?
-                    .recoverable
-                    .then(|| lane.lane.agent.clone());
-                Some((index, host, worktree, lane.lane.branch.clone(), owner))
+                let checkout = lane.checkout.as_ref()?;
+                let owned = checkout.recoverable.then(|| job::Owned {
+                    agent: lane.lane.agent.clone(),
+                    kind: lane.lane.kind,
+                    terminal: checkout.terminal.clone(),
+                });
+                Some((index, host, worktree, lane.lane.branch.clone(), owned))
             })
             .collect();
         let (sender, cancelled) = (self.sender.clone(), self.work.clone());
@@ -604,7 +605,7 @@ impl FanOut {
         spawn(move || {
             let removed: Vec<_> = doomed
                 .into_iter()
-                .map(|(index, host, worktree, branch, owner)| {
+                .map(|(index, host, worktree, branch, owned)| {
                     (
                         index,
                         job::remove(
@@ -612,7 +613,7 @@ impl FanOut {
                             &worktree,
                             &repo_key,
                             &branch,
-                            owner.as_deref(),
+                            owned.as_ref(),
                             &cancelled,
                         ),
                     )
