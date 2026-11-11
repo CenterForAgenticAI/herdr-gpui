@@ -119,15 +119,17 @@ first opened, which the web app reads back and the native app scrolls through.
 A phone closes a Herdr 2 pane, or a tab with every pane in it, chats
 included, as closing a Herdr 1 tab does.
 
-Sheprd keeps a Herdr 2 tab's layout with the tab, so a phone's split, zoom, or
-close of one of Sheprd's Herdr 2 tabs waits in the daemon with the phones'
-questions about workspaces (`control::layout`), and the window holding the tab
-makes it as its own commands do. A split is answered once its shell is in the
-tab (it takes that window's keyboard, as a split there does), and refused as
-busy while another terminal is starting; a zoom makes the zoomed pane the one in
-use; a close ends the tab's terminals, then Sheprd drops the tab. With Sheprd
-closed the phone is told it is not open (a close still ends the terminals); a
-pane of the Herdr desktop app's spaces, or one no tab holds, cannot be split.
+Sheprd keeps a Herdr 2 tab's layout with the tab. While the desktop reports
+itself open, a phone's split, zoom, rename, or close of a saved tab is routed
+through `control::layout` to its window. A split is answered once its shell is
+in the tab and refused as busy while another terminal is starting. With the
+desktop closed, `hub::core::arrange` edits that tab in the saved tabs file;
+Sheprd reads the layout when it starts. Tabs outside Sheprd's saved layout use
+the remote daemon's own persisted layout and can also be split, zoomed and
+renamed. Tabs from the Herdr desktop app's `herdr-app` document remain owned by
+that app and cannot be rearranged here. Closing ends the named terminals.
+Native and web routes use the same arrangement fallback; a stale desktop-open
+report can still route a request to a desktop that no longer answers.
 The daemon keeps at most 16 shared core attachments and releases each after
 30 seconds without a screen read or input request, unless a phone holds it at
 its size. When all 16 are held, the one idle longest gives way to a new pane if
@@ -143,8 +145,8 @@ chat there. A failed start removes the checkout only when it is certain that
 nothing started; an ambiguous failure retains it. Without a core, new work goes
 to Herdr 1.
 
-This is not full backend parity. Desktop-closed split/zoom, standalone GitHub
-checks and chat-process recovery have separate limitations below. The repository's
+This is not full backend parity. External app-owned layouts, standalone GitHub
+checks and chat-process recovery have separate limitations. The repository's
 [acceptance matrix](../../docs/herdr2-acceptance.md) tracks source evidence and
 pending runtime checks; an implementation entry is not a native test result.
 

@@ -42,6 +42,8 @@ has been reported to this ledger, not that no work is underway.
 | link-handlers | Explicit app-owned trusted handler configuration | —; H1 API-dependent plugins cannot transparently migrate | Pending |
 | file-images | Newly assigned: bitmap paste, remote files/images including WSL | —; baseline gap independently confirmed | Pending; shared desktop QA must be coordinated |
 | remote-chats | Newly assigned: remote native chat launch, routing, splits, reconnect | —; baseline exclusion independently confirmed | Pending |
+| remote-browser | Newly assigned: remote core browser reload, feedback and wait-return | —; owner confirmed shim reload refusal and discarded pane identity | Pending |
+| phone-layout | Saved/own/external layout routes and stale desktop heartbeat audit | —; source reconciliation found existing desktop-closed fallback, not blanket missing support | Pending |
 | docs | This matrix, website baseline corrections, remote README, managed skill | `feat/h2r3-docs` | Documentation checks recorded in this PR; runtime checks pending |
 | ci | Fluent checkout error and Windows cleanup fixtures | [#1266](https://github.com/sheprd-labs/sheprd/pull/1266), reported `276bae9bf`; not consumed until merged | CI/Greptile pending when reported; release failure attributed to CI gate |
 
@@ -68,7 +70,7 @@ at landing rather than copying unmerged behavior into these baseline claims.
 | D09 | Terminal links and custom plugin handlers | **Partial** built-in links work; `G/window/links.rs::open_core_link` bypasses H1 handlers; core view discards raw OSC8 and remote file targets | link-handlers | Q03, Q07 pending: ordered first-match, explicit click only, host-correct argv, failure/fallback, arbitrary schemes |
 | D10 | Settings, themes, shortcuts, shared UI settings | **Implemented** app settings plus `G/core_terminals/tests/settings.rs`; H1 daemon-only settings such as scrollback restoration are not core settings | coordinator | Q03, Q07 pending: live apply, restart, keymaps, copy-on-select, scroll amount, right-click modifier, narrow UI |
 | D11 | Agent notes from terminal selection | **Implemented** `G/window/annotate/core.rs`, `tests/core_notes.rs`: core reply, clipboard on gone/refused/unreachable | coordinator | Q03/Q04 pending; test inventory inspected, not executed; website's “no notes yet” corrected |
-| D12 | Browser/review feedback and remote CLI shim | **Partial** local core targeting exists; remote core shim supports browser open via labels, not reload/return notes (`skills/herdr-gpui-browser/SKILL.md`, `G/core_terminals/requests.rs`) | coordinator (assignment needed) | Q03/Q06 pending: origin identity, no delivery to another host's same terminal ID, report unsupported reload/feedback |
+| D12 | Browser/review feedback and remote CLI shim | **Partial** local core targeting exists; remote core shim supports browser open via labels, not reload/return notes (`skills/herdr-gpui-browser/SKILL.md`, `G/core_terminals/requests.rs`) | remote-browser | Q03/Q06 pending: origin identity, no delivery to another host's same terminal ID, report unsupported reload/feedback |
 
 ## Work, agents and automation
 
@@ -101,7 +103,7 @@ supporting only the four chat-convertible agents is insufficient for Teleport.
 | P01 | Pair/authenticate/revoke; direct SSH/cloud pairing; push | **Implemented** `R/auth`, `R/control`, `R/push/terminals.rs`; direct host enrollment is distinct from desktop relaying | coordinator | Q05/Q07 pending: iOS and web, online/offline, revoke on unreachable host, desktop closed, no credential exposure |
 | P02 | Home/repo/branch listing, saved tabs and external core document | **Implemented** `R/hub/core/{projection,saved,spaces,checkouts}.rs`; saved tabs retain membership, malformed document falls back | coordinator | Q02/Q05 pending: empty core, named H1 coexistence, labels and duplicate IDs, bounds/malformed document |
 | P03 | Terminal screens/history/input/resize/close | **Implemented** `R/hub/core/{screen,hold,create}.rs`; shared bounded attachments and observer/driver transitions | coordinator | Q03/Q05 pending: two phones, desktop open/closed, observer dimensions, detach/expiry and loss, no input replay |
-| P04 | Phone splits/zoom of app-kept tabs while desktop closed | **Missing** standalone layout execution: `R/control/layout.rs` queues to desktop; README explicitly refuses while closed (close still ends terminals) | coordinator (assignment needed) | Q05 pending: either implement durable daemon layout ownership or record exact unavailable capability in iOS/web |
+| P04 | Phone split/zoom/rename while desktop closed | **Partial** saved/own fallback exists: `R/native/changes.rs::arrange` routes to `R/hub/core/arrange.rs` when desktop heartbeat expires; `R/web/terminal.rs` uses this too and workspace rename has its own fallback. Owner confirmed stale-heartbeat queueing after desktop exits, saved split retaining old active pane (`sheprd-session/src/saved/edit.rs`), and own zoom lacking active state. External `herdr-app` tabs are intentionally refused. Initial blanket missing claim was disproved | phone-layout | Q02/Q05 pending: stale heartbeat, saved-file concurrency, active pane, own-layout adoption, daemon restart, native/web routes and external-layout refusal |
 | P05 | Create shell/chat/workspace/worktree without desktop | **Implemented** `R/hub/core/create.rs::open_worktree_chat` adds Git checkout, labels chat; ambiguous start retains checkout | remote-worktrees / chat-restore | Q04/Q05 pending: branch collision, no-home/invalid cwd, failed versus ambiguous spawn, adopt into desktop without duplicates |
 | P06 | Standalone Git diff vs standalone GitHub PR/check/log | **Partial** Git fallback implemented in `R/native/changes/local.rs`; Checks returns empty default and CheckLog returns NoLog; PR badge cache depends on desktop | phone-prs | Q05 pending: no desktop cache, explicit auth, expiry/quota/offline errors, paired SSH/cloud, iOS capability display |
 | P07 | Convert terminal agents, recover chat after loss | **Partial** phone conversion shares `C/convert.rs`; lost chats finish (`keep:false`) | agent-sessions / chat-restore | Q02/Q05 pending; B01/B02; native and web must report refusals honestly |
@@ -124,6 +126,15 @@ session a process reported, **not** that the process still owns input when
 Ctrl+C or a launch line lands. A client-only reread is not acceptance evidence.
 Track conversion and Teleport retirement separately until upstream tests prove
 the conditional operation. External Herdr/core checkouts remain read-only.
+
+Agent-sessions additionally inspected the installed `herdr-core schema`:
+`terminal.keys` parameters are only caller/keys/terminal and have no
+`status_mismatch` error; `terminal.send` accepts only an IdleOrWorking `if`
+condition and may wait roughly three seconds for quiet before typing. Foreground
+records have pid/name/argv/cwd, no process-birth identity; Status has no session.
+The acceptance failures to test are a work/selection change after the final read
+but before interrupt, and a replacement foreground program before send (including
+that quiet interval). Preserve the schema/version artifact with any upstream fix.
 
 **B02 — conditional chat restart (blocked guarantee).** `terminal.send` cannot
 atomically fence process identity, cwd and recovery generation; no
@@ -180,8 +191,9 @@ queued; this is not a green full-CI result.
 
 ## Remaining recommendations and acceptance gate
 
-1. Assign D12 and P04 explicitly: remote browser feedback/reload and
-   desktop-closed layout actions must not disappear behind “phone supported.”
+1. D12 and P04 now have remote-browser and phone-layout owners: finish remote
+   browser feedback/reload and verify existing desktop-closed layout routing.
+   The stale README refusal is not evidence that all standalone layout is absent.
 2. Keep D07/D08 and W07 independent of worktree parity: new owners file-images
    and remote-chats were assigned after source evidence was sent to coordinator.
 3. Publish a per-capability unavailable reason to iOS/web and CLI; an empty
