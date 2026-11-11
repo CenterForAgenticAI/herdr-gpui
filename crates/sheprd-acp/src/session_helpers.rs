@@ -56,6 +56,18 @@ fn read_record(input: impl Read) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
+fn endpoint_variable(
+    name: &str,
+    report_socket: Option<&OsString>,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Option<OsString> {
+    match (name, report_socket) {
+        ("HC_SOCKET", Some(socket)) => Some(socket.clone()),
+        ("HC_SESSION", Some(_)) => None,
+        _ => env(name),
+    }
+}
+
 pub(crate) fn run(command: Command) -> crate::Result<()> {
     execute(command).map_err(Into::into)
 }
@@ -75,6 +87,15 @@ fn execute(command: Command) -> Result<(), Error> {
     }
     // Resolve and validate the report's environment before reading stdin or
     // connecting. The core validates the payload and its producing process.
+    let report_socket = if matches!(command, Command::Report(_)) {
+        Some(
+            std::env::var_os("HC_TERMINAL_SOCKET")
+                .filter(|socket| !socket.is_empty())
+                .ok_or(Error::MissingTerminalSocket)?,
+        )
+    } else {
+        None
+    };
     let report = if matches!(command, Command::Report(_)) {
         Some((
             report_terminal(std::env::var_os("HC_TERMINAL_ID"))?,
@@ -83,7 +104,9 @@ fn execute(command: Command) -> Result<(), Error> {
     } else {
         None
     };
-    let endpoint = Endpoint::resolve(|name| std::env::var_os(name))?;
+    let endpoint = Endpoint::resolve(|name| {
+        endpoint_variable(name, report_socket.as_ref(), |key| std::env::var_os(key))
+    })?;
     let core = Core::connect(&endpoint)?;
     if let Some(expected) = std::env::var_os("SHEPRD_EXPECT_CORE")
         && expected.to_str() != Some(core.hello().core.id.as_str())

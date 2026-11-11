@@ -173,12 +173,25 @@ struct Outgoing: Identifiable, Equatable {
 final class TermStore {
     let key: PaneKey
     private(set) var screen: TermScreen?
+    /// Why the computer cannot show it, until a screen comes.
+    var problem: String?
+    /// When this phone last asked for it, which times the wait for a screen.
+    @ObservationIgnored private(set) var asked = ContinuousClock.now
     /// The size the terminal was asked to take on this screen.
     @ObservationIgnored var size: TermSize?
 
     init(key: PaneKey) { self.key = key }
 
-    func apply(_ screen: TermScreen) { self.screen = screen }
+    func apply(_ screen: TermScreen) {
+        self.screen = screen
+        problem = nil
+    }
+
+    /// Asked again: the wait starts over.
+    func askedAgain() {
+        problem = nil
+        asked = .now
+    }
 }
 
 /// The computers collapsed in the Workspaces tab, kept on this phone and

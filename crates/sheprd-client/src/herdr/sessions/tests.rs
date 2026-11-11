@@ -77,6 +77,35 @@ fn only_config_paths_cross_the_binding_boundary() {
 }
 
 #[test]
+fn configuration_roots_and_windows_session_paths_are_unambiguous() {
+    let mut binding = fixture(AgentKind::Codex);
+    binding
+        .environment
+        .insert("CODEX_HOME".into(), "relative/config".into());
+    assert!(matches!(
+        binding.validate(&binding.identity, AgentKind::Codex),
+        Err(Error::Environment)
+    ));
+    binding
+        .environment
+        .insert("CODEX_HOME".into(), "C:\\config\\codex".into());
+    assert!(
+        binding
+            .validate(&binding.identity, AgentKind::Codex)
+            .is_ok()
+    );
+    assert!(
+        reference(
+            AgentKind::Pi,
+            SessionKind::Path,
+            "C:\\sessions\\exact.jsonl".into()
+        )
+        .is_ok()
+    );
+    assert!(reference(AgentKind::Pi, SessionKind::Path, "C:relative.jsonl".into()).is_err());
+}
+
+#[test]
 fn clear_version_bounds_and_provenance_are_not_guessed() {
     let mut binding = fixture(AgentKind::Opencode);
     binding.session = None;

@@ -14,6 +14,8 @@ pub(crate) enum Error {
     Json(#[from] serde_json::Error),
     #[error("session-report requires HC_TERMINAL_ID")]
     MissingTerminal,
+    #[error("session-report requires the owning HC_TERMINAL_SOCKET")]
+    MissingTerminalSocket,
     #[error("could not determine the home directory")]
     NoHome,
     #[error("HC_TERMINAL_ID must be valid UTF-8")]

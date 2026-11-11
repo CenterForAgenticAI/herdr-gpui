@@ -6,7 +6,7 @@ export function setup(api, runtime = {
   spawn, process, setInterval, clearInterval, setTimeout, clearTimeout,
 }) {
   const env = runtime.process.env;
-  if (!env.HC_TERMINAL_ID) return () => {};
+  if (!env.HC_TERMINAL_ID || !env.HC_TERMINAL_SOCKET) return () => {};
   const override = env.SHEPRD_ACP_BINARY;
   const program = override && isAbsolute(override) ? override : "sheprd-acp";
   // Memory survives plugin reloads within this TUI; stale child completions must
@@ -18,9 +18,17 @@ export function setup(api, runtime = {
   let pending;
   let active = false;
   let stopped = false;
+  let retry;
+
+  function later() {
+    if (retry !== undefined) return;
+    retry = runtime.setTimeout(() => { retry = undefined; pump(); }, 1000);
+    retry.unref?.();
+  }
 
   function pump() {
     if (active || pending === undefined) return;
+    if (retry !== undefined) { runtime.clearTimeout(retry); retry = undefined; }
     const payload = pending;
     pending = undefined;
     active = true;
@@ -31,17 +39,20 @@ export function setup(api, runtime = {
       });
     } catch {
       active = false;
+      pending ??= payload;
+      later();
       return;
     }
     const timeout = runtime.setTimeout(() => child.kill("SIGKILL"), 1500);
     timeout.unref?.();
     let finished = false;
-    function finish() {
+    function finish(code) {
       if (finished) return;
       finished = true;
       runtime.clearTimeout(timeout);
       active = false;
-      pump();
+      if (code === 0) pump();
+      else { pending ??= payload; later(); }
     }
     child.once("error", finish);
     child.once("close", finish);
@@ -67,6 +78,7 @@ export function setup(api, runtime = {
     const id = route?.type === "session" ? route.sessionID : null;
     // The output remains well below the CLI frame bound even for a bad route.
     report(typeof id === "string" && id.length > 0 && id.length <= 1024 ? id : null);
+    pump();
   }
 
   sample();
