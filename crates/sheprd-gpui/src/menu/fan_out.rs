@@ -46,7 +46,16 @@ impl SheprdWindow {
         // folder, whichever checkout of the repository it is.
         if target.keeper == sheprd_session::Keeper::App {
             target.worktree.as_ref()?;
-            let checkout = self.kept_checkout()?;
+            let checkout = self
+                .sessions(self.selected_endpoint)
+                .core
+                .as_ref()?
+                .workspace(&target.id)?
+                .cwd
+                .clone();
+            if checkout.is_empty() {
+                return None;
+            }
             // A linked checkout's lanes start from its branch, which the
             // base commit is read through on the repository.
             let base = match target.branch.as_deref() {

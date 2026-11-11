@@ -67,11 +67,6 @@ impl Origin {
         }
     }
 
-    /// Whether the origin is a workspace the app keeps for Herdr 2.
-    pub(crate) fn kept(&self) -> bool {
-        self.checkout.is_some()
-    }
-
     fn fresh(&self) -> FreshOrigin {
         FreshOrigin {
             place: Place {

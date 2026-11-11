@@ -282,7 +282,17 @@ impl SheprdWindow {
                 lane.lane.branch.clone(),
                 checkout.path().to_owned(),
             );
+            let terminal = checkout.terminal.clone();
             self.dismiss_menu(window, cx);
+            if let Some(terminal) =
+                terminal.and_then(|terminal| sheprd_backend::TerminalId::new(terminal).ok())
+            {
+                let location = crate::browser::Location::core_terminal(
+                    crate::core_terminals::panes::Panes::single(terminal),
+                    false,
+                );
+                self.show_fan_out_terminal(&endpoint, &label, &path, location, cx);
+            }
             self.open_fan_out_folder(&endpoint, &label, &path, cx);
             return;
         };
