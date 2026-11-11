@@ -1,4 +1,7 @@
 use super::*;
+
+#[cfg(unix)]
+mod installed;
 use crate::{chat::discovery, state::LiveState};
 use sheprd_client::{ConnectTarget, protocol::ClientShellSnapshot};
 

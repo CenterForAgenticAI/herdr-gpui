@@ -201,6 +201,40 @@ impl SheprdWindow {
             .core_terminals
             .chat_split_at(tab)
             .ok_or(super::StartError::NoWorkspace)?;
+        self.start_core_chat_at(agent, tab, at, cx)
+    }
+
+    /// Explicit CLI pane keys resolve against the owning core, including
+    /// ordinary terminal panes; an unknown key never falls through to Herdr 1.
+    pub(crate) fn start_core_chat_beside(
+        &mut self,
+        agent: Agent,
+        key: &str,
+        cx: &gpui::App,
+    ) -> Result<(), super::StartError> {
+        let (host, info) = self
+            .core_terminals
+            .routed_chat_terminals()
+            .find(|(host, info)| key_on(host, &info.id) == key)
+            .ok_or(super::StartError::NoWorkspace)?;
+        let tab = self
+            .core_terminals
+            .chat_tab_on(host, &info.id)
+            .ok_or(super::StartError::NoWorkspace)?;
+        let at = info.id.clone();
+        self.start_core_chat_at(agent, tab, at, cx)
+    }
+
+    fn start_core_chat_at(
+        &mut self,
+        agent: Agent,
+        tab: TabId,
+        at: TerminalId,
+        cx: &gpui::App,
+    ) -> Result<(), super::StartError> {
+        if at.as_str().contains('/') {
+            return Err(super::StartError::NotLocal);
+        }
         let spawn = self.prepare_core_chat(agent, &self.core_terminals.host_of(tab))?;
         self.chats.last_started = Some(agent);
         self.start_core_program(
@@ -238,6 +272,14 @@ impl SheprdWindow {
     ) -> Result<Spawn, super::StartError> {
         if !self.config.features.acp_chats {
             return Err(super::StartError::Disabled);
+        }
+        if let crate::core_terminals::Host::Remote(scope) = host
+            && self
+                .core_terminals
+                .remote_target(scope)
+                .is_some_and(|target| Some(target) != self.saved_target(scope))
+        {
+            return Err(super::StartError::NotConnected);
         }
         if self.core_chat_agent_missing(host, agent) {
             return Err(super::StartError::AgentMissing(agent));

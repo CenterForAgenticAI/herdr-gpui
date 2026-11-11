@@ -3615,7 +3615,9 @@ the same terminal ID do not share a conversation. Mirrors stay read-only
 terminal views. Reattaching resumes the existing ACP stream; it does not
 restart an agent or reopen an intentionally closed chat.
 
-Remote ACP and the chosen agent must already be installed on the host.
+Remote ACP and the chosen agent must already be installed on the host. ACP
+installed for phone pairing by this release is reused before searching the
+host's user bins, app bundles and PATH.
 These launch and attach scripts require a POSIX shell; a Windows SSH host
 without one is not supported by this chat route. Remote conversion also
 requires `sheprd-acp session-convert` and the process-bound session evidence

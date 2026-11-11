@@ -27,7 +27,9 @@ fn script(core: &str, terminal: &TerminalId, agent: Agent) -> String {
         shell_quote(terminal.as_str()),
     ));
     format!(
-        "unset HC_SOCKET HC_SESSION HC_TERMINAL_ID HC_TERMINAL_SOCKET; export SHEPRD_EXPECT_CORE={}; {program}",
+        // Keep the owning host's login-selected socket/session, exactly as
+        // its core bridge does. Only terminal attribution is inherited noise.
+        "unset HC_TERMINAL_ID HC_TERMINAL_SOCKET; export SHEPRD_EXPECT_CORE={}; {program}",
         shell_quote(core),
     )
 }
@@ -63,7 +65,7 @@ impl SheprdWindow {
             && self
                 .core_terminals
                 .host_backend(&owner.host)
-                .is_some_and(|backend| backend.core().hello().id == owner.core)
+                .is_some_and(|backend| backend.core().hello().core.id == owner.core)
     }
 
     pub(super) fn convert_remote_core_to_chat(
@@ -78,6 +80,9 @@ impl SheprdWindow {
         let Host::Remote(scope) = host else {
             return Err(super::Error::NotReachable);
         };
+        if info.id.as_str().contains('/') {
+            return Err(super::Error::NotReachable);
+        }
         let target = self
             .saved_target(scope)
             .filter(|target| target.is_remote())
@@ -92,6 +97,7 @@ impl SheprdWindow {
             .ok_or(super::Error::NotConnected)?
             .core()
             .hello()
+            .core
             .id
             .clone();
         let agent = sheprd_core_client::convert::check(info)?;

@@ -68,7 +68,7 @@ impl SheprdWindow {
         terminal: TerminalId,
     ) -> Result<(String, Agent), Error> {
         // `sheprd-acp` and the typed `sh` line are Unix, as for Herdr 1.
-        if cfg!(windows) {
+        if cfg!(windows) || terminal.as_str().contains('/') {
             return Err(Error::NotReachable);
         }
         let backend = self

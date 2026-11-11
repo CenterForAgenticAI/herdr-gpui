@@ -523,6 +523,20 @@ download first is left out.
 Files dropped on a remote chat are copied to the host first, into private
 temporary files under its `${TMPDIR:-/tmp}`, and the copies are attached.
 
+Herdr 2 chats also use saved cloud connectors and, on Windows, the selected
+WSL distribution. ACP installed for phone pairing by this release is reused
+before searching user bins, app bundles and PATH. An empty app-kept workspace
+opens a new core chat tab rather than falling back to Herdr 1.
+
+`chat status --json` returns opaque pane keys. Local core keys remain
+`core:TERMINAL`; remote core keys include their host scope. Pass the returned
+key unchanged to `chat new --pane`, `chat convert --pane`, or
+`chat show|hide|toggle --pane`. An explicit unknown core key is refused rather
+than targeting a Herdr 1 pane. `chat new --pane` splits the named core pane,
+even when another pane in that tab is active. See
+[remote core chat acceptance](remote-core-chats.md) for platform prerequisites
+and pending runtime checks.
+
 ### Existing agent rendering
 
 Set `chat.render_existing = true`, with `features.acp_chats` left on, to

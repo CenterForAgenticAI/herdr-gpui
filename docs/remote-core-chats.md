@@ -15,6 +15,8 @@ not a claim that all runtime/platform checks have passed.
   native composer focus apply to remote panes.
 - A remote launch executes the existing `remote_program_script` lookup on
   that host, with the endpoint environment and terminal label chosen together.
+  It first reuses this release's ACP installed by the existing phone-pairing
+  installer, then searches the host's user bins, app bundles and PATH.
   The existing core start queue supplies the remote cwd and tab/workspace
   association. A kept workspace without a driven tab starts a new core tab.
 - SSH attach uses the existing `sheprd-acp connect ENDPOINT` stream. Cloud
@@ -28,12 +30,18 @@ not a claim that all runtime/platform checks have passed.
   and command deduplication use the existing chat session/link protocol.
   Dropping a link cancels connector preparation and closes its exact child.
   This transport never launches recovery when a stream drops.
+- A cancelled start is acknowledged only when its window takes ownership of
+  the result. Unclaimed results (including buffered ones) are cleaned up by
+  the spawn worker on its captured core, never by retrying a terminal ID
+  against an edited host profile. A failed cleanup after transport loss is
+  logged; the app cannot claim the unreachable host ended that process.
 
 ## Conversion and recovery dependencies
 
 Remote conversion runs `sheprd-acp session-convert TERMINAL AGENT` on the
-owning host, with `SHEPRD_EXPECT_CORE` set to the connected core's ID and
-inherited core selection variables cleared. The helper validates that core
+owning host, with `SHEPRD_EXPECT_CORE` set to the connected core's ID. It keeps
+the host's login-selected `HC_SOCKET`/`HC_SESSION`, as the core bridge does,
+and clears inherited terminal attribution. The helper validates that core
 before discovery or mutation. Its session discovery belongs to #1285; see
 [agent session evidence](agent-session-evidence.md) for supported reporters
 and limitations. Conversion is cancelled if the saved target or core changes,
@@ -54,6 +62,8 @@ Automatic process-loss/reboot recovery is not proven by these attach changes.
 | Native focus, host removal, prompt/answer/cancel routing | `chat/tests/core_panes/remote.rs` (headless, mock peer) | Pending CI; not native desktop proof |
 | Endpoint validation and recovered-shell exclusion | `chat/core_pane/tests/remote.rs` | Pending CI |
 | Connector cancellation, invalid targets, no local fallback | `chat/remote_route/tests.rs` | Pending CI; WSL runtime requires Windows |
+| WSL script boundary | `sheprd-client/src/wsl/tests/script.rs` | Default/all-feature macOS runs: 2 passed each; Windows construction pending CI |
+| Cancelled launch ownership | `core_terminals/start/tests.rs` | Pending CI; accepted starts stay running, unclaimed successes end only their created terminal |
 | Owning-core conversion fence | `chat/convert/remote/tests.rs` and #1285 helper tests | Pending CI and remote agent smoke tests |
 
 Manual acceptance still required: start each supported agent on saved SSH,

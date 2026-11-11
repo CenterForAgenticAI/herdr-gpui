@@ -1,6 +1,26 @@
 use super::*;
 
 #[gpui::test]
+fn a_core_forwarded_terminal_cannot_launch_a_chat_on_the_connecting_host(cx: &mut TestAppContext) {
+    let (view, _peer, cx) = open(cx, ConnectTarget::Local);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            let tab = TabId::test(DRIVEN);
+            view.core_terminals.show_for_test(
+                tab,
+                Panes::single(id("other/t1")),
+                false,
+                Vec::new(),
+            );
+            assert!(matches!(
+                view.start_core_chat(sheprd_chat_protocol::Agent::Codex, tab, cx),
+                Err(crate::chat::StartError::NotLocal)
+            ));
+        });
+    });
+}
+
+#[gpui::test]
 fn remote_core_prompts_permission_answers_and_cancel_use_the_attached_chat(
     cx: &mut TestAppContext,
 ) {

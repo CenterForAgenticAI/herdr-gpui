@@ -45,7 +45,7 @@ pub enum Error {
     Disabled,
     #[error("Sheprd is not connected")]
     NotConnected,
-    #[error("chats start on this machine's Herdr or an SSH host's")]
+    #[error("this pane has no supported chat route")]
     NotLocal,
     #[error("no workspace is focused")]
     NoWorkspace,
@@ -116,8 +116,8 @@ pub(crate) fn command_line(agent: Agent) -> String {
 /// to install it, which stays on screen.
 pub(crate) fn remote_command_line(agent: Agent) -> String {
     format!(
-        " sh -c '{}'",
-        super::remote_program_script(&agent.to_string())
+        " sh -c {}",
+        sheprd_client::shell_quote(&super::remote_program_script(&agent.to_string()))
     )
 }
 

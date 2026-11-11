@@ -1,6 +1,29 @@
 use super::*;
 use crate::{browser::Scope, core_terminals::Host};
 
+#[cfg(feature = "cloud")]
+#[test]
+fn cloud_chat_identity_uses_the_provider_account_and_machine_id_not_its_label() {
+    for provider in sheprd_client::CloudProvider::ALL {
+        let host = Host::Remote(Scope::endpoint("cloud:saved"));
+        let target = |id: &str| sheprd_client::ConnectTarget::Cloud {
+            provider: *provider,
+            account: "account-one".into(),
+            id: id.into(),
+            machine: "same-display-name".into(),
+            session: "default".into(),
+        };
+        let first = crate::chat::discovery::remote_route(&target("first-id")).unwrap();
+        let second = crate::chat::discovery::remote_route(&target("second-id")).unwrap();
+        let terminal = info("t1", Some(A));
+        let first = target_on(&host, &first, &terminal).unwrap();
+        let second = target_on(&host, &second, &terminal).unwrap();
+        assert_eq!(first.pane_id, second.pane_id);
+        assert_ne!(first, second);
+        assert!(!first.is_local());
+    }
+}
+
 #[test]
 fn matching_ids_and_endpoint_tokens_on_different_hosts_remain_distinct() {
     let terminals = [info("t1", Some(A))];

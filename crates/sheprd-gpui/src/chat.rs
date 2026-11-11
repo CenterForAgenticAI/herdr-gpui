@@ -222,9 +222,10 @@ impl Route {
 }
 
 /// The remote `/bin/sh` script that runs the first `sheprd-acp` found with
-/// `args`, or says where it looked and exits 127. `args` must be
-/// shell-safe; the script has no single quotes, so it may be wrapped in them.
+/// `args`, or says where it looked and exits 127. `args` must be shell-safe;
+/// callers nesting this script in another shell must quote the complete script.
 pub(crate) fn remote_program_script(args: &str) -> String {
+    let installed = crate::remote::links::install::chat_path(crate::APP_VERSION);
     let candidates: String = ["sheprd-acp", "herdr-acp"]
         .into_iter()
         .flat_map(|program| {
@@ -236,7 +237,7 @@ pub(crate) fn remote_program_script(args: &str) -> String {
         .collect();
     format!(
         // i18n: data
-        "for p in {candidates}; do [ -x \"$p\" ] && exec \"$p\" {args}; done; \
+        "for p in {installed} {candidates}; do [ -x \"$p\" ] && exec \"$p\" {args}; done; \
          echo \"sheprd-acp is not installed here: install it in ~/.herdr/bin\" >&2; exit 127"
     )
 }

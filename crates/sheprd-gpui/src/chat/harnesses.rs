@@ -51,9 +51,33 @@ struct Probe {
 #[derive(Debug, Default)]
 pub(crate) struct Harnesses {
     probes: HashMap<String, Probe>,
+    routes: HashMap<String, sheprd_client::ConnectTarget>,
 }
 
 impl Harnesses {
+    fn bind(&mut self, endpoint: &str, target: &sheprd_client::ConnectTarget) {
+        if self.routes.get(endpoint) != Some(target) {
+            if self.routes.contains_key(endpoint) {
+                self.probes.remove(endpoint);
+            }
+            self.routes.insert(endpoint.to_owned(), target.clone());
+        }
+    }
+
+    fn agents_for(
+        &self,
+        endpoint: &str,
+        target: &sheprd_client::ConnectTarget,
+    ) -> Option<&[Agent]> {
+        if self
+            .routes
+            .get(endpoint)
+            .is_some_and(|known| known != target)
+        {
+            return None;
+        }
+        self.agents(endpoint)
+    }
     pub(crate) fn agents(&self, endpoint: &str) -> Option<&[Agent]> {
         self.probes.get(endpoint)?.agents.as_deref()
     }
@@ -172,7 +196,11 @@ impl SheprdWindow {
             .find(|endpoint| {
                 crate::core_terminals::Host::of(&crate::browser::scope(endpoint)) == *host
             })
-            .and_then(|endpoint| self.chats.agents.agents(&endpoint.id))
+            .and_then(|endpoint| {
+                self.chats
+                    .agents
+                    .agents_for(&endpoint.id, &endpoint.connection.target)
+            })
             .is_some_and(|agents| !agents.contains(&agent))
     }
 
@@ -192,6 +220,8 @@ impl SheprdWindow {
             None => return,
         };
         let id = endpoint.id.clone();
+        let target = endpoint.connection.target.clone();
+        self.chats.agents.bind(&id, &target);
         if !self.chats.agents.begin(&id, refresh, Instant::now()) {
             return;
         }
@@ -199,6 +229,13 @@ impl SheprdWindow {
         cx.spawn(async move |this, cx| {
             let agents = answer.await;
             let _ = this.update(cx, |this, cx| {
+                if !this
+                    .endpoints
+                    .iter()
+                    .any(|endpoint| endpoint.id == id && endpoint.connection.target == target)
+                {
+                    return;
+                }
                 this.chats.agents.finish(&id, agents);
                 cx.notify();
             });
@@ -214,7 +251,11 @@ impl SheprdWindow {
         }
         self.endpoints
             .get(self.selected_endpoint)
-            .and_then(|endpoint| self.chats.agents.agents(&endpoint.id))
+            .and_then(|endpoint| {
+                self.chats
+                    .agents
+                    .agents_for(&endpoint.id, &endpoint.connection.target)
+            })
             .map(<[Agent]>::to_vec)
             .unwrap_or_default()
     }
@@ -223,7 +264,11 @@ impl SheprdWindow {
     pub(super) fn chat_agent_missing(&self, agent: Agent) -> bool {
         self.endpoints
             .get(self.selected_endpoint)
-            .and_then(|endpoint| self.chats.agents.agents(&endpoint.id))
+            .and_then(|endpoint| {
+                self.chats
+                    .agents
+                    .agents_for(&endpoint.id, &endpoint.connection.target)
+            })
             .is_some_and(|agents| !agents.contains(&agent))
     }
 }

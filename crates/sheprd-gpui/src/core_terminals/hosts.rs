@@ -265,7 +265,7 @@ impl CoreTerminals {
         outcome: Result<TerminalInfo, sheprd_core_client::Error>,
     ) {
         let (send, receive) = std::sync::mpsc::sync_channel(1);
-        let _ = send.send(outcome);
+        let _ = send.send(super::start::Outcome::unwatched(outcome));
         self.starting = Some((purpose, host, receive));
     }
 
@@ -295,8 +295,8 @@ impl CoreTerminals {
 
     /// Drops another host's hub, its views, and a terminal wanted or
     /// starting there; the next ask for the host dials it anew. A terminal
-    /// that was starting keeps running on the machine it started on, but is
-    /// never placed in a tab, which would attach its ID on another machine.
+    /// that was starting is ended by its worker if its result cannot be
+    /// handed back, using the captured core rather than the replacement host.
     /// This computer's hub stays.
     pub(super) fn forget_host(&mut self, host: &Host) {
         let Host::Remote(scope) = host else {

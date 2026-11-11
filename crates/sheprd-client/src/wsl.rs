@@ -131,7 +131,9 @@ pub fn script_command(distro: &str, script: &str) -> Result<std::process::Comman
         return Err(Error::InvalidDistro.into());
     }
     #[cfg(windows)]
-    return Ok(command(distro, script));
+    {
+        Ok(command(distro, script))
+    }
     #[cfg(not(windows))]
     {
         let _ = script;

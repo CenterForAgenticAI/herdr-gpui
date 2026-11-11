@@ -41,6 +41,7 @@ mod selection;
 mod session;
 mod sidebar;
 mod split;
+mod start;
 mod tabs;
 mod view;
 mod worker;
@@ -80,7 +81,7 @@ pub(crate) const WORKSPACE: &str = "herdr-2";
 /// store tab, whose IDs count up from zero, ever reaches it.
 pub(crate) const SHELL_TAB: u64 = u64::MAX;
 
-type Started = std::sync::mpsc::Receiver<Result<TerminalInfo, sheprd_core_client::Error>>;
+type Started = std::sync::mpsc::Receiver<start::Outcome>;
 
 /// What a terminal being started is for.
 #[derive(Clone, Debug)]
@@ -724,7 +725,14 @@ impl SheprdWindow {
                 {
                     tracing::warn!(%error, "Could not hand a file to a herdr-core program");
                 }
-                let _ = send.send(started);
+                start::deliver(started, send, |terminal| {
+                    // The receiver vanished with its host/window. End only
+                    // the terminal this worker created, on its captured core;
+                    // never retry its ID against a replacement saved host.
+                    if let Err(error) = backend.kill(terminal) {
+                        tracing::warn!(%error, %terminal, "Could not end an abandoned herdr-core start");
+                    }
+                });
             });
         match spawned {
             Ok(_) => terminals.starting = Some((purpose, host, receive)),
@@ -838,7 +846,7 @@ impl SheprdWindow {
             return;
         };
         let outcome = match started.try_recv() {
-            Ok(outcome) => outcome,
+            Ok(outcome) => outcome.take(),
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.core_terminals.starting = None;
@@ -873,10 +881,12 @@ impl SheprdWindow {
                 self.end_core_terminal(&host, info.id);
             }
             Purpose::Tab { scope, workspace } => {
+                let terminal = info.id.clone();
                 let location = Location::core_terminal(Panes::single(info.id), false);
                 let Some(id) = Store::update(cx, |store| {
                     store.open(scope, &workspace, Some(location), None)
                 }) else {
+                    self.end_core_terminal(&host, terminal);
                     self.show_flash(Flash::warning(fl!("core-terminals-too-many-tabs")), cx);
                     return;
                 };

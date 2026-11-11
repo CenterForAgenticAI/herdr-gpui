@@ -60,8 +60,8 @@ fn remote_line(words: &[&str]) -> Option<String> {
     }
     let args: Vec<String> = words.iter().map(|word| format!("\"{word}\"")).collect();
     Some(format!(
-        " sh -c '{}'",
-        super::remote_program_script(&args.join(" "))
+        " sh -c {}",
+        shell_quote(&super::remote_program_script(&args.join(" ")))
     ))
 }
 
@@ -100,7 +100,10 @@ fn run(request: &Request, cancelled: &AtomicBool) -> Result<String, Error> {
     let line = line(&resume, program.as_deref())?;
     if program.is_none() {
         // i18n: data
-        let body = format!(" sh -c '{}'\n", super::remote_program_script("--version"));
+        let body = format!(
+            " sh -c {}\n",
+            shell_quote(&super::remote_program_script("--version"))
+        );
         existing::query(&host, &body, cancelled).map_err(Error::HostProgram)?;
     }
     let keys = {

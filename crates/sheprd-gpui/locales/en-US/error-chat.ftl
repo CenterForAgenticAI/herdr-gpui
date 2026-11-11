@@ -30,7 +30,7 @@ error-chat-start-agent-missing = { $agent } is not installed on this host
 error-chat-start-disabled = ACP chats are off in Settings
 error-chat-start-no-workspace = no workspace is focused
 error-chat-start-not-connected = Sheprd is not connected
-error-chat-start-not-local = chats start on this machine's Herdr or an SSH host's
+error-chat-start-not-local = this pane has no supported chat route
 error-chat-start-program-missing = sheprd-acp was not found beside Sheprd or on PATH
 error-chat-start-program-unknown = Sheprd is still looking for sheprd-acp
 error-chat-start-response = Herdr's answer did not name the chat's tab
@@ -53,7 +53,7 @@ error-chat-convert-core = herdr-core: { $error }
 # $command is the agent's name as the `herdr` command takes it, such as claude.
 error-chat-convert-no-session = Herdr reports no session for { $agent } in this pane; run `herdr integration install { $command }`, then restart the agent
 error-chat-convert-no-shell = { $agent } is the terminal's own program, with no shell to start its chat in
-error-chat-convert-not-reachable = agents move into chats on this machine's Herdr or an SSH host's, on macOS and Linux
+error-chat-convert-not-reachable = this pane has no supported chat conversion route
 error-chat-convert-not-running = { $agent } is not the program running in this pane
 error-chat-convert-stale = the window moved to another connection before the chat could start
 error-chat-convert-still-running = { $agent } did not stop in time; it is still in its terminal
