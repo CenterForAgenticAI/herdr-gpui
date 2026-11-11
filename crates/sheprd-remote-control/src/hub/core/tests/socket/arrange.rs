@@ -4,6 +4,7 @@
 use super::*;
 use crate::control::layout::Op;
 
+mod routes;
 mod saved;
 
 fn run_request(fake: &Fake) -> Value {

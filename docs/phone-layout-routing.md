@@ -22,6 +22,12 @@ under the lock. An intent already taken by the desktop is **not replayed**:
 its answer may have been lost after the change was saved. The phone receives
 an error promptly and should refresh before deciding what to do next.
 
+Desktop startup must also acquire this lock before reading or starting its
+saved-tabs writer. If a slow phone operation still holds it after the two-second
+startup budget, startup reports an ownership error and exits; opening Sheprd
+again after the operation finishes reads the complete updated layout. It never
+continues with an unlocked snapshot that could overwrite the phone's split.
+
 Saved-file edits serialize concurrent phones, preserve unrelated fields, and
 clean up a shell if recording its split fails. Splitting selects the new pane
 and clears zoom; zooming selects its pane. Saved and daemon-owned selections

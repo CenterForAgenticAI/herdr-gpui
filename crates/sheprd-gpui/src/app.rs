@@ -390,7 +390,15 @@ pub(crate) fn run() -> std::process::ExitCode {
     };
     // Fixtures start with no tabs and never write the file.
     let browser_tabs = if mode == LaunchMode::Normal {
-        crate::browser::Store::load()
+        match crate::browser::Store::load() {
+            Ok(store) => store,
+            Err(error) => {
+                tracing::error!(%error, "Cannot acquire saved-tab ownership");
+                // i18n: data
+                eprintln!("Cannot open saved tabs: {error}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
     } else {
         crate::browser::Store::default()
     };
