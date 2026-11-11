@@ -18,14 +18,12 @@
 use crate::{Core, Result, agent_kind, backend::info, wire::Terminal};
 use sheprd_backend::{AgentStatus, Process, TerminalId, TerminalInfo};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN, restore};
+pub use sheprd_client::herdr::convert::claude_record;
 use sheprd_client::herdr::{
     AgentKind,
     convert::{self, Resume},
 };
-use std::{
-    path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
-};
+use std::{path::Path, sync::atomic::AtomicBool};
 
 mod flags;
 
@@ -114,13 +112,6 @@ fn agent_is_program(record: &Terminal, agent: Agent) -> bool {
         .pid
         .zip(record.foreground.as_ref())
         .is_some_and(|(pid, front)| front.pid == pid && front_runs(front, agent))
-}
-
-/// Where Claude Code records the CLI with process ID `pid`.
-pub fn claude_record(home: &Path, pid: u32) -> PathBuf {
-    home.join(".claude")
-        .join("sessions")
-        .join(format!("{pid}.json"))
 }
 
 /// The line that starts `program` on `resume`'s session at `endpoint` in a

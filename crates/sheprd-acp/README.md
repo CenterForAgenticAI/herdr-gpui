@@ -300,6 +300,13 @@ checklist says only what is done, so no step shows as in progress. Gemini's
 tool calls carry no input to read and the pi translator reads no list, so
 neither shows a plan.
 
+OpenCode V2 release builds default `experimental.todo` to false. If no to-do
+tool is exposed to the model, Sheprd cannot supply a plan from its prose.
+Enable that setting in OpenCode to make `todowrite` available; Sheprd does not
+change the agent's configuration. Structured pending, in-progress, and completed
+items appear in **Plan**; cancelled items are omitted. Child-session plans and
+to-do calls never replace the parent conversation's plan.
+
 ### Codex and pi without an adapter
 
 The same holds for two more agents, each through a translator of its own
@@ -397,7 +404,28 @@ session's earlier prompts, whichever client sent them.
     from then on, until it completes. A sub-agent can be stopped, by
     interrupting its thread's turn, once that turn is known; a command
     cannot, as Codex has no request for one inside a thread.
-  - **Copilot** and **OpenCode**: a call whose input names an agent and a
+  - **OpenCode with child-session updates**: the handshake negotiates
+     `clientCapabilities._meta["opencode/child-session-updates"]`; a peer must
+     advertise the same capability. Its `opencode/session/child_update`
+     notifications create session-identity cards for foreground and background
+     children. Explicit `completed`, `failed`, and `interrupted` statuses end
+     them, including after the parent prompt returns or is cancelled. Completing
+     the launch tool never ends a child. Concurrent and nested children retain
+     their own steps through the notification's child ID and OpenCode's
+     session-prefixed tool IDs. An explicit new `running` execution can reopen
+     a continued child. The existing bounded activity/step limits apply; no
+     unbounded child-session registry or polling worker is added. Losing the
+     ACP process settles running activities as stopped. No Stop button is
+     offered because the extension supplies no per-child stop request.
+     This was checked against OpenCode 2.0.24's live handshake and upstream
+     [child wire contract](https://github.com/anomalyco/opencode/blob/966168800cb80f336cb4267f0484f193a15f1292/packages/cli/src/acp/child.ts),
+     [capability negotiation](https://github.com/anomalyco/opencode/blob/966168800cb80f336cb4267f0484f193a15f1292/packages/cli/src/acp/capabilities.ts),
+     and [cross-turn event consumer](https://github.com/anomalyco/opencode/blob/966168800cb80f336cb4267f0484f193a15f1292/packages/cli/src/acp/turn.ts).
+     Only events delivered by the peer are followed; this does not reconstruct
+     background jobs predating the ACP attachment or infer a terminal state
+     when a live peer stops reporting a child.
+  - **Copilot** and **older OpenCode without the extension**: a call whose
+    input names an agent and a
     prompt is a sub-agent, ending with its call, or with its turn if the agent
     never says. One sent to the background stays an ordinary card, as its end
     cannot be known. OpenCode marks a child session's updates in `_meta`: its
