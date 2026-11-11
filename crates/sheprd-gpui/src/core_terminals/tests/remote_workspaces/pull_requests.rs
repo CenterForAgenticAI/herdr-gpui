@@ -55,6 +55,33 @@ fn shown_remote_checkout_is_host_scoped_and_never_a_local_git_input(cx: &mut Tes
         assert_eq!(input.repo_key.as_deref(), Some("/remote/.git"));
         assert!(view.core_folder(tab, &terminal).is_none());
         assert!(view.git_input().is_none());
+        assert!(
+            view.sessions(1).core.is_none(),
+            "shown pane needs no kept workspace"
+        );
+        view.menu
+            .github_hosts
+            .insert(REMOTE.into(), crate::github::Auth::connected_fixture());
+        let tokens = view.pr_tokens().unwrap();
+        let origin = view.pr_origin().unwrap();
+        let now = std::time::Instant::now();
+        view.menu
+            .pr_cache
+            .scope((0, 0, String::new()), tokens.clone(), &tokens.key(), origin);
+        view.menu
+            .pr_cache
+            .seed(input.clone(), crate::pull_request::fixture().unwrap(), now);
+        view.menu.pr_cache.scope(
+            (0, 0, String::new()),
+            tokens.clone(),
+            &tokens.key(),
+            Origin::Local,
+        );
+        view.update_workspace_pr();
+        assert!(
+            view.menu.pr_cache.get(&input).is_some(),
+            "shown-only SSH input is prefetched in its own scope"
+        );
         view.selected_endpoint = 0;
         assert!(
             view.core_git_input().is_none(),
@@ -69,6 +96,15 @@ fn shown_remote_checkout_is_host_scoped_and_never_a_local_git_input(cx: &mut Tes
             view.core_git_input().is_none(),
             "edited host cannot reuse old checkout metadata"
         );
+        view.endpoints[1].connection.target = ConnectTarget::Wsl {
+            distro: "Ubuntu".into(),
+            session: "work".into(),
+        };
+        assert!(
+            view.pr_origin().is_none(),
+            "WSL must not fall back to a local PR origin"
+        );
+        assert!(view.endpoint_pr_view(1).is_none());
     });
 }
 
