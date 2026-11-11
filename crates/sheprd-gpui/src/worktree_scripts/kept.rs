@@ -172,6 +172,13 @@ impl SheprdWindow {
         let mut waiting = VecDeque::with_capacity(setups.len());
         let mut ready = None;
         for (launch, queued, target) in setups {
+            // Expiry also applies once the workspace exists: a setup must
+            // not run hours later merely because its host was not selected.
+            if queued.elapsed() > SETUP_WAIT {
+                self.local_error = Some(super::Error::SetupExpired.localize());
+                cx.notify();
+                continue;
+            }
             if !self.endpoints.iter().any(|endpoint| {
                 endpoint.id == launch.endpoint_id && endpoint.connection.target == target
             }) {
@@ -189,8 +196,6 @@ impl SheprdWindow {
                     ready = Some((launch, queued, target, workspace))
                 }
                 Some(_) => waiting.push_back((launch, queued, target)),
-                // The agent it lands with did not start.
-                None if queued.elapsed() > SETUP_WAIT => {}
                 None => waiting.push_back((launch, queued, target)),
             }
         }
@@ -371,5 +376,13 @@ impl SheprdWindow {
             .iter()
             .map(|(launch, _, _)| launch)
             .collect()
+    }
+
+    pub(crate) fn age_kept_setups(&mut self) {
+        if let Some(aged) = Instant::now().checked_sub(SETUP_WAIT * 2) {
+            for (_, queued, _) in &mut self.kept_scripts.setups {
+                *queued = aged;
+            }
+        }
     }
 }
