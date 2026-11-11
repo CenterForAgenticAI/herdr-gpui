@@ -663,6 +663,22 @@ impl OrchestratorView {
             .unwrap_or_default();
         let (stop_run, remove_run, agent) = (run.id.clone(), run.id.clone(), run.agent.clone());
         let restart_run = run.id.clone();
+        let restartable = self
+            .snapshot()
+            .sessions
+            .iter()
+            .any(|session| session.run_id == run.id && session.target.is_some());
+        let adoptable = self.snapshot().sessions.iter().any(|session| {
+            session.run_id == run.id
+                && session.target.is_none()
+                && matches!(session.pane, crate::orchestrator::Pane::Herdr2 { .. })
+        });
+        let legacy = self.snapshot().sessions.iter().any(|session| {
+            session.run_id == run.id
+                && session.target.is_none()
+                && session.adopted.is_none()
+                && matches!(session.pane, crate::orchestrator::Pane::Herdr2 { .. })
+        });
         let core = self.snapshot().sessions.iter().any(|session| {
             session.run_id == run.id
                 && matches!(
@@ -688,44 +704,57 @@ impl OrchestratorView {
                     .on_click(cx.listener(move |this, _, _, cx| this.open_run(index, cx))),
                 )
             })
-            .when(own && writable && current && (live || core), |el| {
+            .when(own && writable && adoptable, |el| {
                 el.child(
-                    div()
-                        .flex_1()
-                        .min_w(px(160.))
-                        .px_2()
-                        .py(px(4.))
-                        .rounded(px(corners::CONTROL))
-                        .border_1()
-                        .border_color(rgb(theme.active))
-                        .child(self.message.clone()),
-                )
-                .child(
                     look.button(
-                        ("orchestrator-card-send", index),
-                        fl!("orchestrator-send"),
+                        ("orchestrator-card-adopt", index),
+                        fl!("orchestrator-adopt"),
                         false,
                     )
-                    .on_click(cx.listener(|this, _, _, cx| this.send_message(cx))),
-                )
-                .child(
-                    look.button(
-                        ("orchestrator-card-stop", index),
-                        fl!("orchestrator-stop"),
-                        false,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.ask(
-                            Confirm::Stop {
-                                run: stop_run.clone(),
-                                agent: agent.clone(),
-                            },
-                            cx,
-                        );
-                    })),
+                    .on_click(cx.listener(move |this, _, _, cx| this.offer_adoption(index, cx))),
                 )
             })
-            .when(own && writable && core, |el| {
+            .when(
+                own && writable && current && (live || core) && !legacy,
+                |el| {
+                    el.child(
+                        div()
+                            .flex_1()
+                            .min_w(px(160.))
+                            .px_2()
+                            .py(px(4.))
+                            .rounded(px(corners::CONTROL))
+                            .border_1()
+                            .border_color(rgb(theme.active))
+                            .child(self.message.clone()),
+                    )
+                    .child(
+                        look.button(
+                            ("orchestrator-card-send", index),
+                            fl!("orchestrator-send"),
+                            false,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.send_message(cx))),
+                    )
+                    .child(
+                        look.button(
+                            ("orchestrator-card-stop", index),
+                            fl!("orchestrator-stop"),
+                            false,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.ask(
+                                Confirm::Stop {
+                                    run: stop_run.clone(),
+                                    agent: agent.clone(),
+                                },
+                                cx,
+                            );
+                        })),
+                    )
+                },
+            )
+            .when(own && writable && core && restartable, |el| {
                 el.child(
                     look.button(
                         ("orchestrator-card-restart", index),

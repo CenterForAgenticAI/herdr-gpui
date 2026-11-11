@@ -111,6 +111,8 @@ fn run(id: &str, item: &Item, state: RunState, started: &str) -> Run {
 
 fn session(run: &Run, pane: &str) -> HerdrSession {
     HerdrSession {
+        checkout_token: None,
+        adopted: None,
         target: None,
         run_id: run.id.clone(),
         host: None,

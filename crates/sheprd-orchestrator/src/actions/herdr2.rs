@@ -12,7 +12,7 @@ use chrono::Utc;
 use sheprd_client::shell_quote;
 use sheprd_remote::{
     teleport::Host,
-    work::{self, NewWorktree, Repository, Started, Worktree},
+    work::{self, NewWorktree, Started, Worktree},
 };
 use std::sync::atomic::AtomicBool;
 
@@ -23,9 +23,20 @@ struct Listed {
 
 #[derive(serde::Deserialize)]
 struct Address {
-    address: String,
     #[serde(default)]
     cwd: String,
+    #[serde(default)]
+    state: TerminalState,
+}
+
+#[derive(Default, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TerminalState {
+    Live,
+    Finished,
+    #[default]
+    #[serde(other)]
+    Other,
 }
 
 fn terminals(host: &Host, cancelled: &AtomicBool) -> Result<Listed> {
@@ -50,10 +61,19 @@ pub(super) fn unused_checkout(
     };
     let listed = terminals(host, cancelled)?;
     if listed.terminals.iter().any(|terminal| {
-        terminal.cwd.is_empty() || std::path::Path::new(&terminal.cwd).starts_with(path)
+        terminal.state != TerminalState::Finished
+            && (terminal.cwd.is_empty() || std::path::Path::new(&terminal.cwd).starts_with(path))
     }) {
         return Err(Error::InvalidCheckout);
     }
+    work::owned_agent::checkout_idle(
+        host,
+        &Worktree {
+            path: path.to_string_lossy().into_owned(),
+            opened: work::Opened::Herdr2,
+        },
+        cancelled,
+    )?;
     Ok(())
 }
 
@@ -79,11 +99,10 @@ pub(super) fn launch(
         base: &destination.commit,
         label: None,
     };
-    let repository = Repository::Herdr2 {
-        checkout: checkout.to_owned(),
-    };
-    let worktree = work::create(host, &repository, &new, cancelled)?;
-    *created = Some((host.clone(), worktree.clone()));
+    let worktree = work::owned_checkout::plan(host, checkout, &request.branch, cancelled)?;
+    // Creation itself can lose its reply. Record its planned path first and
+    // never delete a path without the successful-creation receipt.
+    *created = None;
     let (ssh, session) = place(&destination.target);
     run.workspace = Some(Workspace {
         backend: Backend::Herdr,
@@ -96,6 +115,8 @@ pub(super) fn launch(
     run.state = RunState::Starting;
     run.updated_at = Utc::now();
     let pending = HerdrSession {
+        checkout_token: Some(run.id.clone()),
+        adopted: None,
         run_id: run.id.clone(),
         target: Some(destination.target.clone()),
         host: ssh.clone(),
@@ -105,6 +126,7 @@ pub(super) fn launch(
         updated_at: run.updated_at,
     };
     store.update_run(run, Some(&pending))?;
+    work::owned_checkout::create(host, checkout, &worktree, &new, &run.id, cancelled)?;
     let agent = work::Agent {
         kind: request.kind,
         name,
@@ -121,6 +143,8 @@ pub(super) fn launch(
         });
     };
     let herdr_session = HerdrSession {
+        checkout_token: Some(run.id.clone()),
+        adopted: None,
         run_id: run.id.clone(),
         target: Some(destination.target.clone()),
         host: ssh,
@@ -165,6 +189,9 @@ pub(super) fn inspect(
     include_finished: bool,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
+    if let Some(receipt) = &session.adopted {
+        return super::legacy::verify(host, receipt, include_finished, cancelled);
+    }
     let workspace = run.workspace.as_ref().ok_or(Error::NothingToOpen)?;
     let path = workspace
         .path
@@ -241,23 +268,6 @@ pub(super) fn send(host: &Host, terminal: &str, text: &str, cancelled: &AtomicBo
 /// Ends the shell in `terminal` and the agent in it, as removing Herdr 1's
 /// workspace closes its panes. One already gone is no failure.
 pub(super) fn end(host: &Host, terminal: &str) -> Result<()> {
-    let line = format!(
-        "core_cli kill --json -- {} >/dev/null\n",
-        shell_quote(terminal)
-    );
-    let cancelled = AtomicBool::new(false);
-    let Err(error) = host.capture(&line, &cancelled) else {
-        return Ok(());
-    };
-    // A failed kill can mean "already gone", but also an unreachable host.
-    // Only a successful inventory proving absence permits checkout removal.
-    let listed = terminals(host, &cancelled)?;
-    if listed
-        .terminals
-        .iter()
-        .any(|found| found.address == terminal)
-    {
-        return Err(script("Ending the agent terminal")(error));
-    }
+    work::owned_agent::end_verified(host, terminal, &AtomicBool::new(false))?;
     Ok(())
 }

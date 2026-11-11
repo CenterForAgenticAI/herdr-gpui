@@ -15,3 +15,14 @@ fn restart_is_a_confirmation_request_scoped_to_the_callers_project() {
         );
     }
 }
+
+#[test]
+fn adoption_requests_read_only_evidence_then_user_confirmation() {
+    assert_eq!(
+        command(&["orchestrator", "adopt", "legacy-1"]),
+        ControlCommand::Orchestrator(control::OrchestratorCommand::Adopt {
+            repo: None,
+            run: "legacy-1".into(),
+        })
+    );
+}

@@ -43,9 +43,9 @@ impl Orchestrator {
 }
 
 impl SheprdWindow {
-    pub(crate) fn confirm_orchestrator_restart(
+    pub(crate) fn confirm_orchestrator_run(
         &mut self,
-        run: &str,
+        action: &sheprd_control_protocol::OrchestratorRun,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(view) = self
@@ -56,7 +56,14 @@ impl SheprdWindow {
         else {
             return false;
         };
-        view.update(cx, |view, cx| view.confirm_restart(run, cx))
+        view.update(cx, |view, cx| match action {
+            sheprd_control_protocol::OrchestratorRun::Restart { run } => {
+                view.confirm_restart(run, cx)
+            }
+            sheprd_control_protocol::OrchestratorRun::Adopt { run } => {
+                view.confirm_adoption(run, cx)
+            }
+        })
     }
     /// Whether the focused workspace's repository can be listed: a host
     /// scripts can run on, with a workspace open.

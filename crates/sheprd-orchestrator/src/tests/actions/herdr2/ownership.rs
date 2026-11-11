@@ -1,6 +1,50 @@
 use super::*;
 
 #[test]
+fn recreated_same_branch_checkout_does_not_inherit_the_old_runs_receipt() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(dir.path(), "");
+    fake_core(dir.path(), "idle");
+    let cancelled = AtomicBool::new(false);
+    perform(
+        &site,
+        &Action::Dispatch(Box::new(herdr2_request())),
+        &cancelled,
+    )
+    .unwrap();
+    let run = Store::open(&site.database)
+        .unwrap()
+        .runs()
+        .unwrap()
+        .remove(0);
+    let path = checkout(dir.path());
+    for args in [
+        vec!["worktree", "remove", "--force", path.to_str().unwrap()],
+        vec!["worktree", "add", path.to_str().unwrap(), "377-icons"],
+    ] {
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&site.main_root)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(path.join("unrelated.txt"), "keep this work").unwrap();
+    std::fs::write(
+        dir.path().join("home/core-inventory"),
+        r#"{"terminals":[]}"#,
+    )
+    .unwrap();
+    let before = core_calls(dir.path()).len();
+    assert!(perform(&site, &Action::Remove { run: run.id }, &cancelled).is_err());
+    assert!(path.join("unrelated.txt").exists());
+    assert_eq!(core_calls(dir.path()).len(), before);
+}
+
+#[test]
 fn replaced_terminal_is_neither_prompted_nor_killed_or_removed() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(dir.path(), "");

@@ -76,7 +76,7 @@ fn family(name: &str) -> &'static str {
             "sheprd devices [open]\n    Open the Devices overview tab in the caller's workspace."
         }
         "orchestrator" => {
-            "sheprd orchestrator [open] [--repo PATH]\n    Show the Issues section narrowed to the caller's project, or PATH's.\nsheprd orchestrator restart RUN [--repo PATH]\n    Open the confirmation to restart a loaded Herdr 2 run in this project.\n    The user confirms; its checkout is kept and its saved prompt/model reused.\nsheprd orchestrator items|issues|prs|tasks [--repo PATH]\n    List what it last synced, from its local database (no network).\n    Runs here; Sheprd need not run. Exits 4 before its first sync."
+            "sheprd orchestrator [open] [--repo PATH]\n    Show the Issues section narrowed to the caller's project, or PATH's.\nsheprd orchestrator restart RUN [--repo PATH]\n    Open the confirmation to restart a loaded Herdr 2 run in this project.\n    The user confirms; its checkout is kept and its saved prompt/model reused.\nsheprd orchestrator adopt RUN [--repo PATH]\n    Inspect a legacy run's current process and prepare an explicit adoption\n    confirmation. No control authority is granted until the user confirms.\nsheprd orchestrator items|issues|prs|tasks [--repo PATH]\n    List what it last synced, from its local database (no network).\n    Runs here; Sheprd need not run. Exits 4 before its first sync."
         }
         "review" => {
             "sheprd review [open]\n    Open the review of the caller's workspace's uncommitted changes."

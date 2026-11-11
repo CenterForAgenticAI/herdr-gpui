@@ -7,6 +7,7 @@
 //! It never blocks: the [`Service`] worker does the I/O, and the host pushes
 //! the theme, live agent statuses, and the GitHub account from its tick.
 
+mod adoption;
 mod browse;
 mod conversation;
 mod core_removal;
@@ -258,6 +259,7 @@ pub(crate) struct OrchestratorView {
     /// kept workspaces close once the worker forgot the run.
     core_removals: Vec<(String, core_removal::Checkout)>,
     pending_core_open: Option<String>,
+    adoption_pending: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -334,6 +336,7 @@ impl OrchestratorView {
             terminals: Vec::new(),
             core_removals: Vec::new(),
             pending_core_open: None,
+            adoption_pending: false,
             _subscriptions: vec![subscription],
         }
     }

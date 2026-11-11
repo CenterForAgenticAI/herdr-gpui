@@ -66,11 +66,18 @@ pub enum TabOp {
         #[serde(default)]
         repo: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        restart: Option<String>,
+        action: Option<OrchestratorRun>,
     },
     /// The review of the caller's workspace's uncommitted changes.
     Review,
     Px0,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum OrchestratorRun {
+    Adopt { run: String },
+    Restart { run: String },
 }
 
 impl TabOp {
