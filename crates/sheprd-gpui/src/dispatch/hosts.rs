@@ -119,6 +119,22 @@ impl SheprdWindow {
             .filter(|_| live.status.is_connected())
     }
 
+    /// Snapshot paths and load must belong to the host the scripts address.
+    /// A socket can be forwarded, and an unverified local peer proves no
+    /// ownership of this computer's files.
+    fn dispatch_snapshot(&self, index: usize) -> Option<&ClientShellSnapshot> {
+        let endpoint = &self.endpoints[index];
+        let live = if index == self.selected_endpoint {
+            &self.live
+        } else {
+            &endpoint.live
+        };
+        self.endpoint_snapshot(index).filter(|_| {
+            host_for(&endpoint.connection.target).is_ok()
+                && (endpoint.connection.target.is_remote() || live.local_daemon_peer)
+        })
+    }
+
     /// Whether new work dispatched to `endpoint_id` lands in a workspace the
     /// app keeps for Herdr 2, independent of the window's selected host.
     pub(crate) fn dispatch_keeps(&self, endpoint_id: &str) -> bool {
@@ -154,7 +170,7 @@ impl SheprdWindow {
         // Git checkouts opened in Herdr 1 are valid inputs to Herdr 2 too.
         // The kept preparation path consumes their Git keys, never their IDs.
         let mut found = self
-            .endpoint_snapshot(index)
+            .dispatch_snapshot(index)
             .map(open_repositories)
             .unwrap_or_default();
         let Some(session) = self.sessions(index).core else {
@@ -198,7 +214,7 @@ impl SheprdWindow {
                         ))
             })
             .map(|(index, endpoint)| {
-                let snapshot = self.endpoint_snapshot(index);
+                let snapshot = self.dispatch_snapshot(index);
                 let host = Host::of(&crate::browser::scope(endpoint));
                 let kept = (self.dispatch_keeps(&endpoint.id)
                     && (Some(index) == self.core_host()
