@@ -389,15 +389,16 @@ struct Destination {
 
 /// Dispatches `request`. An agent sent to a bead claims it first, on the
 /// host of its database, so a bead someone holds starts nothing. A launch
-/// that fails gives the claim back, so nothing stays in progress that no
-/// agent is working on; the bead's status is otherwise the agent's to change.
+/// that fails before retaining an agent gives the claim back. An uncertain
+/// live agent keeps it, since releasing it could authorize duplicate work.
 fn dispatch(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> Result<()> {
+    let mut retained = false;
     let Some(key) = request.bead() else {
-        return start_run(site, request, cancelled);
+        return start_run(site, request, cancelled, &mut retained);
     };
     let claim = beads::claim::take(&site.host, &key.source, &key.native_id, cancelled)?;
-    let outcome = start_run(site, request, cancelled);
-    if outcome.is_err() {
+    let outcome = start_run(site, request, cancelled, &mut retained);
+    if outcome.is_err() && !retained {
         // Run even when cancelled, as a failed run's worktree is removed.
         let released =
             beads::claim::release(&site.host, &key.source, &claim, &AtomicBool::new(false));
@@ -412,7 +413,12 @@ fn dispatch(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> R
     outcome
 }
 
-fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> Result<()> {
+fn start_run(
+    site: &Site,
+    request: &DispatchRequest,
+    cancelled: &AtomicBool,
+    retained: &mut bool,
+) -> Result<()> {
     let mut store = Store::open(&site.database)?;
     let name = agent_name();
     let now = Utc::now();
@@ -447,6 +453,9 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
         }
         outcome
     });
+    // Set before fallible failure journaling: even a database failure cannot
+    // turn a retained terminal into permission to release its task claim.
+    *retained = created.is_none() && run.workspace.is_some();
     if let Err(error) = &outcome {
         // Undo the checkout of a run that never got going; the branch stays.
         // A checkout that would not go keeps its session, which names the
