@@ -4,6 +4,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("the agent ended unexpectedly")]
+    AgentEnded,
     #[error("the agent's {0} pipe was not available")]
     AgentPipe(&'static str),
     #[error("could not start the agent `{program}`")]
