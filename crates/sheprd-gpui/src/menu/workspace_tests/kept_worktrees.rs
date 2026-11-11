@@ -159,7 +159,10 @@ fn a_made_checkout_lands_in_a_kept_workspace(cx: &mut TestAppContext) {
             view.menu.creation = Some("kept-1".into());
             view.kept_worktree_done.push(KeptDone::Checkout {
                 request: "kept-1".into(),
-                landing: Box::new(KeptLanding::shell(Some("lane"))),
+                landing: Box::new(KeptLanding::shell(
+                    Some("lane"),
+                    view.endpoints[0].connection.target.clone(),
+                )),
                 result: Ok((
                     Ask::Create {
                         branch: "lane".into(),
@@ -197,7 +200,10 @@ fn a_refused_checkout_keeps_the_dialog_open(cx: &mut TestAppContext) {
             view.menu.creation = Some("kept-2".into());
             view.kept_worktree_done.push(KeptDone::Checkout {
                 request: "kept-2".into(),
-                landing: Box::new(KeptLanding::shell(None)),
+                landing: Box::new(KeptLanding::shell(
+                    None,
+                    view.endpoints[0].connection.target.clone(),
+                )),
                 result: Err(crate::Error::StaleWorkspace),
             });
             view.poll_kept_worktree(window, cx);
@@ -229,6 +235,7 @@ fn deleting_a_kept_checkout_names_its_folder_and_closes_it(cx: &mut TestAppConte
             assert_eq!(deletion.path.as_deref(), Some(LINKED));
             deletion.pending = Some("kept-3".into());
             view.kept_worktree_done.push(KeptDone::Removed {
+                target: view.endpoints[0].connection.target.clone(),
                 scope: crate::browser::scope(&view.endpoints[0]),
                 request: "kept-3".into(),
                 workspace: id.clone(),
@@ -261,6 +268,7 @@ fn a_kept_checkout_with_changes_asks_to_discard_them(cx: &mut TestAppContext) {
                 ..Deletion::new(None, false)
             });
             view.kept_worktree_done.push(KeptDone::Removed {
+                target: view.endpoints[0].connection.target.clone(),
                 scope: crate::browser::scope(&view.endpoints[0]),
                 request: "kept-4".into(),
                 workspace: id.clone(),
@@ -285,7 +293,10 @@ fn work_finishing_together_all_lands(cx: &mut TestAppContext) {
             for (request, path) in [("kept-5", NEW), ("kept-6", other)] {
                 view.kept_worktree_done.push(KeptDone::Checkout {
                     request: request.into(),
-                    landing: Box::new(KeptLanding::shell(None)),
+                    landing: Box::new(KeptLanding::shell(
+                        None,
+                        view.endpoints[0].connection.target.clone(),
+                    )),
                     result: Ok((Ask::Open { path: path.into() }, path.into())),
                 });
             }
