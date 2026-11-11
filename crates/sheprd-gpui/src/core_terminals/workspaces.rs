@@ -301,7 +301,7 @@ impl SheprdWindow {
     }
 
     /// Keeps a new workspace for `scope`, named for `label`, else its folder.
-    fn keep_workspace_in(
+    pub(crate) fn keep_workspace_in(
         &mut self,
         scope: &Scope,
         label: Option<&str>,

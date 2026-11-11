@@ -118,12 +118,12 @@ fn interrupted_starting_the_agent_only_offers_the_prompt() {
 }
 
 #[test]
-fn interrupted_sending_the_prompt_waits_for_the_user_to_resend_it() {
+fn interrupted_sending_the_prompt_does_not_offer_a_duplicate_submission() {
     let fan_out = interrupted_after(4);
     let lane = &fan_out.lanes[0];
     assert_eq!(lane.state, LaneState::Interrupted(Checkpoint::Prompting));
     assert!(lane.state.label().contains("may not have arrived"));
-    assert_eq!(fan_out.resumable(0), Some(Resume::Prompt));
+    assert_eq!(fan_out.resumable(0), None);
     assert_eq!(fan_out.interrupted(), 2);
 }
 
@@ -248,7 +248,7 @@ fn a_failed_resume_is_offered_again_without_a_second_agent() {
     assert_eq!(fan_out.resumable(0), Some(Resume::Prompt));
     let mut fan_out = interrupted_after(4);
     fan_out.lanes[0].state = LaneState::Failed("connection lost".into());
-    assert_eq!(fan_out.resumable(0), Some(Resume::Prompt));
+    assert_eq!(fan_out.resumable(0), None);
 }
 
 #[test]

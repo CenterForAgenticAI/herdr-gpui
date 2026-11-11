@@ -243,6 +243,14 @@ fn server_messages_match_the_swift_fixtures() {
         "error",
         &ServerMessage::Error {
             message: "no such chat".into(),
+            view: None,
+        },
+    );
+    check(
+        "error_term",
+        &ServerMessage::Error {
+            message: "no such terminal".into(),
+            view: Some(View::Term { pane: "p2".into() }),
         },
     );
     check(
@@ -317,6 +325,7 @@ fn every_fixture_reads_back_as_what_wrote_it() {
         "term_screen",
         "reload",
         "error",
+        "error_term",
         "bye",
     ] {
         let text = std::fs::read_to_string(dir().join(format!("{name}.json"))).unwrap();
