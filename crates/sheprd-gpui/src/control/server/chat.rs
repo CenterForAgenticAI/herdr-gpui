@@ -33,6 +33,9 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
                     .flatten();
                 let started = match core {
                     Some(tab) => view.start_core_chat(agent, tab, cx),
+                    None if beside.is_none() && view.kept_in_front().is_some() => {
+                        view.start_kept_core_chat(agent, cx)
+                    }
                     None => view.start_chat(agent, beside.as_deref()),
                 };
                 match started {
@@ -151,6 +154,7 @@ fn convert_code(error: &crate::chat::ConvertError) -> ErrorCode {
         | ConvertError::Core(_)
         | ConvertError::Existing(_)
         | ConvertError::NotConnected
+        | ConvertError::Remote(_)
         | ConvertError::Stale
         | ConvertError::Type(_)
         | ConvertError::Worker(_) => ErrorCode::Failed,

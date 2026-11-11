@@ -65,6 +65,7 @@ impl Localize for ConvertError {
             Self::NotConnected => fl!("error-chat-start-not-connected"),
             Self::NotReachable => fl!("error-chat-convert-not-reachable"),
             Self::Program(error) => error.localize(),
+            Self::Remote(_) => fl!("error-chat-remote"),
             Self::Stale => fl!("error-chat-convert-stale"),
             Self::Type(error) => error.localize(),
             Self::Worker(_) => fl!("error-chat-convert-worker"),

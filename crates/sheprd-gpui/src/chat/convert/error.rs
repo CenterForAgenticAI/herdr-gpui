@@ -28,6 +28,8 @@ pub enum Error {
     NotReachable,
     #[error(transparent)]
     Program(#[from] crate::chat::StartError),
+    #[error(transparent)]
+    Remote(#[from] super::remote::Error),
     #[error("the window moved to another connection before the chat could start")]
     Stale,
     #[error("{0}")]

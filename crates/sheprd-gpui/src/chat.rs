@@ -31,6 +31,7 @@ mod prepared;
 pub(crate) mod preview;
 mod rail_folds;
 mod reader;
+mod remote_route;
 mod restore;
 mod rich;
 mod selection;
@@ -167,6 +168,10 @@ pub(crate) enum Surface {
     Herdr,
     /// A herdr-core terminal, drawn over its pane in a herdr-core tab.
     Core(sheprd_backend::TerminalId),
+    RemoteCore {
+        host: crate::core_terminals::Host,
+        terminal: sheprd_backend::TerminalId,
+    },
 }
 
 impl Target {
@@ -182,6 +187,8 @@ impl Target {
 pub(crate) enum Route {
     /// Its socket in this user's private directory on this machine.
     Local,
+    /// A saved cloud machine or WSL distribution, through its authenticated connector.
+    Remote(sheprd_client::ConnectTarget),
     /// `herdr-acp connect` on the SSH host the daemon runs on, carried over
     /// `ssh`; the program there is reached as that host's user.
     Ssh(String),
@@ -200,6 +207,19 @@ const REMOTE_PROGRAM_DIRS: &[&str] = &[
     "/Applications/Herdr.app/Contents/MacOS",      // i18n: data
     "/Applications/Sheprd.app/Contents/MacOS",     // i18n: data
 ];
+
+impl Route {
+    pub(super) fn remote_name(&self) -> Option<&str> {
+        match self {
+            Self::Local => None,
+            Self::Ssh(host) => Some(host),
+            Self::Remote(sheprd_client::ConnectTarget::Wsl { distro, .. }) => Some(distro),
+            #[cfg(feature = "cloud")]
+            Self::Remote(sheprd_client::ConnectTarget::Cloud { machine, .. }) => Some(machine),
+            Self::Remote(_) => Some("remote"),
+        }
+    }
+}
 
 /// The remote `/bin/sh` script that runs the first `sheprd-acp` found with
 /// `args`, or says where it looked and exits 127. `args` must be

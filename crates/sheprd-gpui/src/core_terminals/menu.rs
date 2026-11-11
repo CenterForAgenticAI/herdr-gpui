@@ -260,8 +260,7 @@ impl SheprdWindow {
             (Action::Mute(row), _) => self.apply_core_mute_row(tab, row, cx),
             (Action::MoveToChat(terminal), _) => {
                 // A refusal leaves the agent running, and says why.
-                if let Err(error) =
-                    self.convert_to_chat(Some(&crate::chat::core_pane::key(&terminal)))
+                if let Err(error) = self.convert_to_chat(Some(&self.core_chat_key(tab, &terminal)))
                 {
                     self.show_flash(
                         crate::window::Flash::warning(fl!(

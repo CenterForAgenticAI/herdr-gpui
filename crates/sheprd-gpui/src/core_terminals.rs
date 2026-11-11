@@ -152,12 +152,10 @@ struct TabPanes {
 }
 
 impl TabPanes {
-    /// Whether chats are drawn over the tab's panes: it drives its
-    /// terminals, and they run in this computer's core. A chat runs
-    /// `herdr-acp`, whose program and socket are this computer's, so a tab
-    /// on another host shows its terminals only.
+    /// Only driven tabs draw interactive chats. Their owning host determines
+    /// the ACP launch and attach route; mirrors remain terminal-only.
     fn holds_chats(&self) -> bool {
-        !self.observe && self.host == Host::Local
+        !self.observe
     }
 
     fn new(host: Host, panes: Panes, observe: bool) -> Self {
@@ -445,12 +443,12 @@ impl CoreTerminals {
     }
 
     /// What this computer's core reports of the terminals in the panes of
-    /// tabs that hold chats, which a chat may be drawn over. A mirror only
-    /// watches, and a tab on another host runs no chat.
+    /// tabs that hold chats. Local-only readers use this iterator; native
+    /// chat discovery uses `routed_chat_terminals` to retain host identity.
     pub(crate) fn chat_terminals(&self) -> impl Iterator<Item = &TerminalInfo> {
         self.tabs
             .values()
-            .filter(|shown| shown.holds_chats())
+            .filter(|shown| shown.holds_chats() && shown.host == Host::Local)
             .flat_map(|shown| shown.panes.terminals())
             .filter_map(|terminal| self.infos.get(terminal))
     }
@@ -521,7 +519,7 @@ impl CoreTerminals {
     }
 
     /// Whether `tab` is a herdr-core tab that holds chats: it drives its
-    /// terminals, rather than a mirror that only watches, on this computer.
+    /// terminals, rather than a mirror that only watches, on any host.
     pub(crate) fn drives(&self, tab: TabId) -> bool {
         self.tabs.get(&tab).is_some_and(TabPanes::holds_chats)
     }
@@ -556,7 +554,9 @@ impl CoreTerminals {
     pub(crate) fn tab_of(&self, terminal: &TerminalId) -> Option<TabId> {
         self.tabs
             .iter()
-            .find(|(_, shown)| shown.holds_chats() && shown.panes.contains(terminal))
+            .find(|(_, shown)| {
+                shown.host == Host::Local && shown.holds_chats() && shown.panes.contains(terminal)
+            })
             .map(|(id, _)| *id)
     }
 

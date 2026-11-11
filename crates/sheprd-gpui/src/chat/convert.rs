@@ -11,6 +11,7 @@
 
 mod core;
 mod error;
+mod remote;
 
 pub(crate) use core::Job as CoreJob;
 
@@ -202,6 +203,9 @@ impl SheprdWindow {
         if self.chats.converting.is_some() || self.chats.converting_core.is_some() {
             return Err(Error::AlreadyConverting);
         }
+        if let Some(pane) = pane.filter(|pane| pane.starts_with("core@")) {
+            return self.convert_remote_core_to_chat(pane);
+        }
         if let Some(terminal) = pane.and_then(core::terminal) {
             return self.convert_core_to_chat(terminal);
         }
@@ -210,6 +214,7 @@ impl SheprdWindow {
             Route::Local if cfg!(windows) => return Err(Error::NotReachable),
             Route::Local => Some(self.chats.program.found()?.to_owned()),
             Route::Ssh(_) => None,
+            Route::Remote(_) => return Err(Error::NotReachable),
         };
         let snapshot = self
             .live
@@ -259,7 +264,12 @@ impl SheprdWindow {
     /// pane before Herdr's focused one, reporting a failure as a flash.
     pub(crate) fn convert_to_chat_or_flash(&mut self, window: &Window, cx: &mut Context<Self>) {
         let focused = self.core_terminals.focused_pane(window, cx);
-        let core = focused_core_key(focused, |tab| self.core_terminals.drives(tab));
+        let core = match focused {
+            Some((tab, terminal)) if self.core_terminals.drives(tab) => {
+                Ok(Some(self.core_chat_key(tab, &terminal)))
+            }
+            other => focused_core_key(other, |_| false),
+        };
         if let Err(error) = core.and_then(|core| self.convert_to_chat(core.as_deref())) {
             self.flash_convert_error(&error, cx);
         }

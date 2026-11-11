@@ -125,6 +125,20 @@ pub(crate) fn command(distro: &str, script: &str) -> Command {
     command
 }
 
+/// Runs a script with the distribution's shell, leaving stdin for a protocol.
+pub fn script_command(distro: &str, script: &str) -> Result<std::process::Command> {
+    if !valid_distro(distro) {
+        return Err(Error::InvalidDistro.into());
+    }
+    #[cfg(windows)]
+    return Ok(command(distro, script));
+    #[cfg(not(windows))]
+    {
+        let _ = script;
+        Err(Error::Unsupported.into())
+    }
+}
+
 /// A `wsl.exe` child running `/bin/sh -s` in the default user's home inside
 /// `distro`, reading its script from standard input, as `ssh::script_command`
 /// does on a host. Nothing is started but the distribution. The caller owns
