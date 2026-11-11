@@ -133,7 +133,7 @@ fn a_kept_caller_cannot_mute_in_a_window_that_does_not_hold_it(cx: &mut gpui::Te
         ..here.clone()
     };
     cx.update(|cx| {
-        let response = super::super::super::in_window(&wrong_window, cx, |view, _, cx| {
+        let response = in_window(&wrong_window, cx, |view, _, cx| {
             mute::set(view, &wrong_window, true, cx)
         });
         assert!(error_code(&response).is_some(), "{response:?}");
@@ -207,12 +207,20 @@ fn kept_worktree_commands_open_confirmation_with_a_valid_branch_selection(
             let input = view.menu.input.as_ref().unwrap();
             assert_eq!(input.text, branch);
             assert!(input.selection.end <= branch.len());
-            assert!(view.menu.creation.is_none(), "the user confirms creation");
+            assert_eq!(
+                view.menu.page,
+                Some(Page::Dialog(crate::menu::WorkspaceAction::NewWorktree)),
+                "the user confirms creation"
+            );
             view.dismiss_menu(window, cx);
             let response = worktrees::dialog(view, &here, worktrees::Dialog::Open, window, cx);
             assert!(matches!(response, Response::Done { .. }), "{response:?}");
             assert!(view.worktree_listing());
-            assert!(view.menu.creation.is_none(), "the user picks a checkout");
+            assert_eq!(
+                view.menu.page,
+                Some(Page::Dialog(crate::menu::WorkspaceAction::NewWorktree)),
+                "the user picks a checkout"
+            );
         })
     });
 }
