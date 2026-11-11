@@ -157,10 +157,11 @@ impl AgentKind {
     }
 
     /// Whether a reported session reference identifies a session this kind
-    /// can resume. Only Herdr's own integrations are trusted to report one,
-    /// and only with the reference kinds Herdr's restore accepts.
+    /// can resume. References come from Herdr's integrations or the verified
+    /// Sheprd session-binding reader, with the reference kinds restore accepts.
     pub fn accepts(self, session: &AgentSession) -> bool {
-        session.source.strip_prefix("herdr:") == Some(self.integration())
+        (session.source.strip_prefix("herdr:") == Some(self.integration())
+            || session.source == super::sessions::SOURCE)
             && session.agent == self.name()
             && match (self, session.kind) {
                 (Self::Pi | Self::Omp, SessionKind::Path) => valid_path(&session.value),
@@ -202,6 +203,8 @@ impl AgentKind {
                 "--fallback-model",
             ],
             Self::Codex => &[
+                "--enable",
+                "--disable",
                 "-m",
                 "--model",
                 "-c",
