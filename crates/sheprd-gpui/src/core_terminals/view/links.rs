@@ -235,9 +235,15 @@ impl CoreTerminalView {
         else {
             return false;
         };
-        // A program reading the mouse keeps every press but one on a link
-        // already verified under the pointer.
-        if self.screen.mouse_reporting && self.links.hovered.as_ref() != Some(&link) {
+        // OSC 8 itself identifies an explicit link, even when a file is
+        // missing or its target is only understood by a handler. Existence
+        // gates the ordinary file opener, not offering this user click.
+        let explicit = self.cell_at(event.position).is_some_and(|cell| {
+            self.screen.frame.as_deref().is_some_and(|frame| {
+                crate::terminal::frame_hyperlink_at(frame, cell.column, cell.row).is_some()
+            })
+        });
+        if self.screen.mouse_reporting && !explicit && self.links.hovered.as_ref() != Some(&link) {
             return false;
         }
         if let Some(file) = self.file_link(&link.target) {
