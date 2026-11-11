@@ -15,6 +15,10 @@ pub mod fanout;
 mod inspect;
 pub mod owned_agent;
 
+/// Ownership receipts for newly created linked checkouts. The existing
+/// marker format is shared with fan-out so saved receipts remain readable.
+pub use fanout::checkouts as owned_checkout;
+
 pub use inspect::{git, identity, open};
 
 pub use error::{Error, Result, Step};
