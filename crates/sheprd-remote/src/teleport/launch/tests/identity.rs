@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn resumed_flags_leave_paths_outside_the_checkout_alone() {
+    let flags = strings(&[
+        "--settings",
+        "/backup/work/app/settings.json",
+        "--settings=/backup/work/app/settings.json",
+        "--add-dir=/work/application",
+        "--settings=/work/app/settings.json",
+    ]);
+    assert_eq!(
+        resume_command(
+            AgentKind::Claude,
+            "session-1",
+            &flags,
+            "/work/app",
+            "/dest/app"
+        ),
+        strings(&[
+            "claude",
+            "--resume",
+            "session-1",
+            "--settings",
+            "/backup/work/app/settings.json",
+            "--settings=/backup/work/app/settings.json",
+            "--add-dir=/work/application",
+            "--settings=/dest/app/settings.json"
+        ])
+    );
+}
+
+#[test]
 fn resumed_flags_move_but_destination_session_paths_do_not_move_twice() {
     assert_eq!(
         resume_command(

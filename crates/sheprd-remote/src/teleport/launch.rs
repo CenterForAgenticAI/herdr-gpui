@@ -133,7 +133,16 @@ pub(super) fn resume_command(
     // reference already names the destination and must not be remapped twice.
     let flags = flags
         .iter()
-        .map(|flag| String::from_utf8_lossy(&rewrite_paths(flag.as_bytes(), from, to)).into_owned())
+        .map(|flag| {
+            if let Some((name, value)) = flag.split_once('=')
+                && name.starts_with('-')
+            {
+                return remap(value, from, to)
+                    .map(|value| format!("{name}={value}"))
+                    .unwrap_or_else(|| flag.clone());
+            }
+            remap(flag, from, to).unwrap_or_else(|| flag.clone())
+        })
         .collect::<Vec<_>>();
     agent.resume_argv(reference, &flags)
 }
