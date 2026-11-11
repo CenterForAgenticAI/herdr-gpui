@@ -268,7 +268,8 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
         let _ = inputs.send(Input::Shutdown);
         result
     };
-    let expected = session_thread.join().unwrap_or(false) && result.is_ok();
+    let ended = session_thread.join().unwrap_or(false);
+    let expected = ended && result.is_ok();
     // Only an intentional close or successful agent exit forgets continuity.
     // A failed view, failed agent, or panicked session keeps its record.
     if expected && let Some(keeper) = &keeper {
@@ -278,7 +279,21 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
     if let Some(reporter) = reporter {
         reporter.close();
     }
+    if options.headless {
+        return headless_result(ended);
+    }
     result
+}
+
+/// Headless, the chat program's exit status is the agent's. A failed or
+/// crashed agent must not look like a chat that finished: core keeps a
+/// recovery shell only for a program that did not end normally.
+fn headless_result(expected: bool) -> anyhow::Result<()> {
+    if expected {
+        Ok(())
+    } else {
+        Err(crate::Error::AgentEnded.into())
+    }
 }
 
 fn listen(
@@ -299,3 +314,7 @@ fn listen(
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;
