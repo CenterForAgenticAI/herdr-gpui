@@ -185,21 +185,21 @@ async fn login(
     let metrics = &board.shared.hub.metrics;
     let address = board.shared.address(peer, &headers);
     let now = Instant::now();
-    // A blocked address is refused before its token is looked at, so it
-    // learns nothing from trying.
-    if let Verdict::Blocked(_) = board.lockout.check(address, now) {
-        metrics.login(Login::Blocked);
-        return redirect("/dashboard/login?blocked", None);
-    }
     if !allow(&board.everyone, (), now_secs().saturating_mul(1000)) {
         metrics.login(Login::Limited);
         return redirect("/dashboard/login?limited", None);
     }
+    // The try is reserved before the token is looked at, under one lock,
+    // so a blocked address learns nothing and requests sent at once
+    // cannot get more than three guesses between them.
+    if let Verdict::Blocked(_) = board.lockout.attempt(address, now) {
+        metrics.login(Login::Blocked);
+        return redirect("/dashboard/login?blocked", None);
+    }
     let accepted = auth::login_form(&body).is_some_and(|token| board.account.check(&token));
     if !accepted {
         metrics.login(Login::Failed);
-        let verdict = board.lockout.fail(address, now);
-        if let Verdict::Blocked(_) = verdict {
+        if board.lockout.exhausted(address, now) {
             tracing::warn!("an address was blocked after wrong dashboard tokens");
             // Three wrong tokens is also a ban from the whole relay.
             board

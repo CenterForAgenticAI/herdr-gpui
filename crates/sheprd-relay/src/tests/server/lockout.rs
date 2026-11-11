@@ -1,5 +1,6 @@
-//! The dashboard lockout: three wrong tries block an address for a while,
-//! a block runs out, and memory stays bounded.
+//! The dashboard lockout: each try is reserved before its token is
+//! checked, three block an address for a while, a block runs out, and
+//! signing in clears the count.
 
 use crate::dashboard::lockout::{BLOCK, Lockout, TRIES, Verdict};
 use std::{
@@ -12,22 +13,41 @@ fn address(last: u8) -> IpAddr {
 }
 
 #[test]
-fn the_third_wrong_try_blocks_for_the_block_time() {
+fn three_tries_are_checked_then_the_address_is_blocked() {
     let lockout = Lockout::default();
     let now = Instant::now();
-    for _ in 1..TRIES {
-        assert_eq!(lockout.fail(address(1), now), Verdict::Allowed);
-        assert_eq!(lockout.check(address(1), now), Verdict::Allowed);
+    for _ in 0..TRIES {
+        assert_eq!(lockout.attempt(address(1), now), Verdict::Allowed);
     }
-    assert_eq!(lockout.fail(address(1), now), Verdict::Blocked(BLOCK));
-    assert_eq!(lockout.check(address(1), now), Verdict::Blocked(BLOCK));
+    // The third try was checked; it left the address blocked.
+    assert!(lockout.exhausted(address(1), now));
+    assert_eq!(lockout.attempt(address(1), now), Verdict::Blocked(BLOCK));
     let later = now + Duration::from_secs(60);
     assert_eq!(
         lockout.check(address(1), later),
         Verdict::Blocked(BLOCK - Duration::from_secs(60))
     );
     // Others are untouched.
-    assert_eq!(lockout.check(address(2), now), Verdict::Allowed);
+    assert_eq!(lockout.attempt(address(2), now), Verdict::Allowed);
+}
+
+#[test]
+fn tries_sent_at_once_get_three_guesses_between_them() {
+    let lockout = std::sync::Arc::new(Lockout::default());
+    let now = Instant::now();
+    let checked: usize = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..64)
+            .map(|_| {
+                let lockout = std::sync::Arc::clone(&lockout);
+                scope.spawn(move || lockout.attempt(address(3), now) == Verdict::Allowed)
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| usize::from(handle.join().unwrap()))
+            .sum()
+    });
+    assert_eq!(checked, TRIES as usize);
 }
 
 #[test]
@@ -35,11 +55,12 @@ fn a_block_runs_out_and_starts_the_count_again() {
     let lockout = Lockout::default();
     let now = Instant::now();
     for _ in 0..TRIES {
-        lockout.fail(address(3), now);
+        lockout.attempt(address(4), now);
     }
     let after = now + BLOCK;
-    assert_eq!(lockout.check(address(3), after), Verdict::Allowed);
-    assert_eq!(lockout.fail(address(3), after), Verdict::Allowed);
+    assert_eq!(lockout.check(address(4), after), Verdict::Allowed);
+    assert_eq!(lockout.attempt(address(4), after), Verdict::Allowed);
+    assert!(!lockout.exhausted(address(4), after));
 }
 
 #[test]
@@ -47,10 +68,11 @@ fn old_wrong_tries_are_forgotten() {
     let lockout = Lockout::default();
     let now = Instant::now();
     for _ in 1..TRIES {
-        lockout.fail(address(4), now);
+        lockout.attempt(address(5), now);
     }
-    // Long after, one more wrong try starts a fresh count.
-    assert_eq!(lockout.fail(address(4), now + BLOCK), Verdict::Allowed);
+    // Long after, one more try starts a fresh count.
+    lockout.attempt(address(5), now + BLOCK);
+    assert!(!lockout.exhausted(address(5), now + BLOCK));
 }
 
 #[test]
@@ -58,10 +80,12 @@ fn signing_in_clears_the_count() {
     let lockout = Lockout::default();
     let now = Instant::now();
     for _ in 1..TRIES {
-        lockout.fail(address(5), now);
+        lockout.attempt(address(6), now);
     }
-    lockout.succeed(address(5));
-    for _ in 1..TRIES {
-        assert_eq!(lockout.fail(address(5), now), Verdict::Allowed);
+    // The last allowed try is the right token.
+    assert_eq!(lockout.attempt(address(6), now), Verdict::Allowed);
+    lockout.succeed(address(6));
+    for _ in 0..TRIES {
+        assert_eq!(lockout.attempt(address(6), now), Verdict::Allowed);
     }
 }

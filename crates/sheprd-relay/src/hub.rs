@@ -47,6 +47,9 @@ pub const PAIRING_SESSION: Duration = Duration::from_secs(10 * 60);
 #[derive(Debug)]
 pub struct Hub {
     pub access: Access,
+    /// Wakes every QUIC connection when an address is banned, so the
+    /// banned one closes itself; each checks its own address.
+    bans: tokio::sync::broadcast::Sender<()>,
     dials: Mutex<Limiter<IpAddr>>,
     /// Bans, earned and manual.
     pub guard: Guard,
@@ -156,6 +159,7 @@ impl Hub {
     pub fn new(limits: Limits, access: Access) -> Self {
         Self {
             access,
+            bans: tokio::sync::broadcast::channel(16).0,
             dials: Mutex::new(Limiter::new(Rate::per_minute(limits.dials_per_minute))),
             guard: Guard::new(limits.auto_ban, limits.max_transfer_per_hour),
             limits,
@@ -431,6 +435,12 @@ impl Hub {
         }
     }
 
+    /// Told after each ban, to close connections a ban now covers.
+    #[must_use]
+    pub fn ban_notices(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.bans.subscribe()
+    }
+
     /// Whether `address` is banned now.
     #[must_use]
     pub fn is_banned(&self, address: IpAddr) -> bool {
@@ -469,6 +479,7 @@ impl Hub {
         for _ in 0..removed {
             self.metrics.lower(Gauge::Listeners);
         }
+        let _ = self.bans.send(());
     }
 
     /// Ends every session and listener of `address`.
@@ -490,6 +501,7 @@ impl Hub {
         for _ in 0..removed {
             self.metrics.lower(Gauge::Listeners);
         }
+        let _ = self.bans.send(());
     }
 
     /// The busiest sessions, for the dashboard.

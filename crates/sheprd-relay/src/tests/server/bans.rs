@@ -165,3 +165,21 @@ async fn three_wrong_dashboard_tokens_ban_a_public_address_from_the_relay() {
     assert_eq!(stats.bans.len(), 1);
     assert_eq!(stats.bans[0].address, "203.0.113.70");
 }
+
+#[tokio::test]
+async fn a_ban_closes_open_quic_connections() {
+    let relay = start_both(&options(Limits::default())).await;
+    let connection = connect_with(relay.quic, relay.pin, crate::quic::client_transport())
+        .await
+        .unwrap();
+    let ranges = parse_list("127.0.0.0/8").0;
+    relay.hub.guard.set_manual(ranges.clone());
+    relay.hub.kick_ranges(&ranges);
+    let closed = tokio::time::timeout(Duration::from_secs(5), connection.closed())
+        .await
+        .expect("the connection stayed open");
+    assert!(
+        matches!(&closed, quinn::ConnectionError::ApplicationClosed(close) if close.error_code.into_inner() == u64::from(crate::wire::code::BANNED)),
+        "{closed:?}"
+    );
+}

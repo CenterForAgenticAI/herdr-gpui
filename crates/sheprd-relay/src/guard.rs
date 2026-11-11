@@ -43,7 +43,7 @@ const HOUR: Duration = Duration::from_secs(60 * 60);
 /// Points fade by one each of these.
 const FADE: Duration = Duration::from_secs(60);
 /// The most addresses tracked at once, which bounds memory.
-const MAX_RECORDS: usize = 65_536;
+pub const MAX_RECORDS: usize = 65_536;
 /// The most bans the dashboard lists.
 const MAX_ROWS: usize = 50;
 
@@ -238,8 +238,21 @@ impl Guard {
                 !record.idle(now)
             });
             if records.len() >= MAX_RECORDS {
-                // Full: the rate limits still hold this address back.
-                return None;
+                // Still full, as when one attacker holds many /64s. Never
+                // stop counting: make room by dropping the record that
+                // matters least. An unbanned one with the fewest points
+                // goes first; only if every slot is a ban does the one
+                // ending soonest go.
+                let least = records
+                    .iter()
+                    .min_by_key(|(_, record)| {
+                        let ban_end = record.banned_until.filter(|until| *until > now);
+                        (ban_end.is_some(), ban_end, record.points, record.updated)
+                    })
+                    .map(|(key, _)| *key);
+                if let Some(least) = least {
+                    records.remove(&least);
+                }
             }
         }
         let record = records.entry(key).or_insert_with(|| Record::new(now));

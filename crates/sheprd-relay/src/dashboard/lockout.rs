@@ -48,7 +48,7 @@ impl Lockout {
         }
     }
 
-    /// Whether `address` may try the token at `now`.
+    /// Whether `address` is blocked at `now`, and for how long still.
     pub fn check(&self, address: IpAddr, now: Instant) -> Verdict {
         let records = self.records();
         match records.get(&source_key(address)) {
@@ -60,8 +60,12 @@ impl Lockout {
         }
     }
 
-    /// Records a wrong try from `address`; whether it is now blocked.
-    pub fn fail(&self, address: IpAddr, now: Instant) -> Verdict {
+    /// Reserves one try for `address` before its token is checked, under
+    /// the same lock that refuses it: each try counts as wrong until
+    /// [`Lockout::succeed`] clears it, so requests sent at once cannot
+    /// slip more than [`TRIES`] guesses between a check and a failure.
+    /// `Allowed` means check the token; `Blocked`, refuse it unchecked.
+    pub fn attempt(&self, address: IpAddr, now: Instant) -> Verdict {
         let key = source_key(address);
         let mut records = self.records();
         if records.len() >= MAX_ADDRESSES && !records.contains_key(&key) {
@@ -76,6 +80,9 @@ impl Lockout {
             failures: 0,
             last: now,
         });
+        if let Some(until) = record.blocked_until.filter(|until| *until > now) {
+            return Verdict::Blocked(until - now);
+        }
         // Wrong tries older than the window, or before a block that has
         // run out, are forgotten.
         let expired = record.blocked_until.is_some_and(|until| until <= now)
@@ -87,10 +94,16 @@ impl Lockout {
         record.failures += 1;
         record.last = now;
         if record.failures >= TRIES {
+            // This try is still checked; the block covers every one after.
             record.blocked_until = Some(now + BLOCK);
-            return Verdict::Blocked(BLOCK);
         }
         Verdict::Allowed
+    }
+
+    /// Whether `address`'s tries have now used up its allowance: true
+    /// after the try that set the block, which the caller reports.
+    pub fn exhausted(&self, address: IpAddr, now: Instant) -> bool {
+        matches!(self.check(address, now), Verdict::Blocked(_))
     }
 
     /// Forgets `address`'s wrong tries after it signs in.

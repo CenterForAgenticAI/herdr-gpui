@@ -188,3 +188,23 @@ fn the_dashboard_lists_earned_bans_with_their_reason() {
     );
     assert_eq!(guard.active(now), 2);
 }
+
+#[test]
+fn a_full_table_still_bans_new_offenders() {
+    use crate::guard::MAX_RECORDS;
+    let guard = guard();
+    let now = Instant::now();
+    // Fill every slot with a different public address holding one point,
+    // as an attacker with many /64s could.
+    for index in 0..MAX_RECORDS {
+        let index = u32::try_from(index).unwrap();
+        let address = IpAddr::from(std::net::Ipv6Addr::from(
+            (0x2001_0db8_u128 << 96) | (u128::from(index) << 64),
+        ));
+        guard.offend(address, Offense::Limited, now);
+    }
+    // A new one is still counted and banned, rather than ignored.
+    let late = ip("203.0.113.99");
+    assert!(guard.offend(late, Offense::Lockout, now).is_some());
+    assert!(guard.banned(late, now));
+}

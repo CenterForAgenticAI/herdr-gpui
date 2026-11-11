@@ -22,7 +22,7 @@ use crate::{
 use quinn::{Connection, Endpoint, RecvStream, SendStream, ServerConfig, TransportConfig, VarInt};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tls::Identity;
-use tokio::time::timeout;
+use tokio::{sync::broadcast::error::RecvError, time::timeout};
 
 /// How long a new stream has to send its request.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -104,11 +104,36 @@ pub async fn run(endpoint: Endpoint, hub: Arc<Hub>) {
             continue;
         };
         let hub = Arc::clone(&hub);
+        // Subscribed before the handshake, so a ban during it is not missed.
+        let mut notices = hub.ban_notices();
         tokio::spawn(async move {
             let Ok(connection) = incoming.await else {
                 return;
             };
-            serve(connection, hub).await;
+            if hub.is_banned(connection.remote_address().ip()) {
+                connection.close(VarInt::from_u32(wire::code::BANNED), b"");
+                return;
+            }
+            // A ban ends the whole connection, not only its sessions: a
+            // banned address cannot keep opening streams on one it holds.
+            let banned = async {
+                loop {
+                    match notices.recv().await {
+                        Ok(()) | Err(RecvError::Lagged(_)) => {
+                            if hub.is_banned(connection.remote_address().ip()) {
+                                return;
+                            }
+                        }
+                        Err(RecvError::Closed) => std::future::pending::<()>().await,
+                    }
+                }
+            };
+            tokio::select! {
+                () = serve(connection.clone(), Arc::clone(&hub)) => {}
+                () = banned => {
+                    connection.close(VarInt::from_u32(wire::code::BANNED), b"");
+                }
+            }
             drop(permit);
         });
     }
@@ -122,6 +147,12 @@ async fn serve(connection: Connection, hub: Arc<Hub>) {
 }
 
 async fn stream(connection: Connection, mut send: SendStream, mut recv: RecvStream, hub: Arc<Hub>) {
+    // Checked on every stream too, so nothing slips in between a ban and
+    // its connection closing.
+    if hub.is_banned(connection.remote_address().ip()) {
+        let _ = send.reset(VarInt::from_u32(wire::code::BANNED));
+        return;
+    }
     let address = connection.remote_address().ip();
     let request = match timeout(REQUEST_TIMEOUT, read_request(&mut recv)).await {
         Ok(Ok(request)) => request,
