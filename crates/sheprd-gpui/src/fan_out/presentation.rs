@@ -22,11 +22,12 @@ impl SheprdWindow {
     pub(super) fn open_fan_out_folder(
         &mut self,
         endpoint: &str,
+        host: &crate::teleport::Host,
         label: &str,
         path: &str,
         cx: &mut Context<Self>,
     ) {
-        if !self.select_endpoint(endpoint, cx) {
+        if !self.fan_out_host_matches(endpoint, host) || !self.select_endpoint(endpoint, cx) {
             return;
         }
         self.refresh_core_session(cx);
@@ -41,11 +42,15 @@ impl SheprdWindow {
     pub(super) fn show_fan_out_terminal(
         &mut self,
         endpoint: &str,
+        host: &crate::teleport::Host,
         label: &str,
         path: &str,
         location: Location,
         cx: &mut Context<Self>,
     ) {
+        if !self.fan_out_host_matches(endpoint, host) {
+            return;
+        }
         let Some(scope) = self.fan_out_scope(endpoint) else {
             return;
         };
@@ -77,10 +82,14 @@ impl SheprdWindow {
     pub(super) fn close_fan_out_folder(
         &mut self,
         endpoint: &str,
+        host: &crate::teleport::Host,
         path: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.fan_out_host_matches(endpoint, host) {
+            return;
+        }
         let Some(scope) = self.fan_out_scope(endpoint) else {
             return;
         };
@@ -92,6 +101,19 @@ impl SheprdWindow {
 
     pub(super) fn fan_out_core_host(&self, endpoint: &str) -> Option<Host> {
         self.fan_out_scope(endpoint).as_ref().map(Host::of)
+    }
+
+    pub(super) fn fan_out_host_matches(
+        &self,
+        endpoint: &str,
+        host: &crate::teleport::Host,
+    ) -> bool {
+        self.endpoints
+            .iter()
+            .find(|known| known.id == endpoint)
+            .and_then(|known| crate::teleport::host_for(&known.connection.target).ok())
+            .as_ref()
+            == Some(host)
     }
 }
 

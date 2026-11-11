@@ -154,10 +154,11 @@ impl SheprdWindow {
                 } => self.teleport_follow = Some(Follow::new(endpoint, workspace)),
                 Kept::Herdr2 {
                     endpoint,
+                    host,
                     label,
                     path,
                 } => {
-                    self.open_fan_out_folder(&endpoint, &label, &path, cx);
+                    self.open_fan_out_folder(&endpoint, &host, &label, &path, cx);
                 }
             }
             return;
@@ -283,6 +284,7 @@ impl SheprdWindow {
                 checkout.path().to_owned(),
             );
             let terminal = checkout.terminal.clone();
+            let host = checkout.host.clone();
             self.dismiss_menu(window, cx);
             if let Some(terminal) =
                 terminal.and_then(|terminal| sheprd_backend::TerminalId::new(terminal).ok())
@@ -291,9 +293,9 @@ impl SheprdWindow {
                     crate::core_terminals::panes::Panes::single(terminal),
                     false,
                 );
-                self.show_fan_out_terminal(&endpoint, &label, &path, location, cx);
+                self.show_fan_out_terminal(&endpoint, &host, &label, &path, location, cx);
             }
-            self.open_fan_out_folder(&endpoint, &label, &path, cx);
+            self.open_fan_out_folder(&endpoint, &host, &label, &path, cx);
             return;
         };
         let follow = Follow::new(checkout.endpoint_id.clone(), workspace.to_owned());
@@ -308,12 +310,13 @@ impl SheprdWindow {
     fn show_fan_out_lanes(
         &mut self,
         shown: Vec<Shown>,
-        closed: Vec<(String, String)>,
+        closed: Vec<super::job::Checkout>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         for Shown {
             endpoint,
+            host,
             label,
             path,
             terminal,
@@ -326,10 +329,16 @@ impl SheprdWindow {
                 crate::core_terminals::panes::Panes::single(terminal),
                 false,
             );
-            self.show_fan_out_terminal(&endpoint, &label, &path, location, cx);
+            self.show_fan_out_terminal(&endpoint, &host, &label, &path, location, cx);
         }
-        for (endpoint, path) in closed {
-            self.close_fan_out_folder(&endpoint, &path, window, cx);
+        for checkout in closed {
+            self.close_fan_out_folder(
+                &checkout.endpoint_id,
+                &checkout.host,
+                checkout.path(),
+                window,
+                cx,
+            );
         }
     }
 
@@ -512,6 +521,12 @@ impl SheprdWindow {
                                     .clone()
                                     .and_then(|t| sheprd_backend::TerminalId::new(t).ok())
                                     .and_then(|t| {
+                                        if !self.fan_out_host_matches(
+                                            &checkout.endpoint_id,
+                                            &checkout.host,
+                                        ) {
+                                            return None;
+                                        }
                                         self.core_terminals.reported(
                                             &self.fan_out_core_host(&checkout.endpoint_id)?,
                                             &t,
