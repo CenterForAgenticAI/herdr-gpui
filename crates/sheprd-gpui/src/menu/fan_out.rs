@@ -1,7 +1,7 @@
 //! Opening a fan-out from a workspace row: the repository's main checkout
 //! creates every lane's worktree, branched from the row's own branch when the
 //! row is a linked checkout. A workspace the app keeps for Herdr 2 makes its
-//! lanes with Git through its own folder, on this computer.
+//! lanes with Git through its own folder on the captured host.
 
 // i18n: migrated
 use super::{
@@ -144,8 +144,7 @@ impl SheprdWindow {
         (scriptable && self.fan_out_host(&source).is_some()).then_some(Label::FAN_OUT)
     }
 
-    /// The host `source`'s lanes are made on: the shown one, or this
-    /// computer for a workspace the app keeps, which is always here.
+    /// The host the menu addresses, for either workspace keeper.
     fn fan_out_host(&self, _source: &Source) -> Option<Host> {
         host_for(&self.endpoints[self.selected_endpoint].connection.target).ok()
     }

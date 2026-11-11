@@ -1,6 +1,5 @@
-//! Fan-outs from a workspace the app keeps for Herdr 2: lanes stay on this
-//! computer, each agent's shell is shown in a kept workspace of its own, and
-//! removed lanes close theirs.
+//! Fan-outs from kept Herdr 2 workspaces: each owned agent terminal is shown
+//! once in its host's kept workspace, and removed lanes close theirs.
 
 use super::*;
 

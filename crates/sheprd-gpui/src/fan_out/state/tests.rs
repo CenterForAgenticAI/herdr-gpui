@@ -5,6 +5,7 @@ mod compare;
 mod crash_recovery;
 mod discard_identity;
 mod herdr_2;
+mod hosts;
 mod interrupt;
 mod spread;
 mod wanted;
