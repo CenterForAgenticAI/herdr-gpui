@@ -19,6 +19,8 @@ struct IPadRoot: View {
 
     enum SidebarTab: Hashable { case chats, workspaces, settings }
 
+    /// The workspace a chat or terminal's header opened, over the window.
+    @State private var workspaceSheet: WorkspaceKey?
     /// The sidebar is shown; ⌘⌃S or its button hides it.
     @State private var sidebarShown = true
 
@@ -34,6 +36,9 @@ struct IPadRoot: View {
                 Divider().ignoresSafeArea()
             }
             detail
+                // A chat or terminal leads to its workspace, to start
+                // another tab there.
+                .environment(\.offersWorkspace, true)
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .topLeading) {
                     if !sidebarShown {
@@ -51,12 +56,29 @@ struct IPadRoot: View {
         .animation(.snappy, value: sidebarShown)
         .background { ChatKeys(selection: $selection, tab: $tab, sidebarShown: $sidebarShown) }
         .sheet(isPresented: $pairing) { PairView() }
+        // From a chat or terminal's header: the workspace in a sheet,
+        // which closes once a tab is picked or started, and that tab opens
+        // beside the sidebar.
         .onChange(of: model.pendingWorkspace) { _, key in
             guard let key else { return }
-            tab = .workspaces
-            workspacesPath = [key]
-            sidebarShown = true
+            workspaceSheet = key
             model.pendingWorkspace = nil
+        }
+        .sheet(item: $workspaceSheet) { key in
+            NavigationStack {
+                WorkspaceScreen(key: key)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { workspaceSheet = nil }
+                        }
+                    }
+            }
+            .environment(\.routeOpener, RouteOpener(current: selection) { [selection = $selection, sheet = $workspaceSheet] route in
+                sheet.wrappedValue = nil
+                selection.wrappedValue = route
+            })
+            .connectionToast(pairing: $pairing)
+            .presentationSizing(.page)
         }
         #if DEBUG
         // The simulator loop's `-tab workspaces|settings` picks the

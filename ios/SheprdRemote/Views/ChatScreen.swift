@@ -44,7 +44,6 @@ struct ChatScreen: View {
         // Window titles show in Stage Manager and the app switcher.
         .navigationTitle(LockState.shared.hidesNames ? "Sheprd" : name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(removing: width == .regular ? .title : nil)
         .toolbar(.hidden, for: .tabBar)
         .hidesConnectionToast()
         .toolbar {

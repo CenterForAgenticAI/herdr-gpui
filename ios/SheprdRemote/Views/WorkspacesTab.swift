@@ -2,9 +2,11 @@ import SheprdRemoteCore
 import SwiftUI
 
 /// One workspace of one computer, which the Workspaces tab opens.
-struct WorkspaceKey: Codable, Hashable {
+struct WorkspaceKey: Codable, Hashable, Identifiable {
     let device: String
     let workspace: String
+
+    var id: Self { self }
 }
 
 extension EnvironmentValues {
