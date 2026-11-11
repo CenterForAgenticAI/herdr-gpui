@@ -129,6 +129,15 @@ pub(super) fn resume_command(
     from: &str,
     to: &str,
 ) -> Vec<String> {
+    resume_command_with(agent, reference, flags, |path| remap(path, from, to))
+}
+
+pub(super) fn resume_command_with(
+    agent: AgentKind,
+    reference: &str,
+    flags: &[String],
+    mapped: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
     // Only the retained flags are source paths. A path-valued session
     // reference already names the destination and must not be remapped twice.
     let flags = flags
@@ -137,11 +146,11 @@ pub(super) fn resume_command(
             if let Some((name, value)) = flag.split_once('=')
                 && name.starts_with('-')
             {
-                return remap(value, from, to)
+                return mapped(value)
                     .map(|value| format!("{name}={value}"))
                     .unwrap_or_else(|| flag.clone());
             }
-            remap(flag, from, to).unwrap_or_else(|| flag.clone())
+            mapped(flag).unwrap_or_else(|| flag.clone())
         })
         .collect::<Vec<_>>();
     agent.resume_argv(reference, &flags)

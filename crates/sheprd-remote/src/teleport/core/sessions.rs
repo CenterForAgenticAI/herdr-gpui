@@ -53,9 +53,9 @@ fn claude_processes(terminals: &HashMap<String, Terminal>) -> Vec<(&str, u32)> {
     found
 }
 
-/// The Claude Code session of each terminal of `terminals` that runs one
-/// and recorded it. A host that cannot say leaves the agents to hand off,
-/// so a failure here never fails the move.
+/// Exact sessions reported on the owning host. Explicit absence permits
+/// handoff; failed or stale evidence refuses the move. Only helper-free hosts
+/// use the legacy Claude record probe below.
 pub(in crate::teleport) fn sessions(
     host: &Host,
     terminals: &HashMap<String, Terminal>,

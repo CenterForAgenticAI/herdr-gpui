@@ -23,6 +23,7 @@ use std::{
     time::Duration,
 };
 
+mod acknowledge;
 mod confirm;
 mod discover;
 mod land;
@@ -144,6 +145,8 @@ pub struct Candidate {
 /// Where the teleported workspace ended up.
 #[derive(Debug)]
 pub struct Outcome {
+    /// False when retirement failed, or recovery cannot know whether it ran.
+    pub source_retired: bool,
     pub endpoint_id: String,
     pub workspace: Landed,
     /// The destination repository, for remembering where the work went.
@@ -192,6 +195,7 @@ pub fn run(
     destination: &Candidate,
     review: &Review,
     mut report: impl FnMut(Step),
+    persist: impl FnOnce(&Outcome) -> Result<()>,
     cancelled: &AtomicBool,
 ) -> Result<Outcome> {
     let from = &source.place.host;
@@ -302,48 +306,47 @@ pub fn run(
         }
     };
 
-    // The source's programs stop here, so every session file is complete. The
-    // workspace itself stays, for this client to mark as teleported.
-    report(Step::Retire);
-    // Repository transfer and handoff turns can take minutes. Recheck the
-    // reviewed sessions immediately before retirement, not only at entry.
+    // Only idle, still-selected sessions can be copied. Source programs stay
+    // alive until their destination has acknowledged the resume and the app
+    // has durably recorded its arrival.
     confirm::sessions(from, review, cancelled)?;
-    retire(source, &review.checkout, cancelled)?;
-    core::stop(from, &core::ids(&source.core_tabs), cancelled)?;
 
     report(Step::Sessions);
     let mut launches = Vec::new();
     for (plan, target) in review.panes().zip(&panes) {
+        let mut resume = None;
         let line = match &plan.action {
             Action::Shell | Action::Missing(_) => None,
             Action::Resume(agent) => {
                 let Work::Session { session, flags, .. } = &plan.work else {
                     continue;
                 };
+                let environment = super::sessions::Environment::map(
+                    from,
+                    to,
+                    plan.binding.as_ref(),
+                    &review.checkout,
+                    &landing.checkout,
+                    cancelled,
+                )?;
                 let route = Route {
+                    environment: Some(&environment),
                     source: from,
                     destination: to,
                     from: &review.checkout,
                     to: &landing.checkout,
                     cwd: &target.cwd,
                 };
-                Some(match move_session(*agent, session, &route, cancelled) {
-                    Ok(reference) => super::launch::resume_command(
-                        *agent,
-                        &reference,
-                        flags,
-                        &review.checkout,
-                        &landing.checkout,
-                    ),
-                    Err(Error::Cancelled) => return Err(Error::Cancelled),
-                    Err(error) => {
-                        warnings.push(Warning::AgentStartedAfresh {
-                            agent: *agent,
-                            source: error,
-                        });
-                        agent.start_argv(None)
-                    }
-                })
+                let reference = move_session(*agent, session, &route, cancelled)?;
+                let argv = environment.resume(
+                    *agent,
+                    &reference,
+                    flags,
+                    &review.checkout,
+                    &landing.checkout,
+                );
+                resume = Some(acknowledge::Resume::new(*agent, reference));
+                Some(argv)
             }
             Action::Handoff { note, to: agent } => {
                 let note = format!("{}/{note}", landing.checkout);
@@ -360,7 +363,7 @@ pub fn run(
             });
         }
         if let Some(argv) = line {
-            launches.push((target, argv));
+            launches.push((target, argv, resume));
         }
     }
 
@@ -380,7 +383,7 @@ pub fn run(
     }
 
     report(Step::Launch);
-    for (target, argv) in launches {
+    for (target, argv, resume) in launches {
         let mut line = command_line(&argv);
         if target.cwd != target.created_in {
             line = format!("cd -- {} && {line}", shell_quote(&target.cwd));
@@ -393,17 +396,46 @@ pub fn run(
             )?,
             Generation::Herdr2 => core::type_line(to, &target.pane_id, &line, cancelled)?,
         }
+        if let Some(resume) = resume {
+            acknowledge::wait(to, target, &resume, &destination.place.label, cancelled)?;
+        }
     }
 
-    spawned.keep();
-    Ok(Outcome {
+    confirm::sessions(from, review, cancelled)?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(Error::Cancelled);
+    }
+    let mut outcome = Outcome {
+        source_retired: false,
         endpoint_id: destination.place.endpoint_id.clone(),
         workspace: landing.workspace,
         repo_key: repository.key.clone(),
         branch: review.branch.clone(),
         warnings,
         core_tabs,
-    })
+    };
+    // Commit point: failures before this keep the source and clean up new
+    // terminals. After this, the destination is recoverable even if retirement
+    // fails or the UI closes; cancellation cannot erase the committed arrival.
+    persist(&outcome)?;
+    spawned.keep();
+    report(Step::Retire);
+    let finish = AtomicBool::new(false);
+    for tab in &landing.stale_tabs {
+        if let Err(source) = to.herdr_ok(Step::Tabs, &["tab", "close", tab], &finish) {
+            outcome
+                .warnings
+                .push(Warning::DestinationTabsOpen { source });
+        }
+    }
+    match confirm::sessions(from, review, &finish)
+        .and_then(|()| retire(source, review, &finish))
+        .and_then(|()| core::stop(from, &core::ids(&source.core_tabs), &finish))
+    {
+        Ok(()) => outcome.source_retired = true,
+        Err(source) => outcome.warnings.push(Warning::SourcePaneOpen { source }),
+    }
+    Ok(outcome)
 }
 
 /// The destination repository, opened as a space: as it is when already
@@ -525,6 +557,9 @@ fn rebuild_tabs(
     let mut core_tabs = Vec::new();
     // The first tab rebuilt in Herdr 1 takes the landing's empty tab.
     let mut first = landing.first.clone();
+    if let Some((tab, _)) = &first {
+        spawned.push_tab(tab.clone());
+    }
     for tab in &review.tabs {
         let build = tab.tree.plan();
         if tab.into == Generation::Herdr2 {
@@ -575,8 +610,12 @@ fn rebuild_tabs(
                         &first_cwd,
                         "--no-focus",
                     ],
-                    cancelled,
+                    &AtomicBool::new(false),
                 )?;
+                spawned.push_tab(made.tab.tab_id.clone());
+                if cancelled.load(Ordering::Acquire) {
+                    return Err(Error::Cancelled);
+                }
                 (made.tab.tab_id, made.root_pane.pane_id, first_cwd.clone())
             }
         };
@@ -618,9 +657,6 @@ fn rebuild_tabs(
             );
         }
     }
-    for tab in &landing.stale_tabs {
-        to.herdr_ok(Step::Tabs, &["tab", "close", tab], cancelled)?;
-    }
     let targets = review
         .panes()
         .map(|plan| {
@@ -635,3 +671,8 @@ fn rebuild_tabs(
         .collect::<Result<_>>()?;
     Ok((targets, core_tabs))
 }
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[allow(clippy::unwrap_used)]
+#[path = "job/tests/transaction.rs"]
+mod transaction_tests;

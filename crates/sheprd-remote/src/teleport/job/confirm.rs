@@ -31,6 +31,13 @@ pub(super) fn sessions(host: &Host, review: &Review, cancelled: &AtomicBool) -> 
                     let process = processes
                         .get(&expected.pane_id)
                         .ok_or(Error::SourceSessionChanged)?;
+                    if !matches!(
+                        pane.status,
+                        crate::teleport::snapshot::PaneStatus::Idle
+                            | crate::teleport::snapshot::PaneStatus::Done
+                    ) {
+                        return Err(Error::SessionAgentWorking);
+                    }
                     let cwd = process
                         .foreground_job()
                         .and_then(|job| job.cwd.as_deref())
@@ -46,6 +53,9 @@ pub(super) fn sessions(host: &Host, review: &Review, cancelled: &AtomicBool) -> 
                     let terminal = terminals
                         .get(&expected.pane_id)
                         .ok_or(Error::SourceSessionChanged)?;
+                    if !terminal.idle() {
+                        return Err(Error::SessionAgentWorking);
+                    }
                     unchanged(
                         expected,
                         &core::work(terminal, sessions.sessions.get(&expected.pane_id)),

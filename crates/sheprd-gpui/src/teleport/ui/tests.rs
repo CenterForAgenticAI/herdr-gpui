@@ -5,6 +5,7 @@ use crate::teleport::{
 };
 use sheprd_client::ConnectTarget;
 
+mod arrival;
 mod closing;
 mod en_xa;
 mod kept;

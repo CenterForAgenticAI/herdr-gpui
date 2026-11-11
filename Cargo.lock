@@ -9537,7 +9537,6 @@ dependencies = [
  "sheprd-core-client",
  "sheprd-credentials",
  "sheprd-session",
- "sheprd-updater",
  "tar",
  "tempfile",
  "thiserror 2.0.21",

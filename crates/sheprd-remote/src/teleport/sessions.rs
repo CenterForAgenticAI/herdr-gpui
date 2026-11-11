@@ -18,6 +18,9 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+mod environment;
+pub(super) use environment::Environment;
+
 const TRANSFER: ScriptLimits = ScriptLimits {
     output: TRANSFER_OUTPUT,
     idle: TRANSFER_IDLE,
@@ -28,6 +31,7 @@ const MISSING: i32 = 3;
 
 /// Where the session is moving between.
 pub struct Route<'a> {
+    pub(super) environment: Option<&'a Environment>,
     pub source: &'a Host,
     pub destination: &'a Host,
     /// Source and destination checkout roots, rewritten inside the session.
@@ -102,7 +106,10 @@ fn read_source(
     let mut output = Vec::new();
     match route.source.run(
         Step::Sessions,
-        body,
+        &environment::script(
+            body,
+            route.environment.map(|environment| &environment.source),
+        ),
         io::empty(),
         &mut output,
         TRANSFER,
@@ -128,7 +135,12 @@ fn write_destination(
     let mut output = Vec::new();
     route.destination.run(
         Step::Sessions,
-        body,
+        &environment::script(
+            body,
+            route
+                .environment
+                .map(|environment| &environment.destination),
+        ),
         input,
         &mut output,
         TRANSFER,
@@ -266,7 +278,7 @@ fn pi(
                 agent: agent.binary(),
             })?;
             format!(
-                "f=$(find \"$HOME/{root}/agent/sessions\" -type f -name '*_{id}.jsonl' 2>/dev/null) || exit {MISSING}\n\
+                "f=$(find \"${{PI_CODING_AGENT_DIR:-$HOME/{root}/agent}}/sessions\" -type f \\( -name '{id}.jsonl' -o -name '*_{id}.jsonl' \\) 2>/dev/null) || exit {MISSING}\n\
                  case \"$f\" in *'\n'*) exit {MISSING};; esac\n\
                  [ -n \"$f\" ] || exit {MISSING}\n"
             )
@@ -288,7 +300,7 @@ fn pi(
         })?;
     let file = rewrite_paths(&output[split + 1..], route.from, route.to);
     let write = format!(
-        r#"d="$HOME/{root}/agent/sessions/"{dir}
+        r#"d="${{PI_CODING_AGENT_DIR:-$HOME/{root}/agent}}/sessions/"{dir}
 mkdir -p -- "$d"
 cat > "$d/"{name}
 printf '%s' "$d/"{name}

@@ -1,6 +1,60 @@
 use super::*;
 
 #[test]
+fn source_config_root_is_read_and_mapped_for_transfer_and_resume() {
+    use sheprd_client::herdr::sessions::{Binding, Identity, reference};
+    use std::collections::BTreeMap;
+    let homes = homes();
+    let source_root = homes.source_home.join("custom-codex");
+    let relative = "sessions/2026/11/11/rollout-date-session-1.jsonl";
+    let path = source_root.join(relative);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "selected custom session\n").unwrap();
+    let binding = Binding {
+        version: 1,
+        sequence: 1,
+        identity: Identity {
+            core: "core".into(),
+            terminal: "t1".into(),
+            pid: 42,
+            started: "opaque".into(),
+        },
+        agent: "codex".into(),
+        session: Some(reference(AgentKind::Codex, SessionKind::Id, "session-1".into()).unwrap()),
+        environment: BTreeMap::from([(
+            "CODEX_HOME".into(),
+            source_root.to_string_lossy().into_owned(),
+        )]),
+    };
+    let environment = Environment::map(
+        &homes.source,
+        &homes.destination,
+        Some(&binding),
+        FROM,
+        TO,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let mut route = route(&homes, TO);
+    route.environment = Some(&environment);
+    move_session(
+        AgentKind::Codex,
+        binding.selected().unwrap(),
+        &route,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(homes.destination_home.join("custom-codex").join(relative)).unwrap(),
+        "selected custom session\n"
+    );
+    assert!(
+        !homes.destination_home.join(".codex").exists(),
+        "never silently use a different session store"
+    );
+}
+
+#[test]
 fn transfers_refuse_mismatched_agents_and_untrusted_provenance() {
     let homes = homes();
     for agent in AgentKind::ALL.into_iter().filter(|agent| agent.carries()) {

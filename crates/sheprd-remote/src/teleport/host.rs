@@ -240,14 +240,34 @@ exec "$herdr_core" "$@"
             .and_then(|exe| Some(exe.parent()?.join("sheprd-acp")))
             .filter(|path| path.is_file())
             .map(|path| shell_quote(&path.to_string_lossy()));
-        let fallback = bundled.unwrap_or_else(|| {
-            format!(
-                "\"$HOME/.local/share/herdr-remote-control/bin/\"{}\"/sheprd-acp\"",
-                shell_quote(sheprd_updater::APP_VERSION),
-            )
-        });
+        let bundled = bundled.unwrap_or_else(|| "''".into());
         format!(
-            "( {exports}if command -v sheprd-acp >/dev/null 2>&1; then helper=$(command -v sheprd-acp); else helper={fallback}; fi\n\
+            "( {exports}bundled={bundled}\n\
+             helper=\n\
+             if command -v sheprd-acp >/dev/null 2>&1; then helper=$(command -v sheprd-acp)\n\
+             elif [ -n \"$bundled\" ] && [ -x \"$bundled\" ]; then helper=$bundled\n\
+             else\n\
+               daemon=$(command -v sheprd-remote-control || command -v herdr-remote-control || :)\n\
+               links=0\n\
+               while [ -n \"$daemon\" ] && [ -L \"$daemon\" ]; do\n\
+                 links=$((links + 1)); [ \"$links\" -le 16 ] || exit 1\n\
+                 link=$(readlink \"$daemon\") || exit 1\n\
+                 case \"$link\" in /*) daemon=$link;; *) daemon=$(dirname \"$daemon\")/$link;; esac\n\
+               done\n\
+               if [ -n \"$daemon\" ] && [ -x \"$(dirname \"$daemon\")/sheprd-acp\" ]; then\n\
+                 helper=$(dirname \"$daemon\")/sheprd-acp\n\
+               else\n\
+                 count=0\n\
+                 for candidate in \"$HOME/.local/share/herdr-remote-control/bin/\"*/sheprd-acp; do\n\
+                   [ -x \"$candidate\" ] || continue\n\
+                   count=$((count + 1)); [ \"$count\" -le 64 ] || exit 1\n\
+                   if \"$candidate\" --help 2>/dev/null | grep -Fq session-discover; then\n\
+                     [ -z \"$helper\" ] || {{ echo 'Multiple session helpers; select sheprd-acp on PATH' >&2; exit 1; }}\n\
+                     helper=$candidate\n\
+                   fi\n\
+                 done\n\
+               fi\n\
+             fi\n\
              [ -x \"$helper\" ] || exit 127\n\
              exec \"$helper\" session-discover {terminal} {agent}\n)\n",
             exports = self.core_exports(),

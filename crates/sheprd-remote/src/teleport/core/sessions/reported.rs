@@ -20,12 +20,6 @@ pub(super) fn discover(
         let Some(agent) = AgentKind::parse(&name).filter(|agent| agent.carries()) else {
             continue;
         };
-        // Claude already publishes a native PID/start-bound record. Installing
-        // the companion must not require a second reporter to keep that path.
-        if agent == AgentKind::Claude {
-            unavailable.push(id.clone());
-            continue;
-        }
         let Some(pid) = terminal.foreground.as_ref().and_then(|front| front.pid) else {
             continue;
         };
@@ -69,14 +63,6 @@ fn validate(output: &[u8], id: &str, pid: u32, agent: AgentKind) -> Result<Bindi
         || binding.validate(&binding.identity, agent).is_err()
     {
         return Err(Error::SourceSessionChanged);
-    }
-    // Source absolute roots do not identify a destination store. Until the
-    // transfer has an explicit mapping, refusing is safer than reading defaults
-    // or exporting a source path into the destination's launch environment.
-    if !binding.environment.is_empty() {
-        return Err(Error::SessionConfiguration {
-            agent: agent.binary(),
-        });
     }
     Ok(binding)
 }

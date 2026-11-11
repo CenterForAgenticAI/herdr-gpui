@@ -676,6 +676,7 @@ fn destination_argv(
                 .and_then(|cwd| remap(cwd, &review.checkout, path))
                 .unwrap_or_else(|| path.to_owned());
             let route = Route {
+                environment: None,
                 source: from,
                 destination: &review.destination.host,
                 from: &review.checkout,
