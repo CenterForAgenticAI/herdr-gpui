@@ -502,6 +502,14 @@ impl SheprdWindow {
 
     /// Move to `tab`, focusing whichever field that tab types into and starting
     /// its listing if it has none yet.
+    pub(crate) fn show_existing_worktrees(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_worktree_tab(Tab::Existing, window, cx);
+    }
+
     pub(super) fn select_worktree_tab(
         &mut self,
         tab: Tab,
