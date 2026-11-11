@@ -138,8 +138,8 @@ impl SheprdWindow {
         {
             return Some(Label::FAN_OUT_COMPARISON);
         }
-        // Host scripts need a POSIX client; see `sheprd_client::run_script`.
-        let scriptable = cfg!(any(target_os = "linux", target_os = "macos"));
+        let scriptable =
+            crate::dispatch::scriptable(&self.endpoints[self.selected_endpoint].connection.target);
         let source = self.fan_out_source()?;
         (scriptable && self.fan_out_host(&source).is_some()).then_some(Label::FAN_OUT)
     }
