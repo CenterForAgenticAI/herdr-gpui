@@ -37,41 +37,55 @@ const FUTURE_TOLERANCE_MS: u64 = 24 * 60 * 60 * 1000;
 /// What an answer does to this app's copy.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Settled {
-    /// The computer had a newer edit: it becomes the copy, and goes to the
-    /// other computers.
+    /// The computer had an edit this copy has not: it becomes the copy, and
+    /// goes to the other computers.
     Take(TextShortcuts),
     /// The copy was edited while the exchange ran, so the computer has not
     /// heard of that edit yet: offer it again.
     Again,
-    /// The computer took this copy but stamped it by its own clock, which
-    /// runs behind this one: the copy takes that stamp, so it is not offered
-    /// again as a newer edit, where it would outlast an edit made there
-    /// since. The other computers already hold these shortcuts.
-    Restamp(TextShortcuts),
-    /// The computer holds this copy now; nothing changes.
+    /// The computer holds these shortcuts, or nothing changed there.
     Keep,
 }
 
-/// What `stood`, the computer's answer to an offer of the copy edited at
-/// `offered_ms`, does to `current`, the copy now, at `now_ms`. An answer
-/// edited more than [`FUTURE_TOLERANCE_MS`] ahead is not taken.
+/// What `stood`, the computer's answer to an exchange made when the copy
+/// was edited at `offered_ms`, does to `current`, the copy now, at
+/// `now_ms`. `known` is what that computer answered before.
+///
+/// Edit times come from different clocks, so they only order edits made
+/// on one. An answer whose shortcuts changed since `known` is an edit made
+/// there, however its clock runs, and is taken stamped after the copy it
+/// replaces. Stamps are never lowered: an answer still on its way cannot
+/// undo an edit made here since. An answer more than
+/// [`FUTURE_TOLERANCE_MS`] ahead is not taken.
 pub(crate) fn settle(
     current: &TextShortcuts,
     offered_ms: u64,
     stood: TextShortcuts,
+    known: Option<&TextShortcuts>,
     now_ms: u64,
 ) -> Settled {
-    if stood.updated_ms > now_ms.saturating_add(FUTURE_TOLERANCE_MS) {
+    if stood.updated_ms > now_ms.saturating_add(FUTURE_TOLERANCE_MS)
+        || stood.shortcuts == current.shortcuts
+    {
         Settled::Keep
     } else if stood.updated_ms > current.updated_ms {
         Settled::Take(stood)
     } else if current.updated_ms != offered_ms {
         Settled::Again
-    } else if stood.updated_ms != current.updated_ms && stood.shortcuts == current.shortcuts {
-        Settled::Restamp(stood)
+    } else if known.is_some_and(|known| known.shortcuts != stood.shortcuts) {
+        let updated_ms = stood.updated_ms.max(current.updated_ms.saturating_add(1));
+        Settled::Take(TextShortcuts::new(stood.shortcuts, updated_ms))
     } else {
         Settled::Keep
     }
+}
+
+/// Whether an exchange with a computer that last answered `known` offers
+/// `current`: only when that computer does not hold these shortcuts yet.
+/// Offering a copy it holds would stamp it again there, by this clock,
+/// past an edit made on that computer since.
+pub(crate) fn offers(current: &TextShortcuts, known: Option<&TextShortcuts>) -> bool {
+    known.is_none_or(|known| known.shortcuts != current.shortcuts)
 }
 
 /// `shortcuts` as edited here at `now_ms`: always later than `current`, so
@@ -151,6 +165,9 @@ struct Link {
     /// An edit asks for an exchange without waiting for the interval.
     due: bool,
     running: bool,
+    /// What the computer answered last, to tell an edit made there from
+    /// one this copy already holds.
+    known: Option<TextShortcuts>,
 }
 
 /// The newest copy of the shortcuts and each computer's link to its daemon.
@@ -247,14 +264,14 @@ impl Store {
             })
             .map(|(id, daemon)| (id.clone(), daemon.clone()))
             .collect();
-        let offer = this.list.clone();
+        let current = this.list.clone();
         for (id, daemon) in due {
             let link = cx.global_mut::<Self>().links.entry(id.clone()).or_default();
             link.running = true;
             link.due = false;
             link.last = Some(Instant::now());
-            let offer = (*offer).clone();
-            let offered_ms = offer.updated_ms;
+            let offer = offers(&current, link.known.as_ref()).then(|| (*current).clone());
+            let offered_ms = current.updated_ms;
             let task = cx
                 .background_executor()
                 .spawn(async move { sync::exchange(&daemon, offer, &AtomicBool::new(false)) });
@@ -280,13 +297,13 @@ impl Store {
             }
         };
         let changed = cx.update_global::<Self, _>(|this, _| {
-            if let Some(link) = this.links.get_mut(id) {
-                link.running = false;
-            }
+            let link = this.links.entry(id.to_owned()).or_default();
+            link.running = false;
             let Some(stood) = stood else {
                 return false;
             };
-            match settle(&this.list, offered_ms, stood, now_ms()) {
+            let known = link.known.replace(stood.clone());
+            match settle(&this.list, offered_ms, stood, known.as_ref(), now_ms()) {
                 Settled::Take(stood) => {
                     this.list = Arc::new(stood);
                     // Every other computer still holds the older copy.
@@ -297,10 +314,6 @@ impl Store {
                 }
                 Settled::Again => {
                     this.links.entry(id.to_owned()).or_default().due = true;
-                    false
-                }
-                Settled::Restamp(stood) => {
-                    this.list = Arc::new(stood);
                     false
                 }
                 Settled::Keep => false,

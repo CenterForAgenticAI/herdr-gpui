@@ -21,68 +21,7 @@ fn list(texts: &[&str], updated_ms: u64) -> TextShortcuts {
     )
 }
 
-#[test]
-fn a_newer_copy_on_a_computer_is_taken() {
-    let current = list(&["carry on"], 10);
-    let stood = list(&["carry on", "explain"], 20);
-    assert_eq!(
-        settle(&current, 10, stood.clone(), NOW),
-        Settled::Take(stood)
-    );
-}
-
-#[test]
-fn a_computer_that_took_the_offer_changes_nothing() {
-    let current = list(&["carry on"], 10);
-    assert_eq!(settle(&current, 10, current.clone(), NOW), Settled::Keep);
-    // A daemon whose clock runs behind keeps the offer at its own time,
-    // which the copy here takes, so it is not offered again as newer.
-    assert_eq!(
-        settle(&current, 10, list(&["carry on"], 8), NOW),
-        Settled::Restamp(list(&["carry on"], 8))
-    );
-}
-
-#[test]
-fn an_edit_made_during_an_exchange_is_offered_again() {
-    let current = list(&["explain"], 30);
-    assert_eq!(
-        settle(&current, 10, list(&["carry on"], 10), NOW),
-        Settled::Again
-    );
-    // Unless the computer's copy is newer still, which wins whole.
-    let later = list(&["review"], 40);
-    assert_eq!(
-        settle(&current, 10, later.clone(), NOW),
-        Settled::Take(later)
-    );
-}
-
-/// Three computers holding copies of different ages converge on the newest
 /// once each has met the app: the newest is taken, then offered to the rest.
-#[test]
-fn computers_converge_on_the_latest_edit() {
-    use sheprd_remote_control::control::edited::Edited;
-    let mut computers = [
-        list(&["old"], 10),
-        list(&["newest"], 30),
-        list(&["middle"], 20),
-    ];
-    let mut copy = TextShortcuts::default();
-    // Two rounds: the first finds the newest, the second hands it on.
-    for _ in 0..2 {
-        for computer in &mut computers {
-            let offered_ms = copy.updated_ms;
-            *computer = computer.clone().merged(copy.clone(), 100);
-            if let Settled::Take(stood) = settle(&copy, offered_ms, computer.clone(), NOW) {
-                copy = stood;
-            }
-        }
-    }
-    assert_eq!(copy, list(&["newest"], 30));
-    assert!(computers.iter().all(|computer| *computer == copy));
-}
-
 #[test]
 fn an_edit_here_is_later_than_the_copy_it_replaces() {
     let current = list(&["carry on"], 500);
@@ -164,41 +103,145 @@ fn the_editor_saves_deletes_and_reorders_in_place() {
 }
 
 #[test]
-fn an_answer_edited_far_in_the_future_is_not_taken() {
-    let current = list(&["carry on"], 10);
-    let ahead = list(&["from a fast clock"], NOW + FUTURE_TOLERANCE_MS + 1);
-    assert_eq!(settle(&current, 10, ahead, NOW), Settled::Keep);
-    let slightly = list(&["a minute ahead"], NOW + 60_000);
-    assert_eq!(
-        settle(&current, 10, slightly.clone(), NOW),
-        Settled::Take(slightly)
-    );
-    assert_eq!(
-        settle(&current, 10, list(&["max"], u64::MAX), NOW),
-        Settled::Keep
-    );
-}
-
-#[test]
 fn an_edit_after_the_largest_stamp_does_not_overflow() {
     let current = list(&["carry on"], u64::MAX);
     assert_eq!(edited(&current, Vec::new(), NOW).updated_ms, u64::MAX);
 }
 
 #[test]
-fn a_copy_a_slower_clock_took_is_not_offered_again_as_newer() {
-    // This clock runs ahead: the host took the offer stamped by its own.
-    let current = list(&["carry on"], 5_000);
-    let taken = list(&["carry on"], 4_000);
+fn a_newer_copy_on_a_computer_is_taken() {
+    let current = list(&["carry on"], 10);
+    let stood = list(&["carry on", "explain"], 20);
     assert_eq!(
-        settle(&current, 5_000, taken.clone(), NOW),
-        Settled::Restamp(taken.clone())
+        settle(&current, 10, stood.clone(), None, NOW),
+        Settled::Take(stood)
     );
-    // A phone edit there, stamped by the host's clock after it, now wins
-    // the next exchange instead of being replaced by the older copy.
+}
+
+#[test]
+fn a_computer_holding_these_shortcuts_changes_nothing() {
+    let current = list(&["carry on"], 10);
+    assert_eq!(
+        settle(&current, 10, current.clone(), None, NOW),
+        Settled::Keep
+    );
+    // A daemon whose clock runs behind stamps them by its own: the stamp
+    // here is never lowered to match.
+    assert_eq!(
+        settle(&current, 10, list(&["carry on"], 8), None, NOW),
+        Settled::Keep
+    );
+}
+
+#[test]
+fn an_edit_made_during_an_exchange_is_offered_again() {
+    let current = list(&["explain"], 30);
+    assert_eq!(
+        settle(&current, 10, list(&["carry on"], 10), None, NOW),
+        Settled::Again
+    );
+    // Unless the computer's copy is newer still, which wins whole.
+    let later = list(&["review"], 40);
+    assert_eq!(
+        settle(&current, 10, later.clone(), None, NOW),
+        Settled::Take(later)
+    );
+}
+
+#[test]
+fn a_delayed_answer_cannot_undo_a_save_made_since() {
+    // X goes to two computers at 5000; the first takes it at 4000, by a
+    // slower clock. The stamp here stays 5000, so a save comes after it.
+    let x = list(&["carry on"], 5_000);
+    assert_eq!(
+        settle(&x, 5_000, list(&["carry on"], 4_000), None, NOW),
+        Settled::Keep
+    );
+    let y = edited(&x, vec![shortcut("y", "", "review")], 4_500);
+    assert_eq!(y.updated_ms, 5_001);
+    // The second computer's answer, X at 5000, arrives late: Y stands.
+    let known = list(&["old"], 1);
+    assert_eq!(settle(&y, 5_000, x, Some(&known), NOW), Settled::Again);
+}
+
+#[test]
+fn an_edit_on_a_computer_with_a_slower_clock_is_taken() {
+    // This clock runs ahead; the host took the list at 4000.
+    let current = list(&["carry on"], 5_000);
+    let held = list(&["carry on"], 4_000);
+    assert!(
+        !offers(&current, Some(&held)),
+        "a held copy is not offered again"
+    );
+    // A phone edits there, stamped by the host's slower clock.
     let phone = list(&["review the diff"], 4_500);
     assert_eq!(
-        settle(&taken, 4_000, phone.clone(), NOW),
-        Settled::Take(phone)
+        settle(&current, 5_000, phone, Some(&held), NOW),
+        Settled::Take(list(&["review the diff"], 5_001)),
+        "taken after the copy it replaces, so it goes on to the others"
     );
+    // The same answer heard twice is not an edit.
+    let again = list(&["old"], 4_000);
+    assert_eq!(
+        settle(&current, 5_000, again.clone(), Some(&again), NOW),
+        Settled::Keep
+    );
+}
+
+#[test]
+fn an_answer_edited_far_in_the_future_is_not_taken() {
+    let current = list(&["carry on"], 10);
+    let ahead = list(&["from a fast clock"], NOW + FUTURE_TOLERANCE_MS + 1);
+    assert_eq!(settle(&current, 10, ahead, None, NOW), Settled::Keep);
+    let slightly = list(&["a minute ahead"], NOW + 60_000);
+    assert_eq!(
+        settle(&current, 10, slightly.clone(), None, NOW),
+        Settled::Take(slightly)
+    );
+    assert_eq!(
+        settle(&current, 10, list(&["max"], u64::MAX), None, NOW),
+        Settled::Keep
+    );
+}
+
+/// Three computers holding copies of different ages converge on the newest
+/// once each has met the app: the newest is taken, then offered to the rest.
+#[test]
+fn computers_converge_on_the_latest_edit() {
+    use sheprd_remote_control::control::edited::Edited;
+    let mut computers = [
+        list(&["old"], 10),
+        list(&["newest"], 30),
+        list(&["middle"], 20),
+    ];
+    let mut known: [Option<TextShortcuts>; 3] = Default::default();
+    let mut copy = TextShortcuts::default();
+    // Two rounds: the first finds the newest, the second hands it on.
+    for _ in 0..2 {
+        for (computer, known) in computers.iter_mut().zip(&mut known) {
+            let offered_ms = copy.updated_ms;
+            if offers(&copy, known.as_ref()) {
+                *computer = computer.clone().merged(copy.clone(), 100);
+            }
+            let before = known.replace(computer.clone());
+            if let Settled::Take(stood) =
+                settle(&copy, offered_ms, computer.clone(), before.as_ref(), NOW)
+            {
+                copy = stood;
+            }
+        }
+    }
+    assert_eq!(copy.shortcuts, list(&["newest"], 30).shortcuts);
+    assert!(
+        computers
+            .iter()
+            .all(|computer| computer.shortcuts == copy.shortcuts)
+    );
+}
+
+#[test]
+fn the_read_script_offers_nothing() {
+    assert!(sync::READ_SCRIPT.contains("shortcuts 2>"));
+    assert!(!sync::READ_SCRIPT.contains("--offer"));
+    assert!(!sync::READ_SCRIPT.contains("install"));
 }

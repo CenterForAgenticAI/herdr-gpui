@@ -27,11 +27,20 @@ if [ -x \"$program\" ]; then \"$program\" shortcuts --offer 2>/dev/null || true;
 cat >/dev/null
 ";
 
-/// Offers `offer` to the computer's daemon and returns the shortcuts that
-/// stand, or `None` when the computer has nothing that keeps them.
+/// As [`SCRIPT`], reading the shortcuts without offering any.
+pub(crate) const READ_SCRIPT: &str = "\
+program=$(command -v sheprd-remote-control || command -v herdr-remote-control || true)
+[ -n \"$program\" ] || program=\"$HOME/.local/bin/sheprd-remote-control\"
+if [ -x \"$program\" ]; then \"$program\" shortcuts 2>/dev/null || true; fi
+cat >/dev/null
+";
+
+/// Offers `offer`, if any, to the computer's daemon and returns the
+/// shortcuts that stand, or `None` when the computer has nothing that keeps
+/// them.
 pub(super) fn exchange(
     daemon: &Daemon,
-    offer: TextShortcuts,
+    offer: Option<TextShortcuts>,
     cancelled: &AtomicBool,
 ) -> Result<Option<TextShortcuts>, Error> {
     match daemon {
@@ -39,14 +48,17 @@ pub(super) fn exchange(
             let Ok(state_dir) = remote::state_dir() else {
                 return Ok(None);
             };
-            Ok(Some(shortcuts::exchange(&state_dir, Some(offer))?))
+            Ok(Some(shortcuts::exchange(&state_dir, offer)?))
         }
         Daemon::Remote(target) => {
             let host = Host::new(target).map_err(|_| Error::Unsupported)?;
-            let input = serde_json::to_vec(&offer).map_err(Error::Answer)?;
+            let (script, input) = match &offer {
+                Some(offer) => (SCRIPT, serde_json::to_vec(offer).map_err(Error::Answer)?),
+                None => (READ_SCRIPT, Vec::new()),
+            };
             let mut output = Vec::new();
             host.stream(
-                SCRIPT,
+                script,
                 input.as_slice(),
                 &mut output,
                 ScriptLimits {
