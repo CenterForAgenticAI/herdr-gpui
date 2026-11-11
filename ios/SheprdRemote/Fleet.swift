@@ -326,8 +326,30 @@ final class Fleet {
         if let open = terms[key] { return open }
         let store = TermStore(key: key)
         terms[key] = store
+        let status = machines.first { $0.id == key.device }.map { String(describing: $0.status) } ?? "not paired"
+        log.notice("opening terminal \(key.pane, privacy: .public) on \(key.device, privacy: .public), which is \(status, privacy: .public)")
         Task { await links[key.device]?.watch(.term(pane: key.pane)) }
         return store
+    }
+
+    /// Asks for a terminal again, from scratch, after it did not show.
+    func retryTerm(_ store: TermStore) {
+        guard terms[store.key] === store else { return }
+        store.askedAgain()
+        let key = store.key
+        let size = store.size
+        log.notice("asking again for terminal \(key.pane, privacy: .public) on \(key.device, privacy: .public)")
+        // One task, so the computer drops the old view before the new one.
+        Task {
+            guard let link = links[key.device] else { return }
+            await link.unwatch(.term(pane: key.pane))
+            await link.watch(.term(pane: key.pane), size: size)
+        }
+    }
+
+    /// The link status of `device`, nil when it is not paired.
+    func status(of device: String) -> LinkStatus? {
+        machines.first { $0.id == device }?.status
     }
 
     /// Scrolls a terminal's history by `lines`, above zero going back.
@@ -578,8 +600,20 @@ final class Fleet {
             publishSummary()
         case let .event(.error(message)):
             log.error("\(self.machines[index].computer.name, privacy: .public) refused: \(message, privacy: .public)")
+        case let .event(.refused(view, message)):
+            log.error("\(self.machines[index].computer.name, privacy: .public) refused \(String(describing: view), privacy: .public): \(message, privacy: .public)")
+            if case let .term(pane) = view, let store = terms[PaneKey(device: device, pane: pane)], store.screen == nil {
+                store.problem = message
+            }
+        case let .event(.reload(.term(pane))):
+            log.notice("\(self.machines[index].computer.name, privacy: .public) reloads terminal \(pane, privacy: .public)")
         case let .event(.termScreen(screen)):
-            terms[PaneKey(device: device, pane: screen.pane)]?.apply(screen)
+            guard let store = terms[PaneKey(device: device, pane: screen.pane)] else { return }
+            if store.screen == nil {
+                let waited = ContinuousClock.now - store.asked
+                log.notice("terminal \(screen.pane, privacy: .public) showed after \(waited, privacy: .public)")
+            }
+            store.apply(screen)
         case let .event(event):
             guard let pane = event.pane, let store = chats[PaneKey(device: device, pane: pane)] else { return }
             let before = store.diverged
