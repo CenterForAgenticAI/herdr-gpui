@@ -12,6 +12,7 @@ mod mute;
 mod notes;
 #[cfg(test)]
 mod tests;
+mod worktrees;
 
 pub(super) use flows::bring_forward;
 
@@ -26,6 +27,16 @@ use sheprd_client::protocol::{ClientShellSnapshot, ClientShellWorkspace};
 pub(super) fn serve(call: Call<WorkOp>, incoming: socket::Incoming, _: &mut Watches, cx: &mut App) {
     let Call { caller, op } = call;
     let response = match op {
+        WorkOp::KeptList {} => in_window(&caller, cx, |view, _, _| worktrees::list(view, &caller)),
+        WorkOp::KeptCreate { branch } => in_free_window(&caller, cx, |view, window, cx| {
+            worktrees::dialog(view, &caller, worktrees::Dialog::Create(branch), window, cx)
+        }),
+        WorkOp::KeptOpen {} => in_free_window(&caller, cx, |view, window, cx| {
+            worktrees::dialog(view, &caller, worktrees::Dialog::Open, window, cx)
+        }),
+        WorkOp::KeptDelete {} => in_free_window(&caller, cx, |view, window, cx| {
+            worktrees::dialog(view, &caller, worktrees::Dialog::Delete, window, cx)
+        }),
         WorkOp::Notes => notes::list(cx),
         WorkOp::Note => notes::get(&caller, cx),
         WorkOp::SetNote { text } => notes::set(&caller, &text, cx),

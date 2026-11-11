@@ -136,6 +136,8 @@ and builds without embedded pages return exit 8. See [px0](../crates/sheprd-gpui
 | `notes [list]` | Every worktree note |
 | `notes get\|clear`, `notes set TEXT` | The note on your checkout (its repository and branch) |
 | `worktree [status]`, `worktree mute\|unmute` | Whether your worktree's notifications are muted; silence them or let them through again |
+| `worktree list` | List app-kept Git workspaces on the caller's host, with host, workspace, path, branch and linked-checkout status; unopened Git checkouts are in the Existing picker |
+| `worktree create [BRANCH]`, `worktree open`, `worktree delete` | Open the caller's Herdr 2 new-worktree, existing-checkout, or deletion dialog; the user confirms in the app. Host identity follows the caller, including SSH, cloud and WSL devices |
 | `feedback [--wait S]` | Notes the user sent your pane from pages, reviews, or terminals |
 | `checkpoint [list]` | Checkpoints of the current directory's checkout, newest first (no app needed) |
 | `checkpoint create [LABEL]` | Take one now (no app needed) |

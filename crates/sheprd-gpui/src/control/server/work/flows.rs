@@ -191,12 +191,11 @@ pub(super) fn script(
 fn launch(view: &SheprdWindow, caller: &Caller, kind: ScriptKind) -> Result<Launch, Response> {
     selected_workspace(view, caller)?;
     let found = find(view, caller)?;
-    let herdr = found.herdr("a worktree script")?;
-    let Some(tree) = &herdr.workspace.worktree else {
+    let Some(tree) = &found.workspace.worktree else {
         return Err(invalid(crate::worktree_scripts::Error::NotGit.to_string()));
     };
     // The menu offers the setup script on linked worktrees alone.
-    if kind == ScriptKind::Setup && !tree.is_linked_worktree {
+    if kind == ScriptKind::Setup && !tree.linked {
         return Err(invalid(
             "The setup script runs in linked worktrees, not the main checkout",
         ));
@@ -206,11 +205,21 @@ fn launch(view: &SheprdWindow, caller: &Caller, kind: ScriptKind) -> Result<Laun
         kind,
         endpoint: (view.selection_epoch, endpoint.generation),
         endpoint_id: endpoint.id.clone(),
-        boot: herdr.snapshot.boot_id.clone(),
-        workspace: herdr.workspace.workspace_id.clone(),
+        boot: found
+            .herdr
+            .as_ref()
+            .map(|herdr| herdr.snapshot.boot_id.clone())
+            .unwrap_or_default(),
+        workspace: found.workspace.id.clone(),
         repo: tree.label.clone(),
         repo_key: tree.key.clone(),
-        checkout: None,
+        checkout: found
+            .herdr
+            .is_none()
+            .then(|| crate::worktree_scripts::Checkout {
+                path: found.workspace.cwd.clone(),
+                root: None,
+            }),
         force: false,
         requested: true,
     })

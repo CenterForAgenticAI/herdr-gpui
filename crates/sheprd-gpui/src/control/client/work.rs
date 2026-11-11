@@ -64,6 +64,12 @@ pub(super) fn describe_note(note: &NoteInfo) -> String {
 
 pub(super) fn notes(command: NotesCommand, context: &Context) -> crate::Result<Output> {
     let op = match command {
+        WorktreeCommand::List => WorkOp::KeptList {},
+        WorktreeCommand::Create { branch } => {
+            return context.act(Request::Work, WorkOp::KeptCreate { branch });
+        }
+        WorktreeCommand::Open => return context.act(Request::Work, WorkOp::KeptOpen {}),
+        WorktreeCommand::Delete => return context.act(Request::Work, WorkOp::KeptDelete {}),
         NotesCommand::List => WorkOp::Notes,
         NotesCommand::Get => WorkOp::Note,
         NotesCommand::Set(text) => WorkOp::SetNote { text },
@@ -72,6 +78,24 @@ pub(super) fn notes(command: NotesCommand, context: &Context) -> crate::Result<O
         },
     };
     match context.call(Request::Work, op)? {
+        Response::Work {
+            reply: Reply::Worktrees { worktrees },
+        } => {
+            let text = worktrees
+                .iter()
+                .map(|tree| {
+                    format!(
+                        "{}\t{}\t{}\t{}",
+                        tree.host,
+                        tree.workspace,
+                        tree.branch.as_deref().unwrap_or("detached"),
+                        tree.path
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Output::data(text, &serde_json::json!({"worktrees": worktrees}))
+        }
         Response::Done { message } => Ok(Output::message(message)),
         Response::Work {
             reply: Reply::Notes { notes, omitted },
