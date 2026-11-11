@@ -734,20 +734,22 @@ fn script_lines(script: &str) -> Vec<String> {
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 pub(crate) fn kept_root(checkout: &str, cancelled: &AtomicBool) -> Option<String> {
     kept_root_on(&sheprd_client::ConnectTarget::Local, checkout, cancelled)
+        .ok()
+        .flatten()
 }
 
 fn kept_root_on(
     target: &sheprd_client::ConnectTarget,
     checkout: &str,
     cancelled: &AtomicBool,
-) -> Option<String> {
-    let host = sheprd_remote::work::host_for_kept(target).ok()?;
-    let listed = sheprd_remote::work::list(&host, checkout, cancelled).ok()?;
-    listed
+) -> crate::Result<Option<String>> {
+    let host = sheprd_remote::work::host_for_kept(target)?;
+    let listed = sheprd_remote::work::list(&host, checkout, cancelled)?;
+    Ok(listed
         .into_iter()
         .next()
         .filter(|main| !main.bare)
-        .map(|main| main.path)
+        .map(|main| main.path))
 }
 
 /// The whole checkout a kept folder belongs to, and the main checkout
@@ -760,7 +762,7 @@ pub(crate) fn kept_script_checkout(
     let host = sheprd_remote::work::host_for_kept(target)?;
     let path =
         sheprd_remote::work::git(&host, folder, &["rev-parse", "--show-toplevel"], cancelled)?;
-    let root = kept_root_on(target, &path, cancelled);
+    let root = kept_root_on(target, &path, cancelled)?;
     Ok(Checkout { path, root })
 }
 
