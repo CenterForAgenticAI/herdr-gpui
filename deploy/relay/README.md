@@ -49,7 +49,11 @@ your key ids from `doctl compute ssh-key list` to reach them over SSH.
 
 ## DigitalOcean App Platform (WebSockets only)
 
-No server to manage:
+No server to manage, in one click:
+
+[![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/sheprd-labs/sheprd/tree/main)
+
+The button reads `.do/deploy.template.yaml`. Or, with `doctl`:
 
 ```sh
 doctl apps create --spec deploy/relay/app.yaml

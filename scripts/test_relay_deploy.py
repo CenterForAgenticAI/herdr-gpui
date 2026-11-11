@@ -55,6 +55,30 @@ class BansTest(unittest.TestCase):
         self.assertEqual(bans_mode(rendered("")), (0o755, 0o644))
 
 
+def service_block(path: str, indent: int) -> list[str]:
+    """The relay service's lines in an App Platform spec, without their
+    indentation, from its `- name: relay` to the end of the file."""
+    with open(os.path.join(ROOT, path), encoding="utf-8") as file:
+        lines = file.read().splitlines()
+    start = next(index for index, line in enumerate(lines) if line.strip() == "- name: relay")
+    return [line[indent:] for line in lines[start:] if line.strip()]
+
+
+class AppPlatformTest(unittest.TestCase):
+    def test_the_deploy_button_template_matches_the_doctl_spec(self) -> None:
+        self.assertEqual(
+            service_block(".do/deploy.template.yaml", 4),
+            service_block("deploy/relay/app.yaml", 2),
+        )
+
+    def test_the_image_is_the_published_one(self) -> None:
+        for path in (".do/deploy.template.yaml", "deploy/relay/app.yaml"):
+            with self.subTest(path=path):
+                block = "\n".join(service_block(path, 0))
+                self.assertIn("registry: ghcr.io", block)
+                self.assertIn("repository: sheprd-labs/sheprd-relay", block)
+
+
 class DomainTest(unittest.TestCase):
     def test_a_given_domain_is_kept(self) -> None:
         self.assertEqual(

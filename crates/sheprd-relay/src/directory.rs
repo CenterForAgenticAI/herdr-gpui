@@ -28,6 +28,10 @@ use serde::Deserialize;
 /// Where Sheprd's relays are listed. Compiled in, so a paired device or
 /// a page cannot redirect a client's relay list.
 pub const URL: &str = "https://sheprd.org/relays.json";
+/// How to run a relay, with the one-click DigitalOcean deploy: where
+/// clients link when no Sheprd relays are available, and next to the
+/// private relay setting.
+pub const SETUP_URL: &str = "https://sheprd.org/docs/relays/";
 /// The format this client reads.
 pub const VERSION: u32 = 1;
 /// The largest list a client accepts.
