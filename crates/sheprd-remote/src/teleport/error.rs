@@ -118,6 +118,10 @@ pub enum Error {
     OutsideHome { path: String },
     #[error("The agent is working. Move it once it is idle.")]
     SessionAgentWorking,
+    #[error(
+        "{agent} uses a custom session configuration path; Teleport needs an explicit destination mapping"
+    )]
+    SessionConfiguration { agent: &'static str },
     #[error("The pane's working directory could not be read")]
     SessionCwdUnavailable,
     /// `pane run` was accepted, but the agent never became the destination

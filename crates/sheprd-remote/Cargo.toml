@@ -20,6 +20,7 @@ sheprd-control-protocol.workspace = true
 sheprd-core-client.workspace      = true
 sheprd-credentials.workspace      = true
 sheprd-session.workspace          = true
+sheprd-updater.workspace          = true
 percent-encoding.workspace       = true
 rustls                           = { optional = true, workspace = true }
 secrecy.workspace                = true

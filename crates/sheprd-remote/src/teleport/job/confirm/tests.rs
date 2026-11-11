@@ -8,6 +8,7 @@ use crate::teleport::{
 fn reviewed_session_flags_directory_and_provenance_must_still_match() {
     for agent in AgentKind::ALL.into_iter().filter(|agent| agent.carries()) {
         let expected = PanePlan {
+            binding: None,
             pane_id: "pane".into(),
             cwd: Some("/checkout".into()),
             action: Action::Resume(agent),

@@ -1,21 +1,25 @@
-//! Agent sessions in Herdr 2 terminals. herdr-core reports which agent runs
-//! in a terminal but not its session, which Herdr 1 learns from hooks of its
-//! own. Claude Code records its session by process in
-//! `~/.claude/sessions/<pid>.json`, so a Claude Code terminal's session is
-//! read from there: the record of the terminal's foreground process, started
-//! when that process was, so a record left by an earlier process with the
-//! same ID is never taken for it. Other agents keep no such record, and
-//! hand off with a note as before.
+//! Agent sessions in Herdr 2 terminals, discovered on the owning host through
+//! the shared session reporter. Claude continues using its native PID/start
+//! record, without requiring a separately installed reporter.
 
 use super::Terminal;
 use crate::teleport::{
-    error::{Result, Step},
+    error::{Error, Result, Step},
     host::Host,
     launch::{AgentKind, Work},
     snapshot::{AgentSession, SessionKind},
 };
 use serde::Deserialize;
+use sheprd_client::herdr::sessions::Binding;
 use std::{collections::HashMap, sync::atomic::AtomicBool};
+
+mod reported;
+
+#[derive(Default)]
+pub(in crate::teleport) struct Discovered {
+    pub(in crate::teleport) sessions: HashMap<String, AgentSession>,
+    pub(in crate::teleport) bindings: HashMap<String, Binding>,
+}
 
 /// The most of one record read; Claude Code's are well under a kilobyte.
 const MAX_RECORD: usize = 64 * 1024;
@@ -56,10 +60,14 @@ pub(in crate::teleport) fn sessions(
     host: &Host,
     terminals: &HashMap<String, Terminal>,
     cancelled: &AtomicBool,
-) -> Result<HashMap<String, AgentSession>> {
-    let processes = claude_processes(terminals);
+) -> Result<Discovered> {
+    let (mut found, unavailable) = reported::discover(host, terminals, cancelled)?;
+    let processes = claude_processes(terminals)
+        .into_iter()
+        .filter(|(id, _)| unavailable.iter().any(|missing| missing == id))
+        .collect::<Vec<_>>();
     if processes.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(found);
     }
     let body = processes
         .iter()
@@ -80,7 +88,8 @@ fi
         .collect::<String>();
     let output = host.query(Step::Review, &body, &[], cancelled)?;
     let output = String::from_utf8_lossy(&output);
-    Ok(parse(&output, &processes))
+    found.sessions.extend(parse(&output, &processes));
+    Ok(found)
 }
 
 /// Each section of `output`: a terminal's ID, its process's start in UTC
@@ -105,13 +114,13 @@ fn parse(output: &str, processes: &[(&str, u32)]) -> HashMap<String, AgentSessio
             && started.is_some_and(|started| {
                 !started.is_empty() && (started == words(utc) || started == words(local))
             });
-        let session = AgentSession {
-            agent: AgentKind::Claude.name().to_owned(),
-            kind: SessionKind::Id,
-            source: format!("herdr:{}", AgentKind::Claude.name()),
-            value: record.session_id,
-        };
-        if same_process && AgentKind::Claude.accepts(&session) {
+        if same_process
+            && let Ok(session) = sheprd_client::herdr::sessions::reference(
+                AgentKind::Claude,
+                SessionKind::Id,
+                record.session_id,
+            )
+        {
             found.insert(id.to_owned(), session);
         }
     }

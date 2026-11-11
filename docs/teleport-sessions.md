@@ -14,14 +14,29 @@ the native session storage; `job.rs` launches into either generation.
 | --- | --- | --- |
 | H1 → H1 | H1 integration reference, matched to the detected agent | Live transfer, exact destination session acknowledgement |
 | H1 → H2 | Same H1 reference and transfer implementation | Live transfer, durable app-kept destination, exact session acknowledgement |
-| H2 → H1 | Claude PID/start record only | Non-Claude process-bound discovery, live transfer |
-| H2 → H2 | Claude PID/start record only | Non-Claude process-bound discovery, durable app-kept destination, live transfer |
+| H2 → H1 | Claude PID/start record; installed Sheprd reporters through the owning-host helper | Remaining agent producers, live transfer |
+| H2 → H2 | Same source discovery as H2 → H1 | Remaining agent producers, durable app-kept destination, live transfer |
 
 Before a move and again immediately before retirement, resumable sessions of
 both generations are re-read. Session reference (including provenance), retained
 flags, and working directory must match the review. These are fresh checks,
 not an atomic ownership guarantee: another client can change the process or
 conversation between checking and stopping it.
+
+Non-Claude discovery consumes `sheprd-client::herdr::sessions::Binding` from
+the owning host's `sheprd-acp session-discover TERMINAL AGENT`, using the same
+socket/session environment as Teleport's core commands. The complete binding
+(core, terminal, PID, birth token, selection sequence, provenance and config
+metadata) is retained in the review and compared again before retirement.
+Explicitly absent or cleared selections permit handoff; malformed, stale or
+failed reads refuse the move. Missing helpers permit handoff, not guessed
+session IDs. Claude's native record is attributed to Sheprd's own validation,
+not impersonated as a Herdr 1 integration event.
+
+This integration depends on [#1285](https://github.com/sheprd-labs/sheprd/pull/1285),
+initial foundation `3e2a87dd5`. Its initial producers cover Codex/Copilot
+SessionStart hooks and the OpenCode V2 TUI plugin; installing the helper alone
+does not install those reporters. See [session evidence](agent-session-evidence.md).
 
 ## Agent coverage
 
@@ -31,10 +46,10 @@ The existing transferable subset is `AgentKind::carries` in
 | Agent | Transfer mechanism | Remaining evidence needed |
 | --- | --- | --- |
 | Claude | Project transcript and subagent archive | Foreground-specific config root, live round trip |
-| Codex | Exact rollout filename suffix, preserving dated path | Process-bound discovery, custom config root, live round trip |
-| OpenCode | Native export/import | TUI-owned session binding, exact import/resume acknowledgement, live round trip |
+| Codex | Exact rollout filename suffix, preserving dated path | Installed SessionStart reporter, custom config root mapping, live round trip |
+| OpenCode | Native export/import | Installed TUI reporter, exact import/resume acknowledgement, live round trip |
 | Pi / Omp | Exact session path or full filename ID suffix | Process-bound discovery, custom session roots, live round trip |
-| Copilot | Whole session-state directory | Process-bound discovery, custom config root, live round trip |
+| Copilot | Whole session-state directory | Installed SessionStart reporter, custom config root mapping, live round trip |
 | Letta | Server-side conversation reference | Process-bound discovery and destination server/account identity |
 
 Duplicate Claude, Codex, Pi, or Omp files for one reference are refused rather
@@ -58,9 +73,11 @@ storage/export contract before being added to the transferable subset.
 - WSL and custom socket hosts are explicitly rejected by `Host::new`.
   Native Windows Teleport is not implemented. These are not covered by macOS
   fixture tests.
-- Transfer scripts use their host shell environment. They do not yet carry
-  the foreground agent's allowlisted configuration roots. A PID-bound session
-  ID alone is insufficient for custom-root continuity.
+- Non-Claude bindings with nonempty source configuration overrides are explicitly
+  refused until a destination mapping exists. Absolute source roots are never
+  applied on the destination, or silently discarded to read a different store.
+  Legacy H1 and native Claude transfer scripts still use the host shell
+  environment; foreground-only configuration overrides remain to be handled.
 
 ## Unresolved lifecycle gaps
 
@@ -78,9 +95,10 @@ storage/export contract before being added to the transferable subset.
 4. There is no conditional PID/start/session precondition on the core's stop
    operation. Fresh checks cannot make stopping atomic. A real upstream contract
    is required; no external Herdr checkout is changed by this work.
-5. Shared non-Claude discovery is owned by the round-3 `agent-sessions` slice.
-   It requires explicit Sheprd evidence from agent hooks/plugins; startup argv,
-   the newest transcript, and fabricated H1 provenance are not valid substitutes.
+5. Shared discovery's remaining Pi/Omp/Letta producers are owned by the round-3
+   `agent-sessions` slice. Without explicit Sheprd evidence those sessions still
+   hand off. Startup argv, the newest transcript, and fabricated H1 provenance
+   are not valid substitutes.
 
 ## Validation
 

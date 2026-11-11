@@ -48,9 +48,12 @@ pub(super) fn sessions(host: &Host, review: &Review, cancelled: &AtomicBool) -> 
                         .ok_or(Error::SourceSessionChanged)?;
                     unchanged(
                         expected,
-                        &core::work(terminal, sessions.get(&expected.pane_id)),
+                        &core::work(terminal, sessions.sessions.get(&expected.pane_id)),
                         terminal.cwd().as_deref(),
                     )?;
+                    if expected.binding.as_ref() != sessions.bindings.get(&expected.pane_id) {
+                        return Err(Error::SourceSessionChanged);
+                    }
                 }
             }
         }
