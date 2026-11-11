@@ -291,6 +291,20 @@ way to stop a command inside a thread, so its shells have no Stop, and Copilot's
 and OpenCode's sub-agents are listed without one, as ACP has no request for it.
 Gemini and Pi report none of this, so these sections stay away.
 
+OpenCode versions advertising child-session updates show both foreground and
+background sub-agents. Each gets a card linked from the rail, with its own
+steps even when several run concurrently. Background cards survive the parent
+turn and end when OpenCode reports that child completed, failed, or was
+interrupted. Older OpenCode versions without that extension can only track
+foreground launch calls reliably.
+
+For structured tasks in OpenCode V2, enable `"experimental": {"todo": true}`
+in your OpenCode configuration ([OpenCode's setting](https://opencode.ai/v2/docs/config#todos)).
+It defaults to false in release builds. The resulting `todowrite` calls feed
+the **Plan** section; an assistant's Markdown checklist does not. Child tasks
+remain separate from the parent's plan. Sheprd does not enable agent tools
+or change OpenCode configuration automatically.
+
 Every rail section folds to one line. While anything runs, **Plan** and
 **Changed** fold on their own to leave room, showing the current step and the
 change totals; once nothing runs they open again. Clicking a section's header
