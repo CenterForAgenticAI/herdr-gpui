@@ -299,6 +299,18 @@ final class Fleet {
     /// Devices with an offer of tags on its way, so a home arriving
     /// meanwhile does not send it again.
     @ObservationIgnored private var tagOffers = TagOffers<Computer>()
+    /// When the text shortcuts a computer's home reports were edited; `nil`
+    /// from a computer too old to keep them.
+    @ObservationIgnored var onShortcutsReported: ((UInt64?, String) -> Void)?
+    /// A computer's copy of the text shortcuts, as fetched, or as it stood
+    /// after the offer that goes with it.
+    @ObservationIgnored var onShortcuts: ((TextShortcuts, _ offered: TextShortcuts?, String) -> Void)?
+    /// A computer's shortcuts could not be read.
+    @ObservationIgnored var onShortcutsFetchFailed: ((String) -> Void)?
+    /// A computer's link is not online, or the computer was forgotten.
+    @ObservationIgnored var onOffline: ((String) -> Void)?
+    /// Offers of text shortcuts on their way, one at a time per computer.
+    @ObservationIgnored private var shortcutOffers = TagOffers<TextShortcuts>()
 
     // MARK: Views
 
@@ -503,6 +515,37 @@ final class Fleet {
         }
     }
 
+    /// Reads a computer's text shortcuts. A failure leaves the copy here;
+    /// the computer's next report after it is back asks again.
+    func fetchShortcuts(from device: String) {
+        Task {
+            do {
+                let copy = try await call(device) { client, token in try await client.shortcuts(bearer: token) }
+                onShortcuts?(copy, nil, device)
+            } catch {
+                log.error("could not read shortcuts: \(String(describing: error), privacy: .public)")
+                onShortcutsFetchFailed?(device)
+            }
+        }
+    }
+
+    /// Offers a computer this phone's text shortcuts. An edit made while
+    /// another offer goes waits for it, and only the latest does.
+    func offerShortcuts(_ offer: TextShortcuts, to device: String) {
+        guard shortcutOffers.begin(device, offer, edit: offer.updatedMs) else { return }
+        Task {
+            defer {
+                if let next = shortcutOffers.finish(device) { offerShortcuts(next, to: device) }
+            }
+            do {
+                let answer = try await call(device) { client, token in try await client.offerShortcuts(offer, bearer: token) }
+                onShortcuts?(answer, offer, device)
+            } catch {
+                log.error("could not offer shortcuts: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     /// Closes the pane a chat runs in, which stops its agent in Sheprd.
     func closeChatPane(_ key: PaneKey) async throws {
         let pane = key.pane
@@ -565,7 +608,10 @@ final class Fleet {
         case let .status(status):
             log.notice("\(self.machines[index].computer.name, privacy: .public) is \(String(describing: status), privacy: .public)")
             machines[index].status = status
-            if case .online = status {} else { machines[index].watching = false }
+            if case .online = status {} else {
+                machines[index].watching = false
+                onOffline?(device)
+            }
             if case .revoked = status { stopLink(device) }
             if case .online = status {
                 onOnline?(machines[index].computer)
@@ -579,6 +625,7 @@ final class Fleet {
             unreported[device, default: UnreportedFailures()].add(line)
         case let .event(.home(home)):
             if let tags = home.tags { onTags?(tags, machines[index].computer) }
+            onShortcutsReported?(home.shortcutsMs, device)
             // The computer's load moves every few seconds; only the header
             // shows it, so the cache, widgets, and Spotlight wait for a
             // change to the workspaces.
