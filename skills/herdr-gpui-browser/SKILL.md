@@ -300,11 +300,12 @@ mutes, restores, scripts, Teleport, and fan-out target it without needing
 Herdr 1. Each still enforces its checkout, host, and platform requirements,
 and scripts and dialogs retain the workspace menu's host capabilities and
 confirmation rules. Select the caller's host in the window before opening a
-dialog. Local support does not imply Herdr 2-only remote worktree support. A
-terminal outside every workspace the window keeps is refused rather than
-targeting an unrelated workspace. Chat conversion on Herdr 2 currently needs
-a local Claude process with an exact session record; Herdr 1 integration
-installation does not establish Herdr 2 session identity.
+dialog. Worktree dialogs and scripts run Git on the caller's host, including
+SSH, cloud, and WSL devices. A terminal outside every workspace the window
+keeps is refused rather than targeting an unrelated workspace. Chat
+conversion on Herdr 2 currently needs a local Claude process with an exact
+session record; Herdr 1 integration installation does not establish Herdr 2
+session identity.
 
 Some commands only open the app's dialog and the user confirms there:
 restoring a checkpoint, teleporting a worktree, fanning out a prompt, running
