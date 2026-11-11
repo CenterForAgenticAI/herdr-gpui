@@ -20,6 +20,8 @@ on:
       - 'Cargo.toml'
       - 'rust-toolchain.toml'
       - 'scripts/relay-image.sh'
+      - 'deploy/relay/**'
+      - 'scripts/test_relay_deploy.py'
       - '.github/workflows/relay-image.yml'
   pull_request:
     paths:
@@ -28,6 +30,8 @@ on:
       - 'Cargo.toml'
       - 'rust-toolchain.toml'
       - 'scripts/relay-image.sh'
+      - 'deploy/relay/**'
+      - 'scripts/test_relay_deploy.py'
       - '.github/workflows/relay-image.yml'
   workflow_dispatch:
 
@@ -66,6 +70,9 @@ jobs:
           persist-credentials: false
       - name: Set up Buildx
         run: docker buildx create --name relay --driver docker-container --use
+      - name: Check the DigitalOcean user data
+        if: matrix.arch == 'amd64'
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_relay_deploy.py
       - name: Build and check
         env:
           ARCH: ${{ matrix.arch }}

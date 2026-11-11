@@ -21,14 +21,23 @@ async fn connect_pinned(
     address: SocketAddr,
     pin: Pin,
 ) -> Result<Connection, quinn::ConnectionError> {
+    connect_with(address, pin, client_transport()).await
+}
+
+/// A client connection with its own transport settings.
+pub(super) async fn connect_with(
+    address: SocketAddr,
+    pin: Pin,
+    transport: quinn::TransportConfig,
+) -> Result<Connection, quinn::ConnectionError> {
     let mut endpoint = Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
     let mut config = ClientConfig::new(Arc::new(client_crypto(pin).unwrap()));
-    config.transport_config(Arc::new(client_transport()));
+    config.transport_config(Arc::new(transport));
     endpoint.set_default_client_config(config);
     endpoint.connect(address, SERVER_NAME).unwrap().await
 }
 
-async fn status(recv: &mut RecvStream) -> Status {
+pub(super) async fn status(recv: &mut RecvStream) -> Status {
     let mut byte = [0; 1];
     tokio::time::timeout(Duration::from_secs(5), recv.read_exact(&mut byte))
         .await
@@ -46,7 +55,7 @@ fn exported(connection: &Connection) -> [u8; EXPORTER_LEN] {
 }
 
 /// The listen request `key` makes on `connection`.
-fn listen_request(connection: &Connection, key: &SigningKey, token: &[u8]) -> Request {
+pub(super) fn listen_request(connection: &Connection, key: &SigningKey, token: &[u8]) -> Request {
     Request::Listen {
         key: public(key),
         signature: sign(key, &wire::listen_signed(&exported(connection))),

@@ -244,18 +244,28 @@ async fn listen(
                     continue;
                 };
                 let connection = connection.clone();
+                let limit = hub.limits.accept_timeout;
                 tokio::spawn(async move {
-                    let Ok((mut send, recv)) = connection.open_bi().await else {
-                        return;
+                    // Bounded by the dial's own wait, and dropped as soon
+                    // as the dial gives up, so a listener that grants no
+                    // stream credit cannot pile up waiting tasks.
+                    let open = async {
+                        let (mut send, recv) = connection.open_bi().await.ok()?;
+                        let header = [&[INCOMING][..], &incoming.key].concat();
+                        send.write_all(&header).await.ok()?;
+                        Some((send, recv))
                     };
-                    let header = [&[INCOMING][..], &incoming.key].concat();
-                    if send.write_all(&header).await.is_err() {
-                        return;
+                    let mut accepted = accepted;
+                    let opened = tokio::select! {
+                        opened = timeout(limit, open) => opened.ok().flatten(),
+                        () = accepted.closed() => None,
+                    };
+                    if let Some((send, recv)) = opened {
+                        let _ = accepted.send(Accepted {
+                            peer: Peer::Stream { recv, send },
+                            permit: None,
+                        });
                     }
-                    let _ = accepted.send(Accepted {
-                        peer: Peer::Stream { recv, send },
-                        permit: None,
-                    });
                 });
             }
             // `read_chunk` is cancel-safe: when a dial wins the race, no

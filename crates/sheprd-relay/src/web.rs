@@ -181,13 +181,15 @@ async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, h
     let ready = ToPeer::Ready {
         route: registration.route.to_string(),
     };
-    if !send(&mut socket, &ready).await {
+    let silence = hub.limits.listener_silence;
+    // Writes are bounded by the silence limit too: a listener that stops
+    // reading cannot stall this loop past it and keep its route and keys.
+    if !send_within(&mut socket, &ready, silence).await {
         return;
     }
     // A listener that sends nothing, not even a pong, for the silence limit
     // is gone: its route and keys are dropped, as QUIC's idle timeout drops
     // a silent connection.
-    let silence = hub.limits.listener_silence;
     let mut ping = tokio::time::interval(PING_INTERVAL.min(silence / 3));
     ping.reset();
     let mut heard = tokio::time::Instant::now();
@@ -196,13 +198,13 @@ async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, h
             incoming = registration.incoming.recv() => {
                 let Some(incoming) = incoming else {
                     hub.metrics.listen(Listen::Replaced);
-                    return close(socket, code::REPLACED).await;
+                    return close_within(socket, code::REPLACED, silence).await;
                 };
                 let message = ToPeer::Incoming {
                     key: URL_SAFE_NO_PAD.encode(incoming.key),
                     session: incoming.session.to_string(),
                 };
-                if !send(&mut socket, &message).await {
+                if !send_within(&mut socket, &message, silence).await {
                     return;
                 }
             }
@@ -214,21 +216,24 @@ async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, h
                         .ok()
                         .and_then(|message| message.decode());
                     let Some(message) = message else {
-                        return close(socket, code::PROTOCOL).await;
+                        return close_within(socket, code::PROTOCOL, silence).await;
                     };
                     let status = broker::apply(&registration, message);
-                    if !send(&mut socket, &ToPeer::Status { status }).await {
+                    if !send_within(&mut socket, &ToPeer::Status { status }, silence).await {
                         return;
                     }
                 }
-                Some(Ok(Message::Binary(_))) => return close(socket, code::PROTOCOL).await,
+                Some(Ok(Message::Binary(_))) => {
+                    return close_within(socket, code::PROTOCOL, silence).await;
+                }
                 Some(Ok(Message::Close(_)) | Err(_)) | None => return,
             },
             _ = ping.tick() => {
                 if heard.elapsed() >= silence {
-                    return close(socket, code::IDLE).await;
+                    return close_within(socket, code::IDLE, silence).await;
                 }
-                if socket.send(Message::Ping(Default::default())).await.is_err() {
+                let ping = socket.send(Message::Ping(Default::default()));
+                if !matches!(timeout(silence, ping).await, Ok(Ok(()))) {
                     return;
                 }
             }
@@ -344,6 +349,16 @@ async fn send(socket: &mut WebSocket, message: &ToPeer) -> bool {
         return false;
     };
     socket.send(Message::Text(text.into())).await.is_ok()
+}
+
+/// [`send`], giving up after `limit`.
+async fn send_within(socket: &mut WebSocket, message: &ToPeer, limit: Duration) -> bool {
+    timeout(limit, send(socket, message)).await.unwrap_or(false)
+}
+
+/// [`close`], giving up after `limit`.
+async fn close_within(socket: WebSocket, code: u16, limit: Duration) {
+    let _ = timeout(limit, close(socket, code)).await;
 }
 
 async fn close(mut socket: WebSocket, code: u16) {

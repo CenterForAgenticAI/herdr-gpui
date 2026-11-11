@@ -135,7 +135,7 @@ async fn pump(
                 metrics.throttled(Throttled::Session, wait);
             }
         }
-        if let Some(total) = session.hub().total_throttle() {
+        if let Some(total) = session.hub().total_throttle(direction) {
             let wait = total.take(length).await;
             if !wait.is_zero() {
                 metrics.throttled(Throttled::Total, wait);

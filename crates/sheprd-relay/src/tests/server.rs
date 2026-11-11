@@ -12,6 +12,7 @@ mod options;
 mod quic;
 mod races;
 mod relay;
+mod review;
 
 pub(crate) use super::{hello, public, sign, signing_key};
 use crate::{

@@ -304,7 +304,11 @@ test-mockup-wait:
 test-pr-closure:
     PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_close_low_confidence_prs.py
 
-ci: format-check check-file-size check-sorted check-i18n check-artwork lint test test-mockup-wait test-pr-closure
+# The relay's DigitalOcean user data picks the right domain.
+test-relay-deploy:
+    PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_relay_deploy.py
+
+ci: format-check check-file-size check-sorted check-i18n check-artwork lint test test-mockup-wait test-pr-closure test-relay-deploy
 
 # Tools are listed in scripts/setup-ci.sh; Docker for lint-linux is only checked.
 # Install the tools local CI-equivalent runs need, on macOS or Ubuntu.

@@ -17,7 +17,7 @@ pub use guards::{Permit, Registration, Session, Slot, Unclaimed, Waiting};
 use crate::{
     Limits, RouteId, SessionId,
     bucket::{Limiter, Rate, Throttle, source_key},
-    metrics::{Gauge, Kind, Metrics, Refused},
+    metrics::{Direction, Gauge, Kind, Metrics, Refused},
     splice::Peer,
     wire::{Key, MAX_DIAL_KEYS},
 };
@@ -52,7 +52,8 @@ pub struct Hub {
     pub metrics: Metrics,
     next: AtomicU64,
     state: Mutex<State>,
-    total: Option<Throttle>,
+    /// One throttle each way, as `total_bandwidth` promises.
+    total: [Option<Throttle>; 2],
 }
 
 #[derive(Debug, Default)]
@@ -151,7 +152,10 @@ impl Hub {
             metrics: Metrics::default(),
             next: AtomicU64::new(1),
             state: Mutex::default(),
-            total: Throttle::new(limits.total_bandwidth),
+            total: [
+                Throttle::new(limits.total_bandwidth),
+                Throttle::new(limits.total_bandwidth),
+            ],
         }
     }
 
@@ -164,8 +168,12 @@ impl Hub {
 
     /// The throttle every session shares, unless bandwidth is unlimited.
     #[must_use]
-    pub fn total_throttle(&self) -> Option<&Throttle> {
-        self.total.as_ref()
+    pub fn total_throttle(&self, direction: Direction) -> Option<&Throttle> {
+        let index = match direction {
+            Direction::FromDialer => 0,
+            Direction::FromListener => 1,
+        };
+        self.total[index].as_ref()
     }
 
     /// Whether `address` may start another dial now.
@@ -317,8 +325,10 @@ impl Hub {
         state.pending.insert(session, Pending { accepted });
         state.routes.insert(route, on_route + 1);
         state.slots += 1;
-        drop(state);
+        // Raised before the lock goes, so an `accept` racing in cannot
+        // lower it first and leave it a count too high.
         self.metrics.raise(Gauge::Pending);
+        drop(state);
         Ok(Ok(Waiting {
             accepted: receiver,
             pending: Unclaimed::new(Arc::clone(self), session),
