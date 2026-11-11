@@ -253,10 +253,12 @@ Run `sheprd browser --help` for the full usage.
 
 ## More of Sheprd from the command line
 
-The same executable drives the rest of Sheprd's own features. Herdr's own
-`herdr` CLI still owns workspaces, terminal tabs, panes, agents, and
-scrollback (`herdr pane read`): use `herdr` for those, and the commands below
-for what only Sheprd shows or keeps.
+The same executable drives the rest of Sheprd's own features. For Herdr 1,
+use `herdr` for daemon workspaces, terminal tabs, panes, agents, and scrollback
+(`herdr pane read`). A Herdr 2 terminal is not a Herdr 1 pane: do not pass its ID
+to `herdr`. Use the installed `hc`/`herdr-core --help` for core terminal operations
+and Sheprd for the workspace and layout it keeps. The commands below reach
+what Sheprd shows or keeps.
 
 | To | Run |
 | --- | --- |
@@ -305,9 +307,16 @@ it in the app.
 Add `--json` to any command for machine-readable output; errors then come
 back as `{"error": {"code", "message"}}`. Exit statuses are the ones in the
 table above. A command acts in the window that shows your workspace; it
-exits 5 rather than act in another session's window. In a Herdr 2 terminal
-in no Herdr workspace, `sheprd work` notes, mutes, restores, scripts,
-Teleport, and fan-out exit 8: they keep Herdr's workspace state.
+exits 5 rather than act in another session's window. A Herdr 2 caller is resolved
+through the app-kept workspace of its tab. Notes, checkpoint restore, and
+Teleport can target a kept workspace; each still enforces its checkout, host
+and platform requirements. The CLI paths for worktree mutes, scripts, and
+fan-out still require Herdr 1 workspace state and exit 8 for app-kept Herdr 2
+workspaces, even where the corresponding desktop menu works. Local support does not imply
+Herdr 2-only remote worktree support. A terminal outside a workspace the window
+keeps is refused rather than targeting an unrelated workspace. Chat conversion
+on Herdr 2 currently needs a local Claude process with an exact session record;
+Herdr 1 integration installation does not establish Herdr 2 session identity.
 
 Some commands only open the app's dialog and the user confirms there:
 restoring a checkpoint, teleporting a worktree, fanning out a prompt, running
