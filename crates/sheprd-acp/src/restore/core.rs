@@ -3,7 +3,7 @@
 
 use std::{
     fs::{File, OpenOptions},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context as _, ensure};
@@ -58,6 +58,12 @@ pub(crate) fn run(endpoint: EndpointId) -> anyhow::Result<()> {
         matches_context(&record, &endpoint, &cwd, |name| std::env::var_os(name)),
         "this is not the terminal, endpoint, socket and folder that kept the chat"
     );
+    // The endpoint lock proves the old chat program gone, not the agent it
+    // started: that runs in a process group of its own, as may its tools.
+    ensure!(
+        previous_agent_gone(&dir, &endpoint)?,
+        "the chat's previous agent, or a tool it started, is still running; end it before restoring"
+    );
     crate::app::run_owned(Options {
         adapter: record.adapter,
         agent: AgentChoice::Builtin {
@@ -71,6 +77,85 @@ pub(crate) fn run(endpoint: EndpointId) -> anyhow::Result<()> {
         name: None,
         require_load: true,
     })
+}
+
+/// The agent a core chat started, kept beside its restore record so an
+/// explicit restore can refuse while it, or a tool in its group, lives on.
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct Started {
+    pid: u32,
+    /// The OS birth token, so a reused PID is never mistaken for it.
+    started: String,
+}
+
+fn started_path(dir: &Path, endpoint: &EndpointId) -> PathBuf {
+    dir.join(format!("{endpoint}.agent"))
+}
+
+/// Records the agent `pid` a core chat just started, readable only by this
+/// user. Without it a later restore refuses, so a failure is only reported.
+pub(crate) fn agent_started(dir: &Path, endpoint: &EndpointId, pid: u32) -> anyhow::Result<()> {
+    let started = Started {
+        pid,
+        started: sheprd_core_client::sessions::process_birth(pid)?
+            .context("the agent ended as it started")?,
+    };
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    serde_json::to_writer(options.open(started_path(dir, endpoint))?, &started)?;
+    Ok(())
+}
+
+/// Forgets the agent once its chat ended on its own.
+pub(crate) fn agent_ended(dir: &Path, endpoint: &EndpointId) {
+    let _ = std::fs::remove_file(started_path(dir, endpoint));
+}
+
+/// Whether the agent the chat last started is provably gone. An unknown
+/// agent is not: doubt refuses rather than risk two agents on one session.
+fn previous_agent_gone(dir: &Path, endpoint: &EndpointId) -> anyhow::Result<bool> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    File::open(started_path(dir, endpoint))
+        .context("the chat's previous agent is unknown")?
+        .take(4096)
+        .read_to_end(&mut bytes)?;
+    let started: Started = serde_json::from_slice(&bytes)?;
+    Ok(agent_gone(started.pid, &started.started)?)
+}
+
+/// Proof, without signalling anything, that the agent `pid` born at
+/// `started` and its process group are gone. Nothing here kills or adopts a
+/// process from a stored PID.
+pub(crate) fn agent_gone(pid: u32, started: &str) -> sheprd_core_client::Result<bool> {
+    if sheprd_core_client::sessions::process_birth(pid)?.as_deref() == Some(started) {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        // spawn() made the agent the leader of its own group. Probe signal
+        // zero only: an exited leader may still have live tools in that group.
+        let Some(group) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return Ok(false);
+        };
+        match rustix::process::test_kill_process_group(group) {
+            Err(rustix::io::Errno::SRCH) => Ok(true),
+            Ok(()) | Err(rustix::io::Errno::PERM) => Ok(false),
+            Err(error) => Err(std::io::Error::from(error).into()),
+        }
+    }
+    // Windows has no process group to probe, and stop() there ends only the
+    // agent itself, so a tool it started may outlive it. The exact agent is
+    // gone; anything it left is the same gap a normal Windows close has.
+    #[cfg(not(unix))]
+    {
+        Ok(true)
+    }
 }
 
 fn matches_context(

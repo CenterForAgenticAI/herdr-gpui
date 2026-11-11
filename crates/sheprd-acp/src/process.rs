@@ -85,6 +85,10 @@ pub(crate) fn spawn(
 }
 
 impl AgentProcess {
+    pub(crate) fn id(&self) -> u32 {
+        self.lock().id()
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Child> {
         self.child.lock().unwrap_or_else(PoisonError::into_inner)
     }

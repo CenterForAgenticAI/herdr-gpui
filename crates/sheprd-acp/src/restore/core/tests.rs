@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(unix)]
+mod previous_agent;
+
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
 /// A lock is released once every copy of its descriptor closes. A process

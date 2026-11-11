@@ -200,6 +200,16 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
             &cwd,
         )
     };
+    if target.is_none()
+        && let Some(keeper) = &keeper
+        && let Err(error) = keeper.agent_started(agent_process.id())
+    {
+        // A later restore then refuses rather than guessing the agent ended.
+        notices.push((
+            NoticeLevel::Warning,
+            format!("This chat cannot be restored if it is lost: {error:#}"),
+        ));
+    }
     let reporter = match &target {
         Some(target) => Some(Reporter::start(
             target.clone(),
