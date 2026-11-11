@@ -181,10 +181,7 @@ fn changed_branch_and_commit_never_reuse_checks_or_logs() {
     let reader = Reader::new(true);
     populate(&reader, cwd);
     git(dir.path(), &["checkout", "-b", "other"]);
-    assert_eq!(
-        reader.answer(cwd, &Wanted::Checks),
-        Err(Failure::RateLimited)
-    );
+    assert_eq!(reader.answer(cwd, &Wanted::Checks), Err(Failure::Gone));
     reader.cache.lock().unwrap().next = None;
     reader
         .with_entry_using(
@@ -201,10 +198,7 @@ fn changed_branch_and_commit_never_reuse_checks_or_logs() {
         Ok(Answer::Checks(Checks::default()))
     );
     git(dir.path(), &["commit", "--allow-empty", "-m", "new head"]);
-    assert_eq!(
-        reader.answer(cwd, &Wanted::Checks),
-        Err(Failure::RateLimited)
-    );
+    assert_eq!(reader.answer(cwd, &Wanted::Checks), Err(Failure::Gone));
 }
 
 #[test]
@@ -272,10 +266,7 @@ fn expired_entries_and_remote_changes_require_a_new_lookup() {
             "https://github.com/other/repo.git",
         ],
     );
-    assert_eq!(
-        reader.answer(cwd, &Wanted::Checks),
-        Err(Failure::RateLimited)
-    );
+    assert_eq!(reader.answer(cwd, &Wanted::Checks), Err(Failure::Gone));
 }
 
 #[test]
@@ -299,10 +290,7 @@ fn effective_includes_and_arbitrary_remotes_invalidate_answers() {
         "[remote \"fork\"]\nurl = https://github.com/second/repo.git\n",
     )
     .unwrap();
-    assert_eq!(
-        reader.answer(cwd, &Wanted::Checks),
-        Err(Failure::RateLimited)
-    );
+    assert_eq!(reader.answer(cwd, &Wanted::Checks), Err(Failure::Gone));
 }
 
 #[test]
@@ -359,4 +347,30 @@ fn temporary_failures_keep_a_matching_badge_but_absence_and_identity_changes_rem
     assert!(replaces_badge(&Ok(Ok(None))));
     assert!(replaces_badge(&Ok(Err(Failure::Gone))));
     assert!(replaces_badge(&Ok(Ok(Some(pr())))));
+}
+
+#[test]
+fn remote_changes_clear_old_badges_even_during_account_backoff() {
+    let dir = repository();
+    let cwd = dir.path().to_str().unwrap();
+    let reader = Reader::new(true);
+    populate(&reader, cwd);
+    reader
+        .cache
+        .lock()
+        .unwrap()
+        .pause(&sheprd_github::Error::RateLimit { reset: None });
+    git(
+        dir.path(),
+        &["remote", "add", "fork", "https://github.com/new/repo.git"],
+    );
+    let answer = reader.pull_request(cwd, "feature");
+    assert!(matches!(answer, Err(Failure::Gone)));
+    assert!(replaces_badge(&Ok(answer)));
+    assert!(reader.cache.lock().unwrap().entries.is_empty());
+    // Invalidating the presentation never bypasses the actual account pause.
+    assert_eq!(
+        reader.answer(cwd, &Wanted::Checks),
+        Err(Failure::RateLimited)
+    );
 }

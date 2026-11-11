@@ -166,6 +166,15 @@ impl Reader {
             repo_key: None,
             branch,
         };
+        // Invalidate before pacing: a changed remote must clear its old
+        // badge even while an account-wide backoff prevents a new lookup.
+        if let Some(index) = cache.entries.iter().position(|entry| {
+            entry.input.checkout == input.checkout
+                && (entry.input != input || entry.head != head || entry.repository != repository)
+        }) {
+            cache.entries.remove(index);
+            return Err(Failure::Gone);
+        }
         let now = Instant::now();
         let index = match cache.entries.iter().position(|e| {
             e.input == input && e.head == head && e.repository == repository && now < e.until
