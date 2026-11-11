@@ -274,10 +274,10 @@ impl Guard {
             });
             if records.len() >= MAX_RECORDS {
                 // Still full, as when one attacker holds many /64s. Never
-                // stop counting, and never lift a ban to make room: drop
-                // the unbanned record with the fewest points. If every
-                // slot is an active ban, fail closed and ban this
-                // address's wide block instead.
+                // lift a ban to make room: drop the unbanned record with
+                // the fewest points. If every slot is an active ban, an
+                // offense that would ban this address bans its wide block
+                // instead.
                 let least = records
                     .iter()
                     .filter(|(_, record)| !record.banned(now))
@@ -288,8 +288,15 @@ impl Guard {
                         records.remove(&least);
                     }
                     None => {
+                        // Only what would ban this address on its own
+                        // bans its block: never a lone point, and never a
+                        // transfer still under budget, which every session
+                        // charges each second. Smaller offenses go
+                        // uncounted until a slot frees.
                         drop(records);
-                        return self.ban_wide(address, Offense::Probe, now);
+                        let mut scratch = Record::new(now);
+                        return change(&mut scratch)
+                            .and_then(|_| self.ban_wide(address, scratch.reason, now));
                     }
                 }
             }

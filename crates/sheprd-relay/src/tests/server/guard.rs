@@ -202,7 +202,15 @@ fn a_table_full_of_bans_never_lifts_one_and_bans_wide_instead() {
     for index in 0..u32::try_from(MAX_RECORDS).unwrap() {
         guard.offend(banned_address(index), Offense::Lockout, now);
     }
-    // A newcomer is banned by its wide block (an IPv4 /24) ...
+    // Ordinary traffic from newcomers bans nothing: a lone point, or a
+    // transfer still under budget, which every session charges each second.
+    let innocent = ip("198.51.100.99");
+    assert!(guard.offend(innocent, Offense::Limited, now).is_none());
+    assert!(guard.charge(innocent, GIB, now).is_none());
+    assert!(!guard.banned(innocent, now));
+    assert!(!guard.banned(ip("198.51.100.1"), now));
+    // A newcomer whose offense would ban it alone is banned by its wide
+    // block (an IPv4 /24) ...
     let late = ip("203.0.113.99");
     assert!(guard.offend(late, Offense::Lockout, now).is_some());
     assert!(guard.banned(late, now));
