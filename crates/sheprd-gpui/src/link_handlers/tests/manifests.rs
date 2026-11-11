@@ -98,7 +98,7 @@ fn disabled_or_other_host_plugin_is_not_even_read() {
     assert!(
         !activate(
             &Handlers::default(),
-            &[entry.clone()],
+            std::slice::from_ref(&entry),
             "local",
             &ConnectTarget::Local,
             &click(),
@@ -135,7 +135,7 @@ fn manifest_click_handles_and_unsupported_platform_falls_back_without_running_ho
     assert!(
         activate(
             &Handlers::default(),
-            &[entry.clone()],
+            std::slice::from_ref(&entry),
             "local",
             &ConnectTarget::Local,
             &click(),

@@ -143,7 +143,7 @@ fn read(plugin: &Plugin, target: &ConnectTarget, cancelled: &AtomicBool) -> Resu
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NONBLOCK);
+            options.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
         }
         let file =
             options.open(std::path::Path::new(&plugin.directory).join("herdr-plugin.toml"))?;
@@ -226,7 +226,7 @@ pub(crate) fn activate(
         handler,
         target,
         url,
-        &click.terminal.to_string(),
+        click.terminal.as_ref(),
         click.cwd.as_deref(),
         cancelled,
     )?;
