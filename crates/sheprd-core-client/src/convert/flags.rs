@@ -40,6 +40,32 @@ fn codex(flags: &[String]) -> Result<Vec<String>, Error> {
                 .ok_or(Error::Line)
         };
         let (key, value) = match name {
+            "--no-alt-screen" => continue,
+            "--full-auto" => {
+                result.extend(
+                    [
+                        "-c",
+                        "approval_policy=\"on-request\"",
+                        "-c",
+                        "sandbox_mode=\"workspace-write\"",
+                    ]
+                    .map(str::to_owned),
+                );
+                continue;
+            }
+            "--dangerously-bypass-approvals-and-sandbox" | "--yolo" => {
+                result.extend(
+                    [
+                        "-c",
+                        "approval_policy=\"never\"",
+                        "-c",
+                        "sandbox_mode=\"danger-full-access\"",
+                    ]
+                    .map(str::to_owned),
+                );
+                continue;
+            }
+            "--search" => ("web_search", "live"),
             "-c" | "--config" => {
                 result.extend(["-c".into(), value()?.to_owned()]);
                 continue;

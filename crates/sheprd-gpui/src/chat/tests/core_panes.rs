@@ -25,7 +25,7 @@ fn info(name: &str, endpoint: Option<&str>) -> TerminalInfo {
         foreground: endpoint.map(|_| sheprd_backend::Process {
             name: "sheprd-acp".into(),
             pid: 42,
-            ..Default::default()
+            argv: vec!["sheprd-acp".into()],
         }),
         id: id(name),
         labels: endpoint
