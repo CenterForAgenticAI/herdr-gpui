@@ -11,7 +11,9 @@
 //! worker, never the UI thread.
 
 mod error;
+pub mod fanout;
 mod inspect;
+pub mod owned_agent;
 
 pub use inspect::{git, identity, open};
 
@@ -268,10 +270,13 @@ pub fn start_agent(
                 .collect::<Vec<_>>()
                 .join(" ");
             if let Err(error) = send(host, &terminal, &program, Step::StartAgent, cancelled) {
-                // No agent ever ran there, and no caller learns its address,
-                // so the shell is ended rather than left without a tab.
-                end(host, &terminal);
-                return Err(error);
+                // A failed acknowledgement can follow a successful send.
+                // Preserve the terminal and its identity for inspection;
+                // killing it could terminate an agent that already ran.
+                return Err(Error::Unprompted {
+                    started: Started::Herdr2 { terminal },
+                    source: Box::new(error),
+                });
             }
             Started::Herdr2 { terminal }
         }
@@ -285,18 +290,6 @@ pub fn start_agent(
         });
     }
     Ok(started)
-}
-
-/// Ends the herdr-core terminal `terminal`, best effort: one already gone
-/// is fine.
-fn end(host: &Host, terminal: &str) {
-    let line = format!(
-        "core_cli kill --json -- {} >/dev/null\n",
-        shell_quote(terminal)
-    );
-    if let Err(error) = host.capture(&line, &AtomicBool::new(false)) {
-        tracing::warn!(%error, %terminal, "Could not end a herdr-core shell whose agent never started");
-    }
 }
 
 /// Sends `prompt` to the agent `started` runs, once it says it is ready.
