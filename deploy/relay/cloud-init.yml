@@ -1,0 +1,57 @@
+#cloud-config
+# DigitalOcean user data for one relay droplet (Ubuntu 24.04). It installs
+# Docker, opens only SSH, HTTP, HTTPS, and QUIC (UDP 443), writes the
+# compose files, makes a dashboard password, and starts the relay at
+# https://IP.sslip.io unless RELAY_DOMAIN is filled in below. create-droplet.sh fills the two
+# placeholders; to use this by hand, replace them yourself.
+#
+# The dashboard login is written to /root/sheprd-relay-login.txt (0600).
+
+package_update: true
+packages: [docker.io, docker-compose-v2, ufw, curl]
+
+write_files:
+  - path: /opt/sheprd-relay/compose.yml
+    permissions: "0644"
+    encoding: b64
+    content: __COMPOSE_B64__
+  - path: /opt/sheprd-relay/Caddyfile
+    permissions: "0644"
+    encoding: b64
+    content: __CADDYFILE_B64__
+  - path: /etc/sysctl.d/90-sheprd-relay.conf
+    permissions: "0644"
+    content: |
+      # Room for QUIC's bursts, so the kernel does not drop datagrams.
+      net.core.rmem_max = 7500000
+      net.core.wmem_max = 7500000
+  - path: /opt/sheprd-relay/start.sh
+    permissions: "0700"
+    content: |
+      #!/bin/sh
+      set -eu
+      cd /opt/sheprd-relay
+      domain="__RELAY_DOMAIN__"
+      if [ -z "$domain" ] || [ "$domain" = "__RELAY_DOMAIN__" ]; then
+        ip=$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)
+        domain="$(echo "$ip" | tr . -).sslip.io"
+      fi
+      if [ ! -f .env ]; then
+        umask 077
+        password=$(head -c 24 /dev/urandom | base64 | tr -d '/+=')
+        printf 'RELAY_DASHBOARD_USER=admin\nRELAY_DASHBOARD_PASSWORD=%s\n' "$password" > .env
+        printf 'https://%s/dashboard\nuser: admin\npassword: %s\n' "$domain" "$password" > /root/sheprd-relay-login.txt
+      fi
+      printf 'RELAY_DOMAIN=%s\n' "$domain" > compose.env
+      docker compose --env-file compose.env up -d --pull always
+
+runcmd:
+  - sysctl --system
+  - ufw default deny incoming
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 443/udp
+  - ufw --force enable
+  - systemctl enable --now docker
+  - /opt/sheprd-relay/start.sh

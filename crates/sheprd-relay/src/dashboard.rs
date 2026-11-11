@@ -1,0 +1,258 @@
+//! The read-only dashboard, behind one login: connections, sessions,
+//! traffic, and refusals, refreshed every few seconds. It is served only
+//! when the operator set a password, and changes nothing on the relay.
+//!
+//! - `GET /dashboard`: the page, or a redirect to the login.
+//! - `GET`/`POST /dashboard/login`, `POST /dashboard/logout`.
+//! - `GET /dashboard/api/stats`: the numbers the page draws.
+
+pub mod auth;
+pub mod history;
+
+use crate::{
+    bucket::{Limiter, Rate},
+    hub::{Hub, SessionRow},
+    metrics::{Login, Totals},
+    web::Shared,
+};
+use auth::Account;
+use axum::{
+    Json, Router,
+    body::Bytes,
+    extract::{ConnectInfo, DefaultBodyLimit, RawQuery, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
+    routing::get,
+};
+use history::{History, Sample};
+use serde::Serialize;
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+const INDEX: &str = include_str!("dashboard/assets/index.html");
+const LOGIN: &str = include_str!("dashboard/assets/login.html");
+const SCRIPT: &str = include_str!("dashboard/assets/app.js");
+const STYLE: &str = include_str!("dashboard/assets/style.css");
+const ICON: &str = include_str!("dashboard/assets/icon.svg");
+const FAILED: &str = r#"<p class="error" role="alert">That user and password do not match.</p>"#;
+const LIMITED: &str =
+    r#"<p class="error" role="alert">Too many attempts. Wait a minute and try again.</p>"#;
+const MESSAGE_SLOT: &str = "<!--message-->";
+const MAX_FORM: usize = 2 * 1024;
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
+img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
+/// What the dashboard routes share.
+#[derive(Clone, Debug)]
+struct Board {
+    account: Arc<Account>,
+    /// Logins from all addresses, so a botnet cannot guess faster.
+    everyone: Arc<Mutex<Limiter<()>>>,
+    history: Arc<Mutex<History>>,
+    per_address: Arc<Mutex<Limiter<IpAddr>>>,
+    shared: Shared,
+}
+
+/// The dashboard's routes, for an operator `account`.
+///
+/// Starts sampling throughput, so it must run inside a Tokio runtime.
+pub fn router(shared: Shared, account: Account) -> Router {
+    let history = Arc::new(Mutex::new(History::default()));
+    let hub = Arc::clone(&shared.hub);
+    tokio::spawn(history::run(Arc::downgrade(&history), move || {
+        let totals = hub.metrics.totals();
+        (totals.bytes_from_dialers, totals.bytes_from_listeners)
+    }));
+    let board = Board {
+        account: Arc::new(account),
+        everyone: Arc::new(Mutex::new(Limiter::new(Rate {
+            burst: 30,
+            per_minute: 60,
+        }))),
+        history,
+        per_address: Arc::new(Mutex::new(Limiter::new(Rate {
+            burst: 5,
+            per_minute: 10,
+        }))),
+        shared,
+    };
+    Router::new()
+        .route("/dashboard", get(index))
+        .route("/dashboard/login", get(login_page).post(login))
+        .route("/dashboard/logout", axum::routing::post(logout))
+        .route("/dashboard/api/stats", get(stats))
+        .route(
+            "/dashboard/app.js",
+            get(|| async { asset(SCRIPT, "text/javascript; charset=utf-8") }),
+        )
+        .route(
+            "/dashboard/style.css",
+            get(|| async { asset(STYLE, "text/css; charset=utf-8") }),
+        )
+        .route(
+            "/dashboard/icon.svg",
+            get(|| async { asset(ICON, "image/svg+xml") }),
+        )
+        .layer(DefaultBodyLimit::max(MAX_FORM))
+        .with_state(board)
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+fn signed_in(board: &Board, headers: &HeaderMap) -> bool {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(auth::cookie)
+        .any(|value| board.account.valid(value, now_secs()))
+}
+
+/// Headers every dashboard response carries.
+fn hardened(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    let fixed = [
+        (header::CACHE_CONTROL, "no-store"),
+        (header::CONTENT_SECURITY_POLICY, CSP),
+        (header::REFERRER_POLICY, "no-referrer"),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+    ];
+    for (name, value) in fixed {
+        headers.insert(name, HeaderValue::from_static(value));
+    }
+    response
+}
+
+fn html(body: String) -> Response {
+    hardened(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response())
+}
+
+fn asset(body: &'static str, kind: &'static str) -> Response {
+    hardened(([(header::CONTENT_TYPE, kind)], body).into_response())
+}
+
+fn redirect(to: &'static str, cookie: Option<String>) -> Response {
+    let mut response = (StatusCode::SEE_OTHER, [(header::LOCATION, to)]).into_response();
+    if let Some(cookie) = cookie.and_then(|cookie| HeaderValue::from_str(&cookie).ok()) {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    hardened(response)
+}
+
+async fn index(State(board): State<Board>, headers: HeaderMap) -> Response {
+    if !signed_in(&board, &headers) {
+        return redirect("/dashboard/login", None);
+    }
+    html(INDEX.to_owned())
+}
+
+async fn login_page(RawQuery(query): RawQuery) -> Response {
+    let message = match query.as_deref() {
+        Some("failed") => FAILED,
+        Some("limited") => LIMITED,
+        _ => "",
+    };
+    html(LOGIN.replace(MESSAGE_SLOT, message))
+}
+
+async fn login(
+    State(board): State<Board>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let metrics = &board.shared.hub.metrics;
+    let address = board.shared.address(peer, &headers);
+    let now_ms = now_secs().saturating_mul(1000);
+    let allowed = allow(
+        &board.per_address,
+        crate::bucket::source_key(address),
+        now_ms,
+    ) && allow(&board.everyone, (), now_ms);
+    if !allowed {
+        metrics.login(Login::Limited);
+        return redirect("/dashboard/login?limited", None);
+    }
+    let accepted = auth::login_form(&body)
+        .is_some_and(|(user, password)| board.account.check(&user, &password));
+    if !accepted {
+        metrics.login(Login::Failed);
+        tracing::warn!("a dashboard login failed");
+        return redirect("/dashboard/login?failed", None);
+    }
+    metrics.login(Login::Succeeded);
+    let cookie = board.account.issue(now_secs());
+    redirect("/dashboard", Some(auth::set_cookie(Some(&cookie))))
+}
+
+async fn logout() -> Response {
+    redirect("/dashboard/login", Some(auth::set_cookie(None)))
+}
+
+fn allow<K: Eq + std::hash::Hash>(limiter: &Mutex<Limiter<K>>, key: K, now_ms: u64) -> bool {
+    match limiter.lock() {
+        Ok(mut limiter) => limiter.allow(key, now_ms),
+        Err(poisoned) => poisoned.into_inner().allow(key, now_ms),
+    }
+}
+
+/// The numbers the page draws.
+#[derive(Debug, Serialize)]
+pub struct Stats {
+    /// Throughput samples, oldest first.
+    pub history: Vec<Sample>,
+    pub limits: LimitsView,
+    pub sessions: Vec<SessionRow>,
+    pub totals: Totals,
+    pub version: &'static str,
+}
+
+/// The limits the operator set, as the page shows them.
+#[derive(Debug, Serialize)]
+pub struct LimitsView {
+    pub max_connections: usize,
+    pub max_connections_per_ip: usize,
+    pub max_listeners: usize,
+    pub max_sessions: usize,
+    pub session_bandwidth: u64,
+    pub total_bandwidth: u64,
+}
+
+/// The stats for `hub` as the dashboard reads them.
+#[must_use]
+pub fn snapshot(hub: &Hub, history: Vec<Sample>) -> Stats {
+    let limits = hub.limits;
+    Stats {
+        history,
+        limits: LimitsView {
+            max_connections: limits.max_connections,
+            max_connections_per_ip: limits.max_connections_per_ip,
+            max_listeners: limits.max_listeners,
+            max_sessions: limits.max_sessions,
+            session_bandwidth: limits.session_bandwidth,
+            total_bandwidth: limits.total_bandwidth,
+        },
+        sessions: hub.sessions(),
+        totals: hub.metrics.totals(),
+        version: env!("CARGO_PKG_VERSION"),
+    }
+}
+
+async fn stats(State(board): State<Board>, headers: HeaderMap) -> Response {
+    if !signed_in(&board, &headers) {
+        return hardened(StatusCode::UNAUTHORIZED.into_response());
+    }
+    let history = match board.history.lock() {
+        Ok(history) => history.samples(),
+        Err(poisoned) => poisoned.into_inner().samples(),
+    };
+    hardened(Json(snapshot(&board.shared.hub, history)).into_response())
+}

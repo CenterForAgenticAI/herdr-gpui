@@ -1,0 +1,56 @@
+# One relay. QUIC, the main transport, reaches it directly on UDP 443 with
+# its own pinned certificate. Caddy serves TCP 443 with a Let's Encrypt
+# certificate: /v1/info, the dashboard, and the WebSocket fallback.
+#
+#   RELAY_DOMAIN=relay.example.org docker compose up -d
+#
+# With no domain, cloud-init.yml uses IP.sslip.io, which resolves to the
+# droplet's own address, so Let's Encrypt works with no DNS setup.
+name: sheprd-relay
+
+services:
+  relay:
+    image: ${RELAY_IMAGE:-ghcr.io/sheprd-labs/sheprd-relay:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      RELAY_BEHIND_PROXY: "1"
+      # The name WebSocket proofs must cover; without it the fallback is off.
+      RELAY_PUBLIC_HOST: ${RELAY_DOMAIN:?set RELAY_DOMAIN}
+      # Clients reach QUIC on 443, mapped to the container's 8443.
+      RELAY_QUIC_PORT: "443"
+    ports:
+      - "443:8443/udp"
+      # /metrics stays on the host. Scrape it locally, through an SSH
+      # tunnel, or over a private network with RELAY_METRICS_TOKEN set.
+      - "127.0.0.1:9090:9090"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    logging:
+      driver: local
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [relay]
+    ports:
+      - "80:80"
+      # TCP only: UDP 443 is the relay's QUIC (the Caddyfile turns HTTP/3 off).
+      - "443:443"
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?set RELAY_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  caddy-data:
+  caddy-config:

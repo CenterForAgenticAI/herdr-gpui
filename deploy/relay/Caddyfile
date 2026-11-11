@@ -1,0 +1,21 @@
+{
+	servers {
+		# UDP 443 belongs to the relay's QUIC.
+		protocols h1 h2
+	}
+}
+
+{$RELAY_DOMAIN} {
+	encode zstd gzip {
+		match {
+			path /dashboard*
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	# /v1/info, the dashboard, and the WebSocket fallback for networks
+	# that block UDP. The relay sees ciphertext only.
+	reverse_proxy relay:8080
+}
