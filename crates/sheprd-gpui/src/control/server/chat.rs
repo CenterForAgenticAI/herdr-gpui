@@ -149,7 +149,10 @@ fn convert_code(error: &crate::chat::ConvertError) -> ErrorCode {
         | ConvertError::NoHome
         | ConvertError::NotReachable => ErrorCode::Unsupported,
         ConvertError::Convert(
-            convert::Error::AlreadyChat | convert::Error::NoAgent | convert::Error::NotRunning(_),
+            convert::Error::AlreadyChat
+            | convert::Error::FolderGone(_)
+            | convert::Error::NoAgent
+            | convert::Error::NotRunning(_),
         ) => ErrorCode::NotFound,
         ConvertError::AlreadyConverting | ConvertError::Convert(convert::Error::Busy(_)) => {
             ErrorCode::Busy

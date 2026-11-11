@@ -18,10 +18,10 @@ fn agent_record(stopped: bool, status: &str) -> Value {
     } else {
         ("claude", json!(["claude", "--model", "opus"]))
     };
-    json!({"address": "t1", "cols": 80, "rows": 24, "cwd": "/work/app", "state": "live",
+    json!({"address": "t1", "cols": 80, "rows": 24, "cwd": "/tmp", "state": "live",
         "pid": 100, "status": {"state": status, "app": "claude"},
         "foreground": {"pid": if stopped { 100 } else { std::process::id() }, "name": name,
-            "argv": argv, "cwd": "/work/app"}})
+            "argv": argv, "cwd": "/tmp"}})
 }
 
 struct Stand {
@@ -53,7 +53,7 @@ fn stand(status: &'static str) -> Stand {
     std::fs::write(
         sessions.join(format!("{pid}.json")),
         serde_json::to_vec(
-            &json!({"pid":pid,"sessionId":SESSION,"cwd":"/work/app","procStart":started.trim()}),
+            &json!({"pid":pid,"sessionId":SESSION,"cwd":"/tmp","procStart":started.trim()}),
         )
         .unwrap(),
     )
@@ -143,7 +143,7 @@ fn hub_on(stand: &Stand, home: Option<PathBuf>) -> Arc<Hub> {
         workspaces: vec![Workspace {
             branch: None,
             chats: Vec::new(),
-            cwd: "/work/app".into(),
+            cwd: "/tmp".into(),
             id: UNLISTED.into(),
             label: "Herdr 2".into(),
             session: None,
@@ -170,8 +170,8 @@ fn a_terminal_running_a_movable_agent_offers_it() {
 }
 
 fn record_of_shell() -> Value {
-    json!({"address": "t1", "cols": 80, "rows": 24, "cwd": "/work/app", "state": "live",
-        "foreground": {"pid": 100, "name": "zsh", "argv": ["-zsh"], "cwd": "/work/app"}})
+    json!({"address": "t1", "cols": 80, "rows": 24, "cwd": "/tmp", "state": "live",
+        "foreground": {"pid": 100, "name": "zsh", "argv": ["-zsh"], "cwd": "/tmp"}})
 }
 
 #[test]
@@ -285,9 +285,9 @@ fn a_moved_agents_terminal_is_a_chat_only_while_the_chat_runs() {
     let endpoint = sheprd_chat_protocol::EndpointId::random().to_string();
     let labelled = |front: &str| -> Terminal {
         serde_json::from_value(json!({"address": "t1", "cols": 80, "rows": 24,
-            "cwd": "/work/app", "state": "live",
+            "cwd": "/tmp", "state": "live",
             "labels": {sheprd_chat_protocol::TOKEN: endpoint},
-            "foreground": {"pid": 7, "name": front, "argv": [front], "cwd": "/work/app"}}))
+            "foreground": {"pid": 7, "name": front, "argv": [front], "cwd": "/tmp"}}))
         .unwrap()
     };
     for (front, chat) in [("sheprd-acp", true), ("zsh", false)] {
