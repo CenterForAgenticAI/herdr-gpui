@@ -17,6 +17,7 @@
 // i18n: migrated
 
 mod core;
+mod feedback;
 mod install;
 mod window;
 
@@ -50,6 +51,8 @@ pub(crate) enum Action {
     Open { address: String, focus: bool },
     /// Reload the tabs the requesting pane opened.
     Reload,
+    /// Collect notes through the same terminal that carried the request.
+    Feedback { wait_seconds: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +109,13 @@ impl Request {
                         }
                     }
                     "reload" => Action::Reload,
+                    action if action.starts_with("feedback-") => Action::Feedback {
+                        wait_seconds: action
+                            .strip_prefix("feedback-")?
+                            .parse::<u64>()
+                            .ok()?
+                            .min(600),
+                    },
                     _ => return None,
                 };
                 Some(Self {
