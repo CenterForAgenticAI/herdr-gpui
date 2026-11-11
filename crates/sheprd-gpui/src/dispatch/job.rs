@@ -35,6 +35,7 @@ pub(crate) enum Dispatched {
     /// Herdr 2 workspace at, named `label` unless it is its folder's.
     Kept {
         endpoint_id: String,
+        host_identity: String,
         path: String,
         label: Option<String>,
         /// A new worktree, for its setup script; a workspace has none.
@@ -90,6 +91,7 @@ impl Then {
     ) -> crate::Result<Dispatched> {
         let kept = |path, label: &Option<String>, checkout| Dispatched::Kept {
             endpoint_id: destination.place.endpoint_id.clone(),
+            host_identity: destination.place.host.identity(),
             path,
             label: label.clone(),
             checkout,
@@ -190,6 +192,11 @@ impl Job {
 
     /// Make `then` on `destination`.
     pub(crate) fn on_host(origin: FreshOrigin, destination: HostRepositories, then: Then) -> Self {
+        let then = if destination.lands_in == sheprd_session::Keeper::App {
+            then.kept()
+        } else {
+            then
+        };
         Self::spawn(
             destination.place.label.clone(),
             origin.repo_label.clone(),
@@ -221,10 +228,16 @@ impl Job {
             origin.repo_label.clone(),
             move |events, cancelled| {
                 let stopped = || cancelled.load(Ordering::Acquire);
+                let requirement =
+                    if matches!(then, Then::KeptWorktree { .. } | Then::KeptWorkspace { .. }) {
+                        crate::cloud::Requirement::Core
+                    } else {
+                        crate::cloud::Requirement::Either
+                    };
                 // The project's own image, when it has a recipe and the
                 // provider holds images, built first if it is not there.
                 let image = match crate::cloud::image::checkout_of(&origin.repo_key) {
-                    Some(path) => crate::cloud::image::for_new_machine(
+                    Some(path) => crate::cloud::image::for_new_machine_with(
                         provider,
                         &crate::cloud::image::Checkout {
                             host: &origin.place.host,
@@ -232,6 +245,7 @@ impl Job {
                             path,
                             label: &origin.repo_label,
                         },
+                        requirement,
                         cancelled,
                         &|progress| {
                             let step = crate::cloud::Step::Image(progress.clone());
@@ -242,6 +256,7 @@ impl Job {
                 };
                 let spec = crate::cloud::Spec {
                     image,
+                    requirement,
                     ..crate::cloud::Spec::new()
                 };
                 let saved = provision(&spec, &stopped, &|step| {
@@ -256,7 +271,14 @@ impl Job {
                     },
                     repositories: None,
                     retired: Vec::new(),
-                    lands_in: sheprd_session::Keeper::Herdr1,
+                    lands_in: if matches!(
+                        then,
+                        Then::KeptWorktree { .. } | Then::KeptWorkspace { .. }
+                    ) {
+                        sheprd_session::Keeper::App
+                    } else {
+                        sheprd_session::Keeper::Herdr1
+                    },
                 };
                 let mut report = |step| {
                     let _ = events.send(Event::Step(step));

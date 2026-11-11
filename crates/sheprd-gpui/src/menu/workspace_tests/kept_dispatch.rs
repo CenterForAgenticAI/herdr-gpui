@@ -21,6 +21,8 @@ const KEY: &str = "/src/app/.git";
 const LINKED: &str = "/src/app-feature";
 const NEW: &str = "/src/app-lane";
 
+mod remote;
+
 /// A window on this computer with no Herdr 1, keeping a workspace at
 /// `LINKED`, a checkout of `app`, beside an SSH host "Box" that runs
 /// Herdr 1 when `herdr_1` is set, else only herdr-core.
@@ -155,6 +157,9 @@ fn a_dispatch_here_lands_in_a_kept_workspace(cx: &mut TestAppContext) {
                 "This Mac",
                 "app",
                 Ok(Dispatched::Kept {
+                    host_identity: crate::teleport::host_for(&view.endpoints[0].connection.target)
+                        .unwrap()
+                        .identity(),
                     endpoint_id,
                     path: NEW.into(),
                     label: Some("Lane".into()),
