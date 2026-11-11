@@ -265,9 +265,17 @@ The daemon sends:
 {"type": "chat_connection", "pane": "p1", "connected": false}
 {"type": "term_screen", "pane": "p2", "columns": 120, "rows": [[{"text": "PASS", "fg": "green", "bold": true}]]}
 {"type": "reload", "view": "chat", "pane": "p1"}
-{"type": "error", "message": "no such chat"}
+{"type": "error", "message": "no such chat", "view": "chat", "pane": "p1"}
 {"type": "bye", "reason": "revoked"}
 ```
+
+- `error` names the view it is about (`view`, and `pane` for a chat or a
+  terminal) when there is one: a refused subscription or scroll, or a
+  followed terminal that could not be read three times in a row, which
+  sends `error` "This terminal could not be read: …" before its `reload`.
+  The phone shows it on that view's screen instead of waiting for it.
+  An `error` without `view` is about the socket itself; older daemons
+  never send `view`. The daemon logs every refusal and failed read.
 
 - A subscription answers at once with the current state: `home`; for a
   chat, `chat_resumed` when `since` equals the chat's cursor, otherwise
@@ -349,9 +357,11 @@ app learns the pane it should open:
   A prompt over 256 KiB, an unknown agent, a folder not offered, or an
   invalid branch is answered 400 before anything is created.
 
-A workspace's changes and its pull request's checks are read-only and
-worked out by Sheprd, which alone reads the checkout: the phone does no Git
-work, and the daemon does none either. Bounds are in
+A workspace's changes and its pull request's checks are read-only. Sheprd
+works them out while it is open and lists the workspace; otherwise (Sheprd
+closed, a Herdr 2 workspace it does not list, or any workspace on a host)
+the daemon asks Git in the workspace's listed folder itself
+(`native/changes/local.rs`). The phone does no Git work. Bounds are in
 `crates/sheprd-remote-control/src/control/changes.rs`.
 
 - `GET /api/v2/workspaces/{workspace}/changes?scope=uncommitted|branch`
@@ -367,7 +377,8 @@ work, and the daemon does none either. Bounds are in
   512 KiB, and 500 characters a line; `truncated` says lines were cut.
 - `GET /api/v2/workspaces/{workspace}/checks` answers `{"number"?, "checks":
   [{"name", "state", "job"?, "url"?}]}` from the desktop's pull request
-  cache, so it is as fresh as the desktop's last lookup. `state` is `passed`,
+  cache, so it is as fresh as the desktop's last lookup. Only Sheprd signs
+  in to GitHub: without it the daemon answers no pull request. `state` is `passed`,
   `failed`, `pending`, or `skipped`. `job` is present only on a failed
   GitHub Actions check.
 - `GET /api/v2/workspaces/{workspace}/checks/{job}/log` answers
@@ -381,11 +392,11 @@ The daemon cannot call Sheprd, so a question waits in a bounded mailbox.
 While a phone is connected, Sheprd holds one `Request::ChangeAsks` open on
 the control socket, answers each question on a background thread, and
 replies with `Request::ChangeAnswer`, which the daemon checks against the
-same bounds. A question answers 503 at once when Sheprd is closed, 429 when
-16 already wait, 504 when no answer comes within 25 s, 409 when the
-workspace has no repository or base branch, and 404 when the workspace or
-file is gone. Workspaces on other hosts have no Sheprd beside their daemon,
-so they answer 503.
+same bounds. A question answers 429 when 16 already wait for Sheprd, 504
+when no answer comes within 25 s, 409 when the workspace has no repository
+or base branch, and 404 when the workspace or file is gone. When Sheprd is
+closed, or answers that it does not keep the workspace, the daemon answers
+from Git instead.
 
 ## Connectivity
 

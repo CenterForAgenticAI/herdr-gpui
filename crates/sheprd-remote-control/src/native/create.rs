@@ -198,7 +198,11 @@ async fn installed_agents(program: Option<&std::path::Path>) -> Option<Vec<Agent
 /// Runs the search for at most `wait`. One that overruns is killed and
 /// reaped here, so repeated form loads cannot pile up children or threads.
 pub(super) fn list_agents(program: &std::path::Path, wait: Duration) -> Option<Vec<Agent>> {
-    let mut child = sheprd_client::new_command(program)
+    let mut command = sheprd_client::new_command(program);
+    // A user service's `PATH` is bare; the login shell's finds the agents
+    // the user's own shell runs, wherever their profile puts them.
+    sheprd_client::login_env::apply(&mut command);
+    let mut child = command
         .arg("agents")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -285,6 +289,26 @@ pub(crate) async fn start_chat(
         prompted: opened.prompted,
         started: opened.started,
     }))
+}
+
+/// What `POST /api/v2/workspaces/{workspace}/terminals` answers.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct CreatedTerminal {
+    pub(crate) pane: String,
+}
+
+/// `POST /api/v2/workspaces/{workspace}/terminals`: a shell tab in it,
+/// which a workspace with nothing in it yet has no pane to ask for.
+pub(crate) async fn new_terminal(
+    State(state): State<Shared>,
+    _device: Device,
+    Path(workspace): Path<String>,
+) -> Result<Json<CreatedTerminal>, ApiError> {
+    if state.hub.layout().workspace(&workspace).is_none() {
+        return Err(ApiError::NotFound);
+    }
+    let pane = state.hub.new_terminal(&workspace).await?;
+    Ok(Json(CreatedTerminal { pane }))
 }
 
 /// Refuses a first prompt the chat would refuse anyway, before anything

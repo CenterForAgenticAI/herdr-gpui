@@ -2,9 +2,11 @@ import SheprdRemoteCore
 import SwiftUI
 
 /// One workspace of one computer, which the Workspaces tab opens.
-struct WorkspaceKey: Codable, Hashable {
+struct WorkspaceKey: Codable, Hashable, Identifiable {
     let device: String
     let workspace: String
+
+    var id: Self { self }
 }
 
 extension EnvironmentValues {
@@ -26,7 +28,9 @@ extension EnvironmentValues {
 /// index on its edge, as Contacts has.
 struct WorkspacesTab: View {
     @Environment(AppModel.self) private var model
-    @State private var query = ""
+    /// Shared with the iPad sidebar's Chats tab, so one search follows
+    /// the person across both.
+    @Binding var query: String
     /// The computer whose page is open from its header menu.
     @State private var details: String?
     @State private var forgetting: Computer?
@@ -230,7 +234,10 @@ struct MachineStatus: View {
         case .online:
             HStack(spacing: 6) {
                 if let waiting = machine.home?.waiting, waiting > 0 {
-                    Text("\(waiting) need you").font(.caption.weight(.semibold)).foregroundStyle(.white)
+                    Text(waiting == 1 ? "1 needs you" : "\(waiting) need you").font(.caption.weight(.semibold)).foregroundStyle(.white)
+                        // Squeezed by a long name and "via ...", the pill broke
+                        // "need you" across two lines; the name truncates instead.
+                        .fixedSize()
                         .padding(.horizontal, 8).padding(.vertical, 2).background(Home.AgentStatus.blocked.color, in: .capsule)
                 }
                 Circle().fill(.green).frame(width: 8, height: 8).accessibilityLabel("Connected")

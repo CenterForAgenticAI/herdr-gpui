@@ -17,6 +17,11 @@ installations remain externally managed. The Nix flake embeds no update key.
 Windows installations update by running the release's signed per-user installer
 (see [Windows Installers](#windows-installers)).
 
+A Sheprd app on another machine, reached over SSH, can be updated from this one
+without a screen there: its sidebar header offers the release, the user
+confirms here, and that app's own updater installs it with the same checks
+(see [Updating Sheprd on other machines](cli.md#updating-sheprd-on-other-machines)).
+
 ## Repository Configuration
 
 | Setting | Kind | Contents |
@@ -659,9 +664,13 @@ that helper independently authenticates the request's signed manifest, opens the
 user's staging directory and regular files without following symlinks, and copies
 the package into a private root-owned directory under `/var/cache`. The copied
 bytes must match the signed length and SHA-256 before APT (`apt-get install --yes
---no-remove`), DNF (`dnf install --assumeyes`), or pacman (`pacman -U --noconfirm`)
-is invoked on the protected copy. Replacing the user's download while the password
-prompt is open cannot change which bytes the elevated package manager installs.
+--no-remove`), DNF (`dnf install --assumeyes`), zypper (`zypper install -y
+--allow-unsigned-rpm`), or pacman (`pacman -U --noconfirm`) is invoked on the
+protected copy. The format selects the asset; for an `.rpm` the helper then uses
+`/usr/bin/dnf` where that exists and `/usr/bin/zypper` otherwise, as openSUSE has
+only the latter. Neither the request nor `PATH` chooses a program. Replacing the
+user's download while the password prompt is open cannot change which bytes the
+elevated package manager installs.
 The desktop must have a PolicyKit authentication agent; the app never collects
 passwords. Package managers resolve dependencies and update their installation
 records, desktop files, icons, and license notices along with the executable.
@@ -683,7 +692,7 @@ Older installed clients with the blanket package-manager rejection require one
 manual upgrade. Releases without `package-manifest.json` and its signature cannot
 be installed by the package updater; the panel directs users to Manual Releases.
 Native PolicyKit authorization and real two-version package upgrades still require
-QA on Debian/Ubuntu, Fedora, and Arch.
+QA on Debian/Ubuntu, Fedora, openSUSE, and Arch.
 
 ## Homebrew Casks
 

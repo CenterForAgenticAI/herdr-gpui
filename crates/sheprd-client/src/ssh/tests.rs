@@ -5,6 +5,7 @@ mod child_bridge;
 mod command;
 #[cfg(unix)]
 mod config_dir;
+mod core_probe;
 mod forward;
 mod incompatible;
 #[cfg(unix)]

@@ -11,6 +11,7 @@ mod mute;
 mod ports;
 mod pr;
 mod security;
+mod update;
 
 #[cfg(test)]
 mod tests;
@@ -48,6 +49,9 @@ pub(super) fn serve(
             select(view, &id, |view, id| view.select_endpoint(id, cx))
         }),
         HostOp::Tag { id, tags } => in_window(caller, cx, |view, _, cx| tag(view, &id, tags, cx)),
+        HostOp::Update { host } => in_window(caller, cx, |view, window, cx| {
+            update::ask(view, caller, host.as_deref(), window, cx)
+        }),
         HostOp::Pr => in_window(caller, cx, |view, _, _| pr::status(view, caller)),
         HostOp::PrQuota => in_window(caller, cx, |view, _, _| pr::quota(view)),
         HostOp::PrComments => return pr::comments(call.caller, incoming, watches, cx),
@@ -142,12 +146,13 @@ impl Place {
             .find(|workspace| workspace.workspace_id == self.workspace)
     }
 
+    /// Whether the window shows this workspace in front: a workspace the
+    /// app keeps for Herdr 2 when one is, else Herdr 1's focused one.
     pub(super) fn focused(&self, view: &SheprdWindow) -> bool {
         self.selected(view)
-            && self
-                .snapshot(view)
-                .and_then(|snapshot| snapshot.focused_workspace_id.as_deref())
-                == Some(self.workspace.as_str())
+            && view
+                .browser_key()
+                .is_some_and(|(_, front)| front == self.workspace)
     }
 }
 

@@ -24,6 +24,7 @@ pub(crate) mod slide;
 mod sticky;
 mod tag_groups;
 mod tokens;
+mod update_pill;
 mod view;
 mod wash;
 mod workspaces;
@@ -61,6 +62,7 @@ pub(crate) use metrics::LABEL_WIDTH;
 pub(crate) use view::cached as cached_view;
 
 use agents::agents_sort;
+pub(crate) use agents::listed::{CoreAgent, CoreAgents, Listed, Target as AgentTarget};
 pub(crate) use agents::status_priority;
 use metrics::*;
 use row::{RowBadge, first_text};
