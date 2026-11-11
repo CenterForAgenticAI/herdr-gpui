@@ -44,6 +44,7 @@ pub(crate) struct Kept {
 /// removed once the script succeeds, and stays when it fails.
 #[derive(Debug)]
 struct Archive {
+    identity: Option<(String, Option<String>)>,
     scope: crate::browser::Scope,
     target: sheprd_client::ConnectTarget,
     /// This attempt's own label value, so a retry never takes the terminal
@@ -112,6 +113,12 @@ impl SheprdWindow {
         self.start_in_kept_workspace(&launch.workspace, spawn, cx)?;
         if archive {
             self.kept_scripts.archives.push(Archive {
+                identity: Some((
+                    launch.repo_key.clone(),
+                    self.sessions(self.selected_endpoint)
+                        .workspace(&launch.workspace)
+                        .and_then(|workspace| workspace.branch.clone()),
+                )),
                 scope: crate::browser::scope(&self.endpoints[self.selected_endpoint]),
                 target: self.endpoints[self.selected_endpoint]
                     .connection
@@ -270,11 +277,27 @@ impl SheprdWindow {
 
     /// How `archive` ended, `None` while it runs.
     fn kept_archive_state(&self, archive: &mut Archive, cx: &Context<Self>) -> Option<Ended> {
-        if !self.endpoints.iter().any(|endpoint| {
+        let Some(index) = self.endpoints.iter().position(|endpoint| {
             crate::browser::scope(endpoint) == archive.scope
                 && endpoint.connection.target == archive.target
-        }) {
+        }) else {
             return Some(Ended::Gone);
+        };
+        if let Some((key, branch)) = &archive.identity {
+            let sessions = self.sessions(index);
+            let current = sessions
+                .core
+                .as_ref()
+                .and_then(|session| session.workspace(&archive.workspace));
+            if current.is_none_or(|workspace| {
+                workspace.branch != *branch
+                    || workspace
+                        .worktree
+                        .as_ref()
+                        .is_none_or(|tree| !tree.linked || tree.key != *key)
+            }) {
+                return Some(Ended::Gone);
+            }
         }
         let host = crate::core_terminals::Host::of(&archive.scope);
         if archive.terminal.is_none() {
@@ -325,6 +348,7 @@ impl SheprdWindow {
 
     pub(crate) fn follow_archive_for_test(&mut self, workspace: String, terminal: TerminalId) {
         self.kept_scripts.archives.push(Archive {
+            identity: None,
             scope: crate::browser::scope(&self.endpoints[self.selected_endpoint]),
             target: self.endpoints[self.selected_endpoint]
                 .connection
