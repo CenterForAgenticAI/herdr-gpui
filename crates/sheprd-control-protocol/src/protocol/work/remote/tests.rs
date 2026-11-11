@@ -49,6 +49,7 @@ fn response_namespace_and_malformed_nonces_never_become_requests() {
     let id = "0123456789abcdef0123456789abcdef";
     assert_eq!(request_id(&format!("{REQUEST_PREFIX}{id}")), Some(id));
     assert_eq!(request_id(&format!("{REPLY_PREFIX}{id}")), None);
+    assert_eq!(request_id(&format!("{CLAIM_PREFIX}{id}")), None);
     for bad in ["", "../t1", "0123456789abcdef0123456789abcdef_0"] {
         assert_eq!(request_id(&format!("{REQUEST_PREFIX}{bad}")), None);
     }

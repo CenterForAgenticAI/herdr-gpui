@@ -27,11 +27,18 @@ if args[0] == "label":
     print("{}")
 elif args[0] == "get":
     mode = os.environ.get("FAKE_MODE", "ok")
+    if data.get("interrupted"):
+        print(json.dumps({"labels":data["labels"]}))
+        sys.exit(0)
     key = next(iter(data["labels"]))
     request = json.loads(data["labels"][key])
     assert set(request) == {"version", "window", "operation"}
     reply = "sheprd-work-reply-" + key.removeprefix("sheprd-work-")
-    if mode == "interrupt":
+    if mode in ("interrupt", "claimed-interrupt"):
+        if mode == "claimed-interrupt":
+            data["labels"]["sheprd-work-claim-" + key.removeprefix("sheprd-work-")] = "1"
+        data["interrupted"] = True
+        state.write_text(json.dumps(data))
         os.kill(os.getppid(), signal.SIGTERM)
     elif mode == "cancel":
         data["labels"] = {}
@@ -76,9 +83,10 @@ class RemoteWork(unittest.TestCase):
     def writes(self):
         return json.loads(self.state.read_text())["writes"]
 
-    def assert_once_and_cleaned(self):
-        writes = self.writes()
-        self.assertEqual(len(writes), 2, writes)
+    def assert_once_and_cleaned(self, writes=2):
+        written = self.writes()
+        self.assertEqual(len(written), writes, written)
+        writes = written
         self.assertEqual(json.loads(self.state.read_text())["labels"], {})
         self.assertTrue(all(value.startswith("sheprd-work-") for row in writes for value in row))
         return json.loads(writes[0][0].split("=", 1)[1])
@@ -103,12 +111,23 @@ class RemoteWork(unittest.TestCase):
                 self.assert_once_and_cleaned()
 
     def test_refusals_and_malformed_responses_are_not_retried(self):
-        for mode, status in [("wrong-window",5), ("busy",6), ("invalid",1), ("huge",1), ("cancel",1), ("interrupt",130)]:
+        for mode, status in [("wrong-window",5), ("busy",6), ("invalid",1), ("huge",1), ("cancel",1)]:
             with self.subTest(mode=mode):
                 self.state.unlink(missing_ok=True)
                 result = self.run_work("worktree", "mute", "--json", mode=mode)
                 self.assertEqual(result.returncode, status, result.stderr)
                 self.assert_once_and_cleaned()
+
+    def test_an_interrupted_caller_withdraws_first_and_reports_a_claim_it_finds(self):
+        for mode, claimed in [("interrupt", False), ("claimed-interrupt", True)]:
+            with self.subTest(mode=mode):
+                self.state.unlink(missing_ok=True)
+                result = self.run_work("worktree", "mute", "--json", mode=mode)
+                self.assertEqual(result.returncode, 130, result.stderr)
+                # Request, withdrawal, then the usual cleanup of every label.
+                self.assert_once_and_cleaned(writes=3)
+                self.assertEqual(self.writes()[1], [self.writes()[0][0].split("=", 1)[0] + "="])
+                self.assertEqual("already accepted" in result.stderr, claimed, result.stderr)
 
     def test_invalid_and_host_override_options_never_contact_core(self):
         for args in [("worktree", "delete", "--force"), ("scripts", "run", "--host", "elsewhere"),

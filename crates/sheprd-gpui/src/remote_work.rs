@@ -38,6 +38,7 @@ struct Pending {
     terminal: TerminalId,
     tab: TabId,
     key: String,
+    claim: String,
     reply: String,
     request: Option<Result<Request, Response>>,
     backend: sheprd_core_client::CoreBackend,
@@ -98,7 +99,7 @@ impl SheprdWindow {
                     self.core_terminals.clear_labels(
                         &pending.scope,
                         &pending.terminal,
-                        vec![pending.key, pending.reply],
+                        vec![pending.key, pending.claim, pending.reply],
                     );
                 }
                 continue;
@@ -215,9 +216,14 @@ impl SheprdWindow {
                 else {
                     continue;
                 };
-                let Some(receiver) =
-                    claim::start(backend.clone(), found.terminal.clone(), key.clone(), value)
-                else {
+                let claim = format!("{}{id}", remote::CLAIM_PREFIX);
+                let Some(receiver) = claim::start(
+                    backend.clone(),
+                    found.terminal.clone(),
+                    key.clone(),
+                    claim.clone(),
+                    value,
+                ) else {
                     continue;
                 };
                 self.remote_work.pending.push(Pending {
@@ -227,6 +233,7 @@ impl SheprdWindow {
                     tab: found.tab,
                     reply: format!("{}{id}", remote::REPLY_PREFIX),
                     key,
+                    claim,
                     request: Some(request),
                     backend,
                     started: now,

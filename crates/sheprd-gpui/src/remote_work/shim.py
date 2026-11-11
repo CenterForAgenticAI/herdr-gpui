@@ -172,6 +172,7 @@ Checkpoint reads/diffs and scripts list need the full CLI on this host.""")
     core = shutil.which("herdr-core") or os.path.expanduser("~/.local/bin/herdr-core")
     nonce = secrets.token_hex(16)
     key, reply = "sheprd-work-" + nonce, "sheprd-work-reply-" + nonce
+    claim = "sheprd-work-claim-" + nonce
     deadline = time.monotonic() + 30
 
     def call(*args, cleanup=False):
@@ -221,12 +222,20 @@ Checkpoint reads/diffs and scripts list need the full CLI on this host.""")
             time.sleep(0.2)
         return output({"status": "error", "code": "timeout", "message": "No matching Sheprd window answered. Check the app before retrying; work may have been prepared."}, as_json)
     except KeyboardInterrupt:
+        # Withdraw first: a window that has not claimed yet then never will.
+        # A claim already written means the work may run; say so.
+        try:
+            call("label", terminal, key + "=", cleanup=True)
+            if claim in json.loads(call("get", terminal, "--json", cleanup=True))["labels"]:
+                print("Sheprd already accepted this request; check the app before retrying.", file=sys.stderr)
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            pass
         return 130
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         return output({"status": "error", "code": "failed", "message": str(error) + "; no retry was sent"}, as_json)
     finally:
         try:
-            call("label", terminal, key + "=", reply + "=", cleanup=True)
+            call("label", terminal, key + "=", reply + "=", claim + "=", cleanup=True)
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
 

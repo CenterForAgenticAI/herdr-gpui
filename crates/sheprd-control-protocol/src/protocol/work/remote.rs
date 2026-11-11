@@ -11,6 +11,9 @@ pub use error::Error;
 
 pub const REQUEST_PREFIX: &str = "sheprd-work-";
 pub const REPLY_PREFIX: &str = "sheprd-work-reply-";
+/// A window's claim on a request, beside it: the caller removes the request
+/// to cancel, which a claim can therefore never recreate.
+pub const CLAIM_PREFIX: &str = "sheprd-work-claim-";
 pub const MAX_REQUEST: usize = 4096;
 pub const MAX_REPLY: usize = 16 * 1024;
 pub const VERSION: u8 = 1;
