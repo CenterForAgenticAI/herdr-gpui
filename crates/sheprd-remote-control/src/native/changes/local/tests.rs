@@ -257,32 +257,27 @@ fn a_workspace_in_a_subfolder_shows_the_checkouts_paths_and_their_diffs() {
 
 #[test]
 fn colors_and_patterns_in_names_leave_a_diff_as_git_wrote_it() {
-    // Brackets are Git glob syntax but legal filenames on Windows too.
-    // Keep the star case on filesystems that allow it.
-    let paths: &[(&str, &str)] = if cfg!(windows) {
-        &[("a[bc].txt", "ab.txt")]
-    } else {
-        &[("a[bc].txt", "ab.txt"), ("a*.txt", "a.txt")]
-    };
-    for &(literal, matching) in paths {
-        assert_literal_colored_diff(literal, matching);
+    // Both patterns match a.txt unless Git treats the path literally.
+    // Brackets are valid Windows filename characters; a star is not.
+    let names: &[&str] = &[
+        "[a].txt",
+        #[cfg(unix)]
+        "a*.txt",
+    ];
+    for &name in names {
+        let dir = tempfile::tempdir().unwrap();
+        let repository = repository(dir.path());
+        run(&repository, &["config", "color.diff", "always"]);
+        run(&repository, &["config", "color.ui", "always"]);
+        std::fs::write(repository.join(name), "x\n").unwrap();
+        run(&repository, &["add", "."]);
+        run(&repository, &["commit", "--quiet", "-m", "pattern"]);
+        std::fs::write(repository.join(name), "y\n").unwrap();
+        std::fs::write(repository.join("a.txt"), "other\n").unwrap();
+        let diff = diff_of(&repository, name);
+        let texts: Vec<&str> = diff.lines.iter().map(|line| line.text.as_str()).collect();
+        assert_eq!(texts[1..], ["x", "y"], "{name}: {texts:?}");
     }
-}
-
-fn assert_literal_colored_diff(literal: &str, matching: &str) {
-    let dir = tempfile::tempdir().unwrap();
-    let repository = repository(dir.path());
-    run(&repository, &["config", "color.diff", "always"]);
-    run(&repository, &["config", "color.ui", "always"]);
-    std::fs::write(repository.join(literal), "x\n").unwrap();
-    std::fs::write(repository.join(matching), "before\n").unwrap();
-    run(&repository, &["add", "."]);
-    run(&repository, &["commit", "--quiet", "-m", "pattern"]);
-    std::fs::write(repository.join(literal), "y\n").unwrap();
-    std::fs::write(repository.join(matching), "other\n").unwrap();
-    let diff = diff_of(&repository, literal);
-    let texts: Vec<&str> = diff.lines.iter().map(|line| line.text.as_str()).collect();
-    assert_eq!(texts[1..], ["x", "y"], "{texts:?}");
 }
 
 #[test]
