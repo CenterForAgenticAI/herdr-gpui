@@ -215,12 +215,23 @@ fn a_table_full_of_bans_never_lifts_one_and_bans_wide_instead() {
     assert!(guard.offend(late, Offense::Lockout, now).is_some());
     assert!(guard.banned(late, now));
     assert!(guard.banned(ip("203.0.113.1"), now));
-    assert!(
-        guard
-            .bans(now)
-            .iter()
-            .any(|row| row.address == "203.0.113.0/24")
-    );
+    // Counted among active bans, beside every address's.
+    assert_eq!(guard.active(now), MAX_RECORDS + 1);
+    // Repeated small offenses still add up, per block: forged proofs from
+    // addresses across one /24.
+    let mut banned_by_proofs = false;
+    for last in 1..=10 {
+        let prober = ip(&format!("192.0.2.{last}"));
+        banned_by_proofs |= guard.offend(prober, Offense::BadProof, now).is_some();
+    }
+    assert!(banned_by_proofs);
+    assert!(guard.banned(ip("192.0.2.200"), now));
+    // So does transfer, against a block's larger budget.
+    let heavy = ip("198.18.0.5");
+    let block_budget = 20 * GIB * crate::guard::WIDE_BUDGET;
+    assert!(guard.charge(heavy, block_budget, now).is_none());
+    assert!(guard.charge(heavy, 1, now).is_some());
+    assert!(guard.banned(heavy, now));
     // ... and every earlier ban still stands.
     for index in [0, 1, 1_000, u32::try_from(MAX_RECORDS).unwrap() - 1] {
         assert!(guard.banned(banned_address(index), now), "{index}");

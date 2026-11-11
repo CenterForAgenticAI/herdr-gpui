@@ -44,8 +44,12 @@ const HOUR: Duration = Duration::from_secs(60 * 60);
 const FADE: Duration = Duration::from_secs(60);
 /// The most addresses tracked at once, which bounds memory.
 pub const MAX_RECORDS: usize = 65_536;
-/// The most wide blocks banned when the table is full of bans.
+/// The most wide blocks tracked when the table is full of bans.
 pub const MAX_WIDE: usize = 4_096;
+/// A wide block's transfer budget, in address budgets: a /48 or /24 can
+/// hold many unrelated users, judged together only while bans fill the
+/// table.
+pub const WIDE_BUDGET: u64 = 16;
 /// The most bans the dashboard lists.
 const MAX_ROWS: usize = 50;
 
@@ -156,9 +160,10 @@ pub struct Guard {
     manual: RwLock<Vec<Cidr>>,
     max_transfer_per_hour: u64,
     records: Mutex<HashMap<IpAddr, Record>>,
-    /// Wide blocks (an IPv6 /48, an IPv4 /24) banned when every record is
-    /// an active ban, and when each lifts.
-    wide: Mutex<HashMap<IpAddr, (Instant, Offense)>>,
+    /// Wide blocks (an IPv6 /48, an IPv4 /24), counted and banned like
+    /// addresses while every record is an active ban, so newcomers are
+    /// still judged then.
+    wide: Mutex<HashMap<IpAddr, Record>>,
 }
 
 /// The wide block `address` falls in: its IPv6 /48 or IPv4 /24, where an
@@ -245,10 +250,10 @@ impl Guard {
         }
         self.wide()
             .get(&wide_key(address))
-            .is_some_and(|(until, _)| *until > now)
+            .is_some_and(|record| record.banned(now))
     }
 
-    fn wide(&self) -> MutexGuard<'_, HashMap<IpAddr, (Instant, Offense)>> {
+    fn wide(&self) -> MutexGuard<'_, HashMap<IpAddr, Record>> {
         match self.wide.lock() {
             Ok(wide) => wide,
             Err(poisoned) => poisoned.into_inner(),
@@ -260,7 +265,7 @@ impl Guard {
         &self,
         address: IpAddr,
         now: Instant,
-        change: impl FnOnce(&mut Record) -> Option<Duration>,
+        change: impl FnOnce(&mut Record, u64) -> Option<Duration>,
     ) -> Option<Duration> {
         if !self.auto || exempt(address) {
             return None;
@@ -275,9 +280,8 @@ impl Guard {
             if records.len() >= MAX_RECORDS {
                 // Still full, as when one attacker holds many /64s. Never
                 // lift a ban to make room: drop the unbanned record with
-                // the fewest points. If every slot is an active ban, an
-                // offense that would ban this address bans its wide block
-                // instead.
+                // the fewest points. If every slot is an active ban, the
+                // newcomer is counted by its wide block instead.
                 let least = records
                     .iter()
                     .filter(|(_, record)| !record.banned(now))
@@ -288,15 +292,8 @@ impl Guard {
                         records.remove(&least);
                     }
                     None => {
-                        // Only what would ban this address on its own
-                        // bans its block: never a lone point, and never a
-                        // transfer still under budget, which every session
-                        // charges each second. Smaller offenses go
-                        // uncounted until a slot frees.
                         drop(records);
-                        let mut scratch = Record::new(now);
-                        return change(&mut scratch)
-                            .and_then(|_| self.ban_wide(address, scratch.reason, now));
+                        return self.record_wide(address, now, change);
                     }
                 }
             }
@@ -306,31 +303,54 @@ impl Guard {
         if record.banned(now) {
             return None;
         }
-        change(record)
+        change(record, 1)
     }
 
-    /// Bans `address`'s wide block for the longest ban, when the table
-    /// has no room left to judge it alone.
-    fn ban_wide(&self, address: IpAddr, reason: Offense, now: Instant) -> Option<Duration> {
-        let mut wide = self.wide();
-        wide.retain(|_, (until, _)| *until > now);
+    /// Runs `change` on the record of `address`'s wide block, when the
+    /// address table is all bans. Points add up and fade as for an
+    /// address, so repeated offenses still ban; the transfer budget is
+    /// [`WIDE_BUDGET`] times an address's, as a block holds many users.
+    fn record_wide(
+        &self,
+        address: IpAddr,
+        now: Instant,
+        change: impl FnOnce(&mut Record, u64) -> Option<Duration>,
+    ) -> Option<Duration> {
         let key = wide_key(address);
-        if wide.contains_key(&key) {
+        let mut wide = self.wide();
+        if wide.len() >= MAX_WIDE && !wide.contains_key(&key) {
+            wide.retain(|_, record| {
+                record.fade(now);
+                !record.idle(now)
+            });
+            if wide.len() >= MAX_WIDE {
+                let least = wide
+                    .iter()
+                    .filter(|(_, record)| !record.banned(now))
+                    .min_by_key(|(_, record)| (record.points, record.updated))
+                    .map(|(key, _)| *key);
+                match least {
+                    Some(least) => {
+                        wide.remove(&least);
+                    }
+                    // Tens of thousands of bans and thousands of banned
+                    // blocks at once: the rate limits still hold every
+                    // caller back.
+                    None => return None,
+                }
+            }
+        }
+        let record = wide.entry(key).or_insert_with(|| Record::new(now));
+        record.fade(now);
+        if record.banned(now) {
             return None;
         }
-        if wide.len() >= MAX_WIDE {
-            // Thousands of wide blocks of bans at once: the rate limits
-            // still hold every caller back.
-            return None;
-        }
-        let length = BANS[BANS.len() - 1];
-        wide.insert(key, (now + length, reason));
-        Some(length)
+        change(record, WIDE_BUDGET)
     }
 
     /// Counts `offense` against `address`; a ban it caused, newly.
     pub fn offend(&self, address: IpAddr, offense: Offense, now: Instant) -> Option<Duration> {
-        self.record(address, now, |record| {
+        self.record(address, now, |record, _| {
             record.points = record.points.saturating_add(points(offense));
             (record.points >= BAN_POINTS).then(|| record.ban(offense, now))
         })
@@ -343,8 +363,9 @@ impl Guard {
             return None;
         }
         let budget = self.max_transfer_per_hour;
-        self.record(address, now, |record| {
+        self.record(address, now, |record, scale| {
             record.window_bytes = record.window_bytes.saturating_add(bytes);
+            let budget = budget.saturating_mul(scale);
             (record.window_bytes > budget).then(|| record.ban(Offense::Bandwidth, now))
         })
     }
@@ -369,20 +390,18 @@ impl Guard {
                 })
             })
             .collect();
-        rows.extend(
-            self.wide()
-                .iter()
-                .filter(|(_, (until, _))| *until > now)
-                .map(|(block, (until, reason))| BanRow {
-                    address: match block {
-                        IpAddr::V6(_) => format!("{block}/48"),
-                        IpAddr::V4(_) => format!("{block}/24"),
-                    },
-                    manual: false,
-                    reason: reason.label(),
-                    seconds_left: (*until - now).as_secs(),
-                }),
-        );
+        rows.extend(self.wide().iter().filter_map(|(block, record)| {
+            let until = record.banned_until.filter(|until| *until > now)?;
+            Some(BanRow {
+                address: match block {
+                    IpAddr::V6(_) => format!("{block}/48"),
+                    IpAddr::V4(_) => format!("{block}/24"),
+                },
+                manual: false,
+                reason: record.reason.label(),
+                seconds_left: (until - now).as_secs(),
+            })
+        }));
         rows.sort_by_key(|row| std::cmp::Reverse(row.seconds_left));
         let manual = match self.manual.read() {
             Ok(manual) => manual.clone(),
@@ -404,7 +423,7 @@ impl Guard {
         let wide = self
             .wide()
             .values()
-            .filter(|(until, _)| *until > now)
+            .filter(|record| record.banned(now))
             .count();
         self.records()
             .values()

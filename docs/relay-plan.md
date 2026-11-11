@@ -193,8 +193,11 @@ ban it:
   closes the address's QUIC connections, and every new stream checks.
 - The table of addresses is bounded. When full, the unbanned record with
   the fewest points makes room; active bans are never dropped. If every
-  slot is a ban, a new offender's wider block (IPv6 /48, IPv4 /24) is
-  banned instead, so filling the table buys an attacker nothing.
+  slot is a ban, newcomers are counted by their wider block (IPv6 /48,
+  IPv4 /24) in a second bounded table: points add up and ban the block as
+  they would an address, and the block's transfer budget is 16 times an
+  address's. Filling the table buys an attacker nothing, and one point or
+  one ordinary transfer never bans a neighbour's block.
 - Loopback and private addresses are never banned automatically: behind a
   reverse proxy that is misconfigured, every caller can look like the
   proxy, and banning it would lock everyone out.
