@@ -690,14 +690,30 @@ impl SheprdWindow {
 
     /// The repository for the host-scoped branch reader. Herdr 1 retains its
     /// verified local route; app-kept folders can be on any supported host.
-    fn branch_repository_input(&self) -> crate::Result<crate::pull_request::Input> {
+    pub(in crate::menu) fn branch_repository_input(
+        &self,
+    ) -> crate::Result<crate::pull_request::Input> {
         if self.menu.target.is_none() || !self.menu_target_current() {
             return Err(crate::Error::StaleWorkspace);
         }
-        // The worker receives the same selected target alongside this input.
-        if self.kept_checkout().is_none()
-            && (self.selected_endpoint != 0 || !self.live.local_daemon_peer)
-        {
+        if let Some(checkout) = self.kept_checkout() {
+            let target = self
+                .menu
+                .target
+                .as_ref()
+                .ok_or(crate::Error::StaleWorkspace)?;
+            let sessions = self.sessions(self.selected_endpoint);
+            let workspace = sessions
+                .core
+                .as_ref()
+                .and_then(|session| session.workspace(&target.id))
+                .ok_or(crate::Error::StaleWorkspace)?;
+            let mut input = crate::pull_request::kept_input(workspace, self.selected_is_remote())
+                .ok_or(crate::Error::StaleWorkspace)?;
+            input.checkout = Some(checkout);
+            return Ok(input);
+        }
+        if self.selected_endpoint != 0 || !self.live.local_daemon_peer {
             return Err(sheprd_github::pull_request::Error::UntrustedEndpoint.into());
         }
         self.menu_target_input(&crate::pull_request::Origin::Local)
