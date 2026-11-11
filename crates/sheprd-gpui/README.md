@@ -2061,6 +2061,13 @@ forcibly interrupted. A copy stalls out after 30 seconds without progress.
 
 ## Worktree Scripts
 
+Herdr 2 workspaces kept by the app can create, open, list and delete linked
+checkouts on the selected SSH, cloud or WSL host as well as this computer.
+Git metadata and scripts are read on that host. A completed operation keeps
+its originating host even if you switch devices; an edited or removed device
+is refused rather than applying its paths on another machine. The
+`sheprd worktree` commands open the same confirmation dialogs.
+
 A repository can commit scripts that prepare, start, and clean up its
 worktrees, in `.herdr/worktree.toml` at the repository root:
 
@@ -2087,9 +2094,10 @@ for, so each branch can carry its own.
 - **run** starts from **Run script** in the menu of any Git checkout. A
   repository without one says so.
 - **archive** runs when you confirm **Delete worktree checkout**. Its tab
-  removes the checkout with the pane's own `herdr worktree remove` only if
-  the script succeeds; if it fails, the tab stays open on its output and the
-  checkout stays in place.
+  removes the checkout only if the script succeeds: through the pane's own
+  `herdr worktree remove` for Herdr 1, or host-scoped Git for Herdr 2. A
+  failed or closed archive tab leaves the checkout in place. Terminal IDs
+  on another host cannot satisfy an archive's completion.
 
 Each script runs in a new, focused tab labelled `setup`, `run`, or
 `archive` in the checkout's workspace, never in the background, as
@@ -2099,8 +2107,10 @@ the checkout. `HERDR_WORKTREE_PATH` names that checkout and
 as an environment variable, and the line typed into the tab's shell is
 fixed, so the file's contents never pass through your interactive shell.
 Scripts need `sh` on the daemon's host: a remote host's checkout is read and
-run there, not on this machine. WSL distributions are not supported yet: Run
-script says so, and creating or deleting a worktree there runs no script.
+run there, not on this machine. WSL scripts run through the named distribution
+from a Windows client. Local Windows worktree scripts still require a POSIX
+host. Queued setup scripts wait until their own device is shown and never
+run in a similarly named local checkout.
 
 **Trust.** The file is repository content, so nothing in it runs until you
 trust it. The first time a script would run, a dialog shows every script in

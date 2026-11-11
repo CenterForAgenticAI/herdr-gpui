@@ -36,6 +36,15 @@ impl Checkouts {
     /// Takes a finished batch and starts the next one when `folders` holds
     /// one never asked or the last answers are old. Whether answers changed.
     pub(super) fn poll(&mut self, folders: Vec<String>, now: Instant) -> bool {
+        self.poll_on(folders, now, sheprd_client::ConnectTarget::Local)
+    }
+
+    pub(super) fn poll_on(
+        &mut self,
+        folders: Vec<String>,
+        now: Instant,
+        target: sheprd_client::ConnectTarget,
+    ) -> bool {
         let mut changed = false;
         if let Some(asking) = &self.asking {
             match asking.try_recv() {
@@ -66,11 +75,22 @@ impl Checkouts {
                     .into_iter()
                     .map(|cwd| {
                         let deadline = Instant::now() + DEADLINE;
-                        let identity = sheprd_vcs::git::identity(&cwd, deadline, &|| false)
-                            .unwrap_or_else(|error| {
-                                tracing::debug!(%error, "Could not read a Herdr 2 workspace's checkout");
-                                None
-                            });
+                        let identity = if target.is_remote() {
+                            sheprd_remote::teleport::Host::new(&target)
+                                .ok()
+                                .and_then(|host| {
+                                    sheprd_remote::work::identity(
+                                        &host,
+                                        &cwd,
+                                        &std::sync::atomic::AtomicBool::new(false),
+                                    )
+                                    .ok()
+                                })
+                        } else {
+                            sheprd_vcs::git::identity(&cwd, deadline, &|| false)
+                                .ok()
+                                .flatten()
+                        };
                         (cwd, identity)
                     })
                     .collect();
