@@ -500,6 +500,12 @@ pub(super) const CATALOG: &[Entry] = &[
         "settings-notif-volume-description",
     ),
     entry(
+        Section::TextShortcuts,
+        "text-shortcuts-add",
+        "settings-text-shortcuts-add",
+        "settings-text-shortcuts-add-description",
+    ),
+    entry(
         Section::Integrations,
         "integrations-search",
         "settings-integrations-search",
