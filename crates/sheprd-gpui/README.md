@@ -2486,6 +2486,10 @@ missing terminal address. Once a prompt send has been attempted, interrupted
 or failed delivery remains explicitly uncertain and is not offered for replay:
 neither backend provides an idempotency key that could prove exactly-once
 delivery after a lost acknowledgement. Inspect the retained agent instead.
+Recovery also checks the live foreground process: a replacement shell does
+not inherit the departed agent's ownership. If a removed device is configured
+again with the same host/session identity, its saved lanes rejoin the open
+comparison without replaying creation, launch or prompts.
 Keep removes the other worktrees after its usual confirmation; a lane whose
 worktree may exist or sits on a host no longer set up stays saved until Forget,
 which lets the fan-out go and leaves every worktree as it is. Up to four

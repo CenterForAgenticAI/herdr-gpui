@@ -15,6 +15,40 @@ use std::{
 };
 
 impl FanOut {
+    /// Reassociate a missing saved host after it is configured again. This
+    /// only restores the comparison; no creation, launch or prompt is replayed.
+    pub(crate) fn reconnect(&mut self, host: impl Fn(&str) -> Option<Host>) -> bool {
+        if !self.restored || !matches!(self.stage, Stage::Compare) {
+            return false;
+        }
+        let mut changed = false;
+        for (index, lane) in self.lanes.iter_mut().enumerate() {
+            if lane.checkout.is_some() {
+                continue;
+            }
+            let Some(saved) = self.journal.saved_lane(self.id, index) else {
+                continue;
+            };
+            let Some(checkout) = saved.checkout else {
+                continue;
+            };
+            let Some(host) = same(&host, &checkout.endpoint_id, &checkout.host) else {
+                continue;
+            };
+            lane.checkout = Some(checkout.checkout(host));
+            lane.state = if saved.step == Checkpoint::Prompted {
+                LaneState::Running
+            } else {
+                LaneState::Interrupted(saved.step)
+            };
+            changed = true;
+        }
+        if changed {
+            self.next_refresh = None;
+        }
+        changed
+    }
+
     /// The oldest journaled fan-out no window shows, restored. Records with
     /// nothing left to come back to are forgotten on the way.
     pub(crate) fn reclaim(journal: &Journal, host: impl Fn(&str) -> Option<Host>) -> Option<Self> {
@@ -85,7 +119,14 @@ impl FanOut {
         let hosts = Picker::new(&origin.endpoint_id, Instant::now());
         let lost_prompt = record.prompt.is_none()
             && lanes.iter().any(|lane| match lane.state {
-                LaneState::Interrupted(step) => step.resume().is_some(),
+                LaneState::Interrupted(step) => {
+                    step.resume().is_some()
+                        || (step == Checkpoint::CreatingWorktree
+                            && lane
+                                .checkout
+                                .as_ref()
+                                .is_some_and(|checkout| checkout.recoverable))
+                }
                 _ => false,
             });
         Some(Self {

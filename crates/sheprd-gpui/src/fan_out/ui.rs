@@ -116,7 +116,14 @@ impl SheprdWindow {
             fan_out.stop_probe();
         }
         let was_launching = matches!(fan_out.stage, Stage::Launching);
+        let reconnected = fan_out.reconnect(|id| {
+            self.endpoints
+                .iter()
+                .find(|endpoint| endpoint.id == id)
+                .and_then(|endpoint| host_for(&endpoint.connection.target).ok())
+        });
         let (mut changed, kept) = fan_out.poll();
+        changed |= reconnected;
         let (shown, closed) = fan_out.take_kept();
         self.show_fan_out_lanes(shown, closed, window, cx);
         let Some(fan_out) = &mut self.fan_out else {
