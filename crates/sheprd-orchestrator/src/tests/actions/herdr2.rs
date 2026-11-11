@@ -21,6 +21,7 @@ inventory = home / 'core-inventory'
 if args[0] == 'run':
     label = args[args.index('--label') + 1].split('=', 1)
     terminal = {{'address':'t9', 'cwd': args[args.index('--cwd') + 1], 'argv': args[args.index('--') + 1:], 'labels': {{label[0]: label[1]}}, 'state': 'live'}}
+    terminal['foreground'] = {{'argv': terminal['argv'], 'name': 'claude', 'cwd': terminal['cwd'], 'pid': 9}}
     inventory.write_text(json.dumps({{'terminals': [terminal]}}))
     print('{{"address":"t9"}}')
 elif args[0] == 'wait':
