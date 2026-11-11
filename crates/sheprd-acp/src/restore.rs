@@ -26,6 +26,8 @@ pub(crate) fn expected_end(input: &crate::session::Input) -> bool {
 pub(crate) struct Keeper {
     adapter: bool,
     agent: Agent,
+    args: Vec<String>,
+    core: bool,
     cwd: PathBuf,
     dir: PathBuf,
     endpoint: EndpointId,
@@ -53,14 +55,27 @@ impl Keeper {
             return None;
         }
         let target = Target { pane, socket };
-        Self::new(
+        let AgentChoice::Builtin { agent, args } = agent else {
+            return None;
+        };
+        let args = args
+            .iter()
+            .map(|arg| arg.to_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()?;
+        let mut keeper = Self::new(
             dir.map(|dir| dir.join("core")),
             Some(&target),
             endpoint,
-            agent,
+            &AgentChoice::Builtin {
+                agent: *agent,
+                args: Vec::new(),
+            },
             adapter,
             cwd,
-        )
+        )?;
+        keeper.args = args;
+        keeper.core = true;
+        Some(keeper)
     }
 
     /// A keeper for a chat a client could continue: a built-in agent, in a
@@ -86,6 +101,8 @@ impl Keeper {
         Some(Self {
             adapter,
             agent: *agent,
+            args: Vec::new(),
+            core: false,
             cwd: cwd.to_owned(),
             dir: dir?,
             endpoint: endpoint?.clone(),
@@ -112,13 +129,23 @@ impl Keeper {
     /// earlier record goes with it, so a restore never continues a session
     /// other than the chat's last.
     pub(crate) fn opened(&self, session: &str) {
-        if self.record(session).write(&self.dir).is_err() {
+        if !self.args.is_empty() || self.record(session).write(&self.dir).is_err() {
             restore::remove(&self.dir, &self.endpoint);
+        }
+        if self.core
+            && let Err(error) = core::opened(self, session)
+        {
+            eprintln!("sheprd-acp: could not persist automatic chat recovery: {error:#}");
         }
     }
 
     /// Removes the record: the chat ended on its own.
     pub(crate) fn ended(&self) {
+        if self.core
+            && let Err(error) = core::closed(self)
+        {
+            eprintln!("sheprd-acp: could not persist the chat closure: {error:#}");
+        }
         restore::remove(&self.dir, &self.endpoint);
     }
 }

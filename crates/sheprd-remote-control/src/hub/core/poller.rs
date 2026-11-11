@@ -19,6 +19,7 @@ pub(super) struct Poller {
     doc: Option<(u64, Option<spaces::Spaces>)>,
     checkouts: super::checkouts::Checkouts,
     names: spaces::Names,
+    pub(super) recovery: sheprd_core_client::chat_recovery::Sweep,
     saved: Option<(SystemTime, Option<SavedTabs>)>,
 }
 
@@ -60,6 +61,29 @@ impl Poller {
         if let Some(tabs) = tabs {
             self.refresh_saved(tabs);
         }
+        let replacements = sheprd_core_client::chat_recovery::mapping(
+            terminals
+                .iter()
+                .map(|terminal| (terminal.address.as_str(), &terminal.labels)),
+        );
+        if let Some(scope) = scope
+            && let Some((_, Some(saved))) = &mut self.saved
+        {
+            saved.remap(scope, &replacements);
+        }
+        if let Some((_, Some(spaces))) = &mut self.doc {
+            spaces.remap(&replacements);
+        }
+        let terminals: Vec<_> = terminals
+            .iter()
+            .filter(|terminal| {
+                !replacements
+                    .keys()
+                    .any(|old| old.as_str() == terminal.address)
+            })
+            .cloned()
+            .collect();
+        let terminals = terminals.as_slice();
         let saved = self.saved.as_ref().and_then(|(_, saved)| saved.as_ref());
         let mut layout = match &self.doc {
             Some((_, Some(spaces))) => {

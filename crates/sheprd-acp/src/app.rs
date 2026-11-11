@@ -126,6 +126,7 @@ fn native_history(
 
 pub(crate) fn run(options: Options) -> anyhow::Result<()> {
     let _owner = crate::restore::core::lock()?;
+    crate::restore::core::claim_launch()?;
     run_owned(options)
 }
 

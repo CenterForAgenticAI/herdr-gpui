@@ -112,7 +112,7 @@ impl Source {
     pub(super) fn start_run(&self, run: &Run<'_>) -> Result<sheprd_core_client::wire::Terminal> {
         let core = lock(&self.state).core.clone();
         let core = core.ok_or(Error::Disconnected)?;
-        let terminal = core.run(run)?;
+        let terminal = sheprd_core_client::chat_recovery::run(&core, run)?;
         lock(&self.state).terminals.push(terminal.clone());
         Ok(terminal)
     }
@@ -143,7 +143,16 @@ impl Source {
         };
         // Each one ended is gone from the list, even if a later one fails.
         for address in addresses {
-            core.kill(&address)?;
+            let terminal = lock(&self.state)
+                .terminals
+                .iter()
+                .find(|terminal| terminal.address == address)
+                .cloned();
+            if let Some(terminal) = terminal {
+                sheprd_core_client::chat_recovery::close_terminal(&core, &terminal)?;
+            } else {
+                core.kill(&address)?;
+            }
             let mut state = lock(&self.state);
             state.screens.remove(&address);
             state
