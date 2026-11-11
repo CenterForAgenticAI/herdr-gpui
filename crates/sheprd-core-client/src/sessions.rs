@@ -319,6 +319,7 @@ fn selection(
     }
     let id = payload
         .get("session_id")
+        .filter(|value| !value.as_str().is_some_and(str::is_empty))
         .or_else(|| payload.get("sessionId"));
     if agent == AgentKind::Opencode {
         if id == Some(&serde_json::Value::Null) {
@@ -329,9 +330,26 @@ fn selection(
             .get("hook_event_name")
             .or_else(|| payload.get("hookEventName"))
             .and_then(serde_json::Value::as_str)
-            .ok_or(Error::Event)?;
-        let event = event.replace(['_', '-'], "").to_ascii_lowercase();
-        if event != "sessionstart"
+            .filter(|event| !event.is_empty());
+        let start = match event {
+            Some(event) => event
+                .replace(['_', '-'], "")
+                .eq_ignore_ascii_case("sessionstart"),
+            None if matches!(agent, AgentKind::Codex | AgentKind::Copilot) => ![
+                "prompt",
+                "tool_name",
+                "toolName",
+                "notification_type",
+                "notificationType",
+                "stop_reason",
+                "stopReason",
+                "reason",
+            ]
+            .iter()
+            .any(|key| payload.get(key).is_some()),
+            None => false,
+        };
+        if !start
             || !matches!(
                 agent,
                 AgentKind::Claude | AgentKind::Codex | AgentKind::Copilot

@@ -20,6 +20,7 @@ mod context;
 mod effects;
 mod error;
 mod fallback;
+pub(crate) mod files;
 mod folders;
 mod history;
 mod hosts;

@@ -14,7 +14,9 @@ fn session_events_are_explicit_and_not_prompts() {
             selection(agent, &event).unwrap().unwrap().value,
             "exact-123"
         );
-        assert!(selection(agent, &json!({"session_id":"guessed"})).is_err());
+        if agent != AgentKind::Copilot {
+            assert!(selection(agent, &json!({"session_id":"guessed"})).is_err());
+        }
         assert!(
             selection(
                 agent,
@@ -27,6 +29,41 @@ fn session_events_are_explicit_and_not_prompts() {
         selection(
             AgentKind::Codex,
             &json!({"hook_event_name":"SessionStart", "session_id":"x"})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn native_hook_payloads_without_event_names_are_supported_without_prompt_inference() {
+    assert_eq!(
+        selection(
+            AgentKind::Copilot,
+            &json!({"session_id":"", "sessionId":"exact"})
+        )
+        .unwrap()
+        .unwrap()
+        .value,
+        "exact"
+    );
+    assert!(
+        selection(
+            AgentKind::Copilot,
+            &json!({"sessionId":"exact", "prompt":"not a start"})
+        )
+        .is_err()
+    );
+    assert!(
+        selection(
+            AgentKind::Codex,
+            &json!({"session_id":"exact", "transcript_path":"/exact/log"})
+        )
+        .is_ok()
+    );
+    assert!(
+        selection(
+            AgentKind::Codex,
+            &json!({"session_id":"exact", "transcript_path":"/exact/log", "tool_name":"tool"})
         )
         .is_err()
     );
