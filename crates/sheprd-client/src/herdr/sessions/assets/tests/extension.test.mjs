@@ -43,4 +43,39 @@ for (const agent of ["pi", "omp"]) {
     assert.equal(children[2].payload.sequence, 4);
     assert.deepEqual(children[2].args, ["session-report", agent]);
   });
+
+  test(`${agent} drops an old reporter's failed report once a reload supersedes it`, () => {
+    const first = new Map();
+    const second = new Map();
+    const children = [];
+    const timers = new Set();
+    const runtime = {
+      process: { pid: 42, env: { HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/owning.sock" } }, globalThis: {},
+      setTimeout(fn) {
+        const timer = () => { timers.delete(timer); fn(); };
+        timers.add(timer);
+        return timer;
+      },
+      clearTimeout(timer) { timers.delete(timer); },
+      spawn() {
+        const child = new EventEmitter();
+        child.stdin = new EventEmitter();
+        child.stdin.end = (text) => { child.payload = JSON.parse(text); };
+        child.kill = () => {};
+        children.push(child);
+        return child;
+      },
+    };
+    const context = (path) => ({ hasUI: true, sessionManager: { getSessionFile: () => path } });
+    setup({ on: (name, callback) => first.set(name, callback) }, runtime);
+    setup({ on: (name, callback) => second.set(name, callback) }, runtime);
+    first.get("session_start")({}, context("/sessions/old"));
+    second.get("session_start")({}, context("/sessions/new"));
+    assert.equal(children.length, 2);
+    children[1].emit("close", 0);
+    children[0].emit("close", 1);
+    for (const timer of [...timers]) timer();
+    assert.equal(children.length, 2);
+    assert.equal(timers.size, 0);
+  });
 }
