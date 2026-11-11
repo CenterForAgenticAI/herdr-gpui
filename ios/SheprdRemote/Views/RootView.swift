@@ -12,6 +12,7 @@ struct RootView: View {
     @State private var tab = RootTab.home
     @State private var homePath: [Route] = []
     @State private var workspacesPath = NavigationPath()
+    @State private var workspacesQuery = ""
     @State private var selection: Route?
     @State private var windowWidth: CGFloat = 0
     @State private var window = WindowState()
@@ -123,7 +124,8 @@ struct RootView: View {
             model.pendingRoute = nil
         }
         .onChange(of: model.pendingWorkspace) { _, key in
-            guard let key else { return }
+            // The split view opens it in its sidebar's Workspaces tab.
+            guard let key, !wide else { return }
             showWorkspace(key)
             model.pendingWorkspace = nil
         }
@@ -161,7 +163,7 @@ struct RootView: View {
             }
             .badge(model.fleet.waiting)
             Tab("Workspaces", systemImage: "square.stack.3d.up", value: RootTab.workspaces) {
-                NavigationStack(path: $workspacesPath) { WorkspacesTab().withRoutes() }
+                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $workspacesQuery).withRoutes() }
                     .slidesTabBar(hidden: !workspacesPath.isEmpty)
                     .connectionToast(pairing: $window.pairing)
             }

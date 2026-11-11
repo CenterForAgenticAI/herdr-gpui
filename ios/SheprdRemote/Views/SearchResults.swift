@@ -45,14 +45,14 @@ struct SearchResults: View {
             if !chats.isEmpty {
                 Section("Chats") {
                     ForEach(chats) { item in
-                        NavigationLink(value: Route.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item) }
+                        RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item) }
                     }
                 }
             }
             if !messages.isEmpty {
                 Section("Messages") {
                     ForEach(messages) { hit in
-                        NavigationLink(value: Route.chat(hit.item.key, title: hit.item.chat.title)) {
+                        RouteLink(.chat(hit.item.key, title: hit.item.chat.title)) {
                             MessageHitRow(hit: hit, query: query)
                         }
                     }
@@ -62,7 +62,7 @@ struct SearchResults: View {
                 Section("Terminals") {
                     ForEach(terminals) { item in
                         if let pane = item.terminal.firstPane {
-                            NavigationLink(value: Route.term(PaneKey(device: item.computer.device, pane: pane.pane), title: item.terminal.label)) {
+                            RouteLink(.term(PaneKey(device: item.computer.device, pane: pane.pane), title: item.terminal.label)) {
                                 Label("\(item.terminal.label) · \(item.computer.name) · \(item.workspace.label)", systemImage: "apple.terminal")
                             }
                         }
