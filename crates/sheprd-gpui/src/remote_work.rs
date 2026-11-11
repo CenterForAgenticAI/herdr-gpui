@@ -6,6 +6,7 @@ use crate::{
     SheprdWindow,
     browser::{Scope, Store, TabId},
     core_terminals::Host,
+    window::main_window::MainWindow,
 };
 use gpui::{Context, Global, Window};
 use sheprd_backend::TerminalId;
@@ -167,11 +168,9 @@ impl SheprdWindow {
                         .window
                         .filter(|id| *id != window.window_handle().window_id().as_u64())
                 {
-                    let holds = cx
-                        .windows()
+                    let holds = MainWindow::all(cx)
                         .into_iter()
                         .find(|handle| handle.window_id().as_u64() == id)
-                        .and_then(|handle| handle.downcast::<Self>())
                         .is_some_and(|handle| {
                             handle
                                 .read_with(cx, |view, _| {
