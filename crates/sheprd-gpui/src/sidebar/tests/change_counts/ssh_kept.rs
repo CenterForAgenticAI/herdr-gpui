@@ -34,17 +34,21 @@ fn ssh_kept_badge_and_counts_read_the_prefetch_input_without_h1_lookup() {
     );
     let marks = crate::teleport::Marks::detached();
     let theme = Theme::default();
-    let badge = |workspace, view| {
-        workspace_badge(
-            workspace,
-            Some((&cache, view)),
-            (None, ChangeCounts::PullRequest),
-            (&marks, "ssh:box"),
-            (None, false),
-            &theme,
-        )
-    };
-    let found = badge(&workspace, &view).unwrap();
+    // A macro rather than a closure: each call borrows its own view and
+    // workspace, which a closure's single inferred lifetime cannot express.
+    macro_rules! badge {
+        ($workspace:expr, $view:expr) => {
+            workspace_badge(
+                $workspace,
+                Some((&cache, $view)),
+                (None, ChangeCounts::PullRequest),
+                (&marks, "ssh:box"),
+                (None, false),
+                &theme,
+            )
+        };
+    }
+    let found = badge!(&workspace, &view).unwrap();
     assert_eq!(found.pr.unwrap().number, "#8");
     let counts = found.counts.unwrap();
     assert_eq!(
@@ -65,11 +69,11 @@ fn ssh_kept_badge_and_counts_read_the_prefetch_input_without_h1_lookup() {
             ..view.clone()
         },
     ] {
-        assert!(badge(&workspace, &wrong).is_none());
+        assert!(badge!(&workspace, &wrong).is_none());
     }
     workspace.cwd = "/remote/other-checkout".into();
     assert!(
-        badge(&workspace, &view).is_none(),
+        badge!(&workspace, &view).is_none(),
         "another checkout cannot borrow the answer"
     );
 }
