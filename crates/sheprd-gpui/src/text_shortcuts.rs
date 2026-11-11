@@ -43,6 +43,11 @@ pub(crate) enum Settled {
     /// The copy was edited while the exchange ran, so the computer has not
     /// heard of that edit yet: offer it again.
     Again,
+    /// The computer took this copy but stamped it by its own clock, which
+    /// runs behind this one: the copy takes that stamp, so it is not offered
+    /// again as a newer edit, where it would outlast an edit made there
+    /// since. The other computers already hold these shortcuts.
+    Restamp(TextShortcuts),
     /// The computer holds this copy now; nothing changes.
     Keep,
 }
@@ -62,6 +67,8 @@ pub(crate) fn settle(
         Settled::Take(stood)
     } else if current.updated_ms != offered_ms {
         Settled::Again
+    } else if stood.updated_ms != current.updated_ms && stood.shortcuts == current.shortcuts {
+        Settled::Restamp(stood)
     } else {
         Settled::Keep
     }
@@ -290,6 +297,10 @@ impl Store {
                 }
                 Settled::Again => {
                     this.links.entry(id.to_owned()).or_default().due = true;
+                    false
+                }
+                Settled::Restamp(stood) => {
+                    this.list = Arc::new(stood);
                     false
                 }
                 Settled::Keep => false,

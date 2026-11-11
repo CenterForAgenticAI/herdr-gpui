@@ -121,8 +121,14 @@ impl SettingsWindow {
         if shortcut.text.trim().is_empty() || shortcut.text.chars().count() > MAX_TEXT_CHARS {
             return;
         }
-        self.text_shortcuts.editing = None;
+        // Another device may have filled the list while this was written:
+        // the draft stays, rather than being saved past the limit and lost.
         let list = Store::current(cx);
+        if no_room_for(&list.shortcuts, &shortcut.id) {
+            cx.notify();
+            return;
+        }
+        self.text_shortcuts.editing = None;
         Store::set(cx, text_shortcuts::with_saved(&list.shortcuts, shortcut));
         window.focus(&self.focus, cx);
         cx.notify();
@@ -301,7 +307,8 @@ impl SettingsWindow {
         let written = editing.text.read(cx).text();
         let length = written.chars().count();
         let too_long = length > MAX_TEXT_CHARS;
-        let ready = !written.trim().is_empty() && !too_long;
+        let no_room = no_room_for(&Store::current(cx).shortcuts, &editing.id);
+        let ready = !written.trim().is_empty() && !too_long && !no_room;
         let field = |selector: &'static str| {
             div()
                 .debug_selector(move || selector.into())
@@ -353,6 +360,15 @@ impl SettingsWindow {
                     })
                     .child(editing.text.clone()),
             )
+            .when(no_room, |form| {
+                form.child(
+                    div()
+                        .debug_selector(|| "text-shortcut-full".into())
+                        .text_size(px(11.))
+                        .text_color(rgb(theme.ink(theme.palette[1])))
+                        .child(fl!("settings-text-shortcuts-full", count = MAX_SHORTCUTS)),
+                )
+            })
             // Shown near the limit, and why Save is off past it.
             .when(length > MAX_TEXT_CHARS / 10 * 9, |form| {
                 form.child(
@@ -402,4 +418,10 @@ impl SettingsWindow {
                     ),
             )
     }
+}
+
+/// Whether `list` is full for a new shortcut `id`: one already listed is
+/// edited in its place and always fits.
+fn no_room_for(list: &[TextShortcut], id: &str) -> bool {
+    list.len() >= MAX_SHORTCUTS && list.iter().all(|own| own.id != id)
 }

@@ -35,10 +35,11 @@ fn a_newer_copy_on_a_computer_is_taken() {
 fn a_computer_that_took_the_offer_changes_nothing() {
     let current = list(&["carry on"], 10);
     assert_eq!(settle(&current, 10, current.clone(), NOW), Settled::Keep);
-    // A daemon whose clock runs behind keeps the offer at its own time.
+    // A daemon whose clock runs behind keeps the offer at its own time,
+    // which the copy here takes, so it is not offered again as newer.
     assert_eq!(
         settle(&current, 10, list(&["carry on"], 8), NOW),
-        Settled::Keep
+        Settled::Restamp(list(&["carry on"], 8))
     );
 }
 
@@ -182,4 +183,22 @@ fn an_answer_edited_far_in_the_future_is_not_taken() {
 fn an_edit_after_the_largest_stamp_does_not_overflow() {
     let current = list(&["carry on"], u64::MAX);
     assert_eq!(edited(&current, Vec::new(), NOW).updated_ms, u64::MAX);
+}
+
+#[test]
+fn a_copy_a_slower_clock_took_is_not_offered_again_as_newer() {
+    // This clock runs ahead: the host took the offer stamped by its own.
+    let current = list(&["carry on"], 5_000);
+    let taken = list(&["carry on"], 4_000);
+    assert_eq!(
+        settle(&current, 5_000, taken.clone(), NOW),
+        Settled::Restamp(taken.clone())
+    );
+    // A phone edit there, stamped by the host's clock after it, now wins
+    // the next exchange instead of being replaced by the older copy.
+    let phone = list(&["review the diff"], 4_500);
+    assert_eq!(
+        settle(&taken, 4_000, phone.clone(), NOW),
+        Settled::Take(phone)
+    );
 }

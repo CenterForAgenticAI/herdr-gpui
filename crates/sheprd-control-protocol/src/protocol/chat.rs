@@ -97,12 +97,12 @@ pub enum Reply {
         /// epoch; 0 for a list never edited.
         updated_ms: u64,
         /// Every shortcut is listed: a reply stops short of
-        /// [`MAX_SHORTCUT_BYTES`] of text rather than exceed the message bound.
+        /// [`MAX_SHORTCUT_BYTES`] encoded rather than exceed the message bound.
         complete: bool,
     },
 }
 
-/// The most text, in bytes, a reply lists across its shortcuts, well
+/// The most bytes a reply's shortcuts take encoded, escapes and all, well
 /// within [`super::MAX_MESSAGE`].
 pub const MAX_SHORTCUT_BYTES: usize = 160 * 1024;
 
@@ -119,15 +119,17 @@ pub struct ShortcutInfo {
 }
 
 /// `shortcuts` as a reply lists them: in order, until the next would take
-/// their text past [`MAX_SHORTCUT_BYTES`]. Whether all of them fit.
+/// them past [`MAX_SHORTCUT_BYTES`] as JSON, where a quote, backslash,
+/// newline, or tab takes two bytes. Whether all of them fit.
 pub fn bounded_shortcuts(
     shortcuts: impl IntoIterator<Item = ShortcutInfo>,
 ) -> (Vec<ShortcutInfo>, bool) {
     let mut listed = Vec::new();
     let mut bytes = 0;
     for shortcut in shortcuts {
-        bytes +=
-            shortcut.text.len() + shortcut.title.len() + shortcut.label.len() + shortcut.id.len();
+        // One more for the comma between entries; one that cannot be
+        // encoded is counted as too large to list.
+        bytes += serde_json::to_string(&shortcut).map_or(usize::MAX, |encoded| encoded.len() + 1);
         if bytes > MAX_SHORTCUT_BYTES {
             return (listed, false);
         }

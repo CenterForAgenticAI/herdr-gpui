@@ -140,3 +140,33 @@ fn a_prompt_past_the_limit_shows_its_length_and_cannot_be_saved(cx: &mut TestApp
     let list = cx.update(|_, cx| Store::current(cx));
     assert_eq!(list.shortcuts.len(), 2);
 }
+
+#[gpui::test]
+fn a_new_shortcut_is_kept_when_another_device_fills_the_list(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx);
+    click(cx, "text-shortcuts-add-button");
+    view.update_in(cx, |view, window, cx| {
+        let editing = view.text_shortcuts.editing().unwrap().clone();
+        editing.update(cx, |input, cx| {
+            input.replace_text_in_range(None, "Carry on", window, cx);
+        });
+    });
+    // A phone fills the list while the form is open.
+    let max = sheprd_remote_control::control::shortcuts::MAX_SHORTCUTS;
+    cx.update(|_, cx| {
+        let full: Vec<_> = (0..max)
+            .map(|index| shortcut(&format!("p{index}"), "", "go"))
+            .collect();
+        Store::set(cx, full);
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("text-shortcut-full").is_some());
+    click(cx, "text-shortcut-save");
+    assert!(
+        cx.debug_bounds("text-shortcut-form").is_some(),
+        "the draft stays"
+    );
+    let list = cx.update(|_, cx| Store::current(cx));
+    assert_eq!(list.shortcuts.len(), max);
+    assert!(list.shortcuts.iter().all(|own| own.text == "go"));
+}

@@ -49,3 +49,20 @@ fn a_reply_lists_shortcuts_within_its_bound() {
     let total: usize = listed.iter().map(|shortcut| shortcut.text.len() * 2).sum();
     assert!(total <= MAX_SHORTCUT_BYTES);
 }
+
+#[test]
+fn escaped_text_is_counted_as_encoded_so_a_reply_fits_the_socket() {
+    // Newlines, quotes, and backslashes double when encoded.
+    let escaped = "\n\"\\".repeat(4_000 / 3);
+    let many = (0..64).map(|index| info(&format!("{index:0>36}"), &escaped));
+    let (listed, complete) = bounded_shortcuts(many);
+    assert!(!complete);
+    let reply = Response::Chat {
+        reply: Reply::Shortcuts {
+            shortcuts: listed,
+            updated_ms: u64::MAX,
+            complete,
+        },
+    };
+    assert!(serde_json::to_vec(&reply).unwrap().len() < crate::protocol::MAX_MESSAGE);
+}
