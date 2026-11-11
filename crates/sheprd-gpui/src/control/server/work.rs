@@ -66,8 +66,7 @@ pub(super) struct Found<'a> {
     pub index: usize,
     /// The workspace as the session model has it, whichever keeps it.
     pub workspace: sheprd_session::Workspace,
-    /// Herdr 1's state of it; `None` for a workspace the app keeps for
-    /// Herdr 2, which has none of what mutes, scripts, and fan-out keep.
+    /// Herdr 1's state of it; `None` for a workspace the app keeps.
     pub herdr: Option<Herdr<'a>>,
 }
 
@@ -98,10 +97,22 @@ impl<'a> Found<'a> {
 /// it: Herdr 1's, or one the app keeps for Herdr 2.
 pub(super) fn find<'a>(view: &'a SheprdWindow, caller: &Caller) -> Result<Found<'a>, Response> {
     let target = target(caller);
-    let (index, id) = target
-        .strictness()
-        .iter()
-        .find_map(|strict| view.control_target(&target, *strict))
+    let focused_kept = (target.workspace.is_none()
+        && target.terminal.is_none()
+        && target.pane.is_none()
+        && target.daemon.is_none())
+    .then(|| {
+        view.kept_in_front()
+            .map(|id| (view.selected_endpoint, id.to_owned()))
+    })
+    .flatten();
+    let (index, id) = focused_kept
+        .or_else(|| {
+            target
+                .strictness()
+                .iter()
+                .find_map(|strict| view.control_target(&target, *strict))
+        })
         .ok_or_else(|| match &caller.workspace_id {
             Some(id) => Response::error(
                 ErrorCode::WorkspaceNotFound,
