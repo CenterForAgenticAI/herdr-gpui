@@ -2,6 +2,9 @@ use super::*;
 use sheprd_client::ConnectTarget;
 use std::fs;
 
+#[path = "sessions/tests/identity.rs"]
+mod identity;
+
 struct Homes {
     _temp: tempfile::TempDir,
     source: Host,

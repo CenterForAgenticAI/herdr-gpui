@@ -27,6 +27,7 @@ impl Work {
         let argv = job.map(|job| job.argv.clone()).unwrap_or_default();
         if let Some(session) = &pane.agent_session
             && let Some(agent) = AgentKind::parse(&session.agent)
+            && pane.agent.as_deref().and_then(AgentKind::parse) == Some(agent)
             && agent.carries()
             && agent.accepts(session)
         {
@@ -118,6 +119,23 @@ pub fn remap_argv(argv: &[String], from: &str, to: &str) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// Resume a transferred reference with checkout-relative flag paths moved.
+pub(super) fn resume_command(
+    agent: AgentKind,
+    reference: &str,
+    flags: &[String],
+    from: &str,
+    to: &str,
+) -> Vec<String> {
+    // Only the retained flags are source paths. A path-valued session
+    // reference already names the destination and must not be remapped twice.
+    let flags = flags
+        .iter()
+        .map(|flag| String::from_utf8_lossy(&rewrite_paths(flag.as_bytes(), from, to)).into_owned())
+        .collect::<Vec<_>>();
+    agent.resume_argv(reference, &flags)
 }
 
 /// One POSIX shell command line for `argv`.

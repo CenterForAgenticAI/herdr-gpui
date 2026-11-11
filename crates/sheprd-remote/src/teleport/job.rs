@@ -10,7 +10,7 @@ use super::{
     provision::{self, Arrival},
     remote::MatchReason,
     sessions::{Route, move_session},
-    snapshot::{AgentSession, PaneInfoResult, TabCreated, WorkspaceCreated},
+    snapshot::{PaneInfoResult, TabCreated, WorkspaceCreated},
     warning::Warning,
 };
 use sheprd_backend::Generation;
@@ -23,6 +23,7 @@ use std::{
     time::Duration,
 };
 
+mod confirm;
 mod discover;
 mod land;
 pub(super) mod plan;
@@ -185,21 +186,6 @@ pub(super) fn reference_name() -> String {
     format!("refs/herdr-teleport/{nanos:x}-{:x}", std::process::id())
 }
 
-/// The sessions the review found in Herdr 2 terminals, by terminal, which
-/// must still be running when the move stops them.
-fn core_sessions(review: &Review) -> Vec<(String, AgentSession)> {
-    review
-        .tabs
-        .iter()
-        .filter(|tab| tab.generation == Generation::Herdr2)
-        .flat_map(|tab| &tab.panes)
-        .filter_map(|pane| match &pane.work {
-            Work::Session { session, .. } => Some((pane.pane_id.clone(), session.clone())),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Move the workspace. `report` announces each step as it starts.
 pub fn run(
     source: &Source,
@@ -211,11 +197,10 @@ pub fn run(
     let from = &source.place.host;
     let to = &destination.place.host;
     let mut warnings = Vec::new();
-    // Herdr 2 agents' sessions are read from their processes, which may have
-    // moved on to another conversation since the review. Checked before
+    // Agents may have moved on to another conversation since the review.
+    // Both backends are checked before
     // anything changes, so a refusal leaves nothing behind on either host.
-    let resumed = core_sessions(review);
-    core::confirm(from, &resumed, cancelled)?;
+    confirm::sessions(from, review, cancelled)?;
 
     // The repository comes first: if it cannot be put on the destination,
     // nothing on the source has been touched.
@@ -320,6 +305,9 @@ pub fn run(
     // The source's programs stop here, so every session file is complete. The
     // workspace itself stays, for this client to mark as teleported.
     report(Step::Retire);
+    // Repository transfer and handoff turns can take minutes. Recheck the
+    // reviewed sessions immediately before retirement, not only at entry.
+    confirm::sessions(from, review, cancelled)?;
     retire(source, &review.checkout, cancelled)?;
     core::stop(from, &core::ids(&source.core_tabs), cancelled)?;
 
@@ -340,7 +328,13 @@ pub fn run(
                     cwd: &target.cwd,
                 };
                 Some(match move_session(*agent, session, &route, cancelled) {
-                    Ok(reference) => agent.resume_argv(&reference, flags),
+                    Ok(reference) => super::launch::resume_command(
+                        *agent,
+                        &reference,
+                        flags,
+                        &review.checkout,
+                        &landing.checkout,
+                    ),
                     Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(error) => {
                         warnings.push(Warning::AgentStartedAfresh {

@@ -712,7 +712,9 @@ fn resume_session(
     cancelled: &AtomicBool,
 ) -> Result<Vec<String>> {
     let reference = move_session(agent, session, route, cancelled)?;
-    Ok(agent.resume_argv(&reference, flags))
+    Ok(super::launch::resume_command(
+        agent, &reference, flags, route.from, route.to,
+    ))
 }
 
 /// A review of an idle shell into a new worktree on `destination`, for

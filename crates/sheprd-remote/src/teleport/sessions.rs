@@ -15,7 +15,7 @@ use sheprd_client::{ScriptLimits, shell_quote};
 use std::{
     io::{self, Read},
     path::{Component, Path},
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 const TRANSFER: ScriptLimits = ScriptLimits {
@@ -44,6 +44,14 @@ pub fn move_session(
     route: &Route<'_>,
     cancelled: &AtomicBool,
 ) -> Result<String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(Error::Cancelled);
+    }
+    if !agent.accepts(session) {
+        return Err(Error::SessionMissing {
+            agent: agent.binary(),
+        });
+    }
     match agent {
         AgentKind::Claude => claude(session, route, cancelled),
         AgentKind::Codex => codex(session, route, cancelled),
@@ -136,7 +144,12 @@ fn claude(session: &AgentSession, route: &Route<'_>, cancelled: &AtomicBool) -> 
     let read = format!(
         r#"base="${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects"
 found=
-for f in "$base"/*/{id}.jsonl; do if [ -f "$f" ]; then found=$f; break; fi; done
+for f in "$base"/*/{id}.jsonl; do
+    if [ -f "$f" ]; then
+        [ -z "$found" ] || exit {MISSING}
+        found=$f
+    fi
+done
 [ -n "$found" ] || exit {MISSING}
 cd -- "$(dirname -- "$found")"
 if [ -d {id} ]; then tar -cf - {id}.jsonl {id}; else tar -cf - {id}.jsonl; fi
@@ -160,7 +173,9 @@ fn codex(session: &AgentSession, route: &Route<'_>, cancelled: &AtomicBool) -> R
     // Rollouts live under sessions/YYYY/MM/DD; `codex resume` scans for the id.
     let read = format!(
         r#"base="${{CODEX_HOME:-$HOME/.codex}}/sessions"
-f=$(find "$base" -type f -name 'rollout-*-{id}.jsonl' 2>/dev/null | head -n 1)
+f=$(find "$base" -type f -name 'rollout-*-{id}.jsonl' 2>/dev/null) || exit {MISSING}
+case "$f" in *'
+'*) exit {MISSING};; esac
 [ -n "$f" ] || exit {MISSING}
 printf '%s\n' "${{f#"$base"/}}"
 cat -- "$f"
@@ -251,7 +266,8 @@ fn pi(
                 agent: agent.binary(),
             })?;
             format!(
-                "f=$(find \"$HOME/{root}\" -type f -name '*{id}*.jsonl' 2>/dev/null | head -n 1)\n\
+                "f=$(find \"$HOME/{root}/agent/sessions\" -type f -name '*_{id}.jsonl' 2>/dev/null) || exit {MISSING}\n\
+                 case \"$f\" in *'\n'*) exit {MISSING};; esac\n\
                  [ -n \"$f\" ] || exit {MISSING}\n"
             )
         }
