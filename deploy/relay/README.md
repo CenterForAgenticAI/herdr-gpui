@@ -152,6 +152,27 @@ Elsewhere, mount a directory and point `RELAY_BAN_FILE` at a file in it, or
 set `RELAY_BAN=203.0.113.7,2001:db8::/32` and restart. `RELAY_AUTO_BAN=off`
 turns the automatic bans off.
 
+## Listing a relay as one of Sheprd's
+
+Sheprd's own relays are whatever `https://sheprd.org/relays.json` lists,
+from `website/site/relays.json` in this repository. To add one once it
+answers `https://DOMAIN/v1/info`, add an entry and deploy the site:
+
+```json
+{
+  "version": 1,
+  "relays": [
+    { "endpoint": "https://fra1.relay.sheprd.org", "region": "fra1", "name": "Frankfurt" }
+  ]
+}
+```
+
+Remove an entry to retire a relay, or empty the list to take them all out
+of service: Sheprd then shows "No Sheprd relays are available for now", and
+computers stay reachable on their own networks and private relays. Clients
+re-read the list every hour and keep the last good copy. The endpoint must
+be `https`; the site test and the relay crate's tests check the file.
+
 ## Using your own relay from Sheprd
 
 Once the daemon side ships (`docs/relay-plan.md`, phase 3), add the relay in

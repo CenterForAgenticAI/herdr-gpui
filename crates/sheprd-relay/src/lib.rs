@@ -16,6 +16,7 @@
 //! - Logs carry no addresses, routes, or payloads. The dashboard shows only
 //!   the start of a route.
 //!
+//! - [`directory`]: Sheprd's own relays, listed on sheprd.org.
 //! - [`endpoint`]: a relay's address, Sheprd's or a private one, and the
 //!   URLs built from it.
 //! - [`options`]: settings from flags and `RELAY_*` variables, all optional.
@@ -35,8 +36,8 @@
 //!   and the dashboard's routes.
 
 //!
-//! Without the `server` feature, only [`endpoint`], [`route`], [`socket`],
-//! and [`wire`] are built:
+//! Without the `server` feature, only [`directory`], [`endpoint`],
+//! [`route`], [`socket`], and [`wire`] are built:
 //! what a client needs to reach a relay.
 
 #[cfg(feature = "server")]
@@ -45,6 +46,7 @@ mod broker;
 pub mod bucket;
 #[cfg(feature = "server")]
 pub mod dashboard;
+pub mod directory;
 pub mod endpoint;
 mod error;
 #[cfg(feature = "server")]

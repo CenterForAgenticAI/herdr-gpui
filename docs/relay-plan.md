@@ -21,7 +21,7 @@ work from any network, not a detour for traffic that has a better route.
 | End-to-end encryption | Hybrid post-quantum Noise inside the stream (below). TLS to the relay protects only metadata. |
 | State | None. Memory only; a restart drops sessions and listeners reconnect. No database, no volume. |
 | Many relays | Relays share nothing. A computer listens on every relay it knows, and a client dials whichever answers first. Adding a region is starting a droplet. |
-| Choosing a relay | Sheprd's relays by default, or the user's own: any number of private endpoints, which can replace ours entirely (below). |
+| Choosing a relay | Sheprd's relays by default, listed in one static file, `https://sheprd.org/relays.json`, so they are added or all removed without a release; or the user's own: any number of private endpoints, which can replace ours entirely (below). |
 | Zero config | Every setting has a safe default. The image runs with no settings; `deploy/relay` serves it at `IP.sslip.io` with a Let's Encrypt certificate and no DNS work. |
 | Operator safety | Limits on connections (total and per address), listeners, sessions (total and per route), frame size, bandwidth (per session and total), idle and total session time, and dial and listen rates. |
 | Telemetry | Prometheus at `/metrics` on its own port, and a read-only dashboard behind a login. Neither carries an address, a full route, or a byte of payload. |
@@ -287,6 +287,30 @@ relays = "default"   # Sheprd's relays (the default). Or one of:
 
 - A list replaces the defaults unless it names `"default"`, so someone
   running a private relay never touches ours, not even to look one up.
+- `"default"` means the relays listed at `https://sheprd.org/relays.json`
+  (`sheprd_relay::directory`, built), never a list compiled into the app:
+
+  ```json
+  { "version": 1, "relays": [
+    { "endpoint": "https://fra1.relay.sheprd.org", "region": "fra1", "name": "Frankfurt" }
+  ] }
+  ```
+
+  Adding or removing a relay is a change to `website/site/relays.json` and
+  a site deploy; clients pick it up within the hour. The URL is compiled
+  in, the parser strict (64 KiB, 64 relays, `https` only, duplicates
+  dropped, unknown fields ignored), and the file is not signed: a relay
+  only ever sees end-to-end encrypted bytes, so a tampered list can send
+  clients to relays that drop traffic, never to ones that read it.
+- The daemon fetches the list at start and every hour, and keeps the last
+  good one in its state directory, so a sheprd.org outage changes nothing.
+  It listens on every relay listed and stops on any removed. Settings and
+  `sheprd remote status` say which case holds:
+  - **The list is empty:** "No Sheprd relays are available for now." The
+    computer stays reachable on its LAN and private relays; phones keep
+    trying direct addresses.
+  - **The list could not be loaded, and none was saved:** "Could not load
+    Sheprd's relay list", with the reason, and it retries.
 - Each endpoint may have a listen token. Tokens are secrets, so they are not
   in the config: the daemon keeps them in `STATE_DIR/relay/tokens.json`
   (0600), keyed by endpoint, set through Settings or
