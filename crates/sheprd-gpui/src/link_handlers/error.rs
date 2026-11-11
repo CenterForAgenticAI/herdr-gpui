@@ -1,5 +1,5 @@
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("link_handlers: {0}")]
     Invalid(&'static str),
     #[error("link_handlers pattern: {0}")]

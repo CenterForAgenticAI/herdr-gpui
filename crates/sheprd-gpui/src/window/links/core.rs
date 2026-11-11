@@ -103,7 +103,15 @@ impl SheprdWindow {
                 match result {
                     Ok(false)
                         if this.browser_key() == context
-                            && this.core_terminals.link_target(&host) == Some(&route) =>
+                            && this.core_terminals.link_target(&host) == Some(&route)
+                            && match &host {
+                                Host::Local => true,
+                                Host::Remote(scope) => this.endpoints.iter().any(|endpoint| {
+                                    endpoint.enabled
+                                        && crate::browser::scope(endpoint) == *scope
+                                        && endpoint.connection.target == route
+                                }),
+                            } =>
                     {
                         this.open_core_fallback(click, &host, window, cx);
                     }
