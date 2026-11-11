@@ -339,11 +339,16 @@ final class Fleet {
         let key = store.key
         let size = store.size
         log.notice("asking again for terminal \(key.pane, privacy: .public) on \(key.device, privacy: .public)")
+        let offline = if case .online = status(of: key.device) { false } else { true }
         // One task, so the computer drops the old view before the new one.
         Task {
             guard let link = links[key.device] else { return }
             await link.unwatch(.term(pane: key.pane))
+            // Closed while the old view was dropped: nobody watches it now.
+            guard terms[key] === store else { return }
             await link.watch(.term(pane: key.pane), size: size)
+            // Down: try every address now rather than after the backoff.
+            if offline { await link.networkChanged() }
         }
     }
 
