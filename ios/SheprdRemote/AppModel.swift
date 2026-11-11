@@ -15,6 +15,16 @@ enum Route: Codable, Hashable {
     case workspace(WorkspaceKey)
     case changes(WorkspaceKey)
 
+    /// Whether this opens the same tab as `other`, whatever either's title:
+    /// a renamed chat, or a tab opened before its name arrived, is still it.
+    func opensSameTab(as other: Route) -> Bool {
+        switch (self, other) {
+        case let (.chat(one, _), .chat(two, _)), let (.term(one, _), .term(two, _)): one == two
+        case let (.workspace(one), .workspace(two)), let (.changes(one), .changes(two)): one == two
+        default: false
+        }
+    }
+
     /// Whether this shows the terminal of `pane`, under whatever title.
     func showsTerminal(_ pane: PaneKey) -> Bool {
         if case let .term(key, _) = self { key == pane } else { false }
