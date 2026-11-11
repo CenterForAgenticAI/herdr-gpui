@@ -126,6 +126,7 @@ mod release_notes;
 mod remote;
 mod remote_browser;
 mod remote_update;
+mod remote_work;
 mod reorder;
 mod repo_items;
 mod restart_manager;

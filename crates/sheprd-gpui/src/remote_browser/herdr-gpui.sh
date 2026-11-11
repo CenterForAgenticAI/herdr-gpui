@@ -301,6 +301,25 @@ PY
 }
 
 # Options apply to every command, wherever they appear.
+# Work uses a separate namespace and the app's normal confirmation flows.
+skip_window=0
+family=
+for arg in "$@"; do
+    if [ "$skip_window" = 1 ]; then skip_window=0; continue; fi
+    case $arg in
+        --json | --window=*) continue ;;
+        --window) skip_window=1; continue ;;
+        *) family=$arg; break ;;
+    esac
+done
+case $family in
+    notes | worktree | scripts | checkpoint | teleport | fan-out)
+        core_terminal || unavailable
+        command -v python3 >/dev/null 2>&1 || fail 8 unsupported "Remote work requires python3."
+        core_work "$@"
+        exit $?
+        ;;
+esac
 for arg in "$@"; do
     [ "$arg" = --json ] && json=1
 done

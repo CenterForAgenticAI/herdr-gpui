@@ -114,7 +114,7 @@ impl SheprdWindow {
         });
         self.with_notes_prompt(tab, notes, save, cx, move |this, text, cx| {
             if let Some(target) = remote {
-                this.deliver_notes(Some(target), text, Some(pending), None, cx);
+                let _ = this.deliver_notes(Some(target), text, Some(pending), None, cx);
                 return;
             }
             if let Some(text) = this

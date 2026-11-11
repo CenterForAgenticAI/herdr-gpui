@@ -47,8 +47,18 @@ const LIST_BUDGET: usize = MAX_MESSAGE - 4096;
 /// The most recent notes that fit one answer: up to 512 notes of 500
 /// characters, with their keys, could pass the socket's bound.
 pub(super) fn list(cx: &mut App) -> Response {
+    list_in(None, cx)
+}
+
+pub(super) fn list_in(endpoint: Option<&str>, cx: &mut App) -> Response {
     let all: Vec<NoteInfo> = Notes::of(cx)
-        .map(|notes| notes.recent().map(NoteInfo::from).collect())
+        .map(|notes| {
+            notes
+                .recent()
+                .filter(|note| endpoint.is_none_or(|endpoint| note.checkout.endpoint == endpoint))
+                .map(NoteInfo::from)
+                .collect()
+        })
         .unwrap_or_default();
     let (notes, omitted) = within(all, LIST_BUDGET);
     Response::Work {
@@ -92,9 +102,13 @@ pub(super) fn get(caller: &Caller, cx: &mut App) -> Response {
         Ok(checkout) => checkout,
         Err(response) => return response,
     };
+    get_at(&checkout, cx)
+}
+
+pub(super) fn get_at(checkout: &Checkout, cx: &App) -> Response {
     let note = Notes::of(cx)
         .and_then(|notes| notes.get(&checkout.endpoint, &checkout.repo_key, &checkout.branch))
-        .map(|text| info(&checkout, text));
+        .map(|text| info(checkout, text));
     Response::Work {
         reply: Reply::Note { note },
     }
@@ -105,6 +119,10 @@ pub(super) fn set(caller: &Caller, text: &str, cx: &mut App) -> Response {
         Ok(checkout) => checkout,
         Err(response) => return response,
     };
+    set_at(checkout, text, cx)
+}
+
+pub(super) fn set_at(checkout: Checkout, text: &str, cx: &mut App) -> Response {
     let branch = checkout.branch.clone();
     let key = checkout.clone();
     Notes::update(cx, |notes| notes.set(checkout, text));

@@ -242,6 +242,19 @@ replayed. Cloud and WSL core callers use the same label bridge; automatic
 localhost forwarding currently requires an SSH endpoint (WSL uses its host's
 localhost integration). Remote file URLs and `--beside` remain unsupported.
 
+The remote Herdr 2 shim also supports `worktree status|mute|unmute|list`,
+`worktree create [BRANCH]`, `worktree open|delete`, `notes list|get|set|clear`,
+`scripts setup|run`, `checkpoint restore [ID]`, `teleport --to HOST`, and
+`fan-out PROMPT [--agent KIND[:N]]...`. These require Python 3 and a driving
+tab in a connected window. `--window ID` must name a window holding that
+terminal on that host; dialogs require its host selected and retain normal
+confirmation/trust. Remote `notes list` lists only that host's notes.
+Replies confirm preparation, not the user's approval. After timeout or
+cancellation, inspect the app before retrying: the request is never replayed
+automatically, and an already launched trusted script cannot be undone by
+cancelling its reply. Checkpoint reads/diffs and `scripts list` need the full
+CLI installed on the host.
+
 On Linux the app has no embedded browser yet: web pages open in the system
 browser, and local files and annotations are not available.
 

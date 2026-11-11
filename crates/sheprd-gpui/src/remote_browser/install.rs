@@ -13,7 +13,12 @@ use gpui::{Context, Global};
 use sheprd_client::{ConnectTarget, ScriptHost, ScriptLimits, run_script};
 use std::{collections::HashSet, sync::atomic::AtomicBool, time::Duration};
 
-pub(super) const SHIM: &str = include_str!("herdr-gpui.sh");
+pub(super) const SHIM: &str = concat!(
+    "#!/bin/sh\ncore_work() {\nexec python3 - \"$@\" <<'SHEPRD_WORK_PY'\n",
+    include_str!("../remote_work/shim.py"),
+    "\nSHEPRD_WORK_PY\n}\n",
+    include_str!("herdr-gpui.sh"),
+);
 /// Where agents on the host run the shim from; their shell expands `~`.
 pub(super) const SHIM_COMMAND: &str = "~/.local/state/herdr/gpui/bin/herdr-gpui";
 
