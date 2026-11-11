@@ -1,23 +1,30 @@
 //! Deterministic session-write failures, scoped to one test's dispatch thread.
-use std::{cell::Cell, marker::PhantomData, rc::Rc};
+//! Only the Unix-only Herdr 2 dispatch tests arm them.
+use std::cell::Cell;
+#[cfg(unix)]
+use std::{marker::PhantomData, rc::Rc};
 
 thread_local! {
     static REMAINING: Cell<usize> = const { Cell::new(0) };
 }
 
+#[cfg(unix)]
 pub(crate) struct Failure(PhantomData<Rc<()>>);
 
+#[cfg(unix)]
 impl Drop for Failure {
     fn drop(&mut self) {
         REMAINING.set(0);
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn session_updates(count: usize) -> Failure {
     assert_eq!(REMAINING.replace(count), 0);
     Failure(PhantomData)
 }
 
+#[cfg(unix)]
 pub(crate) fn remaining() -> usize {
     REMAINING.get()
 }

@@ -15,6 +15,7 @@ send)
     case "$*" in *'Fix the icons'*) stage=prompt ;; *) stage=start ;; esac
     if [ "$stage" = '{phase}' ]; then printf applied > "$HOME/applied"; exit 75; fi
     echo '{{}}' ;;
+ls) echo '{{"terminals":[]}}' ;;
 *) echo '{{}}' ;;
 esac
 "#
