@@ -12,7 +12,7 @@ fn select(list: List, path: &str, token: &str, expected: Option<&str>) -> Result
         },
         &["claude".into()],
         expected,
-        false,
+        Purpose::Message,
         crate::teleport::AgentKind::Claude,
     )
 }
@@ -76,7 +76,7 @@ fn cleanup_can_inspect_a_finished_owned_terminal_but_never_an_unknown_state() {
                 owner,
                 &["claude".into()],
                 Some("t7"),
-                true,
+                Purpose::End,
                 crate::teleport::AgentKind::Claude
             )
             .is_ok(),
@@ -98,4 +98,39 @@ fn a_kept_shell_does_not_inherit_the_original_agents_ownership() {
         ),
         Err(Error::Uncertain)
     ));
+}
+
+#[test]
+fn an_agent_that_exited_into_its_kept_shell_can_still_be_ended() {
+    let mut shell = terminal("lane-a", "/work/a", "t7");
+    shell["foreground"] = serde_json::json!({"name":"sh", "argv":["/bin/sh"], "pid":43});
+    let owner = Owner {
+        key: OWNER,
+        value: "lane-a",
+    };
+    let ended = super::select(
+        list(serde_json::json!([shell])),
+        "/work/a",
+        owner,
+        &["claude".into()],
+        Some("t7"),
+        Purpose::End,
+        crate::teleport::AgentKind::Claude,
+    );
+    assert!(matches!(ended, Ok(Started::Herdr2 { terminal }) if terminal == "t7"));
+    let mut moved = terminal("lane-a", "/work/b", "t7");
+    moved["foreground"] = serde_json::json!({"name":"sh", "argv":["/bin/sh"], "pid":43});
+    let elsewhere = super::select(
+        list(serde_json::json!([moved])),
+        "/work/a",
+        owner,
+        &["claude".into()],
+        Some("t7"),
+        Purpose::End,
+        crate::teleport::AgentKind::Claude,
+    );
+    assert!(
+        matches!(elsewhere, Err(Error::Uncertain)),
+        "the label, folder and address still fence it"
+    );
 }

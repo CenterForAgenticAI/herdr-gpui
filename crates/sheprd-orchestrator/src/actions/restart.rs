@@ -5,7 +5,7 @@ use super::*;
 pub(super) fn recover(site: &Site, id: &str, cancelled: &AtomicBool) -> Result<()> {
     let (mut store, run, mut session, host) = own_run(site, id, cancelled)?;
     let work::Started::Herdr2 { terminal } =
-        herdr2::inspect(&host, &run, &session, true, cancelled)?
+        herdr2::inspect(&host, &run, &session, Purpose::End, cancelled)?
     else {
         return Err(Error::NothingToOpen);
     };
@@ -21,7 +21,7 @@ pub(super) fn restart(site: &Site, id: &str, cancelled: &AtomicBool) -> Result<(
     }
     let prompt = store.prompt(id)?;
     let work::Started::Herdr2 { terminal: previous } =
-        herdr2::inspect(&host, &run, &session, true, cancelled)?
+        herdr2::inspect(&host, &run, &session, Purpose::End, cancelled)?
     else {
         return Err(Error::NothingToOpen);
     };

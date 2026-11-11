@@ -12,7 +12,7 @@ use chrono::Utc;
 use sheprd_client::shell_quote;
 use sheprd_remote::{
     teleport::Host,
-    work::{self, NewWorktree, Started, Worktree},
+    work::{self, NewWorktree, Started, Worktree, owned_agent::Purpose},
 };
 use std::sync::atomic::AtomicBool;
 
@@ -183,18 +183,18 @@ pub(super) fn recover(
     session: &HerdrSession,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
-    inspect(host, run, session, false, cancelled)
+    inspect(host, run, session, Purpose::Message, cancelled)
 }
 
 pub(super) fn inspect(
     host: &Host,
     run: &Run,
     session: &HerdrSession,
-    include_finished: bool,
+    purpose: Purpose,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
     if let Some(receipt) = &session.adopted {
-        return super::legacy::verify(host, receipt, include_finished, cancelled);
+        return super::legacy::verify(host, receipt, purpose == Purpose::End, cancelled);
     }
     let workspace = run.workspace.as_ref().ok_or(Error::NothingToOpen)?;
     let path = workspace
@@ -223,7 +223,7 @@ pub(super) fn inspect(
         owner(&session.agent_name),
         &agent,
         expected,
-        include_finished,
+        purpose,
         cancelled,
     )?)
 }

@@ -12,6 +12,18 @@ mod error;
 pub use end::{checkout_idle, end, end_verified};
 pub use error::{Error, Result};
 
+/// What a caller does with the terminal it inspects, which decides how much
+/// it must prove beyond the ownership label `run` attached atomically.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    /// Type into it: the live foreground must still be the agent, never the
+    /// shell `--keep` leaves once it exits, nor anything typed there since.
+    Message,
+    /// End it, as cleanup and a confirmed restart do: a finished terminal, or
+    /// a live one whose agent exited into its kept shell, is still ours.
+    End,
+}
+
 /// A caller's namespace and durable operation identity, attached atomically.
 #[derive(Clone, Copy)]
 pub struct Owner<'a> {
@@ -95,18 +107,26 @@ pub fn recover(
     expected: Option<&str>,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
-    inspect(host, tree, owner, agent, expected, false, cancelled)
+    inspect(
+        host,
+        tree,
+        owner,
+        agent,
+        expected,
+        Purpose::Message,
+        cancelled,
+    )
 }
 
-/// Inspect a retained terminal for cleanup. Finished terminals are accepted
-/// only when explicitly requested; an unknown state is never ownership proof.
+/// Inspect a retained terminal for `purpose`; an unknown state is never
+/// ownership proof.
 pub fn inspect(
     host: &Host,
     tree: &Worktree,
     owner: Owner<'_>,
     agent: &Agent<'_>,
     expected: Option<&str>,
-    include_finished: bool,
+    purpose: Purpose,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
     owner.validate()?;
@@ -122,13 +142,7 @@ pub fn inspect(
         })?;
     let argv = command(agent);
     select(
-        list,
-        &tree.path,
-        owner,
-        &argv,
-        expected,
-        include_finished,
-        agent.kind,
+        list, &tree.path, owner, &argv, expected, purpose, agent.kind,
     )
 }
 
@@ -138,7 +152,7 @@ fn select(
     owner: Owner<'_>,
     argv: &[String],
     expected: Option<&str>,
-    include_finished: bool,
+    purpose: Purpose,
     kind: crate::teleport::AgentKind,
 ) -> Result<Started> {
     let mut matches = list.terminals.into_iter().filter(|terminal| {
@@ -150,10 +164,10 @@ fn select(
     let terminal = matches.next().ok_or(Error::Uncertain)?;
     if matches.next().is_some()
         || !(terminal.state == TerminalState::Live
-            || (include_finished && terminal.state == TerminalState::Finished))
+            || (purpose == Purpose::End && terminal.state == TerminalState::Finished))
         || terminal.cwd != path
         || terminal.argv != argv
-        || (terminal.state == TerminalState::Live
+        || (purpose == Purpose::Message
             && !terminal.foreground.as_ref().is_some_and(|foreground| {
                 crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
                     == Some(kind)

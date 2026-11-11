@@ -5,6 +5,7 @@ use super::*;
 use crate::test_executable;
 
 mod cleanup;
+mod kept_shell;
 mod legacy;
 mod ownership;
 mod remote;
