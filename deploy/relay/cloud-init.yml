@@ -46,9 +46,12 @@ write_files:
         printf 'RELAY_DASHBOARD_TOKEN=%s\n' "$token" > .env
         printf 'https://%s/dashboard\naccess token: %s\n' "$domain" "$token" > /root/sheprd-relay-login.txt
       fi
-      # Ranges to ban by hand, one per line; the relay re-reads it.
-      mkdir -p bans
-      [ -f bans/list ] || printf '# One address or range per line, e.g. 203.0.113.0/24\n' > bans/list
+      # Ranges to ban by hand, one per line; the relay re-reads it. Made
+      # readable by the relay's non-root user: the umask above keeps .env
+      # private, and must not reach these.
+      (umask 022; mkdir -p bans; [ -f bans/list ] || printf '# One address or range per line, e.g. 203.0.113.0/24\n' > bans/list)
+      chmod 755 bans
+      chmod 644 bans/list
       printf 'RELAY_DOMAIN=%s\n' "$domain" > compose.env
       docker compose --env-file compose.env up -d --pull always
 

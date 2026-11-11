@@ -134,7 +134,7 @@ never need it.
 
 Addresses that misbehave are banned automatically, with nothing to set up:
 hitting limits again and again, forged proofs, malformed messages, probing,
-dialing computers without an allowed key, three wrong dashboard tokens, or
+dialing computers that refuse them, three wrong dashboard tokens, or
 moving more than 20 GiB in an hour (`RELAY_MAX_TRANSFER_PER_HOUR`). Bans
 last 10 minutes, then an hour, then a day, and show on the dashboard.
 Private and loopback addresses are never banned automatically.

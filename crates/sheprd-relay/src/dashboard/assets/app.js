@@ -246,12 +246,18 @@ function live() {
       setText("status", "Reconnecting…");
       return;
     }
-    const check = await fetch("/dashboard/api/stats", { credentials: "same-origin", cache: "no-store" });
-    if (check.status === 401) {
-      window.location.assign("/dashboard/login");
-      return;
+    // Whatever the check finds, even a network error, keep the page
+    // recovering: poll, and try the live stream again later.
+    try {
+      const check = await fetch("/dashboard/api/stats", { credentials: "same-origin", cache: "no-store" });
+      if (check.status === 401) {
+        window.location.assign("/dashboard/login");
+        return;
+      }
+      setText("status", "Live updates unavailable; refreshing every 5 s");
+    } catch (error) {
+      setText("status", `Could not reach the relay: ${error.message}; retrying`);
     }
-    setText("status", "Live updates unavailable; refreshing every 5 s");
     startPolling();
     setTimeout(live, 30000);
   });

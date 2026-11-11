@@ -77,7 +77,8 @@ struct State {
 
 #[derive(Debug)]
 struct Listener {
-    /// Where it connects from, as limits key it, so a ban reaches it.
+    /// Where it connects from, in full: bans match it by range, and by
+    /// the address limits key it under.
     address: IpAddr,
     dial_keys: HashSet<Key>,
     generation: u64,
@@ -111,7 +112,8 @@ pub struct Accepted {
 struct Live {
     /// Ends the session when either side is banned.
     ban: Arc<Notify>,
-    /// Both sides' addresses, as limits key them.
+    /// Both sides' addresses, in full, so a manual ban of one IPv6 host
+    /// matches; automatic bans compare the keys limits use.
     dialer: IpAddr,
     key: Key,
     listener: IpAddr,
@@ -235,6 +237,11 @@ impl Hub {
         let (sender, incoming) = mpsc::channel(INCOMING_QUEUE);
         let generation = self.next.fetch_add(1, Relaxed);
         let mut state = self.state();
+        // Checked under the lock `kick` sweeps with: a ban either comes
+        // first and refuses this listener, or comes after and removes it.
+        if self.guard.banned(address, Instant::now()) {
+            return Err(Full);
+        }
         let replacing = state.listeners.contains_key(&route);
         if !replacing && state.listeners.len() >= self.limits.max_listeners {
             return Err(Full);
@@ -242,7 +249,7 @@ impl Hub {
         state.listeners.insert(
             route,
             Listener {
-                address: source_key(address),
+                address,
                 dial_keys: HashSet::new(),
                 generation,
                 incoming: sender,
@@ -360,7 +367,7 @@ impl Hub {
                 route,
                 key,
                 pairing,
-                (source_key(dialer), listener_address),
+                (dialer, listener_address),
             ),
         }))
     }
@@ -384,6 +391,12 @@ impl Hub {
         let revoke = Arc::new(Notify::new());
         let ban = Arc::new(Notify::new());
         let mut state = self.state();
+        // A ban on either side, checked under the lock `kick` sweeps with,
+        // so a session either is refused here or is there to be ended.
+        let now = Instant::now();
+        if self.guard.banned(slot.dialer, now) || self.guard.banned(slot.listener, now) {
+            return None;
+        }
         let allowed = slot.pairing
             || state
                 .listeners
@@ -487,7 +500,7 @@ impl Hub {
         let key = source_key(address);
         let mut state = self.state();
         for live in state.sessions.values() {
-            if live.dialer == key || live.listener == key {
+            if source_key(live.dialer) == key || source_key(live.listener) == key {
                 live.ban.notify_one();
             }
         }
@@ -495,7 +508,7 @@ impl Hub {
         // A removed listener's channel closes, which ends its socket.
         state
             .listeners
-            .retain(|_, listener| listener.address != key);
+            .retain(|_, listener| source_key(listener.address) != key);
         let removed = before - state.listeners.len();
         drop(state);
         for _ in 0..removed {

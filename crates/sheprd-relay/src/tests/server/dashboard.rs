@@ -275,3 +275,30 @@ fn a_client_ip_header_names_the_caller() {
     let missing = Source::Header(axum::http::HeaderName::from_static("cf-connecting-ip"));
     assert_eq!(shared(missing).address(peer, &headers), peer.ip());
 }
+
+#[tokio::test]
+async fn a_cross_site_login_is_refused_and_not_counted() {
+    let router = router();
+    let attacker_page = |token: &str| {
+        Request::post("/dashboard/login")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header("x-forwarded-for", HOME)
+            .header("host", "relay.example.org")
+            .header("origin", "https://evil.example")
+            .body(Body::from(format!("token={token}")))
+            .unwrap()
+    };
+    for _ in 0..5 {
+        let response = router
+            .clone()
+            .oneshot(attacker_page("wrong"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+    // None of those counted: the visitor still signs in.
+    assert_eq!(
+        location(&login_from(&router, HOME, TOKEN).await),
+        "/dashboard"
+    );
+}

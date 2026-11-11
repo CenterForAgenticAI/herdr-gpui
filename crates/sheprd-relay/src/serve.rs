@@ -119,6 +119,8 @@ fn banned_now(hub: &Hub) -> String {
 pub(crate) async fn watch_ban_file(hub: Arc<Hub>, file: std::path::PathBuf, fixed: Vec<Cidr>) {
     let mut ticks = tokio::time::interval(BAN_FILE_EVERY);
     let mut last: Option<String> = None;
+    // Warned once each time reading starts failing, not every 30 s.
+    let mut failing = false;
     loop {
         ticks.tick().await;
         let path = file.clone();
@@ -126,13 +128,15 @@ pub(crate) async fn watch_ban_file(hub: Arc<Hub>, file: std::path::PathBuf, fixe
         let text = match read {
             Ok(Ok(text)) => text,
             Ok(Err(error)) => {
-                if last.is_some() {
+                if !failing {
                     tracing::warn!(%error, "could not read the ban file; keeping its last bans");
+                    failing = true;
                 }
                 continue;
             }
             Err(_) => continue,
         };
+        failing = false;
         if last.as_ref() == Some(&text) {
             continue;
         }

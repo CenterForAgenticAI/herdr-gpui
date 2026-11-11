@@ -115,7 +115,7 @@ labels! {
         Lockout => "lockout",
         Malformed => "malformed",
         Probe => "probe",
-        Unauthorized => "unauthorized",
+        RefusedDial => "refused_dial",
     }
 }
 

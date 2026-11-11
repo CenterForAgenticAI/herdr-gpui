@@ -174,7 +174,7 @@ ban it:
 
 | Offense | Points |
 | --- | --- |
-| Hitting a rate limit or the per-address connection cap; dialing with a key the computer did not name | 1 |
+| Hitting a rate limit or the per-address connection cap; a refused dial, whether no one listens or the key is not named (the two cost the same, so a ban never reveals an occupied route) | 1 |
 | Probing: a route or session id that does not parse, a stream held open with no request | 2 |
 | A forged proof or wrong listen token; malformed messages or frames | 3 |
 | Three wrong dashboard tokens; moving more than `max-transfer-per-hour` (20 GiB, both sides of every session) | 10, a ban at once |
@@ -184,10 +184,17 @@ ban it:
 - A banned address is refused before any work: before the QUIC handshake
   (even before a retry), and before every HTTP route but `/healthz`. Its
   open sessions end (QUIC code 8, WebSocket 4429) and its listeners close.
-- One point for a disallowed dial key, fading a point a minute, means a
-  revoked device retrying about once a minute never adds up, so it cannot
-  get its household's shared address, and that household's computer,
-  banned. A burst does.
+- One point for a refused dial, fading a point a minute, means a revoked
+  device, or a phone whose computer is off, retrying about once a minute
+  never adds up, so it cannot get its household's shared address, and that
+  household's computer, banned. A burst does.
+- Bans are checked under the same lock that opens sessions and registers
+  listeners, so a ban cannot slip between a dial and its session. A ban
+  closes the address's QUIC connections, and every new stream checks.
+- The table of addresses is bounded. When full, the unbanned record with
+  the fewest points makes room; active bans are never dropped. If every
+  slot is a ban, a new offender's wider block (IPv6 /48, IPv4 /24) is
+  banned instead, so filling the table buys an attacker nothing.
 - Loopback and private addresses are never banned automatically: behind a
   reverse proxy that is misconfigured, every caller can look like the
   proxy, and banning it would lock everyone out.
@@ -227,6 +234,9 @@ outcomes, and the busiest sessions by the first eight characters of their
 route, live: `GET /dashboard/api/live` streams a snapshot a second as
 Server-Sent Events. It changes nothing.
 
+- Logins posted from another site (by `Sec-Fetch-Site`, or `Origin`
+  against the relay's host) are refused before anything is counted, so a
+  hostile page cannot lock out, and ban, its visitors.
 - One access token, compared in constant time. Three wrong tries from an
   address (an IPv4 address or IPv6 /64) block it for 15 minutes; while
   blocked, its tries are refused unchecked. Logins across all addresses

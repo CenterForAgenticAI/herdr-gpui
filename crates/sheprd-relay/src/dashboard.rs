@@ -183,6 +183,12 @@ async fn login(
     body: Bytes,
 ) -> Response {
     let metrics = &board.shared.hub.metrics;
+    // A page on another site cannot post here: otherwise it could submit
+    // wrong tokens from a visitor's browser and get the visitor's address
+    // locked out and banned. Refused before anything is counted.
+    if !same_origin(&headers) {
+        return hardened(StatusCode::FORBIDDEN.into_response());
+    }
     let address = board.shared.address(peer, &headers);
     let now = Instant::now();
     if !allow(&board.everyone, (), now_secs().saturating_mul(1000)) {
@@ -215,6 +221,31 @@ async fn login(
     metrics.login(Login::Succeeded);
     let cookie = board.account.issue(now_secs());
     redirect("/dashboard", Some(auth::set_cookie(Some(&cookie))))
+}
+
+/// Whether a form post comes from the dashboard's own pages. Browsers
+/// send `Sec-Fetch-Site`, or at least `Origin`, on every cross-site post;
+/// a client that sends neither, such as `curl`, is not a browser being
+/// used against its owner.
+#[must_use]
+pub fn same_origin(headers: &HeaderMap) -> bool {
+    let text = |name| {
+        headers
+            .get(name)
+            .and_then(|value: &HeaderValue| value.to_str().ok())
+    };
+    if let Some(site) = text("sec-fetch-site") {
+        return matches!(site, "same-origin" | "none");
+    }
+    let Some(origin) = text("origin") else {
+        return true;
+    };
+    let host = text("host").unwrap_or_default();
+    let origin_host = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"));
+    origin_host
+        .is_some_and(|origin_host| !host.is_empty() && origin_host.eq_ignore_ascii_case(host))
 }
 
 async fn logout() -> Response {

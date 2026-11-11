@@ -56,11 +56,11 @@ fn points_fade_a_point_a_minute() {
     // One a minute never adds up: a revoked device retrying, say.
     for minute in 0..120 {
         let now = start + Duration::from_secs(60 * minute);
-        assert!(guard.offend(address, Offense::Unauthorized, now).is_none());
+        assert!(guard.offend(address, Offense::RefusedDial, now).is_none());
     }
     // A burst does.
     let now = start + Duration::from_secs(60 * 120);
-    assert!(offend_until_banned(&guard, address, Offense::Unauthorized, now) <= BAN_POINTS);
+    assert!(offend_until_banned(&guard, address, Offense::RefusedDial, now) <= BAN_POINTS);
 }
 
 #[test]
@@ -187,6 +187,36 @@ fn the_dashboard_lists_earned_bans_with_their_reason() {
             .any(|row| row.address == "2001:db8::/64" && row.reason == "bandwidth")
     );
     assert_eq!(guard.active(now), 2);
+}
+
+#[test]
+fn a_table_full_of_bans_never_lifts_one_and_bans_wide_instead() {
+    use crate::guard::MAX_RECORDS;
+    let guard = guard();
+    let now = Instant::now();
+    let banned_address = |index: u32| {
+        IpAddr::from(std::net::Ipv6Addr::from(
+            (0x2001_0db8_u128 << 96) | (u128::from(index) << 64),
+        ))
+    };
+    for index in 0..u32::try_from(MAX_RECORDS).unwrap() {
+        guard.offend(banned_address(index), Offense::Lockout, now);
+    }
+    // A newcomer is banned by its wide block (an IPv4 /24) ...
+    let late = ip("203.0.113.99");
+    assert!(guard.offend(late, Offense::Lockout, now).is_some());
+    assert!(guard.banned(late, now));
+    assert!(guard.banned(ip("203.0.113.1"), now));
+    assert!(
+        guard
+            .bans(now)
+            .iter()
+            .any(|row| row.address == "203.0.113.0/24")
+    );
+    // ... and every earlier ban still stands.
+    for index in [0, 1, 1_000, u32::try_from(MAX_RECORDS).unwrap() - 1] {
+        assert!(guard.banned(banned_address(index), now), "{index}");
+    }
 }
 
 #[test]

@@ -44,6 +44,8 @@ const HOUR: Duration = Duration::from_secs(60 * 60);
 const FADE: Duration = Duration::from_secs(60);
 /// The most addresses tracked at once, which bounds memory.
 pub const MAX_RECORDS: usize = 65_536;
+/// The most wide blocks banned when the table is full of bans.
+pub const MAX_WIDE: usize = 4_096;
 /// The most bans the dashboard lists.
 const MAX_ROWS: usize = 50;
 
@@ -51,10 +53,11 @@ const MAX_ROWS: usize = 50;
 #[must_use]
 pub const fn points(offense: Offense) -> u32 {
     match offense {
-        // One point, fading one a minute: a revoked device retrying about
-        // once a minute never adds up, so it cannot get its household's
-        // shared address banned; a burst does.
-        Offense::ConnectionCap | Offense::Limited | Offense::Unauthorized => 1,
+        // One point, fading one a minute: a revoked device, or a phone
+        // whose computer is off, retrying about once a minute never adds
+        // up, so it cannot get its household's shared address banned; a
+        // burst does.
+        Offense::ConnectionCap | Offense::Limited | Offense::RefusedDial => 1,
         Offense::Probe => 2,
         Offense::BadProof | Offense::Malformed => 3,
         Offense::Bandwidth | Offense::Lockout => BAN_POINTS,
@@ -153,6 +156,23 @@ pub struct Guard {
     manual: RwLock<Vec<Cidr>>,
     max_transfer_per_hour: u64,
     records: Mutex<HashMap<IpAddr, Record>>,
+    /// Wide blocks (an IPv6 /48, an IPv4 /24) banned when every record is
+    /// an active ban, and when each lifts.
+    wide: Mutex<HashMap<IpAddr, (Instant, Offense)>>,
+}
+
+/// The wide block `address` falls in: its IPv6 /48 or IPv4 /24, where an
+/// attacker's many addresses usually sit together.
+#[must_use]
+pub fn wide_key(address: IpAddr) -> IpAddr {
+    match address.to_canonical() {
+        IpAddr::V4(address) => {
+            IpAddr::V4(std::net::Ipv4Addr::from(u32::from(address) & 0xffff_ff00))
+        }
+        IpAddr::V6(address) => IpAddr::V6(std::net::Ipv6Addr::from(
+            u128::from(address) & !((1u128 << 80) - 1),
+        )),
+    }
 }
 
 /// Whether an address is one automatic bans leave alone.
@@ -184,6 +204,7 @@ impl Guard {
             manual: RwLock::default(),
             max_transfer_per_hour,
             records: Mutex::default(),
+            wide: Mutex::default(),
         }
     }
 
@@ -215,9 +236,23 @@ impl Guard {
         if self.manually_banned(address) {
             return true;
         }
-        self.records()
+        if self
+            .records()
             .get(&source_key(address))
             .is_some_and(|record| record.banned(now))
+        {
+            return true;
+        }
+        self.wide()
+            .get(&wide_key(address))
+            .is_some_and(|(until, _)| *until > now)
+    }
+
+    fn wide(&self) -> MutexGuard<'_, HashMap<IpAddr, (Instant, Offense)>> {
+        match self.wide.lock() {
+            Ok(wide) => wide,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     /// Runs `change` on `address`'s record; a ban it caused, newly.
@@ -239,19 +274,23 @@ impl Guard {
             });
             if records.len() >= MAX_RECORDS {
                 // Still full, as when one attacker holds many /64s. Never
-                // stop counting: make room by dropping the record that
-                // matters least. An unbanned one with the fewest points
-                // goes first; only if every slot is a ban does the one
-                // ending soonest go.
+                // stop counting, and never lift a ban to make room: drop
+                // the unbanned record with the fewest points. If every
+                // slot is an active ban, fail closed and ban this
+                // address's wide block instead.
                 let least = records
                     .iter()
-                    .min_by_key(|(_, record)| {
-                        let ban_end = record.banned_until.filter(|until| *until > now);
-                        (ban_end.is_some(), ban_end, record.points, record.updated)
-                    })
+                    .filter(|(_, record)| !record.banned(now))
+                    .min_by_key(|(_, record)| (record.points, record.updated))
                     .map(|(key, _)| *key);
-                if let Some(least) = least {
-                    records.remove(&least);
+                match least {
+                    Some(least) => {
+                        records.remove(&least);
+                    }
+                    None => {
+                        drop(records);
+                        return self.ban_wide(address, Offense::Probe, now);
+                    }
                 }
             }
         }
@@ -261,6 +300,25 @@ impl Guard {
             return None;
         }
         change(record)
+    }
+
+    /// Bans `address`'s wide block for the longest ban, when the table
+    /// has no room left to judge it alone.
+    fn ban_wide(&self, address: IpAddr, reason: Offense, now: Instant) -> Option<Duration> {
+        let mut wide = self.wide();
+        wide.retain(|_, (until, _)| *until > now);
+        let key = wide_key(address);
+        if wide.contains_key(&key) {
+            return None;
+        }
+        if wide.len() >= MAX_WIDE {
+            // Thousands of wide blocks of bans at once: the rate limits
+            // still hold every caller back.
+            return None;
+        }
+        let length = BANS[BANS.len() - 1];
+        wide.insert(key, (now + length, reason));
+        Some(length)
     }
 
     /// Counts `offense` against `address`; a ban it caused, newly.
@@ -304,6 +362,20 @@ impl Guard {
                 })
             })
             .collect();
+        rows.extend(
+            self.wide()
+                .iter()
+                .filter(|(_, (until, _))| *until > now)
+                .map(|(block, (until, reason))| BanRow {
+                    address: match block {
+                        IpAddr::V6(_) => format!("{block}/48"),
+                        IpAddr::V4(_) => format!("{block}/24"),
+                    },
+                    manual: false,
+                    reason: reason.label(),
+                    seconds_left: (*until - now).as_secs(),
+                }),
+        );
         rows.sort_by_key(|row| std::cmp::Reverse(row.seconds_left));
         let manual = match self.manual.read() {
             Ok(manual) => manual.clone(),
@@ -322,9 +394,15 @@ impl Guard {
     /// How many addresses are banned now, earned bans only.
     #[must_use]
     pub fn active(&self, now: Instant) -> usize {
+        let wide = self
+            .wide()
+            .values()
+            .filter(|(until, _)| *until > now)
+            .count();
         self.records()
             .values()
             .filter(|record| record.banned(now))
             .count()
+            + wide
     }
 }

@@ -38,6 +38,23 @@ def chosen_domain(text: str) -> str:
         ).stdout
 
 
+def bans_mode(text: str) -> tuple[int, int]:
+    """Runs start.sh's ban list setup under the umask start.sh has by then,
+    and returns the directory's and the list's permissions."""
+    block = re.search(r"\n\s*\(umask 022; mkdir -p bans.*?chmod 644 bans/list\n", text, re.S)
+    assert block, "start.sh's ban list block is missing"
+    script = "umask 077\n" + "\n".join(line.strip() for line in block.group(0).splitlines())
+    with tempfile.TemporaryDirectory() as directory:
+        subprocess.run(["sh", "-c", script], cwd=directory, check=True)
+        bans = os.path.join(directory, "bans")
+        return os.stat(bans).st_mode & 0o777, os.stat(os.path.join(bans, "list")).st_mode & 0o777
+
+
+class BansTest(unittest.TestCase):
+    def test_the_ban_list_is_readable_by_the_relay(self) -> None:
+        self.assertEqual(bans_mode(rendered("")), (0o755, 0o644))
+
+
 class DomainTest(unittest.TestCase):
     def test_a_given_domain_is_kept(self) -> None:
         self.assertEqual(

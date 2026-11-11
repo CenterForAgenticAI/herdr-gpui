@@ -71,6 +71,9 @@ pub async fn splice(dialer: Peer, listener: Peer, session: Session) {
     let (from_dialer, mut to_dialer) = dialer.split();
     let (from_listener, mut to_listener) = listener.split();
     let last = AtomicU64::new(0);
+    // Bytes already charged to both sides' budgets. Outside the watchdog,
+    // which is dropped when a pump finishes, so the rest is settled below.
+    let charged = AtomicU64::new(0);
     let started = Instant::now();
     let up = Throttle::new(bounds.bandwidth);
     let down = Throttle::new(bounds.bandwidth);
@@ -98,11 +101,12 @@ pub async fn splice(dialer: Peer, listener: Peer, session: Session) {
         tokio::select! {
             end = pump_up => end,
             end = pump_down => end,
-            end = watchdog(&session, &last, started, bounds.idle, bounds.longest) => end,
+            end = watchdog(&session, &charged, &last, started, bounds.idle, bounds.longest) => end,
             () = session.revoked() => End::Revoked,
             () = session.banned() => End::Banned,
         }
     };
+    settle(&session, &charged);
     let _ = tokio::join!(
         timeout(CLOSE_TIMEOUT, to_dialer.finish(end)),
         timeout(CLOSE_TIMEOUT, to_listener.finish(end)),
@@ -164,26 +168,31 @@ async fn pump(
     }
 }
 
+/// Charges what crossed since the last charge to both sides' budgets.
+pub(crate) fn settle(session: &Session, charged: &AtomicU64) {
+    let carried =
+        session.traffic.from_dialer.load(Relaxed) + session.traffic.from_listener.load(Relaxed);
+    let before = charged.swap(carried, Relaxed);
+    if carried > before {
+        let hub = session.hub_arc();
+        hub.charge(session.dialer(), carried - before);
+        hub.charge(session.listener(), carried - before);
+    }
+}
+
 /// Resolves when the session has idled or run too long. Each turn also
 /// charges what crossed since the last one to both sides' budgets.
 async fn watchdog(
     session: &Session,
+    charged: &AtomicU64,
     last: &AtomicU64,
     started: Instant,
     idle: Duration,
     longest: Duration,
 ) -> End {
     let deadline = started + longest;
-    let mut charged = 0;
     loop {
-        let carried =
-            session.traffic.from_dialer.load(Relaxed) + session.traffic.from_listener.load(Relaxed);
-        if carried > charged {
-            let hub = session.hub_arc();
-            hub.charge(session.dialer(), carried - charged);
-            hub.charge(session.listener(), carried - charged);
-            charged = carried;
-        }
+        settle(session, charged);
         let quiet_since = started + Duration::from_millis(last.load(Relaxed));
         let idle_at = quiet_since + idle;
         if Instant::now() >= deadline {

@@ -106,12 +106,15 @@ pub async fn dial(
     }
     let waiting = match hub.dial(route, *key, address) {
         Ok(Ok(waiting)) => waiting,
-        // An empty route is no one's fault: a computer can be off.
+        // An empty route and a key the listener did not name cost the
+        // same, as they answer the same: a caller's ban must not reveal
+        // whether a computer is online.
         Ok(Err(DialRefusal::Offline)) => {
-            return Err(refuse(Status::Offline, Dial::Offline, None));
+            let offense = Some(Offense::RefusedDial);
+            return Err(refuse(Status::Offline, Dial::Offline, offense));
         }
         Ok(Err(DialRefusal::Unauthorized)) => {
-            let offense = Some(Offense::Unauthorized);
+            let offense = Some(Offense::RefusedDial);
             return Err(refuse(Status::Offline, Dial::Unauthorized, offense));
         }
         Ok(Err(DialRefusal::Busy)) | Err(_) => {

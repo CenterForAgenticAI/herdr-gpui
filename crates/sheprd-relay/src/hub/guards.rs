@@ -103,7 +103,7 @@ impl Drop for Registration {
 #[derive(Debug)]
 pub struct Slot {
     hub: Arc<Hub>,
-    /// The dialer's and listener's addresses, as limits key them.
+    /// The dialer's and listener's addresses, in full.
     pub(super) dialer: IpAddr,
     pub(super) listener: IpAddr,
     pub(super) key: Key,
@@ -241,13 +241,13 @@ impl Session {
         self.ban.notified().await;
     }
 
-    /// The dialer's address, as limits key it.
+    /// The dialer's address, in full.
     #[must_use]
     pub fn dialer(&self) -> IpAddr {
         self.slot.dialer
     }
 
-    /// The listener's address, as limits key it.
+    /// The listener's address, in full.
     #[must_use]
     pub fn listener(&self) -> IpAddr {
         self.slot.listener
