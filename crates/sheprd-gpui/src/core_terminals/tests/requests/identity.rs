@@ -42,3 +42,20 @@ fn feedback_and_reload_keep_first_snapshot_and_unshown_request_fences() {
         assert!(terminals.label_requests().is_empty());
     }
 }
+
+#[test]
+fn removing_the_callers_tab_cancels_its_wait_even_with_other_host_tabs_present() {
+    let mut terminals = terminals();
+    assert!(terminals.drives_browser_request(&scope(), &id("t1")));
+    assert!(
+        !terminals.drives_browser_request(&scope(), &id("t2")),
+        "mirror cannot acknowledge"
+    );
+    assert!(!terminals.drives_browser_request(&Scope::endpoint("ssh:other"), &id("t1")));
+    terminals.tabs.remove(&TabId::test(1));
+    assert!(
+        !terminals.tabs.is_empty(),
+        "another tab still holds this host"
+    );
+    assert!(!terminals.drives_browser_request(&scope(), &id("t1")));
+}

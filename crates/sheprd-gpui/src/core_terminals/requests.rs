@@ -26,6 +26,13 @@ pub(crate) struct LabelRequests {
 }
 
 impl CoreTerminals {
+    pub(super) fn drives_browser_request(&self, scope: &Scope, terminal: &TerminalId) -> bool {
+        let host = Host::Remote(scope.clone());
+        self.tabs
+            .values()
+            .any(|tab| tab.host == host && !tab.observe && tab.panes.contains(terminal))
+    }
+
     pub(crate) fn browser_terminal(&self, scope: &Scope, origin: &str) -> Option<TerminalId> {
         let host = Host::Remote(scope.clone());
         self.tabs
@@ -53,11 +60,7 @@ impl CoreTerminals {
         name: &str,
     ) -> Option<&str> {
         let host = Host::Remote(scope.clone());
-        if !self
-            .tabs
-            .values()
-            .any(|tab| tab.host == host && !tab.observe && tab.panes.contains(terminal))
-        {
+        if !self.drives_browser_request(scope, terminal) {
             return None;
         }
         let remote = self.remote.get(scope)?;
