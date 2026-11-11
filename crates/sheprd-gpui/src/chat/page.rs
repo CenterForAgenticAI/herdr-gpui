@@ -113,11 +113,14 @@ impl SheprdWindow {
             let copied = copied.await;
             let _ = this.update_in(cx, |this, window, cx| match copied {
                 // Show code while the page was being copied wins over it.
+                // Without embedding the page opens in the browser and the
+                // code stays, so the choice cannot be overridden.
                 Ok(_)
-                    if this
-                        .chats
-                        .pane(&pane_id)
-                        .is_some_and(|pane| pane.code.shows_code(key)) => {}
+                    if crate::browser::EMBEDDED
+                        && this
+                            .chats
+                            .pane(&pane_id)
+                            .is_some_and(|pane| pane.code.shows_code(key)) => {}
                 Ok(path) => this.open_chat_file(&pane_id, key, path, window, cx),
                 Err(error) => this.chat_page_failed(&pane_id, error.localize(), cx),
             });

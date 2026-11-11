@@ -161,6 +161,13 @@ fn an_html_card_switches_to_its_code_and_back(cx: &mut TestAppContext) {
         poll(&view, &program, cx);
         poll(&view, &program, cx);
         assert!(cx.debug_bounds("chat-html-code-1").is_none());
+    } else {
+        // The browser opens and the code stays.
+        cx.simulate_click(render.center(), Modifiers::default());
+        cx.run_until_parked();
+        poll(&view, &program, cx);
+        assert!(view.read_with(cx, |view, _| view.flash.is_some()));
+        assert!(cx.debug_bounds("chat-html-code-1").is_some());
     }
 }
 
