@@ -11,7 +11,7 @@ use crate::{
 };
 use gpui::*;
 use sheprd_client::ConnectTarget;
-use sheprd_remote::{teleport::Host, work};
+use sheprd_remote::work;
 use std::{path::Path, sync::atomic::AtomicBool};
 
 /// What a kept workspace's new worktree dialog asked for.
@@ -125,7 +125,7 @@ impl Landing {
 
 /// `checkout`, made or opened as `ask` says. Blocking.
 fn carry_out(target: &ConnectTarget, checkout: &str, ask: &Ask) -> crate::Result<String> {
-    let host = Host::new(target)?;
+    let host = work::host_for_kept(target)?;
     match ask {
         Ask::Open { path } => Ok(work::open(&host, checkout, path, &AtomicBool::new(false))?),
         Ask::Create {
@@ -184,7 +184,7 @@ impl SheprdWindow {
         let request = format!("kept-{}", uuid::Uuid::new_v4().simple());
         source.checkouts.request = Some(request.clone());
         let listed = cx.background_executor().spawn(async move {
-            let host = Host::new(&target)?;
+            let host = work::host_for_kept(&target)?;
             Ok::<_, crate::Error>(work::list(&host, &checkout, &AtomicBool::new(false))?)
         });
         cx.spawn(async move |this, cx| {
@@ -551,9 +551,21 @@ impl SheprdWindow {
         let scope = crate::browser::scope(&self.endpoints[index]);
         let target = self.endpoints[index].connection.target.clone();
         let expected = target.clone();
+        let identity = self.sessions(index).core.as_ref().and_then(|session| {
+            let workspace = session.workspace(&workspace)?;
+            let tree = workspace.worktree.as_ref().filter(|tree| tree.linked)?;
+            Some((tree.key.clone(), workspace.branch.clone()))
+        });
         let removed = cx.background_executor().spawn(async move {
-            let host = Host::new(&target)?;
+            let host = work::host_for_kept(&target)?;
             let cancelled = AtomicBool::new(false);
+            // A directory can be replaced while a dialog or archive is
+            // open. Its old workspace never authorizes the replacement.
+            let (key, branch) = identity.ok_or(crate::Error::StaleWorkspace)?;
+            let current = work::identity(&host, &path, &cancelled)?;
+            if !current.linked || current.key != key || current.branch != branch {
+                return Err(crate::Error::StaleWorkspace);
+            }
             if let Some(candidate) = merged {
                 crate::merged_cleanup::verify_kept_removal_on(
                     &target, &candidate, &path, &cancelled,
