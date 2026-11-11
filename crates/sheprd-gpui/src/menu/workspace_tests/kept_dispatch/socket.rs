@@ -2,10 +2,9 @@ use super::*;
 
 #[gpui::test]
 fn forwarded_socket_snapshot_never_supplies_local_core_repository_paths(cx: &mut TestAppContext) {
-    let (view, cx, _) = window(cx, false);
+    let target = sheprd_client::ConnectTarget::Socket("/private/forwarded.sock".into());
+    let (view, cx, _) = window_on(cx, false, target);
     view.update(cx, |view, cx| {
-        view.endpoints[0].connection.target =
-            sheprd_client::ConnectTarget::Socket("/private/forwarded.sock".into());
         view.config.herdr_2_terminals = true;
         view.live.missing_installation = false;
         view.live.status = crate::state::ConnectionStatus::Connected;
@@ -43,10 +42,9 @@ fn forwarded_socket_snapshot_never_supplies_local_core_repository_paths(cx: &mut
 
 #[gpui::test]
 fn a_custom_socket_routes_only_app_kept_work_to_local_core_files(cx: &mut TestAppContext) {
-    let (view, cx, workspace) = window(cx, false);
+    let target = sheprd_client::ConnectTarget::Socket("/private/custom-herdr.sock".into());
+    let (view, cx, workspace) = window_on(cx, false, target);
     view.update(cx, |view, cx| {
-        view.endpoints[0].connection.target =
-            sheprd_client::ConnectTarget::Socket("/private/custom-herdr.sock".into());
         let endpoint = view.endpoints[0].id.clone();
         let local = crate::teleport::host_for(&sheprd_client::ConnectTarget::Local).unwrap();
         let origin = view.dispatch_origin(&workspace, KEY, "app").unwrap();
