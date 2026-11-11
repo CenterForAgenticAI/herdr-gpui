@@ -107,6 +107,8 @@ impl Checkouts {
 
     #[cfg(test)]
     pub(crate) fn seed(&mut self, cwd: &str, identity: Option<Identity>) {
+        // An older real worker must not overwrite the fixture's answer.
+        self.asking = None;
         self.known.insert(cwd.to_owned(), identity);
         self.asked = Some(Instant::now());
     }
