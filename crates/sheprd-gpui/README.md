@@ -2586,7 +2586,8 @@ restart an agent already waiting on you counts as new once.
 ## Orchestrator
 
 The activity bar's **Pull requests**, **Issues**, and **Tasks** sections list,
-across the window, every repository the workspaces of every connected local or SSH host
+across the window, every repository the workspaces of every connected local, SSH,
+cloud, or WSL host
 hold: their GitHub issues and pull requests or GitLab issues, their
 [Beads](https://github.com/steveyegge/beads) issues when a main checkout has a
 `.beads` folder, and the agent runs dispatched for them. Folders outside Git
@@ -2674,7 +2675,12 @@ the issue or PR identifier and title, so long-paste transport markers do not
 replace that task context. With more than one host connected, the
 dialog also ranks the hosts as [Smart Dispatch](#smart-dispatch) does; picking
 another one sets the repository up there the same way and starts the agent
-there, and its run card then acts on that host. A pull
+there, and its run card then acts on that host. Herdr 2 destinations use Git
+for the checkout and herdr-core for the agent, without needing Herdr 1. The
+recorded destination and terminal identity survive an app restart: opening,
+messaging, stopping, and removing the run keep targeting that host, even when
+another host has a checkout at the same path. Removing a run closes only its
+host's saved workspace after checkout removal succeeds. A pull
 request's **Review with agent** does the same on an `agent/review-…` branch with a
 read-only prompt: the agent verifies the pull request, reads its diff, and
 reports findings without writing to GitHub. A run's card sends it messages, stops
