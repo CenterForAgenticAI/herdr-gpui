@@ -24,8 +24,10 @@ mod window;
 pub(crate) use window::Forwarding;
 
 /// The command installed on the caller's host, never the desktop executable.
+/// Only page notes use it, and Linux builds show no pages.
+#[cfg(any(target_os = "macos", windows))]
 pub(crate) fn reload_command() -> String {
-    format!("{} browser reload", install::SHIM_COMMAND)
+    format!("{} browser reload", install::SHIM_COMMAND) // i18n: data
 }
 
 use crate::browser::Scope;
