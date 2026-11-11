@@ -96,10 +96,26 @@ pub fn recover(
     expected: Option<&str>,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
+    inspect(host, tree, owner, agent, expected, false, cancelled)
+}
+
+/// Inspect a retained terminal for cleanup. Finished terminals are accepted
+/// only when explicitly requested; an unknown state is never ownership proof.
+pub fn inspect(
+    host: &Host,
+    tree: &Worktree,
+    owner: Owner<'_>,
+    agent: &Agent<'_>,
+    expected: Option<&str>,
+    include_finished: bool,
+    cancelled: &AtomicBool,
+) -> Result<Started> {
     owner.validate()?;
-    let output = host
-        .capture("core_cli ls --json\n", cancelled)
-        .map_err(script(Step::List))?;
+    let line = format!(
+        "core_cli ls --all --json --label {}\n",
+        shell_quote(&format!("{}={}", owner.key, owner.value))
+    );
+    let output = host.capture(&line, cancelled).map_err(script(Step::List))?;
     let list: List =
         serde_json::from_slice(output.trim_ascii()).map_err(|source| super::Error::Decode {
             step: Step::List,
@@ -109,7 +125,7 @@ pub fn recover(
     if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
         argv.extend(["--model".into(), model.into()]);
     }
-    select(list, &tree.path, owner, &argv, expected)
+    select(list, &tree.path, owner, &argv, expected, include_finished)
 }
 
 fn select(
@@ -118,6 +134,7 @@ fn select(
     owner: Owner<'_>,
     argv: &[String],
     expected: Option<&str>,
+    include_finished: bool,
 ) -> Result<Started> {
     let mut matches = list.terminals.into_iter().filter(|terminal| {
         terminal
@@ -127,7 +144,8 @@ fn select(
     });
     let terminal = matches.next().ok_or(Error::Uncertain)?;
     if matches.next().is_some()
-        || terminal.state != TerminalState::Live
+        || !(terminal.state == TerminalState::Live
+            || (include_finished && terminal.state == TerminalState::Finished))
         || terminal.cwd != path
         || terminal.argv != argv
         || expected.is_some_and(|expected| terminal.address != expected)

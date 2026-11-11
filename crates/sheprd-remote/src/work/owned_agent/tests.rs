@@ -12,6 +12,7 @@ fn select(list: List, path: &str, token: &str, expected: Option<&str>) -> Result
         },
         &["claude".into()],
         expected,
+        false,
     )
 }
 
@@ -56,4 +57,28 @@ fn recovery_requires_unique_owned_live_terminal_at_the_saved_checkout() {
         select(list(serde_json::json!([ended])), "/work/a", "lane-a", None),
         Err(Error::Uncertain)
     ));
+}
+
+#[test]
+fn cleanup_can_inspect_a_finished_owned_terminal_but_never_an_unknown_state() {
+    let owner = Owner {
+        key: OWNER,
+        value: "lane-a",
+    };
+    for (state, accepted) in [("live", true), ("finished", true), ("unexpected", false)] {
+        let mut value = terminal("lane-a", "/work/a", "t7");
+        value["state"] = state.into();
+        assert_eq!(
+            super::select(
+                list(serde_json::json!([value])),
+                "/work/a",
+                owner,
+                &["claude".into()],
+                Some("t7"),
+                true
+            )
+            .is_ok(),
+            accepted
+        );
+    }
 }
