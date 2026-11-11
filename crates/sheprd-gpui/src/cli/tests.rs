@@ -22,6 +22,7 @@ mod remote_update;
 mod security;
 mod ui_agent_group;
 mod ui_panel;
+mod worktrees;
 
 #[test]
 fn build_info_is_an_informational_mode() {
