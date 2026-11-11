@@ -10,6 +10,7 @@ mod keys;
 mod metrics;
 mod options;
 mod quic;
+mod races;
 mod relay;
 
 pub(crate) use super::{hello, public, sign, signing_key};

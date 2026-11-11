@@ -24,7 +24,9 @@ Every option is optional, and each can also be set as a RELAY_* variable
 (--max-connections is RELAY_MAX_CONNECTIONS). Flags win over variables.
 
   --listen ADDRESS               HTTP: the WebSocket fallback, /v1/info, and the
-                                 dashboard (default 127.0.0.1:8080)
+                                 dashboard (default 127.0.0.1:8080; with only
+                                 PORT set, as platforms like DigitalOcean App
+                                 Platform do, 0.0.0.0:$PORT)
   --quic ADDRESS|off             QUIC, the main transport, on UDP
                                  (default 127.0.0.1:8443)
   --quic-port PORT               The UDP port clients reach QUIC on, when a
@@ -37,6 +39,11 @@ Every option is optional, and each can also be set as a RELAY_* variable
                                  WebSocket fallback is off. QUIC needs nothing.
   --behind-proxy                 Take the caller's address from X-Forwarded-For.
                                  Only when nothing reaches the relay but that proxy.
+  --client-ip-header NAME        Take it from this header instead, which the
+                                 platform in front sets to the caller's address:
+                                 do-connecting-ip on DigitalOcean App Platform,
+                                 cf-connecting-ip behind Cloudflare. Same
+                                 condition as --behind-proxy.
   --max-connections N            Open sockets in total (default 10000)
   --max-connections-per-ip N     Per IPv4 address or IPv6 /64 (default 64)
   --max-listeners N              Computers listening (default 5000)
@@ -83,6 +90,7 @@ pub const SETTINGS: &[(&str, Kind)] = &[
     // keep-sorted start
     ("accept-timeout", Kind::Duration),
     ("behind-proxy", Kind::Flag),
+    ("client-ip-header", Kind::Text),
     ("dashboard-password-file", Kind::File),
     ("dashboard-user", Kind::Text),
     ("dials-per-minute", Kind::Count),
@@ -122,6 +130,8 @@ const FRAME_RANGE: std::ops::RangeInclusive<u64> = 1024..=(16 * 1024 * 1024);
 #[derive(Clone, Debug)]
 pub struct Options {
     pub behind_proxy: bool,
+    /// The header the proxy in front puts the caller's address in.
+    pub client_ip_header: Option<String>,
     pub dashboard_password: Option<SecretString>,
     pub dashboard_user: String,
     pub limits: Limits,
@@ -144,6 +154,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             behind_proxy: false,
+            client_ip_header: None,
             dashboard_password: None,
             dashboard_user: "admin".to_owned(),
             limits: Limits::default(),
@@ -172,6 +183,20 @@ impl Options {
         variables: impl Fn(&str) -> Option<OsString>,
     ) -> Result<Option<Self>> {
         let mut options = Self::default();
+        // Platforms that choose the port, such as DigitalOcean App Platform,
+        // say so in PORT and route to every interface. RELAY_LISTEN and
+        // --listen still win.
+        if let Some(port) = variables("PORT") {
+            let port = port
+                .to_str()
+                .and_then(|port| port.parse::<u16>().ok())
+                .filter(|port| *port > 0)
+                .ok_or(Error::Invalid {
+                    name: "PORT",
+                    value: port.clone(),
+                })?;
+            options.listen = SocketAddr::from(([0, 0, 0, 0], port));
+        }
         for (name, kind) in SETTINGS {
             if let Some(value) = variables(&variable(name)) {
                 options.apply(name, *kind, Some(&value))?;
@@ -260,6 +285,14 @@ impl Options {
         match name {
             "accept-timeout" => limits.accept_timeout = duration()?,
             "dashboard-password-file" => self.dashboard_password = Some(read(name, text)?),
+            "client-ip-header" => {
+                let name = text.trim().to_ascii_lowercase();
+                let token = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'-';
+                if name.is_empty() || name.len() > 64 || !name.bytes().all(token) {
+                    return Err(invalid());
+                }
+                self.client_ip_header = Some(name);
+            }
             "dashboard-user" if !text.trim().is_empty() => {
                 self.dashboard_user = text.trim().to_owned()
             }

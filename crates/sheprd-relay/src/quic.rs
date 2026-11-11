@@ -77,9 +77,22 @@ fn windows(transport: &mut TransportConfig) {
 /// Accepts connections until the endpoint closes.
 pub async fn run(endpoint: Endpoint, hub: Arc<Hub>) {
     while let Some(incoming) = endpoint.accept().await {
+        // A source address on a UDP packet can be forged. A stateless retry
+        // makes the peer prove it receives at that address before anything
+        // counts against it, so forged packets cannot use up another
+        // address's connections. It costs one round trip, on a new
+        // connection only: migration keeps an existing one.
+        if !incoming.remote_address_validated() {
+            if incoming.may_retry() {
+                let _ = incoming.retry();
+            } else {
+                incoming.refuse();
+            }
+            continue;
+        }
         let address = incoming.remote_address().ip();
-        // Counted before the handshake, so a flood costs no cryptography
-        // beyond what the per-address limit allows.
+        // Counted before the handshake, so a flood from a proven address
+        // costs no cryptography beyond what the per-address limit allows.
         let Ok(permit) = hub.admit(address, Kind::Quic) else {
             incoming.refuse();
             continue;
@@ -103,7 +116,7 @@ async fn serve(connection: Connection, hub: Arc<Hub>) {
 }
 
 async fn stream(connection: Connection, mut send: SendStream, mut recv: RecvStream, hub: Arc<Hub>) {
-    let request = match timeout(REQUEST_TIMEOUT, read::<Request>(&mut recv)).await {
+    let request = match timeout(REQUEST_TIMEOUT, read_request(&mut recv)).await {
         Ok(Some(request)) => request,
         Ok(None) | Err(_) => return reply_and_end(&mut send, Status::Malformed).await,
     };
@@ -130,11 +143,10 @@ async fn stream(connection: Connection, mut send: SendStream, mut recv: RecvStre
         } => {
             let signed = wire::dial_signed(&exported, &route);
             match broker::dial(&hub, address, route, &key, &signature, &signed).await {
-                Ok((accepted, slot)) => {
+                Ok((accepted, session)) => {
                     if !reply(&mut send, Status::Ok).await {
                         return;
                     }
-                    let session = hub.open(slot);
                     let _permit = accepted.permit;
                     splice(Peer::Stream { recv, send }, accepted.peer, session).await;
                 }
@@ -153,35 +165,44 @@ fn export(connection: &Connection) -> Option<[u8; EXPORTER_LEN]> {
     Some(exported)
 }
 
-/// Something read off a stream in one piece: a request or a listener's
-/// message.
-trait Read: Sized {
-    fn parse(bytes: &[u8]) -> Option<Parse<Self>>;
-}
-
-impl Read for Request {
-    fn parse(bytes: &[u8]) -> Option<Parse<Self>> {
-        Self::parse(bytes).ok()
-    }
-}
-
-impl Read for Message {
-    fn parse(bytes: &[u8]) -> Option<Parse<Self>> {
-        Self::parse(bytes).ok()
-    }
-}
-
-/// Reads exactly one request or message, never past it: what follows
-/// belongs to the session or the next message. `None` at a clean end.
-async fn read<T: Read>(recv: &mut RecvStream) -> Option<T> {
-    let mut bytes = Vec::with_capacity(MAX_MESSAGE.max(MAX_REQUEST));
+/// Reads exactly one request, never past it: what follows belongs to the
+/// session. Not cancel-safe, so it runs alone, under a timeout.
+async fn read_request(recv: &mut RecvStream) -> Option<Request> {
+    let mut bytes = Vec::with_capacity(MAX_REQUEST);
     loop {
-        match T::parse(&bytes)? {
-            Parse::Done(value, _) => return Some(value),
+        match Request::parse(&bytes).ok()? {
+            Parse::Done(request, _) => return Some(request),
             Parse::Need(total) => {
                 let have = bytes.len();
                 bytes.resize(total, 0);
                 recv.read_exact(&mut bytes[have..]).await.ok()?;
+            }
+        }
+    }
+}
+
+/// What a listener's stream has sent so far, kept across the listen loop's
+/// turns: a message cut off when a dial arrives is finished on the next
+/// turn, never dropped, so the stream cannot fall out of step.
+#[derive(Debug, Default)]
+pub(crate) struct Messages {
+    bytes: Vec<u8>,
+}
+
+impl Messages {
+    /// Adds `chunk`, then takes every whole message now buffered. `None`
+    /// when the bytes are not messages, or more than one could hold.
+    pub(crate) fn take(&mut self, chunk: &[u8]) -> Option<Vec<Message>> {
+        self.bytes.extend_from_slice(chunk);
+        let mut messages = Vec::new();
+        loop {
+            match Message::parse(&self.bytes).ok()? {
+                Parse::Done(message, used) => {
+                    self.bytes.drain(..used);
+                    messages.push(message);
+                }
+                Parse::Need(total) if total <= MAX_MESSAGE => return Some(messages),
+                Parse::Need(_) => return None,
             }
         }
     }
@@ -210,6 +231,7 @@ async fn listen(
     if !reply(&mut send, Status::Ok).await {
         return;
     }
+    let mut messages = Messages::default();
     loop {
         tokio::select! {
             incoming = registration.incoming.recv() => {
@@ -236,14 +258,21 @@ async fn listen(
                     });
                 });
             }
-            message = read::<Message>(&mut recv) => {
-                let Some(message) = message else {
-                    // The stream ended, broke, or carried something that
-                    // is not a message: stop listening.
+            // `read_chunk` is cancel-safe: when a dial wins the race, no
+            // byte is lost, and `messages` keeps any partial message.
+            chunk = recv.read_chunk(MAX_MESSAGE, true) => {
+                // The stream ended or broke: stop listening.
+                let Ok(Some(chunk)) = chunk else {
                     return;
                 };
-                if !reply(&mut send, broker::apply(&registration, message)).await {
+                // Bytes that are not messages: stop listening.
+                let Some(taken) = messages.take(&chunk.bytes) else {
                     return;
+                };
+                for message in taken {
+                    if !reply(&mut send, broker::apply(&registration, message)).await {
+                        return;
+                    }
                 }
             }
             _ = connection.closed() => return,

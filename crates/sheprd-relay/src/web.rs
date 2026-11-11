@@ -49,13 +49,16 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 
 /// How to tell who a request came from.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Source {
     /// The connection's peer.
     Peer,
     /// The last `X-Forwarded-For` entry, which the proxy in front appended.
     /// Only for a relay no one can reach except through that proxy.
     Proxy,
+    /// A header the platform in front sets to the caller's address, such as
+    /// `do-connecting-ip`. The same condition as [`Source::Proxy`].
+    Header(axum::http::HeaderName),
 }
 
 /// What the handlers share.
@@ -76,16 +79,17 @@ impl Shared {
     /// The address limits apply to.
     #[must_use]
     pub fn address(&self, peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
-        if self.source == Source::Proxy
-            && let Some(forwarded) = headers
+        let given = match &self.source {
+            Source::Peer => None,
+            Source::Proxy => headers
                 .get("x-forwarded-for")
                 .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.rsplit(',').next())
-                .and_then(|value| value.trim().parse().ok())
-        {
-            return forwarded;
-        }
-        peer.ip()
+                .and_then(|value| value.rsplit(',').next()),
+            Source::Header(name) => headers.get(name).and_then(|value| value.to_str().ok()),
+        };
+        given
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or_else(|| peer.ip())
     }
 }
 
@@ -278,15 +282,14 @@ async fn serve_dialer(
         return answer(socket, Status::Offline).await;
     };
     let signed = socket::dial_signed(&host, &nonce, &route);
-    let (accepted, slot) = match broker::dial(&hub, address, route, &key, &signature, &signed).await
-    {
-        Ok(dialed) => dialed,
-        Err(status) => return answer(socket, status).await,
-    };
+    let (accepted, session) =
+        match broker::dial(&hub, address, route, &key, &signature, &signed).await {
+            Ok(dialed) => dialed,
+            Err(status) => return answer(socket, status).await,
+        };
     if !send(&mut socket, &ToPeer::Status { status: Status::Ok }).await {
         return;
     }
-    let session = hub.open(slot);
     let _permit = accepted.permit;
     splice(Peer::Socket(Box::new(socket)), accepted.peer, session).await;
 }

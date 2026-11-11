@@ -5,7 +5,7 @@
 
 use crate::{
     RouteId,
-    hub::{Accepted, DialRefusal, Hub, Registration, Slot},
+    hub::{Accepted, DialRefusal, Hub, Registration, Session},
     metrics::{Dial, Listen},
     route::prove,
     wire::{Key, Message, Status},
@@ -62,9 +62,10 @@ pub fn apply(registration: &Registration, message: Message) -> Status {
     }
 }
 
-/// Takes a dial from its proof to the listener's accepted side: checks the
-/// address's rate and the proof over `signed`, then waits for the listener.
-/// A key the listener does not allow answers `Offline`, exactly as no
+/// Takes a dial from its proof to an open session: checks the address's
+/// rate and the proof over `signed`, waits for the listener, and opens the
+/// session if the key is still allowed. A key the listener does not allow,
+/// or revoked while the dial waited, answers `Offline`, exactly as no
 /// listener would.
 pub async fn dial(
     hub: &Arc<Hub>,
@@ -73,7 +74,7 @@ pub async fn dial(
     key: &Key,
     signature: &[u8],
     signed: &[u8],
-) -> Result<(Accepted, Slot), Status> {
+) -> Result<(Accepted, Session), Status> {
     let refuse = |status, outcome| {
         hub.metrics.dial(outcome);
         status
@@ -97,6 +98,9 @@ pub async fn dial(
         Ok(Err(_)) | Err(_) => return Err(refuse(Status::Timeout, Dial::Timeout)),
     };
     drop(waiting.pending);
+    let Some(session) = hub.open(waiting.slot) else {
+        return Err(refuse(Status::Offline, Dial::Unauthorized));
+    };
     hub.metrics.dial(Dial::Spliced);
-    Ok((accepted, waiting.slot))
+    Ok((accepted, session))
 }

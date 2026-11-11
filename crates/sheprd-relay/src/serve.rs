@@ -33,11 +33,7 @@ pub fn app(options: &Options, quic: Option<QuicInfo>) -> Result<(Router, Arc<Hub
         hub: Arc::clone(&hub),
         public_host: options.public_host.as_deref().map(Arc::from),
         quic,
-        source: if options.behind_proxy {
-            Source::Proxy
-        } else {
-            Source::Peer
-        },
+        source: source(options),
     };
     let mut router = web::router(shared.clone());
     if let Some(password) = &options.dashboard_password {
@@ -45,6 +41,19 @@ pub fn app(options: &Options, quic: Option<QuicInfo>) -> Result<(Router, Arc<Hub
         router = router.merge(dashboard::router(shared, account));
     }
     Ok((router, hub))
+}
+
+/// Where callers' addresses come from, for per-address limits.
+fn source(options: &Options) -> Source {
+    let header = options
+        .client_ip_header
+        .as_deref()
+        .and_then(|name| axum::http::HeaderName::from_bytes(name.as_bytes()).ok());
+    match (header, options.behind_proxy) {
+        (Some(header), _) => Source::Header(header),
+        (None, true) => Source::Proxy,
+        (None, false) => Source::Peer,
+    }
 }
 
 /// Who may listen: anyone, unless the operator set a token.

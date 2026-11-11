@@ -137,3 +137,37 @@ fn units_parse() {
     assert_eq!(parse_duration("10"), None);
     assert_eq!(parse_duration("s"), None);
 }
+
+#[test]
+fn port_is_honoured_unless_listen_says_otherwise() {
+    let options = parse(&[], &[("PORT", "8080")]).unwrap().unwrap();
+    assert_eq!(options.listen.to_string(), "0.0.0.0:8080");
+    let options = parse(&[], &[("PORT", "8080"), ("RELAY_LISTEN", "127.0.0.1:9000")])
+        .unwrap()
+        .unwrap();
+    assert_eq!(options.listen.to_string(), "127.0.0.1:9000");
+    let options = parse(&["--listen", "127.0.0.1:9001"], &[("PORT", "8080")])
+        .unwrap()
+        .unwrap();
+    assert_eq!(options.listen.to_string(), "127.0.0.1:9001");
+    for bad in ["0", "http", "70000"] {
+        assert!(matches!(
+            parse(&[], &[("PORT", bad)]),
+            Err(Error::Invalid { name: "PORT", .. })
+        ));
+    }
+}
+
+#[test]
+fn a_client_ip_header_is_a_plain_header_name() {
+    let options = parse(&["--client-ip-header", "DO-Connecting-IP"], &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        options.client_ip_header.as_deref(),
+        Some("do-connecting-ip")
+    );
+    for bad in ["", "bad header", "x:y", &"a".repeat(65)] {
+        assert!(parse(&["--client-ip-header", bad], &[]).is_err(), "{bad:?}");
+    }
+}

@@ -4,7 +4,33 @@
 end-to-end encrypted bytes, keeps no state, and needs no settings.
 `docs/relay-plan.md` has the design.
 
-## DigitalOcean, one command
+## The image
+
+CI (`.github/workflows/relay-image.yml`) builds the image natively for amd64
+and arm64, checks that each starts and answers, and on every change to `main`
+publishes one multi-architecture image, signed with cosign and with build
+provenance:
+
+```text
+ghcr.io/sheprd-labs/sheprd-relay:latest
+ghcr.io/sheprd-labs/sheprd-relay:sha-COMMIT
+```
+
+Docker picks the right architecture, so the same name works on regular and
+ARM droplets. Before the first deploy, make the package public once (GitHub >
+the organization > Packages > sheprd-relay > Package settings > Change
+visibility), or droplets and App Platform cannot pull it without
+credentials. To pin and verify the digest the workflow's summary prints:
+
+```sh
+cosign verify ghcr.io/sheprd-labs/sheprd-relay@sha256:… \
+  --certificate-identity-regexp 'https://github.com/sheprd-labs/sheprd/.github/workflows/relay-image.yml@refs/heads/main' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+`scripts/relay-image.sh amd64` builds and checks it locally, as CI does.
+
+## DigitalOcean droplets, one command (QUIC and WebSockets)
 
 ```sh
 doctl auth init
@@ -20,6 +46,36 @@ Let's Encrypt certificate. The dashboard login is in
 To use your own names, set `RELAY_DOMAIN_SUFFIX=relay.example.org`, then point
 `nyc3.relay.example.org` and the rest at the droplets. Set `RELAY_SSH_KEYS` to
 your key ids from `doctl compute ssh-key list` to reach them over SSH.
+
+## DigitalOcean App Platform (WebSockets only)
+
+No server to manage:
+
+```sh
+doctl apps create --spec deploy/relay/app.yaml
+```
+
+App Platform carries HTTP but not UDP, so the relay runs there without QUIC,
+and clients use its WebSocket fallback: slower to connect and with no
+connection migration, but it works from any network. The spec wires up what
+the platform provides (below); add `RELAY_DASHBOARD_PASSWORD` as an encrypted
+variable in the app's settings for the dashboard.
+
+## Ports and names from outside
+
+A container cannot see which ports the host publishes it on, so the relay is
+told what the outside looks like. Each deploy sets these for you:
+
+| Variable | What it says | Droplet (compose) | App Platform |
+| --- | --- | --- | --- |
+| `PORT` | The HTTP port to listen on, when the platform picks it; `RELAY_LISTEN` wins | not set (8080) | set by the platform |
+| `RELAY_QUIC_PORT` | The UDP port clients reach QUIC on, when a mapping changes it | `443` (published to the container's 8443) | QUIC is off |
+| `RELAY_PUBLIC_HOST` | The name clients use, which WebSocket proofs must cover | `RELAY_DOMAIN` | `${APP_DOMAIN}` |
+| `RELAY_BEHIND_PROXY` | Take callers' addresses from `X-Forwarded-For` | `1` (Caddy) | not set |
+| `RELAY_CLIENT_IP_HEADER` | Take them from this header instead | not set | `do-connecting-ip` |
+
+Callers' real addresses matter: limits are per address, so behind a proxy
+without either setting, every caller would share the proxy's.
 
 ## Any host with Docker
 

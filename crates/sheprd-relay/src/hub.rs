@@ -333,13 +333,26 @@ impl Hub {
         Some(pending.accepted)
     }
 
-    /// Records a spliced session on `slot`'s route until the guard drops.
+    /// Records a spliced session on `slot`'s route until the guard drops,
+    /// unless its key was revoked since the dial was checked: the check and
+    /// the record happen under one lock, so a revocation either sees the
+    /// session and ends it, or the session never starts. A pairing slot
+    /// already spent its one-time key and goes ahead.
     #[must_use]
-    pub fn open(self: &Arc<Self>, slot: Slot) -> Session {
+    pub fn open(self: &Arc<Self>, slot: Slot) -> Option<Session> {
         let id = self.next.fetch_add(1, Relaxed);
         let traffic = Arc::new(Traffic::default());
         let revoke = Arc::new(Notify::new());
-        self.state().sessions.insert(
+        let mut state = self.state();
+        let allowed = slot.pairing
+            || state
+                .listeners
+                .get(&slot.route)
+                .is_some_and(|listener| listener.dial_keys.contains(&slot.key));
+        if !allowed {
+            return None;
+        }
+        state.sessions.insert(
             id,
             Live {
                 key: slot.key,
@@ -350,8 +363,9 @@ impl Hub {
                 traffic: Arc::clone(&traffic),
             },
         );
+        drop(state);
         self.metrics.raise(Gauge::Sessions);
-        Session::new(Arc::clone(self), id, slot, traffic, revoke)
+        Some(Session::new(Arc::clone(self), id, slot, traffic, revoke))
     }
 
     /// The busiest sessions, for the dashboard.

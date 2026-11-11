@@ -144,3 +144,31 @@ async fn metrics_honour_their_token() {
             .contains("sheprd_relay_sessions 0")
     );
 }
+
+#[test]
+fn a_client_ip_header_names_the_caller() {
+    use crate::web::{Shared, Source};
+    let shared = |source| Shared {
+        hub: Arc::new(Hub::new(Limits::default(), crate::hub::Access::Open)),
+        public_host: None,
+        quic: None,
+        source,
+    };
+    let peer = SocketAddr::from(([10, 0, 0, 1], 1));
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("do-connecting-ip", "203.0.113.9".parse().unwrap());
+    headers.insert("x-forwarded-for", "198.51.100.1, 10.0.0.1".parse().unwrap());
+    let header = Source::Header(axum::http::HeaderName::from_static("do-connecting-ip"));
+    assert_eq!(
+        shared(header).address(peer, &headers).to_string(),
+        "203.0.113.9"
+    );
+    assert_eq!(
+        shared(Source::Proxy).address(peer, &headers).to_string(),
+        "10.0.0.1"
+    );
+    assert_eq!(shared(Source::Peer).address(peer, &headers), peer.ip());
+    // A missing or garbled header falls back to the peer.
+    let missing = Source::Header(axum::http::HeaderName::from_static("cf-connecting-ip"));
+    assert_eq!(shared(missing).address(peer, &headers), peer.ip());
+}

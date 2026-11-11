@@ -467,13 +467,22 @@ distroless `nonroot` image. `deploy/relay` holds the rest:
   Docker, allows only 22, 80, and 443 through `ufw`, makes a dashboard
   password, and starts the relay at `IP.sslip.io` unless a domain is given.
 - `create-droplet.sh REGION...`: one droplet per region with `doctl`.
+- `app.yaml`: DigitalOcean App Platform, with no server: WebSockets only,
+  since App Platform has no UDP. The relay listens on `PORT` and reads
+  callers' addresses from `do-connecting-ip` (`RELAY_CLIENT_IP_HEADER`).
+
+**Image.** `.github/workflows/relay-image.yml` builds amd64 and arm64 on
+native runners through `scripts/relay-image.sh`, which also checks that the
+image starts read-only and answers `/v1/info`. Pull requests build and
+check; `main` pushes each architecture by digest, joins them under
+`ghcr.io/<owner>/sheprd-relay:latest` and `:sha-<commit>`, signs with cosign
+keyless (the version `release.yml` pins), and attests build provenance. CI
+holds no relay secrets and deploys nothing.
 
 ### Before the first public relay
 
-- Publish the image from CI (build on pull requests that touch the relay,
-  push to `ghcr.io/sheprd-labs/sheprd-relay` on `main`, cosign keyless
-  signing and provenance, as `docs/apns-relay-plan.md` describes), and pin
-  the base images by digest.
+- Make the GHCR package public once, and pin the Dockerfile's base images by
+  digest.
 - Load-test a 1 GB droplet: listeners held, sessions, and throughput at the
   default limits, measured rather than estimated.
 
