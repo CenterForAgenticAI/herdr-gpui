@@ -123,6 +123,17 @@ class RemoteWork(unittest.TestCase):
         self.assertEqual(result.returncode, 5)
         self.assertFalse(self.state.exists())
 
+    def test_full_binary_only_commands_and_non_core_callers_return_json_refusals(self):
+        for args in [("scripts", "list"), ("checkpoint", "list"), ("checkpoint", "diff", "123")]:
+            result = self.run_work(*args, "--json")
+            self.assertEqual(result.returncode, 8, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"]["code"], "unsupported")
+        self.env["HERDR_WORKSPACE_ID"] = "w1"
+        result = self.run_work("worktree", "mute", "--json")
+        self.assertEqual(result.returncode, 8, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["error"]["code"], "unsupported")
+        self.assertFalse(self.state.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

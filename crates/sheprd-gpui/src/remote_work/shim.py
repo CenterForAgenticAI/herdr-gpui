@@ -21,6 +21,10 @@ def printable(text):
     return "".join(char for char in str(text) if char in "\n\t" or unicodedata.category(char) not in ("Cc", "Cf"))
 
 
+class Unsupported(ValueError):
+    pass
+
+
 def parse(arguments):
     args, window, as_json = [], None, False
     iterator = iter(arguments)
@@ -37,6 +41,8 @@ def parse(arguments):
     if not args:
         raise ValueError("Give a work command")
     family, args = args[0], args[1:]
+    if (family == "scripts" and (not args or args[0] == "list")) or (family == "checkpoint" and (not args or args[0] in ("list", "create", "diff"))):
+        raise Unsupported("This command needs the full Sheprd CLI binary on the host")
     if family == "worktree":
         verb = args.pop(0) if args else "status"
         if verb == "create" and len(args) <= 1:
@@ -155,6 +161,8 @@ Checkpoint reads/diffs and scripts list need the full CLI on this host.""")
     as_json = "--json" in arguments
     try:
         request, as_json = parse(arguments)
+    except Unsupported as error:
+        return output({"status": "error", "code": "unsupported", "message": str(error)}, as_json)
     except ValueError as error:
         return output({"status": "error", "code": "usage", "message": str(error)}, as_json)
     terminal = os.environ.get("HC_TERMINAL_ID", "")
