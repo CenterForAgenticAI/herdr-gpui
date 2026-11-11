@@ -202,6 +202,7 @@ not take it either.
 | `config get\|set\|unset KEY [VALUE]` | Read or change `config-gpui.local.toml`, keeping its comments. A value that would not load, or an unknown key, is refused and nothing is written; the app applies the rest at once (no app needed) |
 | `config check` | Report invalid settings, exit 1 if any |
 | `config get\|set\|unset link_handlers [ARRAY]` | Read or configure explicit [Herdr 2 link-handler adapters](link-handlers.md); execution still requires a terminal link click |
+| `config get\|set\|unset link_plugins [ARRAY]` | Opt in to installed plugin directories on exact hosts; read only link actions with manifest platform filtering, never startup/build/event hooks |
 | `config reload` | Reread Herdr's config and this app's |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |

@@ -5,9 +5,45 @@ Herdr 2 desktop panes**. Nothing runs on hover, plain clicks, selection, or
 terminal output alone. Herdr 1 continues to use its daemon's plugin handlers.
 
 Add adapters to `config-gpui.local.toml`. This is trusted executable
-configuration: select the command yourself, rather than copying commands from
+configuration: select the command or plugin directory yourself, rather than copying commands from
 terminal output. No Herdr plugin registry, manifest, startup hook, or build hook
 is automatically imported.
+
+## Existing manifests (opt-in)
+
+To use the link actions from an existing **trusted, installed** plugin, opt in
+to its directory on the pane's host:
+
+```toml
+[[link_plugins]]
+host = "local" # or the exact remote ID from sheprd host list --json
+directory = "/absolute/path/to/my-plugin"
+enabled = true
+# Optional existing plugin-owned directories:
+# config_directory = "/absolute/path/to/plugin-config"
+# state_directory = "/absolute/path/to/plugin-state"
+```
+
+Only `herdr-plugin.toml` in that directory is read, on a background worker
+after a click. Only `[[link_handlers]]` and their referenced `[[actions]]`
+commands are adapted. The manifest's plugin ID determines ordering, and its
+handler declaration order is retained. The action and handler independently
+inherit the plugin's `platforms` unless they explicitly override it; both
+must support the execution host. Local platform detection is native, while a
+remote host is probed with `uname -s` through its own transport. Unsupported
+handlers are skipped before choosing the first match. Disabled or other-host
+entries are not read. A malformed/missing manifest reports an error without
+running a command or fallback. At most 16 manifest entries, 256 KiB per
+manifest, and 64 combined handlers are accepted.
+
+This opt-in list is app-owned, independent of Herdr 1's registry. Set
+`enabled = false` to disable an entry here; changes to Herdr 1's registry do
+not silently enable or disable it. Manifest edits apply to subsequent clicks.
+Install/build the plugin yourself first: build, startup and event hooks are
+never run by a click. A command that requires Herdr 1 APIs still needs adaptation
+as described below.
+
+## Explicit command adapters
 
 ```toml
 [[link_handlers]]
@@ -22,6 +58,8 @@ action = "open-link" # original manifest action ID, when needed
 # config_directory = "/absolute/path/to/plugin-config"
 # state_directory = "/absolute/path/to/plugin-state"
 enabled = true
+# Optional platform filter; omitted means every platform:
+# platforms = ["linux", "macos", "windows"]
 ```
 
 `command` is an argv array, not shell text. A shell is used only if explicitly
@@ -65,8 +103,8 @@ This supports standalone commands or purpose-built adapters. It is **not full
 Herdr plugin runtime compatibility**: plugins requiring `HERDR_SOCKET_PATH`,
 Herdr 1 workspace/tab/pane IDs, plugin popups, lifecycle hooks, installation
 leases, or daemon APIs need adaptation. No fake Herdr 1 identity is supplied.
-Plugin/platform selection is explicit through per-host configuration; manifests
-and their platform inheritance are not loaded. Phone/web clicks, including with
+Plugin opt-in and enable state are explicit through per-host configuration;
+manifest platform inheritance is honored by `link_plugins`. Phone/web clicks, including with
 the desktop closed, do not invoke these desktop adapters. No Herdr 1 custom
 link activation route was found in the current phone/web client either, so
 this is a shared capability gap, not a demonstrated Herdr 2 regression.
@@ -77,7 +115,7 @@ this is a shared capability gap, not a demonstrated Herdr 2 regression.
 | --- | --- |
 | Match URL and run a standalone argv action in plugin root | This slice supports it, local and explicit remote host routes |
 | Read clicked URL, action/handler IDs, root/config/state paths, pane cwd | This slice supplies those data fields without inventing H1 identity |
-| Use manifest platform inheritance and registry enable/disable state | App-owned work: a separately approved manifest/registry adapter could validate and snapshot only link actions; no Herdr change is required |
+| Read existing link actions with platform inheritance and enable/disable | This slice supports explicit `link_plugins` directories and app-owned enable state. It does not silently read Herdr 1 registry state |
 | Open a core split/tab or app browser through a plugin-specific command | App-owned adapter can use existing Sheprd CLI capabilities, but the existing H1 `plugin.pane.open` socket protocol is not aliased; broader plugin-runtime owner should define the explicit H2 contract |
 | Call H1 `pane.*`, `workspace.*`, `plugin.pane.open` using `HERDR_SOCKET_PATH` and H1 pane IDs | Requires adapting the plugin to Sheprd/core APIs or a deliberately implemented compatibility service. H1 cannot address a core terminal; passing a core ID to H1 is incorrect. This is unimplemented app/runtime compatibility, not evidence that upstream Herdr must change |
 | Startup/build/event hooks, plugin installation leases, persistent logs | Broader app plugin-runtime/registry ownership; not necessary for standalone click actions, and not run implicitly by this slice |
@@ -109,6 +147,8 @@ sheprd config get link_handlers --json
 sheprd config check --json
 sheprd config set link_handlers '[]' --json
 sheprd config unset link_handlers --json
+sheprd config get link_plugins --json
+sheprd config set link_plugins '[]' --json
 ```
 
 There is deliberately no handler-execution CLI: activation requires a terminal

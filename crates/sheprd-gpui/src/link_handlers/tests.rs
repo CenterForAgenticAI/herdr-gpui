@@ -2,6 +2,7 @@ use super::*;
 
 fn handler(plugin: &str, id: &str) -> Handler {
     Handler {
+        platforms: None,
         action: None,
         config_directory: None,
         state_directory: None,

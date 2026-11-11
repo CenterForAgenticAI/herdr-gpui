@@ -8,6 +8,7 @@ fn remote_script_preserves_literal_arguments_and_plugin_context() {
     let directory = temporary.path().join("plugin's directory");
     std::fs::create_dir(&directory).unwrap();
     let handler = Handler {
+        platforms: None,
         plugin: "fixture".into(), id: "markdown".into(), host: "ssh:fixture".into(),
         action: Some("open-notes".into()), pattern: ".*".into(), enabled: true,
         directory: directory.to_str().unwrap().into(),

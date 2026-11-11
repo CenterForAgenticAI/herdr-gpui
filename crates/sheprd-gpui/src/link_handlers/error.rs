@@ -8,7 +8,10 @@ pub(crate) enum Error {
     HostChanged,
     #[error("Link handler failed: {0}")]
     Run(#[from] sheprd_client::Error),
-    #[cfg(feature = "cloud")]
     #[error("Link handler failed: {0}")]
-    Cloud(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
+    #[error("Link handler manifest: {0}")]
+    Manifest(#[from] toml::de::Error),
+    #[error("Link handler manifest is not UTF-8: {0}")]
+    Utf8(#[source] std::string::FromUtf8Error),
 }

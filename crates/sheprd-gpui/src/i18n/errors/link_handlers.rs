@@ -6,10 +6,11 @@ impl Localize for Error {
         match self {
             Self::HostChanged => fl!("error-link-handlers-host-changed"),
             Self::Run(error) => error.localize(),
-            #[cfg(feature = "cloud")]
-            Self::Cloud(error) => fl!("error-link-handlers-transport", reason = error.to_string()),
+            Self::Io(error) => fl!("error-link-handlers-transport", reason = error.to_string()),
             Self::Invalid(reason) => fl!("error-link-handlers-config", reason = *reason),
             Self::Pattern(error) => fl!("error-link-handlers-config", reason = error.to_string()),
+            Self::Manifest(error) => fl!("error-link-handlers-config", reason = error.to_string()),
+            Self::Utf8(error) => fl!("error-link-handlers-config", reason = error.to_string()),
         }
     }
 }

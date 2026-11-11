@@ -25,19 +25,25 @@ impl SheprdWindow {
         click: &LinkClick,
         host: &Host,
         target: Option<&ConnectTarget>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(url) = &click.handler_url else {
             return false;
         };
-        let Some(handler) = self
+        if self
             .config
             .link_handlers
             .matching(host.endpoint(), url)
-            .cloned()
-        else {
+            .is_none()
+            && !self
+                .config
+                .link_plugins
+                .iter()
+                .any(|plugin| plugin.enabled && plugin.host == host.endpoint())
+        {
             return false;
-        };
+        }
         if self.links.core_handler.is_some() {
             return true;
         }
@@ -71,22 +77,20 @@ impl SheprdWindow {
             token: cancelled.clone(),
             _timeout: timeout,
         });
-        let url = url.clone();
-        let terminal = click.terminal.to_string();
-        let cwd = click.cwd.clone();
+        let click = click.clone();
+        let asked = click.clone();
+        let handlers = self.config.link_handlers.clone();
+        let plugins = self.config.link_plugins.clone();
+        let host = host.clone();
+        let host_name = host.endpoint().to_owned();
+        let route = target.clone();
+        let context = self.browser_key();
         let job = cx.background_executor().spawn(async move {
-            link_handlers::run(
-                &handler,
-                &target,
-                &url,
-                &terminal,
-                cwd.as_deref(),
-                &cancelled,
-            )
+            link_handlers::activate(&handlers, &plugins, &host_name, &target, &asked, &cancelled)
         });
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
-            let _ = this.update(cx, |this, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 if !this
                     .links
                     .core_handler
@@ -96,10 +100,19 @@ impl SheprdWindow {
                     return;
                 }
                 this.links.core_handler = None;
-                if let Err(error) = result {
-                    this.local_error =
-                        Some(fl!("window-input-link-failed", error = error.localize()));
-                    cx.notify();
+                match result {
+                    Ok(false)
+                        if this.browser_key() == context
+                            && this.core_terminals.link_target(&host) == Some(&route) =>
+                    {
+                        this.open_core_fallback(click, &host, window, cx);
+                    }
+                    Err(error) => {
+                        this.local_error =
+                            Some(fl!("window-input-link-failed", error = error.localize()));
+                        cx.notify();
+                    }
+                    _ => {}
                 }
             });
         })

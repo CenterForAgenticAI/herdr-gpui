@@ -92,25 +92,49 @@ pub(crate) fn run(
     cwd: Option<&str>,
     cancelled: &AtomicBool,
 ) -> Result<(), Error> {
-    let text = script(handler, url, terminal, cwd);
+    if !target.is_remote() {
+        let program = std::path::Path::new(&handler.command[0]);
+        let program = if program.is_relative() && program.components().count() > 1 {
+            std::path::Path::new(&handler.directory).join(program)
+        } else {
+            program.to_owned()
+        };
+        let mut command = sheprd_client::new_command(program);
+        command
+            .args(&handler.command[1..])
+            .current_dir(&handler.directory);
+        for key in REMOVE {
+            command.env_remove(key);
+        }
+        command.envs(environment(handler, url, terminal, cwd));
+        sheprd_client::run_script_command(
+            command,
+            std::io::empty(),
+            std::io::sink(),
+            LIMITS,
+            cancelled,
+        )?;
+        return Ok(());
+    }
+    remote_script(
+        target,
+        &script(handler, url, terminal, cwd),
+        std::io::sink(),
+        LIMITS,
+        cancelled,
+    )
+}
+
+pub(super) fn remote_script(
+    target: &ConnectTarget,
+    text: &str,
+    output: impl std::io::Write + Send,
+    limits: ScriptLimits,
+    cancelled: &AtomicBool,
+) -> Result<(), Error> {
     let host = match target {
         ConnectTarget::Local | ConnectTarget::Session { .. } | ConnectTarget::Socket(_) => {
-            let mut command = sheprd_client::new_command(&handler.command[0]);
-            command
-                .args(&handler.command[1..])
-                .current_dir(&handler.directory);
-            for key in REMOVE {
-                command.env_remove(key);
-            }
-            command.envs(environment(handler, url, terminal, cwd));
-            sheprd_client::run_script_command(
-                command,
-                std::io::empty(),
-                std::io::sink(),
-                LIMITS,
-                cancelled,
-            )?;
-            return Ok(());
+            return Err(Error::HostChanged);
         }
         ConnectTarget::Ssh { target, .. } => ScriptHost::Ssh(target, SshLane::Bulk),
         ConnectTarget::Wsl { distro, .. } => ScriptHost::Wsl(distro),
@@ -127,12 +151,12 @@ pub(crate) fn run(
                 id,
                 cancelled,
                 |mut command| {
-                    command.arg(format!("/bin/sh -c {}", shell_quote(&text)));
+                    command.arg(format!("/bin/sh -c {}", shell_quote(text)));
                     sheprd_client::run_script_command(
                         command,
                         std::io::empty(),
-                        std::io::sink(),
-                        LIMITS,
+                        output,
+                        limits,
                         cancelled,
                     )
                 },
@@ -140,14 +164,7 @@ pub(crate) fn run(
             return Ok(());
         }
     };
-    sheprd_client::run_script(
-        host,
-        &text,
-        std::io::empty(),
-        std::io::sink(),
-        LIMITS,
-        cancelled,
-    )?;
+    sheprd_client::run_script(host, text, std::io::empty(), output, limits, cancelled)?;
     Ok(())
 }
 

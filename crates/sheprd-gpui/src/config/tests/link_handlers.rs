@@ -29,3 +29,27 @@ command = ["./open-link"]
         Config::parse_over(&text.replace("^file://.*\\.md$", "["), &Daemon::default()).is_err()
     );
 }
+
+#[test]
+fn manifest_opt_in_is_validated_without_reading_or_running_it() {
+    let config = Config::parse(
+        r#"[[link_plugins]]
+host = "ssh:fixture"
+directory = "/not-installed-on-this-machine"
+enabled = false
+"#,
+    )
+    .unwrap();
+    assert!(config.unknown_keys.is_empty());
+    assert_eq!(config.link_plugins.len(), 1);
+    assert!(!config.link_plugins[0].enabled);
+    assert!(
+        Config::parse(
+            r#"[[link_plugins]]
+host = "local"
+directory = "relative"
+"#
+        )
+        .is_err()
+    );
+}

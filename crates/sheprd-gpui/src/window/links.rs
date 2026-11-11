@@ -568,9 +568,19 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.activate_core_handler(&click, host, target, cx) {
+        if self.activate_core_handler(&click, host, target, window, cx) {
             return;
         }
+        self.open_core_fallback(click, host, window, cx);
+    }
+
+    fn open_core_fallback(
+        &mut self,
+        click: crate::core_terminals::LinkClick,
+        host: &crate::core_terminals::Host,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let in_tab =
             (self.config.open_links_in == crate::config::LinkTarget::BrowserTab) != click.alt;
         let fallback = match click.target {

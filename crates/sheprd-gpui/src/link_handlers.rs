@@ -2,8 +2,10 @@
 //! or terminal-provided command is imported. Only a completed click calls `run`.
 
 mod error;
+mod plugins;
 mod run;
 pub(crate) use error::Error;
+pub(crate) use plugins::{Plugin, activate, validate_plugins};
 pub(crate) use run::run;
 
 use regex::Regex;
@@ -12,6 +14,8 @@ use serde::Deserialize;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Handler {
+    #[serde(default)]
+    pub(crate) platforms: Option<Vec<Platform>>,
     /// Original manifest action ID, when the adapter uses it.
     #[serde(default)]
     pub(crate) action: Option<String>,
@@ -29,6 +33,22 @@ pub(crate) struct Handler {
     pub(crate) state_directory: Option<String>,
     #[serde(default = "enabled")]
     pub(crate) enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Platform {
+    Linux,
+    Macos,
+    Windows,
+}
+
+impl Handler {
+    fn supports(&self, platform: Platform) -> bool {
+        self.platforms
+            .as_ref()
+            .is_none_or(|platforms| platforms.contains(&platform))
+    }
 }
 
 fn enabled() -> bool {
@@ -85,7 +105,9 @@ impl Handlers {
             )) {
                 return Err(Error::Invalid("duplicate handler ID for a plugin and host"));
             }
-            let pattern = Regex::new(&handler.pattern)?;
+            let pattern = regex::RegexBuilder::new(&handler.pattern)
+                .size_limit(256 * 1024)
+                .build()?;
             compiled.push((handler, pattern));
         }
         Ok(Self(compiled))
