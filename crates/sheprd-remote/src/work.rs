@@ -10,11 +10,13 @@
 //! Every function runs host scripts and blocks: call them from a background
 //! worker, never the UI thread.
 
+mod deadline;
 mod error;
 pub mod fanout;
 mod inspect;
 pub mod owned_agent;
 
+pub use deadline::identity_before;
 pub use inspect::{git, identity, open};
 
 pub use error::{Error, Result, Step};

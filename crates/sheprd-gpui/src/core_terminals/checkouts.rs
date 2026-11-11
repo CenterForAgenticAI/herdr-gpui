@@ -79,9 +79,10 @@ impl Checkouts {
                             sheprd_remote::teleport::Host::new(&target)
                                 .ok()
                                 .and_then(|host| {
-                                    sheprd_remote::work::identity(
+                                    sheprd_remote::work::identity_before(
                                         &host,
                                         &cwd,
+                                        deadline,
                                         &std::sync::atomic::AtomicBool::new(false),
                                     )
                                     .ok()
