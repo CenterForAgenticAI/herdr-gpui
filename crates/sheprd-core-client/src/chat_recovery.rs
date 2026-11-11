@@ -260,7 +260,13 @@ pub fn claim(
     // let another worker infer cleanup of a child whose identity is unknown.
     record.state = State::Starting;
     write(core, endpoint, &record, version)?;
-    publish_mapping(core, &record)
+    // The claim is durable; labels are receipts. A failed relabel (the user
+    // removed the retired shell, a transient refusal) must not abort the
+    // replacement: the sweep republishes them once the record is live.
+    if let Err(error) = publish_mapping(core, &record) {
+        tracing::warn!(%error, "recovered chat labels deferred to the next sweep");
+    }
+    Ok(())
 }
 
 /// Confirm the replacement's child before beginning the ACP handshake.
@@ -290,6 +296,28 @@ pub fn child_started(
 /// Durable expected-close tombstone, written BEFORE terminal.kill. A late
 /// launch can no longer claim the chat; workers also end a claimed replacement.
 pub fn closed(core: &Core, endpoint: &EndpointId) -> Result<()> {
+    // A claim, a child registration, or `opened` may write between our read
+    // and write. Each conflict means another writer made progress, so a few
+    // rereads suffice; the tombstone must land before the caller kills.
+    let mut attempt = 0;
+    loop {
+        match close_once(core, endpoint) {
+            Err(error) if conflict(&error) && attempt + 1 < CLOSE_ATTEMPTS => attempt += 1,
+            done => return done,
+        }
+    }
+}
+
+const CLOSE_ATTEMPTS: usize = 8;
+
+fn conflict(error: &crate::Error) -> bool {
+    matches!(
+        error,
+        crate::Error::Refused { method: crate::Method::DocSet, kind: Some(kind), .. } if kind == "conflict"
+    )
+}
+
+fn close_once(core: &Core, endpoint: &EndpointId) -> Result<()> {
     let (record, version) = read(core, endpoint)?;
     let mut record = record.unwrap_or_else(|| Record {
         adapter: false,

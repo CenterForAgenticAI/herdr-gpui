@@ -138,3 +138,72 @@ fn a_child_registration_for_another_generation_or_terminal_is_refused() {
         ));
     }
 }
+
+#[test]
+fn a_close_rereads_after_a_conflict_so_its_tombstone_lands_before_any_kill() {
+    let (core, mut peer) = connected();
+    let worker = std::thread::spawn(move || closed(&core, &ID.parse().unwrap()));
+    let get = peer.request();
+    peer.answer(&get, json!({"value": launching(), "version": 4}));
+    let set = peer.request();
+    assert_eq!(set["params"]["version"], 4);
+    conflict(&mut peer, &set);
+    // A claim won the race: the close builds on what it wrote.
+    let mut claimed = launching();
+    claimed.state = State::Starting;
+    claimed.terminal = "t2".into();
+    let get = peer.request();
+    assert_eq!(get["method"], "doc.get");
+    peer.answer(&get, json!({"value": claimed, "version": 5}));
+    let set = peer.request();
+    assert_eq!(set["params"]["version"], 5);
+    assert_eq!(set["params"]["value"]["state"], "closed");
+    assert_eq!(set["params"]["value"]["terminal"], "t2");
+    peer.answer(&set, json!({"version": 6}));
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
+fn a_close_does_not_retry_a_refusal_that_is_not_a_conflict() {
+    let (core, mut peer) = connected();
+    let worker = std::thread::spawn(move || closed(&core, &ID.parse().unwrap()));
+    let get = peer.request();
+    peer.answer(&get, json!({"value": launching(), "version": 4}));
+    let set = peer.request();
+    let message = json!({"jsonrpc": "2.0", "id": set["id"],
+        "error": {"code": -32000, "message": "too large", "data": {"kind": "limit"}}});
+    peer.send(
+        0,
+        crate::frame::Kind::Data,
+        &serde_json::to_vec(&message).unwrap(),
+    );
+    assert!(matches!(
+        worker.join().unwrap(),
+        Err(crate::Error::Refused { kind: Some(kind), .. }) if kind == "limit"
+    ));
+}
+
+#[test]
+fn a_failed_relabel_after_a_durable_claim_still_lets_the_replacement_start() {
+    let (core, mut peer) = connected();
+    let worker =
+        std::thread::spawn(move || claim(&core, &ID.parse().unwrap(), "t2", 1, |_| Ok(true)));
+    let mut record = launching();
+    record.previous = vec!["t1".into()];
+    let get = peer.request();
+    peer.answer(&get, json!({"value": record, "version": 4}));
+    let list = peer.request();
+    peer.answer(&list, json!({"terminals": [terminal("t1"), pending()]}));
+    let set = peer.request();
+    peer.answer(&set, json!({"version": 5}));
+    let label = peer.request();
+    assert_eq!(label["method"], "terminal.label");
+    let message = json!({"jsonrpc": "2.0", "id": label["id"],
+        "error": {"code": -32000, "message": "no such terminal", "data": {"kind": "not_found"}}});
+    peer.send(
+        0,
+        crate::frame::Kind::Data,
+        &serde_json::to_vec(&message).unwrap(),
+    );
+    worker.join().unwrap().unwrap();
+}

@@ -2,7 +2,10 @@
 //! Core labels survive an app crash before its asynchronous tabs-file write.
 
 use super::{Host, TabPanes};
-use crate::{SheprdWindow, browser::Store};
+use crate::{
+    SheprdWindow,
+    browser::{Location, Store},
+};
 use sheprd_backend::TerminalId;
 use std::collections::BTreeMap;
 
@@ -29,6 +32,37 @@ impl TabPanes {
         }
         changed
     }
+}
+
+/// Rebinds one saved tab to its recovered chats. Returns the stored layout
+/// to save, if it held a replaced pane, and whether this window's copy
+/// changed. The store holds what every window saved; this window's copy may
+/// be stale, so it never overwrites the stored layout.
+fn recover(
+    host: &Host,
+    location: &Location,
+    shown: Option<&mut TabPanes>,
+    mapping: &BTreeMap<TerminalId, TerminalId>,
+) -> (Option<Location>, bool) {
+    let remapped = |location: &Location| {
+        let mut panes = TabPanes::restore(host.clone(), location)?;
+        panes.remap(mapping).then(|| panes.location())
+    };
+    let stored = remapped(location);
+    let Some(shown) = shown else {
+        return (stored, false);
+    };
+    let in_sync = shown.saved.as_ref() == Some(location);
+    let changed = shown.remap(mapping);
+    if in_sync {
+        shown.saved = Some(stored.clone().unwrap_or_else(|| location.clone()));
+    } else if let Some(base) = shown.saved.as_ref().and_then(remapped) {
+        // Rebase the copy last read too, so the next refresh merges another
+        // window's changes rather than reading the recovered pane as one
+        // this window opened.
+        shown.saved = Some(base);
+    }
+    (stored, changed)
 }
 
 impl SheprdWindow {
@@ -65,30 +99,23 @@ impl SheprdWindow {
             let Some((_, mapping)) = mappings.iter().find(|(mapped, _)| *mapped == host) else {
                 continue;
             };
-            let location = if let Some(shown) = self.core_terminals.tabs.get_mut(&tab) {
-                if !shown.remap(mapping) {
-                    continue;
-                }
-                let location = shown.location();
-                shown.saved = Some(location.clone());
-                shown.unsaved = false;
-                location
-            } else {
-                let Some(mut shown) = TabPanes::restore(host, &location) else {
-                    continue;
-                };
-                if !shown.remap(mapping) {
-                    continue;
-                }
-                shown.location()
-            };
-            Store::update(cx, |store| store.visited(tab, Some(location), None));
+            let (stored, shown_changed) = recover(
+                &host,
+                &location,
+                self.core_terminals.tabs.get_mut(&tab),
+                mapping,
+            );
             if focused.as_ref().is_some_and(|(focused, terminal)| {
                 *focused == tab && mapping.contains_key(terminal)
-            }) {
+            }) && shown_changed
+            {
                 focus_rebound = Some(tab);
             }
-            changed = true;
+            changed |= shown_changed || stored.is_some();
+            let Some(location) = stored else {
+                continue;
+            };
+            Store::update(cx, |store| store.visited(tab, Some(location), None));
         }
         if changed {
             self.sync_core_views(cx);

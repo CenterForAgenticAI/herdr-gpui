@@ -1,6 +1,8 @@
 use super::*;
 use sheprd_session::panes::{Axis, Panes};
 
+mod stale_window;
+
 #[test]
 fn replacing_a_chat_preserves_split_focus_zoom_and_user_names() {
     let old = TerminalId::new("t1").unwrap();
