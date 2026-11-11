@@ -2068,6 +2068,12 @@ its originating host even if you switch devices; an edited or removed device
 is refused rather than applying its paths on another machine. The
 `sheprd worktree` commands open the same confirmation dialogs.
 
+Saved SSH hosts also prefetch desktop pull requests for kept and shown Herdr 2
+checkouts without Herdr 1, using the device's GitHub account selection. See
+[desktop SSH pull requests](../../docs/desktop-ssh-pull-requests.md) for cache
+isolation, merged-checkout discovery, and the remaining cloud/WSL PR-origin
+limitation shared by both terminal backends.
+
 A repository can commit scripts that prepare, start, and clean up its
 worktrees, in `.herdr/worktree.toml` at the repository root:
 
