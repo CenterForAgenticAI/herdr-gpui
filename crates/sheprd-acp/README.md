@@ -36,10 +36,12 @@ without reading stdin or connecting to a daemon.
 
 ### Installing session reporters
 
-Run `sheprd-acp session-install codex|copilot|opencode` explicitly on each host
+Run `sheprd-acp session-install claude|codex|copilot|opencode|pi|omp|letta` explicitly on each host
 where reporting is wanted. This command authorizes installation on that host;
-discovery, conversion, and normal startup never install anything. Linux and
-macOS are supported; Windows returns an unsupported-platform error.
+discovery, conversion, and normal startup never install anything. Linux/macOS
+use POSIX hooks; Windows uses bounded PowerShell hooks and a CIM process-birth
+probe. Windows runtime verification remains a platform CI/manual check; native
+Windows terminal-to-chat launch still follows the existing unsupported policy.
 
 The installer copies the bundled owned assets into `sheprd-session-report/`
 inside the agent's configuration directory, then adds a registration preserving
@@ -47,8 +49,12 @@ unrelated keys and existing hooks/plugins. Re-running is idempotent. Files are
 atomically replaced with private permissions. Codex uses `$CODEX_HOME` (default
 `~/.codex`), Copilot uses `$COPILOT_HOME` (default `~/.copilot`), and OpenCode V2
 uses `$XDG_CONFIG_HOME/opencode` (default `~/.config/opencode`). Custom paths
-must be absolute and UTF-8. Install `sheprd-acp` on PATH for reporter execution,
-or supply an absolute `SHEPRD_ACP_BINARY` in the agent's environment.
+must be absolute and UTF-8. The installer pins its own executable path; reinstall
+after moving it. Claude honors `CLAUDE_CONFIG_DIR`. Pi uses
+`PI_CODING_AGENT_DIR` (default `~/.pi/agent`); OMP uses that override or
+`$HOME/$PI_CONFIG_DIR/agent` (default `~/.omp/agent`). Their separately named
+extensions report exact session-manager paths. Letta's `~/.letta/settings.json`
+hook reports its explicit conversation ID, qualifying `default` with its agent.
 
 ### Manual session reporter installation
 

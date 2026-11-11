@@ -17,9 +17,13 @@ fn only_absent_discovery_has_exit_status_three() {
 fn installation_cli_accepts_only_supported_agents_and_help() {
     use crate::cli::{Parsed, parse};
     for (name, agent) in [
+        ("claude", AgentKind::Claude),
         ("codex", AgentKind::Codex),
         ("copilot", AgentKind::Copilot),
         ("opencode", AgentKind::Opencode),
+        ("pi", AgentKind::Pi),
+        ("omp", AgentKind::Omp),
+        ("letta", AgentKind::Letta),
     ] {
         assert_eq!(
             parse(["session-install".into(), name.into()]).unwrap(),
@@ -30,7 +34,7 @@ fn installation_cli_accepts_only_supported_agents_and_help() {
         parse(["session-install".into(), "--help".into()]).unwrap(),
         Parsed::Help
     );
-    assert!(parse(["session-install".into(), "claude".into()]).is_err());
+    assert!(parse(["session-install".into(), "droid".into()]).is_err());
     assert!(parse(["session-install".into()]).is_err());
     assert!(parse(["session-install".into(), "codex".into(), "extra".into()]).is_err());
 }

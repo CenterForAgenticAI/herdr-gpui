@@ -12,9 +12,15 @@ pub(super) fn parse(args: impl Iterator<Item = OsString>) -> Result<Parsed, Erro
         Some("session-install") => {
             let name = utf8(args.next(), "AGENT")?;
             let agent = match AgentKind::parse(&name) {
-                Some(agent @ (AgentKind::Codex | AgentKind::Copilot | AgentKind::Opencode)) => {
-                    agent
-                }
+                Some(
+                    agent @ (AgentKind::Claude
+                    | AgentKind::Codex
+                    | AgentKind::Copilot
+                    | AgentKind::Opencode
+                    | AgentKind::Pi
+                    | AgentKind::Omp
+                    | AgentKind::Letta),
+                ) => agent,
                 _ => return Err(Error::SessionAgent(name)),
             };
             Command::Install(agent)
