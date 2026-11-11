@@ -17,6 +17,18 @@ pub use inspect::{git, identity, open};
 
 pub use error::{Error, Result, Step};
 
+/// The host of an app-kept Herdr 2 workspace. A custom Herdr 1 socket does
+/// not relocate the app's local core or files. This is deliberately
+/// separate from `Host::new`: a socket still cannot route Herdr 1 commands.
+pub fn host_for_kept(
+    target: &sheprd_client::ConnectTarget,
+) -> Result<Host, crate::teleport::Error> {
+    match target {
+        sheprd_client::ConnectTarget::Socket(_) => Host::new(&sheprd_client::ConnectTarget::Local),
+        _ => Host::new(target),
+    }
+}
+
 use crate::teleport::{AgentKind, Envelope, Host, WorktreeCreated};
 use error::script;
 use serde::Deserialize;

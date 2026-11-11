@@ -458,7 +458,7 @@ impl SheprdWindow {
         let launch_target = target.clone();
         let path = checkout.to_string_lossy().into_owned();
         let started = cx.background_executor().spawn(async move {
-            let host = Host::new(&launch_target)?;
+            let host = sheprd_remote::work::host_for_kept(&launch_target)?;
             let worktree = sheprd_remote::work::Worktree {
                 path,
                 opened: sheprd_remote::work::Opened::Herdr2,
