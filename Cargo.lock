@@ -9033,6 +9033,7 @@ dependencies = [
  "serde_json",
  "sheprd-chat-protocol",
  "sheprd-client",
+ "sheprd-core-client",
  "tempfile",
  "thiserror 2.0.21",
  "unicode-width",
@@ -9136,6 +9137,7 @@ dependencies = [
  "sheprd-protocol",
  "tempfile",
  "thiserror 2.0.21",
+ "toml_edit 0.25.19+spec-1.1.0",
  "tracing",
  "windows-sys 0.61.2",
 ]

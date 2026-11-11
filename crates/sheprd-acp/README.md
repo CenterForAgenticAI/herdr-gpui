@@ -14,6 +14,67 @@ sheprd-acp restore ENDPOINT  # recover the chat in its kept Herdr 2 shell
 
 `sheprd-acp --help` lists every option and key.
 
+## Herdr-core session helpers
+
+These commands connect to the local core using `HC_SOCKET`, its configured
+socket, or its default endpoint (`HC_SESSION` selects the session):
+
+```sh
+sheprd-acp session-report AGENT < session-event.json
+sheprd-acp session-discover TERMINAL AGENT
+sheprd-acp session-convert TERMINAL AGENT
+```
+
+`session-report` requires `HC_TERMINAL_ID` and reads at most 64 KiB of JSON
+from stdin. The core-client validates the event and its process ownership.
+`session-discover` prints the verified session binding as JSON (exit 0).
+It exits 3 only for absent evidence or an explicitly cleared selection; invalid,
+stale, unknown, and process-mismatched evidence fail with exit 1. Other runtime
+failures exit 1; command-line errors exit 2.
+`session-convert` moves an idle agent into a chat and prints its endpoint ID.
+Terminal IDs must be local, not routed addresses. All three accept `--help`
+without reading stdin or connecting to a daemon.
+
+### Installing session reporters
+
+Run `sheprd-acp session-install codex|copilot|opencode` explicitly on each host
+where reporting is wanted. This command authorizes installation on that host;
+discovery, conversion, and normal startup never install anything. Linux and
+macOS are supported; Windows returns an unsupported-platform error.
+
+The installer copies the bundled owned assets into `sheprd-session-report/`
+inside the agent's configuration directory, then adds a registration preserving
+unrelated keys and existing hooks/plugins. Re-running is idempotent. Files are
+atomically replaced with private permissions. Codex uses `$CODEX_HOME` (default
+`~/.codex`), Copilot uses `$COPILOT_HOME` (default `~/.copilot`), and OpenCode V2
+uses `$XDG_CONFIG_HOME/opencode` (default `~/.config/opencode`). Custom paths
+must be absolute and UTF-8. Install `sheprd-acp` on PATH for reporter execution,
+or supply an absolute `SHEPRD_ACP_BINARY` in the agent's environment.
+
+### Manual session reporter installation
+
+JSONC/comments or malformed config are refused without modifying the file:
+this build has no comment-preserving JSON editor. For manual installation,
+copy the relevant bundled files from
+`crates/sheprd-client/src/herdr/sessions/assets/` into the configuration
+directory's `sheprd-session-report/` subdirectory, then merge these entries
+using your editor, retaining existing array entries and comments:
+
+- Codex `hooks.json`: append
+  `{"hooks":[{"type":"command","command":"sh '/absolute/path/sheprd-session-report/codex-session-start.sh'","timeout":5}]}`
+  to `hooks.SessionStart`. In `config.toml`, set `hooks = true` under
+  `[features]`, preserving other features.
+- Copilot `settings.json`: append
+  `{"type":"command","bash":"sh '/absolute/path/sheprd-session-report/copilot-session-start.sh'","timeoutSec":5}`
+  directly to `hooks.SessionStart`.
+- OpenCode V2: copy all three files in `assets/opencode/` to the owned
+  directory, and append `{"package":"/absolute/path/sheprd-session-report"}`
+  to `plugins` in `cli.json`. This is a TUI-only package, not a server plugin.
+
+Use actual absolute paths and shell-escape apostrophes when needed. Restart the
+agent after installation. `HC_TERMINAL_ID` must be present for reports to bind
+to a core terminal; installing a reporter does not create session evidence.
+
 ## Why a program in the pane
 
 Herdr owns terminals, not conversations. The agent's structured conversation

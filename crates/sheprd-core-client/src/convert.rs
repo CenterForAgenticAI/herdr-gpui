@@ -9,11 +9,11 @@
 //! endpoint, and the terminal is labelled with it (`terminal.label`), as a
 //! chat started in a terminal of its own is, so every client finds it.
 //!
-//! herdr-core reports no agent session, unlike Herdr 1's integrations. Claude
-//! Code records its own in `~/.claude/sessions/<pid>.json`, by the process
-//! herdr-core reports in front, so Claude moves; the other agents wait for
-//! herdr-core to carry a session reference (for instance in their OSC 7501
-//! records).
+//! Separately installed Sheprd hooks record process-bound session evidence in
+//! the core's document store. Claude's own PID file is a legacy fallback,
+//! checked against its process birth stamp. No newest-session inference occurs.
+//! Client rereads are not an atomic process precondition on keys/send: the core
+//! protocol currently provides no such mutation fence.
 
 use crate::{Core, Result, agent_kind, backend::info, wire::Terminal};
 use serde::Deserialize;
@@ -29,6 +29,8 @@ use std::{
     sync::atomic::AtomicBool,
 };
 
+mod flags;
+
 /// The names a chat program runs under, as the OS reports them.
 const CHAT_PROGRAMS: &[&str] = &["herdr-acp", "sheprd-acp"];
 
@@ -41,7 +43,7 @@ const PANE_ENV: &str = "HERDR_PANE_ID";
 /// keeps the label once its chat ends and its shell is back in front.
 pub fn chat_endpoint(info: &TerminalInfo) -> Option<EndpointId> {
     let endpoint = info.labels.get(TOKEN)?.parse().ok()?;
-    let chat = info.foreground.as_ref().is_none_or(|process| {
+    let chat = info.foreground.as_ref().is_some_and(|process| {
         let name = process.name.strip_suffix(".exe").unwrap_or(&process.name);
         CHAT_PROGRAMS.contains(&name)
     });
@@ -216,6 +218,11 @@ pub fn run(
     home: &Path,
     cancelled: &AtomicBool,
 ) -> Result<EndpointId> {
+    // This entry point reads local process records and starts a local binary.
+    // A routed address must never borrow a same-numbered local process.
+    if terminal.as_str().contains('/') {
+        return Err(convert::Error::Moved.into());
+    }
     let raw = record(core, terminal)?;
     let found = info(&raw)?;
     if check(&found)? != agent {
@@ -225,13 +232,78 @@ pub fn run(
     if agent_is_program(&raw, agent) {
         return Err(convert::Error::NoShell(agent).into());
     }
-    let resume = resume(&found, agent, home, |path| std::fs::read_to_string(path))?;
+    let kind = AgentKind::parse(agent.name()).ok_or(convert::Error::NoAgent)?;
+    let binding = match crate::sessions::discover(core, terminal.as_str(), kind) {
+        Ok(binding) => Some(binding),
+        Err(crate::Error::Sessions(crate::sessions::Error::Absent)) if agent == Agent::Claude => {
+            None
+        }
+        Err(crate::Error::Sessions(
+            crate::sessions::Error::Absent | crate::sessions::Error::Cleared,
+        )) => {
+            return Err(convert::Error::NoCoreSession(agent).into());
+        }
+        Err(error) => return Err(error),
+    };
+    let resume = if let Some(binding) = &binding {
+        let process = agent_process(&found, agent)?;
+        let selected = binding
+            .selected()
+            .filter(|session| {
+                session.kind == sheprd_client::herdr::snapshot::SessionKind::Id
+                    && restore::session_id_is_plain(&session.value)
+            })
+            .ok_or(convert::Error::NoCoreSession(agent))?;
+        Resume {
+            agent,
+            cwd: found
+                .cwd
+                .as_deref()
+                .and_then(Path::to_str)
+                .filter(|cwd| !cwd.is_empty())
+                .ok_or(convert::Error::NotRunning(agent))?
+                .to_owned(),
+            flags: flags::chat(kind, &process.argv)?,
+            session: selected.value.clone(),
+        }
+    } else {
+        let process = agent_process(&found, agent)?;
+        let session = crate::sessions::claude_record(process.pid, home)
+            .map_err(|_| convert::Error::NoCoreSession(agent))?;
+        Resume {
+            agent,
+            session,
+            cwd: found
+                .cwd
+                .as_deref()
+                .and_then(Path::to_str)
+                .filter(|cwd| !cwd.is_empty())
+                .ok_or(convert::Error::NotRunning(agent))?
+                .to_owned(),
+            flags: AgentKind::Claude.kept_flags(&process.argv),
+        }
+    };
     let endpoint = EndpointId::random();
-    let line = chat_line(&resume, program, &endpoint)?;
+    let line = if let Some(binding) = &binding {
+        bound_line(&resume, program, &endpoint, &binding.environment)?
+    } else {
+        chat_line(&resume, program, &endpoint)?
+    };
+    // Read again after constructing the line; selection can change without
+    // changing the foreground PID (notably OpenCode's session tabs).
+    if let Some(binding) = &binding
+        && crate::sessions::discover(core, terminal.as_str(), kind)? != *binding
+    {
+        return Err(convert::Error::Moved.into());
+    }
     convert::stop(
         agent,
-        || record(core, terminal).map(|now| shell_back(&now, agent)),
-        || core.keys(terminal.as_str(), &["ctrl+c"]),
+        || record(core, terminal).map(|now| returned(&raw, &now, agent)),
+        || {
+            let now = record(core, terminal)?;
+            unchanged(&raw, &now, agent)?;
+            core.keys(terminal.as_str(), &["ctrl+c"])
+        },
         || std::thread::sleep(convert::POLL),
         cancelled,
     )?;
@@ -239,6 +311,9 @@ pub fn run(
     // session is left to continue by hand, and no chat starts.
     if cancelled.load(std::sync::atomic::Ordering::Acquire) {
         return Err(convert::Error::Stopped.into());
+    }
+    if !returned(&raw, &record(core, terminal)?, agent) {
+        return Err(convert::Error::Moved.into());
     }
     core.send(&crate::wire::SendText {
         terminal: terminal.as_str(),
@@ -250,6 +325,46 @@ pub fn run(
         &std::collections::BTreeMap::from([(TOKEN, endpoint.as_str())]),
     )?;
     Ok(endpoint)
+}
+
+fn bound_line(
+    resume: &Resume,
+    program: &Path,
+    endpoint: &EndpointId,
+    environment: &std::collections::BTreeMap<String, String>,
+) -> Result<String, convert::Error> {
+    let mut words = vec![
+        "env".to_owned(),
+        format!("{PANE_ENV}="),
+        format!("{ENDPOINT_ENV}={endpoint}"),
+    ];
+    words.extend(
+        environment
+            .iter()
+            .map(|(key, value)| format!("{key}={value}")),
+    );
+    words.push(program.to_str().ok_or(convert::Error::Line)?.to_owned());
+    words.extend(resume.words().into_iter().map(str::to_owned));
+    sheprd_client::quoted_line(&words.iter().map(String::as_str).collect::<Vec<_>>())
+        .ok_or(convert::Error::Line)
+}
+
+/// A replacement terminal's shell is not the shell that launched this agent.
+fn returned(before: &Terminal, now: &Terminal, agent: Agent) -> bool {
+    before.pid == now.pid && before.pid.is_some() && shell_back(now, agent)
+}
+
+/// Recheck identity and idleness after discovery and before every interrupt.
+/// The original foreground, not merely another process of the same agent kind,
+/// owns the conversation being moved.
+fn unchanged(before: &Terminal, now: &Terminal, agent: Agent) -> Result<()> {
+    if before.pid != now.pid || before.foreground != now.foreground {
+        return Err(convert::Error::Moved.into());
+    }
+    if check(&info(now)?)? != agent {
+        return Err(convert::Error::Moved.into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

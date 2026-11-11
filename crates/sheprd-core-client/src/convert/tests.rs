@@ -2,6 +2,9 @@ use super::*;
 use sheprd_backend::RunState;
 use std::collections::BTreeMap;
 
+mod fences;
+mod flags;
+
 fn process(pid: u32, argv: &[&str]) -> Process {
     Process {
         argv: argv.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -71,10 +74,10 @@ fn a_chat_does_not_move_again() {
 #[test]
 fn a_label_is_a_chat_only_while_a_chat_program_is_in_front() {
     let endpoint = Some(ENDPOINT.parse().unwrap());
-    // Started by a core that reports no process.
+    // An unknown foreground after process loss cannot prove the label is live.
     assert_eq!(
         chat_endpoint(&labelled(info(AgentStatus::Idle, None))),
-        endpoint
+        None
     );
     for program in [
         "/opt/sheprd/sheprd-acp",
