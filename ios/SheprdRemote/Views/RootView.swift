@@ -57,11 +57,10 @@ struct RootView: View {
         } message: {
             Text(model.notice ?? "")
         }
-        .sheet(item: Bindable(model).creating) { creating in
-            switch creating {
-            case let .workspace(device, folder, session): NewWorkspaceSheet(device: device, folder: folder, session: session)
-            case let .chat(device, workspace, label, agent): NewChatSheet(device: device, workspace: workspace, label: label, agent: agent)
-            }
+        // A panel's sheet presents it over itself, as here it would be
+        // behind it.
+        .sheet(item: Binding(get: { window.panelOpen ? nil : model.creating }, set: { model.creating = $0 })) {
+            CreatingSheet(creating: $0)
         }
         .sheet(item: Bindable(model).voice, onDismiss: nil) { session in
             VoiceSheet(session: session)
@@ -246,6 +245,18 @@ extension RootView {
     }
 }
 #endif
+
+/// The form for a new workspace or chat, wherever it is presented.
+struct CreatingSheet: View {
+    let creating: Creating
+
+    var body: some View {
+        switch creating {
+        case let .workspace(device, folder, session): NewWorkspaceSheet(device: device, folder: folder, session: session)
+        case let .chat(device, workspace, label, agent): NewChatSheet(device: device, workspace: workspace, label: label, agent: agent)
+        }
+    }
+}
 
 extension View {
     func withRoutes() -> some View {

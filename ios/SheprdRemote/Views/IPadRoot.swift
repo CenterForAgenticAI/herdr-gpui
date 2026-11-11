@@ -10,6 +10,7 @@ import SwiftUI
 /// A foldable iPhone opened flat gets it too (`RootView.wideWidth`).
 struct IPadRoot: View {
     @Environment(AppModel.self) private var model
+    @Environment(WindowState.self) private var window: WindowState?
     @Binding var pairing: Bool
     @Binding var selection: Route?
     @State private var query = ""
@@ -84,7 +85,18 @@ struct IPadRoot: View {
                 selection.wrappedValue = route
             })
             .connectionToast(pairing: $pairing)
+            // Forms it opens, such as a new tab with a first prompt, and the
+            // nearby card, go over it rather than behind it.
+            .sheet(item: Bindable(model).creating) { CreatingSheet(creating: $0) }
+            .nearbyCard(window)
+            .onAppear { window?.panelOpen = true }
+            .onDisappear { window?.panelOpen = false }
             .presentationSizing(.page)
+        }
+        // A tab started from the sheet's forms opens beside the sidebar,
+        // so the sheet makes way for it.
+        .onChange(of: model.pendingRoute) { _, route in
+            if route != nil { workspaceSheet = nil }
         }
         #if DEBUG
         // The simulator loop's `-tab workspaces|settings` picks the
