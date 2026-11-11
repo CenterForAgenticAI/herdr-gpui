@@ -18,9 +18,9 @@ use crate::{
     ssh::{self, ChildGuard, HostProbe},
     transport::Stream,
 };
-use std::{path::Path, sync::atomic::AtomicBool};
 #[cfg(not(windows))]
 use std::process::Command;
+use std::{path::Path, sync::atomic::AtomicBool};
 #[cfg(windows)]
 use std::{
     path::PathBuf,
