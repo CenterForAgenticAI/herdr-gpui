@@ -43,6 +43,7 @@ mod sidebar;
 mod split;
 mod tabs;
 mod view;
+mod work_requests;
 mod worker;
 mod workspaces;
 

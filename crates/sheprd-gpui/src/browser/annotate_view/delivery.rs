@@ -80,18 +80,43 @@ impl SheprdWindow {
         save: impl FnOnce(&[Option<Arc<Image>>]) -> crate::Result<Vec<Option<PathBuf>>> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
-        let (indexes, notes) = self.notes_round(tab);
+        let (indexes, mut notes) = self.notes_round(tab);
         let Some((send, pending)) = self.tab_notes(tab.id).sending.start() else {
             self.show_flash(Flash::warning(fl!("browser-notes-pending")), cx);
             return;
         };
         let pane_id = tab.origin.clone();
+        // Remote core pages carry a host-qualified origin. Their notes belong
+        // to that saved scope even if the selected host changes during saving,
+        // and require no Herdr 1 snapshot or local caller impersonation.
+        let remote = pane_id
+            .as_ref()
+            .filter(|pane| {
+                self.core_terminals
+                    .browser_terminal(&tab.scope, pane)
+                    .is_some()
+            })
+            .map(|pane_id| crate::browser::FeedbackKey {
+                scope: tab.scope.clone(),
+                pane_id: pane_id.clone(),
+            });
+        if remote.is_some() {
+            // A local screenshot path cannot be read by a remote agent.
+            // Textual annotations remain usable without machine-local paths.
+            for note in &mut notes {
+                note.image = None;
+            }
+        }
         // The page's daemon must still be the one shown, in the session
         // shown now, once the screenshots are saved.
         let origin = crate::agent_notes::Origin::of(self).filter(|_| {
             crate::browser::scope(&self.endpoints[self.selected_endpoint]) == tab.scope
         });
         self.with_notes_prompt(tab, notes, save, cx, move |this, text, cx| {
+            if let Some(target) = remote {
+                let _ = this.deliver_notes(Some(target), text, Some(pending), None, cx);
+                return;
+            }
             if let Some(text) = this
                 .deliver_from(origin.as_ref(), pane_id, text, Some(pending), cx)
                 .copy()

@@ -11,10 +11,26 @@ Commands reach the app over a socket of its own,
 `$XDG_STATE_HOME/herdr/gpui/control.sock` (default `~/.local/state/`), which
 only your user can open; on Windows, over a named pipe (see
 [Windows](#windows)). An agent on an SSH host has no path to it; there,
-the app's shim at `~/.local/state/herdr/gpui/bin/sheprd` offers
+the app's managed shim at `~/.local/state/herdr/gpui/bin/herdr-gpui` offers
 `browser open` and `browser reload` through Herdr workspace metadata (see
 [remote agents](../crates/sheprd-gpui/README.md#letting-agents-open-pages)),
-and every other command exits 8. A few commands work from files alone and
+and every other command exits 8 for Herdr 1 callers. Remote Herdr 2 callers
+use terminal labels over the existing core bridge for `browser open`,
+`browser reload`, and `browser feedback [--wait SECONDS]` (also `feedback`).
+Feedback requires Python 3 on the remote host, waits up to 600 seconds, and
+returns exit 4 when there are no notes. The window must remain connected and
+hold a driving tab for the caller. Host-qualified terminal identity isolates
+same-named terminals on different machines; requests cannot select another
+pane. At most eight feedback calls are pending. Replies are bounded by the
+normal notes budget and acknowledged after printing; cancellation, timeout,
+or disconnect returns unacknowledged notes to the queue. A lost acknowledgement
+can cause a duplicate on retry. Existing labels at first connection and requests
+on unshown terminals remain intentionally non-replayable. No browser server is
+started remotely. Cloud and WSL use the same core reply route; cloud loopback
+URLs still need a separately reachable address, while SSH uses the existing
+port forward and WSL uses localhost integration.
+
+A few commands work from files alone and
 need no running app; they say so below.
 
 On Windows, `sheprd.exe` is a console program, so a shell waits for it and
@@ -28,6 +44,13 @@ sheprd COMMAND --help      # one command
 ```
 
 ## Options and output
+
+For app-kept work commands from remote Herdr 2 terminals, the managed shim
+supports notes, mute/status, worktree dialogs/listing, setup/run scripts,
+checkpoint restore, Teleport, and fan-out with scoped replies and the same
+confirmation policy. See [the remote work contract](remote-core-work.md) for
+host/window identity, bounds, cancellation, and the full-binary-only Git
+commands. Remote notes listings are restricted to the caller's host.
 
 Every command accepts:
 

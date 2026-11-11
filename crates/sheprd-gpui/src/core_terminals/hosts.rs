@@ -47,6 +47,7 @@ impl Host {
 
 /// Another host's core and what it reports of its terminals.
 pub(super) struct Remote {
+    pub(super) work_requests: super::work_requests::Seen,
     pub(super) checkouts: super::checkouts::Checkouts,
     pub(super) hub: Hub,
     pub(super) infos: Infos,
@@ -157,6 +158,7 @@ impl CoreTerminals {
         self.remote.insert(
             scope,
             Remote {
+                work_requests: Default::default(),
                 checkouts: super::checkouts::Checkouts::default(),
                 hub,
                 infos: Infos::default(),
@@ -426,6 +428,7 @@ impl SheprdWindow {
             self.core_terminals.remote.insert(
                 scope.clone(),
                 Remote {
+                    work_requests: Default::default(),
                     checkouts: super::checkouts::Checkouts::default(),
                     hub: Hub::remote(target.clone()),
                     infos: Infos::default(),
