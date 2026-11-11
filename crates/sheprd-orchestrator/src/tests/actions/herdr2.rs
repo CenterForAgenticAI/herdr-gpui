@@ -4,6 +4,7 @@
 use super::*;
 use crate::test_executable;
 
+mod journal;
 mod uncertain;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.

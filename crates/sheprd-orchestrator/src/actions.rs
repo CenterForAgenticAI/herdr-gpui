@@ -387,6 +387,14 @@ struct Destination {
     prepared: Option<teleport::Prepared>,
 }
 
+/// Ownership kept across fallible launch/journal steps. A new terminal's
+/// receipt must survive even when its first database write does not.
+#[derive(Default)]
+struct Attempt {
+    created: Option<(Host, Worktree)>,
+    retained_session: Option<HerdrSession>,
+}
+
 /// Dispatches `request`. An agent sent to a bead claims it first, on the
 /// host of its database, so a bead someone holds starts nothing. A launch
 /// that fails before retaining an agent gives the claim back. An uncertain
@@ -436,7 +444,7 @@ fn start_run(
         owner: Owner::Sheprd,
     };
     store.save_run(&run, None)?;
-    let mut created: Option<(Host, Worktree)> = None;
+    let mut attempt = Attempt::default();
     let outcome = destination(site, request, cancelled).and_then(|destination| {
         let outcome = launch(
             &destination,
@@ -444,7 +452,7 @@ fn start_run(
             &name,
             &mut run,
             &mut store,
-            &mut created,
+            &mut attempt,
             cancelled,
         );
         // The new branch keeps the shipped commit; its reference can go.
@@ -455,16 +463,19 @@ fn start_run(
     });
     // Set before fallible failure journaling: even a database failure cannot
     // turn a retained terminal into permission to release its task claim.
-    *retained = created.is_none() && run.workspace.is_some();
+    *retained = attempt.created.is_none() && run.workspace.is_some();
     if let Err(error) = &outcome {
         // Undo the checkout of a run that never got going; the branch stays.
         // A checkout that would not go keeps its session, which names the
         // host, so Remove can try again; one that went is no longer the run's.
-        let mut kept = store
-            .sessions()?
-            .into_iter()
-            .find(|session| session.run_id == run.id);
-        if let Some((host, worktree)) = created {
+        let mut kept = match attempt.retained_session {
+            Some(session) => Some(session),
+            None => store
+                .sessions()?
+                .into_iter()
+                .find(|session| session.run_id == run.id),
+        };
+        if let Some((host, worktree)) = attempt.created {
             let removed = match &worktree.opened {
                 Opened::Herdr1 { workspace_id, .. } => herdr(
                     &host,
@@ -494,6 +505,11 @@ fn start_run(
         // A run removed meanwhile stays removed; the failure is still told.
         match store.update_run(&run, kept.as_ref()) {
             Ok(()) | Err(Error::RunNotFound(_)) => {}
+            Err(journal_error) if *retained => {
+                // One bounded recovery write; retain the original failure
+                // and its source even when storage remains unavailable.
+                tracing::warn!(category = "orchestrator", %journal_error, "Could not persist a retained agent's recovery receipt");
+            }
             Err(error) => return Err(error),
         }
     }
@@ -648,7 +664,7 @@ fn launch(
     name: &str,
     run: &mut Run,
     store: &mut Store,
-    created_worktree: &mut Option<(Host, Worktree)>,
+    attempt: &mut Attempt,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     let workspace_id = match &destination.repository {
@@ -661,7 +677,7 @@ fn launch(
                 name,
                 run,
                 store,
-                created_worktree,
+                attempt,
                 cancelled,
             );
         }
@@ -689,7 +705,7 @@ fn launch(
             source,
         })?
         .result;
-    *created_worktree = Some((
+    attempt.created = Some((
         host.clone(),
         Worktree {
             path: created.worktree.path.clone(),

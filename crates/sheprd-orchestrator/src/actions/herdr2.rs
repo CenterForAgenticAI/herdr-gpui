@@ -5,14 +5,14 @@
 
 use super::{
     super::model::{Pane, Workspace},
-    Destination, DispatchRequest, place,
+    Attempt, Destination, DispatchRequest, place,
 };
 use crate::{Backend, Error, HerdrSession, Result, Run, RunState, Store, error::script};
 use chrono::Utc;
 use sheprd_client::shell_quote;
 use sheprd_remote::{
     teleport::Host,
-    work::{self, NewWorktree, Repository, Started, Worktree},
+    work::{self, NewWorktree, Repository, Started},
 };
 use std::sync::atomic::AtomicBool;
 
@@ -28,7 +28,7 @@ pub(super) fn launch(
     name: &str,
     run: &mut Run,
     store: &mut Store,
-    created: &mut Option<(Host, Worktree)>,
+    attempt: &mut Attempt,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     let host = &destination.host;
@@ -41,7 +41,7 @@ pub(super) fn launch(
         checkout: checkout.to_owned(),
     };
     let worktree = work::create(host, &repository, &new, cancelled)?;
-    *created = Some((host.clone(), worktree.clone()));
+    attempt.created = Some((host.clone(), worktree.clone()));
     let (ssh, session) = place(&destination.target);
     run.workspace = Some(Workspace {
         backend: Backend::Herdr,
@@ -73,7 +73,7 @@ pub(super) fn launch(
     };
     // No later failure proves that the agent did not start. In particular,
     // neither a lost send reply nor a failed journal write permits deletion.
-    *created = None;
+    attempt.created = None;
     let Started::Herdr2 { terminal } = &started else {
         return Err(Error::Output {
             operation: "Starting the agent",
@@ -89,6 +89,7 @@ pub(super) fn launch(
         agent_name: name.to_owned(),
         updated_at: Utc::now(),
     };
+    attempt.retained_session = Some(herdr_session.clone());
     store.update_run(run, Some(&herdr_session))?;
     if let Some(error) = failure {
         return Err(error.into());
