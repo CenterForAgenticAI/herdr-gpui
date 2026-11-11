@@ -2453,6 +2453,10 @@ On Windows, dispatch between SSH and WSL hosts uses their POSIX shells. A native
 Windows local checkout cannot be a dispatch source or destination because the
 Git transfer scripts require a POSIX shell. Cloud provisioning remains subject
 to each platform's cloud-device availability.
+With a custom Herdr 1 socket, app-kept Herdr 2 workspaces still use this
+computer's core and files on POSIX clients. Herdr 1 workspaces reached through
+that socket remain ineligible for scripted dispatch; their paths are not
+assumed to belong to this computer.
 
 The fan-out dialog offers Spread agents across hosts. Each lane then goes to
 the host with the most room left, a lane counting as a core, and its host chip

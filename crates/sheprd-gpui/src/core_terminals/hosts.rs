@@ -307,7 +307,12 @@ impl SheprdWindow {
                 .iter()
                 .filter(|endpoint| {
                     endpoint.enabled
-                        && crate::teleport::host_for(&endpoint.connection.target).is_ok()
+                        && (crate::dispatch::scriptable(&endpoint.connection.target)
+                            || (self.dispatch_keeps(&endpoint.id)
+                                && crate::dispatch::scriptable_for(
+                                    &endpoint.connection.target,
+                                    sheprd_session::Keeper::App,
+                                )))
                 })
                 .map(|endpoint| Host::of(&crate::browser::scope(endpoint)))
                 .collect();

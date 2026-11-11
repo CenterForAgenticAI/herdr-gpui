@@ -20,9 +20,33 @@ use std::time::Instant;
 
 /// Windows can run scripts through SSH, WSL and cloud connectors, but has
 /// no native local POSIX shell. Check the route rather than hiding every host.
-fn scriptable(target: &sheprd_client::ConnectTarget) -> bool {
-    (cfg!(any(target_os = "linux", target_os = "macos")) || (cfg!(windows) && target.is_remote()))
-        && host_for(target).is_ok()
+pub(crate) fn scriptable(target: &sheprd_client::ConnectTarget) -> bool {
+    scriptable_for(target, sheprd_session::Keeper::Herdr1)
+}
+
+pub(crate) fn scriptable_for(
+    target: &sheprd_client::ConnectTarget,
+    keeper: sheprd_session::Keeper,
+) -> bool {
+    host_for_keeper(target, keeper).is_some()
+}
+
+fn host_for_keeper(
+    target: &sheprd_client::ConnectTarget,
+    keeper: sheprd_session::Keeper,
+) -> Option<teleport::Host> {
+    if matches!(target, sheprd_client::ConnectTarget::Wsl { .. }) && !cfg!(windows) {
+        return None;
+    }
+    if !(cfg!(any(target_os = "linux", target_os = "macos"))
+        || (cfg!(windows) && target.is_remote()))
+    {
+        return None;
+    }
+    match keeper {
+        sheprd_session::Keeper::App => sheprd_remote::work::host_for_kept(target).ok(),
+        sheprd_session::Keeper::Herdr1 => host_for(target).ok(),
+    }
 }
 
 fn working(snapshot: &ClientShellSnapshot) -> u32 {
@@ -60,6 +84,28 @@ fn repository(
 }
 
 impl SheprdWindow {
+    fn dispatch_source_keeper(&self) -> sheprd_session::Keeper {
+        let kept = self
+            .menu
+            .target
+            .as_ref()
+            .is_some_and(|target| self.is_kept_workspace(&target.id))
+            || self.kept_in_front().is_some();
+        if kept {
+            sheprd_session::Keeper::App
+        } else {
+            sheprd_session::Keeper::Herdr1
+        }
+    }
+
+    fn dispatch_keeper(&self, endpoint_id: &str) -> sheprd_session::Keeper {
+        if self.dispatch_keeps(endpoint_id) {
+            sheprd_session::Keeper::App
+        } else {
+            sheprd_session::Keeper::Herdr1
+        }
+    }
+
     /// The connected snapshot of endpoint `index`, reading the selected one
     /// from the window's own copy.
     pub(crate) fn endpoint_snapshot(&self, index: usize) -> Option<&ClientShellSnapshot> {
@@ -136,7 +182,7 @@ impl SheprdWindow {
     /// shown host cannot be scripted, since its commit could not be shipped.
     pub(crate) fn dispatch_candidates(&self, repo: &str, cx: &App) -> Vec<Candidate> {
         let current = &self.endpoints[self.selected_endpoint];
-        if !scriptable(&current.connection.target) {
+        if !scriptable_for(&current.connection.target, self.dispatch_source_keeper()) {
             return Vec::new();
         }
         let history = cx.try_global::<History>();
@@ -145,7 +191,11 @@ impl SheprdWindow {
             .enumerate()
             .filter(|(index, endpoint)| {
                 *index == self.selected_endpoint
-                    || (endpoint.enabled && scriptable(&endpoint.connection.target))
+                    || (endpoint.enabled
+                        && scriptable_for(
+                            &endpoint.connection.target,
+                            self.dispatch_keeper(&endpoint.id),
+                        ))
             })
             .map(|(index, endpoint)| {
                 let snapshot = self.endpoint_snapshot(index);
@@ -192,7 +242,7 @@ impl SheprdWindow {
     /// offers nothing they never set up.
     pub(crate) fn dispatch_sandboxes(&self) -> Vec<Sandbox> {
         let current = &self.endpoints[self.selected_endpoint];
-        if !scriptable(&current.connection.target) {
+        if !scriptable_for(&current.connection.target, self.dispatch_source_keeper()) {
             return Vec::new();
         }
         #[cfg(feature = "cloud")]
@@ -220,14 +270,16 @@ impl SheprdWindow {
         repo_label: &str,
     ) -> Option<FreshOrigin> {
         let selected = &self.endpoints[self.selected_endpoint];
-        if !scriptable(&selected.connection.target) {
-            return None;
-        }
+        let keeper = if self.is_kept_workspace(workspace_id) {
+            sheprd_session::Keeper::App
+        } else {
+            sheprd_session::Keeper::Herdr1
+        };
         Some(FreshOrigin {
             place: Place {
                 endpoint_id: selected.id.clone(),
                 label: selected.label.clone(),
-                host: host_for(&selected.connection.target).ok()?,
+                host: host_for_keeper(&selected.connection.target, keeper)?,
             },
             workspace_id: workspace_id.to_owned(),
             repo_key: repo_key.to_owned(),
@@ -244,8 +296,10 @@ impl SheprdWindow {
             .iter()
             .position(|endpoint| endpoint.id == endpoint_id)?;
         let endpoint = &self.endpoints[index];
-        if !scriptable(&endpoint.connection.target)
-            || (!endpoint.enabled && index != self.selected_endpoint)
+        if !scriptable_for(
+            &endpoint.connection.target,
+            self.dispatch_keeper(endpoint_id),
+        ) || (!endpoint.enabled && index != self.selected_endpoint)
         {
             return None;
         }
@@ -268,7 +322,14 @@ impl SheprdWindow {
             place: Place {
                 endpoint_id: endpoint.id.clone(),
                 label: endpoint.label.clone(),
-                host: host_for(&endpoint.connection.target).ok()?,
+                host: host_for_keeper(
+                    &endpoint.connection.target,
+                    if kept {
+                        sheprd_session::Keeper::App
+                    } else {
+                        sheprd_session::Keeper::Herdr1
+                    },
+                )?,
             },
             repositories: if kept {
                 Some(self.kept_repositories(index))
@@ -507,7 +568,8 @@ impl SheprdWindow {
         else {
             return false;
         };
-        if !host_for(&endpoint.connection.target).is_ok_and(|host| host.identity() == host_identity)
+        if !host_for_keeper(&endpoint.connection.target, sheprd_session::Keeper::App)
+            .is_some_and(|host| host.identity() == host_identity)
             || !self.select_endpoint(endpoint_id, cx)
         {
             return false;
