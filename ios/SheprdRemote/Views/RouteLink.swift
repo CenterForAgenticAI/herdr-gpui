@@ -17,6 +17,8 @@ extension EnvironmentValues {
 /// sidebar, beside it, highlighted while it is the one shown.
 struct RouteLink<Label: View>: View {
     @Environment(\.routeOpener) private var opener
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.supportsMultipleWindows) private var multipleWindows
     let route: Route
     let label: Label
 
@@ -26,6 +28,16 @@ struct RouteLink<Label: View>: View {
     }
 
     var body: some View {
+        link.contextMenu {
+            // As the sidebar's own rows offer, for a tab found by search.
+            if multipleWindows, opener != nil {
+                Button("Open in New Window", systemImage: "macwindow.badge.plus") { openWindow(value: route) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var link: some View {
         if let opener {
             Button { opener.open(route) } label: {
                 HStack(spacing: 0) {
@@ -35,7 +47,7 @@ struct RouteLink<Label: View>: View {
                 .contentShape(.rect)
             }
             .tint(.primary)
-            .listRowBackground(opener.current == route ? Color.accentColor.opacity(0.25) : nil)
+            .listRowBackground(opener.current.map(route.opensSameTab) == true ? Color.accentColor.opacity(0.25) : nil)
         } else {
             NavigationLink(value: route) { label }
         }

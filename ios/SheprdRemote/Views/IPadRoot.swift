@@ -29,10 +29,16 @@ struct IPadRoot: View {
     /// inside it, hiding their search and buttons.
     var body: some View {
         HStack(spacing: 0) {
+            // Kept alive while hidden, so each tab's stack, search, and
+            // place in Settings are where the person left them.
+            sidebar
+                .frame(width: 360)
+                .frame(width: sidebarShown ? 360 : 0, alignment: .trailing)
+                .clipped()
+                .opacity(sidebarShown ? 1 : 0)
+                .allowsHitTesting(sidebarShown)
+                .accessibilityHidden(!sidebarShown)
             if sidebarShown {
-                sidebar
-                    .frame(width: 360)
-                    .transition(.move(edge: .leading))
                 Divider().ignoresSafeArea()
             }
             detail
@@ -89,8 +95,16 @@ struct IPadRoot: View {
             case "settings": tab = .settings
             default: break
             }
-            if let workspace = UserDefaults.standard.string(forKey: "openWorkspace"),
-               let machine = model.fleet.machines.first(where: { $0.home?.workspaces.contains { $0.id == workspace } == true }) {
+            // Waits for a computer to list it: a fresh install or a new
+            // workspace has no cached home to find it in at launch.
+            var found: Fleet.Machine?
+            if let workspace = UserDefaults.standard.string(forKey: "openWorkspace") {
+                for _ in 0..<40 where found == nil {
+                    found = model.fleet.machines.first { $0.home?.workspaces.contains { $0.id == workspace } == true }
+                    if found == nil { try? await Task.sleep(for: .milliseconds(500)) }
+                }
+            }
+            if let workspace = UserDefaults.standard.string(forKey: "openWorkspace"), let machine = found {
                 tab = .workspaces
                 workspacesPath = [WorkspaceKey(device: machine.id, workspace: workspace)]
                 // `-openChat YES` opens its first chat beside it.
@@ -129,7 +143,7 @@ struct IPadRoot: View {
             }
             .badge(model.fleet.waiting)
             Tab("Workspaces", systemImage: "square.stack.3d.up", value: SidebarTab.workspaces) {
-                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $query).nearbyBanner().toolbar { hideSidebar } }
+                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $query).toolbar { hideSidebar } }
                     .connectionToast(pairing: $pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: SidebarTab.settings) {
@@ -240,7 +254,11 @@ private struct ChatKeys: View {
     var body: some View {
         Group {
             Button("Toggle Sidebar") { sidebarShown.toggle() }.keyboardShortcut("s", modifiers: [.command, .control])
-            Button("Settings") { tab = .settings }.keyboardShortcut(",", modifiers: .command)
+            Button("Settings") {
+                tab = .settings
+                sidebarShown = true
+            }
+            .keyboardShortcut(",", modifiers: .command)
             Button("Previous Chat") { move(-1) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
             Button("Next Chat") { move(1) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
         }
