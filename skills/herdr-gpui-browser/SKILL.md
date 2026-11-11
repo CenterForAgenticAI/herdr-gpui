@@ -251,6 +251,8 @@ for what only Sheprd shows or keeps.
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
 | Keep a note on this worktree (repository and branch) | `sheprd notes set waiting on CI` |
 | Silence this worktree's notifications | `sheprd worktree mute` |
+| List app-kept Git workspaces on your host | `sheprd worktree list` |
+| Review creating, opening, or deleting an app-kept worktree | `sheprd worktree create [BRANCH]`, `sheprd worktree open`, `sheprd worktree delete` (confirm in Sheprd) |
 | Silence a whole host's notifications | `sheprd host mute studio` |
 | Update the Sheprd app on another machine (the user confirms in Sheprd) | `sheprd host update studio` |
 | Save the working tree before a risky change, and compare later | `sheprd checkpoint create before refactor`, `sheprd checkpoint diff ID` |
@@ -290,9 +292,12 @@ it in the app.
 Add `--json` to any command for machine-readable output; errors then come
 back as `{"error": {"code", "message"}}`. Exit statuses are the ones in the
 table above. A command acts in the window that shows your workspace; it
-exits 5 rather than act in another session's window. In a Herdr 2 terminal
-in no Herdr workspace, `sheprd work` notes, mutes, restores, scripts,
-Teleport, and fan-out exit 8: they keep Herdr's workspace state.
+exits 5 rather than act in another session's window. In a Herdr 2 terminal,
+`sheprd work` notes, mutes, restores, scripts, Teleport, and fan-out target
+the workspace the app keeps for your tab, without needing Herdr 1.
+Scripts and dialogs retain the workspace menu's host capabilities and
+confirmation rules. Select the caller's host in the window before opening
+a dialog; a terminal outside every workspace the app keeps is refused.
 
 Some commands only open the app's dialog and the user confirms there:
 restoring a checkpoint, teleporting a worktree, fanning out a prompt, running

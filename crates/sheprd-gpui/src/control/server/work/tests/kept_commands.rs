@@ -18,11 +18,16 @@ fn kept(
     view.endpoints[0].connection.target = sheprd_client::ConnectTarget::Local;
     view.live.snapshot = None;
     view.live.missing_installation = true;
+    let folder = if cfg!(windows) {
+        "C:/src/tools"
+    } else {
+        "/src/tools"
+    };
     view.core_terminals.seed_checkout_for_test(
-        "/src/tools",
+        folder,
         Some(sheprd_vcs::git::Identity {
             branch: Some("feature".into()),
-            key: "/src/tools/.git".into(),
+            key: format!("{folder}/.git"),
             label: "tools".into(),
             linked: true,
         }),
@@ -32,7 +37,7 @@ fn kept(
     let id = view
         .open_kept_workspace(
             Some("tools"),
-            std::path::Path::new("/src/tools"),
+            std::path::Path::new(folder),
             location,
             window,
             cx,
