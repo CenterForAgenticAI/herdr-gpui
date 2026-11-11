@@ -484,8 +484,17 @@ impl SheprdWindow {
                     this.local_error = Some(crate::Error::StaleWorkspace.localize());
                     return;
                 }
-                match result {
-                Ok(sheprd_remote::work::Started::Herdr2 { terminal }) => {
+                let (started, error) = kept_start_outcome(result);
+                if let Some(error) = error {
+                    tracing::warn!(%error, agent = kind.name(), "Cannot start the new worktree's agent");
+                    this.local_error = Some(fl!(
+                        "worktree-landing-failed",
+                        agent = kind.name(),
+                        error = error.localize()
+                    ));
+                }
+                match started {
+                Some(sheprd_remote::work::Started::Herdr2 { terminal }) => {
                     let Ok(terminal) = sheprd_backend::TerminalId::new(terminal) else {
                         return;
                     };
@@ -495,14 +504,8 @@ impl SheprdWindow {
                     );
                     this.open_kept_workspace(Some(&label), &checkout, location, window, cx);
                 }
-                Ok(sheprd_remote::work::Started::Herdr1 { .. }) => {}
-                Err(error) => {
-                    tracing::warn!(%error, agent = kind.name(), "Cannot start the new worktree's agent");
-                    this.local_error = Some(fl!(
-                        "worktree-landing-failed",
-                        agent = kind.name(),
-                        error = error.localize()
-                    ));
+                Some(sheprd_remote::work::Started::Herdr1 { .. }) => {}
+                None => {
                     // The checkout is there; its shell still opens.
                     this.new_kept_workspace(Some(&label), Some(checkout), cx);
                 }
@@ -589,6 +592,25 @@ impl SheprdWindow {
                 )
             })
             .into_any_element()
+    }
+}
+
+/// A failed send may have reached the agent. Preserve its known terminal
+/// and show it with the error, rather than hiding it behind a fresh shell.
+fn kept_start_outcome(
+    result: crate::Result<sheprd_remote::work::Started>,
+) -> (Option<sheprd_remote::work::Started>, Option<crate::Error>) {
+    match result {
+        Ok(started) => (Some(started), None),
+        Err(error) => {
+            let started = match &error {
+                crate::Error::Remote(sheprd_remote::Error::Work(
+                    sheprd_remote::work::Error::Unprompted { started, .. },
+                )) => Some(started.clone()),
+                _ => None,
+            };
+            (started, Some(error))
+        }
     }
 }
 
