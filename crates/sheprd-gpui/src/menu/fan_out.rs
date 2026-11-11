@@ -95,11 +95,13 @@ impl SheprdWindow {
         else {
             return false;
         };
-        if host_for(&self.endpoints[index].connection.target)
-            .ok()
-            .as_ref()
-            != Some(&origin.host)
-        {
+        let target = &self.endpoints[index].connection.target;
+        let host = if origin.checkout.is_some() {
+            sheprd_remote::work::host_for_kept(target).ok()
+        } else {
+            host_for(target).ok()
+        };
+        if host.as_ref() != Some(&origin.host) {
             return false;
         }
         // Look in the captured host's session even after a host switch.
@@ -138,15 +140,28 @@ impl SheprdWindow {
         {
             return Some(Label::FAN_OUT_COMPARISON);
         }
-        let scriptable =
-            crate::dispatch::scriptable(&self.endpoints[self.selected_endpoint].connection.target);
         let source = self.fan_out_source()?;
+        let target = &self.endpoints[self.selected_endpoint].connection.target;
+        let local = sheprd_client::ConnectTarget::Local;
+        let routed = if source.checkout.is_some()
+            && matches!(target, sheprd_client::ConnectTarget::Socket(_))
+        {
+            &local
+        } else {
+            target
+        };
+        let scriptable = crate::dispatch::scriptable(routed);
         (scriptable && self.fan_out_host(&source).is_some()).then_some(Label::FAN_OUT)
     }
 
     /// The host the menu addresses, for either workspace keeper.
-    fn fan_out_host(&self, _source: &Source) -> Option<Host> {
-        host_for(&self.endpoints[self.selected_endpoint].connection.target).ok()
+    fn fan_out_host(&self, source: &Source) -> Option<Host> {
+        let target = &self.endpoints[self.selected_endpoint].connection.target;
+        if source.checkout.is_some() {
+            sheprd_remote::work::host_for_kept(target).ok()
+        } else {
+            host_for(target).ok()
+        }
     }
 
     pub(crate) fn open_fan_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -111,7 +111,7 @@ impl SheprdWindow {
         self.endpoints
             .iter()
             .find(|known| known.id == endpoint)
-            .and_then(|known| crate::teleport::host_for(&known.connection.target).ok())
+            .and_then(|known| sheprd_remote::work::host_for_kept(&known.connection.target).ok())
             .as_ref()
             == Some(host)
     }

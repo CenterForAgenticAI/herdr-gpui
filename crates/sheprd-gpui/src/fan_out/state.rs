@@ -219,6 +219,9 @@ impl Drop for FanOut {
     fn drop(&mut self) {
         self.work.store(true, Ordering::Release);
         self.probe.store(true, Ordering::Release);
+        if !self.composing() {
+            self.journal.release(self.id);
+        }
     }
 }
 
