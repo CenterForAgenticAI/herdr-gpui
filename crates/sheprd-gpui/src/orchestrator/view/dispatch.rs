@@ -65,6 +65,10 @@ impl Problem {
 /// A destructive action waiting for the user to confirm it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Confirm {
+    Adopt {
+        run: String,
+        receipt: Box<crate::orchestrator::actions::legacy::Receipt>,
+    },
     Restart {
         run: String,
     },
@@ -90,6 +94,7 @@ pub(crate) enum Confirm {
 /// What a finished action did, as the banner says it.
 pub(super) fn done(done: Done) -> String {
     match done {
+        Done::Adopted => fl!("orchestrator-done-adopted"),
         Done::BeadDeleted => fl!("orchestrator-done-bead-deleted"),
         Done::Removed => fl!("orchestrator-done-removed"),
         Done::Sent => fl!("orchestrator-done-sent"),
@@ -112,6 +117,24 @@ impl Confirm {
     /// Its title, what it does, its button, and the button's ID.
     fn text(&self) -> (String, String, String, &'static str) {
         match self {
+            Self::Adopt { receipt, .. } => (
+                fl!("orchestrator-adopt"),
+                fl!(
+                    "orchestrator-confirm-adopt-body",
+                    host = format!("{:?}", receipt.target),
+                    terminal = receipt.process.address.as_str(),
+                    cwd = format!("{:?}", receipt.process.cwd),
+                    process = format!(
+                        "{:?} (PID {}, terminal PID {}): {:?}",
+                        receipt.process.foreground.name,
+                        receipt.process.foreground.pid,
+                        receipt.process.pid,
+                        receipt.process.foreground.argv
+                    )
+                ),
+                fl!("orchestrator-adopt"),
+                "adopt",
+            ),
             Self::Restart { .. } => (
                 fl!("orchestrator-restart"),
                 fl!("orchestrator-confirm-restart-body"),
@@ -165,6 +188,7 @@ impl Confirm {
     /// The worker action it confirms; a merge goes through `pr_actions`.
     fn action(self) -> Option<Action> {
         match self {
+            Self::Adopt { run, receipt } => Some(Action::Adopt { run, receipt }),
             Self::Restart { run } => Some(Action::Restart { run }),
             Self::Stop { run, .. } => Some(Action::Stop { run }),
             Self::Remove { run, .. } => Some(Action::Remove { run }),

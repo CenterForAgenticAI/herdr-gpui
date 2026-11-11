@@ -37,21 +37,25 @@ pub(super) fn restart(site: &Site, id: &str, cancelled: &AtomicBool) -> Result<(
         return Err(Error::InvalidCheckout);
     }
     let next = agent_name();
-    // Win the durable claim before touching the old process. A competing
-    // window cannot restart the same receipt twice.
-    store.claim_restart(id, &session.agent_name, &next)?;
+    let tree = Worktree {
+        path,
+        opened: Opened::Herdr2,
+    };
+    if let Some(token) = &session.checkout_token {
+        work::owned_checkout::verify(&host, &tree, &workspace.branch, token, cancelled)?;
+    }
+    // perform() holds the cross-process action lease. Keep the old receipt
+    // until its program is ended, so a crash cannot orphan a live agent.
     let outcome = (|| {
         herdr2::end(&host, &previous)?;
+        store.claim_restart(id, &session.agent_name, &next)?;
+        session.adopted = None;
         session.agent_name = next.clone();
         session.pane = Pane::Pending;
         run.session_id = Some(next.clone());
         run.state = RunState::Starting;
         run.updated_at = Utc::now();
         store.update_run(&run, Some(&session))?;
-        let tree = Worktree {
-            path,
-            opened: Opened::Herdr2,
-        };
         let agent = work::Agent {
             kind: AgentKind::parse(&run.agent).ok_or(Error::NothingToOpen)?,
             name: &next,

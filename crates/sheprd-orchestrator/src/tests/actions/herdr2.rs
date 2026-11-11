@@ -5,12 +5,13 @@ use super::*;
 use crate::test_executable;
 
 mod cleanup;
+mod legacy;
 mod ownership;
 mod remote;
 mod restart;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.
-fn fake_core(dir: &Path, status: &str) {
+pub(super) fn fake_core(dir: &Path, status: &str) {
     let script = format!(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -21,7 +22,7 @@ with (home / 'core-calls').open('a') as log:
 inventory = home / 'core-inventory'
 if args[0] == 'run':
     label = args[args.index('--label') + 1].split('=', 1)
-    terminal = {{'address':'t9', 'cwd': args[args.index('--cwd') + 1], 'argv': args[args.index('--') + 1:], 'labels': {{label[0]: label[1]}}, 'state': 'live'}}
+    terminal = {{'address':'t9', 'cwd': args[args.index('--cwd') + 1], 'argv': args[args.index('--') + 1:], 'labels': {{label[0]: label[1]}}, 'state': 'live', 'pid': 8}}
     terminal['foreground'] = {{'argv': terminal['argv'], 'name': 'claude', 'cwd': terminal['cwd'], 'pid': 9}}
     inventory.write_text(json.dumps({{'terminals': [terminal]}}))
     if (home / 'lose-run-reply').exists():
@@ -33,6 +34,12 @@ elif args[0] in ('ls', 'list'):
     print(inventory.read_text() if inventory.exists() else '{{"terminals":[]}}')
 elif args[0] == 'kill':
     inventory.write_text('{{"terminals":[]}}')
+    print('{{}}')
+elif args[0] == 'label':
+    value = json.loads(inventory.read_text())
+    key, token = args[-1].split('=', 1)
+    value['terminals'][0]['labels'][key] = token
+    inventory.write_text(json.dumps(value))
     print('{{}}')
 else:
     print('{{}}')
@@ -146,6 +153,7 @@ fn a_herdr_2_run_is_stopped_messaged_and_removed_through_its_terminal() {
         [
             "send --json -- t9 --and the tests",
             "keys --json -- t9 esc ctrl+c",
+            "keep --off --json -- t9",
             "kill --json -- t9",
         ]
     );
@@ -167,7 +175,7 @@ fn a_herdr_2_agent_that_never_gets_ready_retains_its_durable_identity() {
     fake_core(dir.path(), "blocked");
     let request = Action::Dispatch(Box::new(herdr2_request()));
     let error = perform(&site, &request, &AtomicBool::new(false)).unwrap_err();
-    assert!(matches!(error, Error::Work(_)), "{error:?}");
+    assert!(matches!(error, Error::Retained { .. }), "{error:?}");
 
     let core = core_calls(dir.path());
     assert!(!core.iter().any(|call| call.starts_with("kill ")));

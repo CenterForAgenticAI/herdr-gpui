@@ -130,6 +130,8 @@ fn run(id: &str, owner: Owner) -> Run {
 
 fn session(run_id: &str) -> HerdrSession {
     HerdrSession {
+        checkout_token: None,
+        adopted: None,
         target: None,
         run_id: run_id.into(),
         host: None,

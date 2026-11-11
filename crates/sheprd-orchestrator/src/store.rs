@@ -20,7 +20,7 @@ use std::{
 };
 
 /// The newest schema this build reads and writes.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// How long a write waits for the other application's transaction.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -351,7 +351,7 @@ impl Store {
     pub fn sessions(&self) -> Result<Vec<HerdrSession>> {
         let mut statement = self.connection.prepare(
             "SELECT run_id, host, session, workspace_id, pane_id, terminal, agent_name, \
-             updated_at, target_json, pending FROM herdr_sessions",
+             updated_at, target_json, pending, adopted_json, checkout_token FROM herdr_sessions",
         )?;
         let rows = statement.query_map([], |row| Ok(session_from_row(row)))?;
         rows.map(|row| row?).collect()
@@ -479,12 +479,12 @@ impl Store {
                     .transpose()?;
                 transaction.execute(
                     "INSERT INTO herdr_sessions (run_id, host, session, workspace_id, pane_id, \
-                     terminal, agent_name, updated_at, target_json, pending) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+                     terminal, agent_name, updated_at, target_json, pending, adopted_json, checkout_token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
                      ON CONFLICT(run_id) DO UPDATE SET host = excluded.host, \
                      session = excluded.session, workspace_id = excluded.workspace_id, \
                      pane_id = excluded.pane_id, terminal = excluded.terminal, \
                      agent_name = excluded.agent_name, updated_at = excluded.updated_at, \
-                     target_json = excluded.target_json, pending = excluded.pending",
+                     target_json = excluded.target_json, pending = excluded.pending, adopted_json = excluded.adopted_json, checkout_token = excluded.checkout_token",
                     params![
                         run.id,
                         session.host,
@@ -496,6 +496,8 @@ impl Store {
                         time(session.updated_at),
                         target,
                         matches!(session.pane, Pane::Pending),
+                        session.adopted.as_ref().map(|receipt| encode("adopted_json", receipt)).transpose()?,
+                        session.checkout_token,
                     ],
                 )?;
             }
@@ -645,6 +647,12 @@ fn migrate(connection: &mut Connection) -> Result<Access> {
     if version < 5 {
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS run_prompts (run_id TEXT PRIMARY KEY NOT NULL, prompt TEXT NOT NULL)")?;
     }
+    if version < 6 && !has_column(&transaction, "herdr_sessions", "adopted_json")? {
+        transaction.execute_batch("ALTER TABLE herdr_sessions ADD COLUMN adopted_json TEXT")?;
+    }
+    if version < 7 && !has_column(&transaction, "herdr_sessions", "checkout_token")? {
+        transaction.execute_batch("ALTER TABLE herdr_sessions ADD COLUMN checkout_token TEXT")?;
+    }
     if version < SCHEMA_VERSION {
         transaction.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
     }
@@ -768,6 +776,12 @@ fn run_from_row(row: &Row<'_>) -> Result<Run> {
 
 fn session_from_row(row: &Row<'_>) -> Result<HerdrSession> {
     Ok(HerdrSession {
+        checkout_token: row.get("checkout_token")?,
+        adopted: row
+            .get::<_, Option<String>>("adopted_json")?
+            .as_deref()
+            .map(|json| decode("adopted_json", json))
+            .transpose()?,
         run_id: row.get("run_id")?,
         host: row.get("host")?,
         target: row

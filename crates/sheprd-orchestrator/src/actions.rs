@@ -22,6 +22,8 @@ use sheprd_remote::{
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 
 mod herdr2;
+pub mod legacy;
+pub(crate) mod lock;
 mod restart;
 mod start;
 
@@ -82,6 +84,10 @@ impl DispatchRequest {
 
 #[derive(Clone, Debug)]
 pub enum Action {
+    Adopt {
+        run: String,
+        receipt: Box<legacy::Receipt>,
+    },
     Recover {
         run: String,
     },
@@ -115,7 +121,8 @@ impl Action {
         match self {
             Self::DeleteBead { .. } => true,
             Self::Dispatch(request) => request.bead().is_some(),
-            Self::Stop { .. }
+            Self::Adopt { .. }
+            | Self::Stop { .. }
             | Self::Send { .. }
             | Self::Remove { .. }
             | Self::Recover { .. }
@@ -128,6 +135,7 @@ impl Action {
         match self {
             Self::Dispatch(_) => Done::Started,
             Self::Recover { .. } => Done::Recovered,
+            Self::Adopt { .. } => Done::Adopted,
             Self::Restart { .. } => Done::Started,
             Self::Stop { .. } => Done::Stopped,
             Self::Send { .. } => Done::Sent,
@@ -141,6 +149,7 @@ impl Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Done {
     // keep-sorted start
+    Adopted,
     BeadDeleted,
     Recovered,
     Removed,
@@ -152,7 +161,9 @@ pub enum Done {
 
 /// Runs `action` to completion; what it did, or why it failed.
 pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<Done> {
+    let _lease = lock::take(site)?;
     match action {
+        Action::Adopt { run, receipt } => legacy::adopt(site, run, receipt, cancelled)?,
         Action::Recover { run } => restart::recover(site, run, cancelled)?,
         Action::Restart { run } => restart::restart(site, run, cancelled)?,
         Action::Dispatch(request) => dispatch(site, request, cancelled)?,
@@ -307,6 +318,14 @@ fn remove_worktree(
     const READING: &str = "Reading the workspaces";
     let host = host_of(site, session)?;
     if matches!(session.pane, Pane::Pending | Pane::Herdr2 { .. }) {
+        let exists = validate_checkout(&host, workspace, cancelled)?;
+        let tree = workspace.path.as_ref().map(|path| Worktree {
+            path: path.to_string_lossy().into_owned(),
+            opened: Opened::Herdr2,
+        });
+        if exists && let (Some(token), Some(tree)) = (&session.checkout_token, &tree) {
+            work::owned_checkout::verify(&host, tree, &workspace.branch, token, cancelled)?;
+        }
         match herdr2::inspect(&host, run, session, true, cancelled) {
             Ok(work::Started::Herdr2 { terminal }) => herdr2::end(&host, &terminal)?,
             Ok(_) => return Err(Error::NothingToOpen),
@@ -317,6 +336,11 @@ fn remove_worktree(
                     return Err(error);
                 }
             }
+        }
+        herdr2::unused_checkout(&host, workspace, cancelled)?;
+        if exists && let (Some(token), Some(tree)) = (&session.checkout_token, &tree) {
+            work::owned_checkout::discard(&host, tree, &workspace.branch, token, cancelled)?;
+            return Ok(());
         }
         return remove_checkout(&host, workspace, cancelled);
     }
@@ -349,6 +373,36 @@ fn remove_worktree(
 }
 
 const REMOVING: &str = "Removing the worktree";
+
+fn validate_checkout(host: &Host, workspace: &Workspace, cancelled: &AtomicBool) -> Result<bool> {
+    let Some(path) = workspace.path.as_deref() else {
+        return Ok(false);
+    };
+    let path = path.to_string_lossy();
+    let exists = if host.is_local() {
+        std::path::Path::new(path.as_ref()).is_dir()
+    } else {
+        !host
+            .capture(
+                &format!("if [ -d {} ]; then printf yes; fi\n", shell_quote(&path)),
+                cancelled,
+            )
+            .map_err(script(REMOVING))?
+            .is_empty()
+    };
+    if !exists {
+        return Ok(false);
+    }
+    let identity = work::identity(host, &path, cancelled)?;
+    let prefix = work::git(host, &path, &["rev-parse", "--show-prefix"], cancelled)?;
+    if !identity.linked
+        || identity.branch.as_deref() != Some(&workspace.branch)
+        || !prefix.is_empty()
+    {
+        return Err(Error::InvalidCheckout);
+    }
+    Ok(true)
+}
 
 /// The checkout a run recorded, removed with Git: all a Herdr 1 workspace
 /// that is gone could leave, and all a Herdr 2 run has.
@@ -471,12 +525,13 @@ struct Destination {
 /// that fails gives the claim back, so nothing stays in progress that no
 /// agent is working on; the bead's status is otherwise the agent's to change.
 fn dispatch(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> Result<()> {
+    let mut retained = false;
     let Some(key) = request.bead() else {
-        return start_run(site, request, cancelled);
+        return start_run(site, request, cancelled, &mut retained);
     };
     let claim = beads::claim::take(&site.host, &key.source, &key.native_id, cancelled)?;
-    let outcome = start_run(site, request, cancelled);
-    if outcome.is_err() {
+    let outcome = start_run(site, request, cancelled, &mut retained);
+    if outcome.is_err() && !retained {
         // Run even when cancelled, as a failed run's worktree is removed.
         let released =
             beads::claim::release(&site.host, &key.source, &claim, &AtomicBool::new(false));
@@ -491,7 +546,12 @@ fn dispatch(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> R
     outcome
 }
 
-fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> Result<()> {
+fn start_run(
+    site: &Site,
+    request: &DispatchRequest,
+    cancelled: &AtomicBool,
+    retained: &mut bool,
+) -> Result<()> {
     let target = request
         .elsewhere
         .as_ref()
@@ -517,6 +577,9 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
     store.save_prompt(&run.id, &request.prompt)?;
     let mut created: Option<(Host, Worktree)> = None;
     let outcome = destination(site, request, cancelled).and_then(|destination| {
+        // Carry uncertainty outside error journaling too: a database failure
+        // must not release a claim while an accepted launch may be working.
+        *retained = true;
         let outcome = launch(
             &destination,
             request,
@@ -548,6 +611,8 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
             if kept.is_none() && matches!(worktree.opened, Opened::Herdr2) {
                 let (host, session) = place(target);
                 kept = Some(HerdrSession {
+                    checkout_token: None,
+                    adopted: None,
                     run_id: run.id.clone(),
                     target: Some(target.clone()),
                     host,
@@ -590,6 +655,7 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
             }
         }
         run.state = RunState::Failed;
+        *retained = run.workspace.is_some() && kept.is_some();
         run.message = Some(error.to_string().chars().take(500).collect());
         run.updated_at = Utc::now();
         // A run removed meanwhile stays removed; the failure is still told.
@@ -598,7 +664,15 @@ fn start_run(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> 
             Err(error) => return Err(error),
         }
     }
-    outcome
+    outcome.map_err(|source| {
+        if *retained {
+            Error::Retained {
+                source: Box::new(source),
+            }
+        } else {
+            source
+        }
+    })
 }
 
 fn destination(
@@ -809,6 +883,8 @@ fn launch(
     run.state = RunState::Starting;
     run.updated_at = Utc::now();
     let herdr_session = HerdrSession {
+        checkout_token: None,
+        adopted: None,
         run_id: run.id.clone(),
         target: Some(destination.target.clone()),
         host: ssh,

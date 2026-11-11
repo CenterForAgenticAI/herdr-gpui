@@ -2701,6 +2701,17 @@ uncommitted files stay, while a new owned agent receives the saved model and
 initial prompt. Opening a run whose launch reply was lost first looks up its
 unique ownership receipt; it never resends the initial prompt. The CLI
 `sheprd orchestrator restart RUN` opens the same confirmation for a loaded run.
+Legacy Herdr 2 runs created before ownership receipts require **Adopt current
+process** before reply/stop controls work. The read-only preview shows the host,
+terminal, checkout and current process. Confirmation grants new authority over
+that displayed process, not proof that it was the original agent; cancel changes
+nothing. The worker revalidates the process, adds an ownership label, and saves
+the receipt. A replaced process is refused until explicitly adopted again.
+Legacy runs have no saved initial prompt, so their restart action is unavailable.
+New dispatches require a fresh branch; use Restart to reuse an existing run's
+checkout. Each newly created checkout carries a receipt in its Git metadata.
+Recreating the same path and branch does not transfer the old run's authority.
+Uncertain creation without that receipt remains for manual inspection.
 A pull
 request's **Review with agent** does the same on an `agent/review-…` branch with a
 read-only prompt: the agent verifies the pull request, reads its diff, and
