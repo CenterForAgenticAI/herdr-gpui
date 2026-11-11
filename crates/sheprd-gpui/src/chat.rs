@@ -36,6 +36,7 @@ mod restore;
 mod rich;
 mod selection;
 mod session;
+mod shortcuts;
 mod start;
 mod summary;
 mod terminal;

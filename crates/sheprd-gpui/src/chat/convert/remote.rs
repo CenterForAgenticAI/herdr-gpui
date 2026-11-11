@@ -43,7 +43,7 @@ fn run(owner: &Owner, terminal: &TerminalId, agent: Agent, stop: &AtomicBool) ->
             sheprd_client::run_script_command(
                 command,
                 std::io::empty(),
-                &mut std::io::sink(),
+                std::io::sink(),
                 ScriptLimits {
                     idle: Duration::from_secs(30),
                     output: 16 * 1024,
