@@ -227,13 +227,15 @@ impl CoreTerminals {
 
     /// Reads what each core reports while any of its tabs is known, for
     /// split chrome and the sidebar's rows. True when what is known changed.
-    pub(super) fn poll_infos(&mut self, now: Instant) -> bool {
+    pub(super) fn poll_infos(&mut self, now: Instant, dispatching: bool) -> bool {
         let mut changed = false;
         for host in self.hosts() {
             // This computer's core is read while it answers, tabs or not:
             // a phone may start a terminal there for one of its workspaces
             // (`adopt`), and its stand-in shell runs agents too.
-            let listed = host == Host::Local || self.tabs.values().any(|shown| shown.host == host);
+            let listed = dispatching
+                || host == Host::Local
+                || self.tabs.values().any(|shown| shown.host == host);
             let backend = listed.then(|| self.backend_of(&host).cloned()).flatten();
             if let Some(infos) = self.infos_of_mut(&host) {
                 changed |= infos.poll(backend.as_ref(), now);
@@ -271,11 +273,10 @@ impl CoreTerminals {
     }
 
     /// How many agents `host`'s core last reported working, for ranking
-    /// hosts by how busy they are. The list is only kept current while the
-    /// window has a tab of that core, so without one it counts none rather
-    /// than agents that may have stopped since.
+    /// hosts by how busy they are. Dispatch samples connected cores even
+    /// without open tabs; a disconnected core contributes no stale load.
     pub(crate) fn working(&self, host: &Host) -> u32 {
-        if !self.tabs.values().any(|shown| shown.host == *host) {
+        if !self.is_connected(host) {
             return 0;
         }
         self.infos_of(host).map_or(0, Infos::working)
@@ -298,6 +299,22 @@ impl SheprdWindow {
     /// attached anew; nothing is started or replayed.
     pub(super) fn poll_core_hubs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = self.forget_stale_core_hosts();
+        if self.dispatch_sampling() {
+            let hosts: Vec<_> = self
+                .endpoints
+                .iter()
+                .filter(|endpoint| {
+                    endpoint.enabled
+                        && crate::teleport::host_for(&endpoint.connection.target).is_ok()
+                })
+                .map(|endpoint| Host::of(&crate::browser::scope(endpoint)))
+                .collect();
+            for host in hosts {
+                if let Some(hub) = self.core_hub(&host) {
+                    hub.connect(super::Start::Join);
+                }
+            }
+        }
         let scrollback = self.config.herdr_2_scrollback;
         for host in self.core_terminals.hosts() {
             let Some(hub) = self.core_terminals.hub_of_mut(&host) else {
