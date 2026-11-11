@@ -95,7 +95,11 @@ pub(super) fn dialog(
     );
     match dialog {
         Dialog::Create(Some(branch)) => {
+            // Selected whole, as a new field starts, so the selection stays
+            // inside the text it replaced.
             if let Some(input) = &mut view.menu.input {
+                input.selection = 0..branch.len();
+                input.marked = None;
                 input.text = branch;
             }
         }
