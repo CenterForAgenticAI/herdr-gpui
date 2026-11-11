@@ -125,7 +125,11 @@ pub(super) fn launch(
         agent_name: name.to_owned(),
         updated_at: run.updated_at,
     };
-    store.update_run(run, Some(&pending))?;
+    if let Err(error) = store.update_run(run, Some(&pending)) {
+        // Neither checkout creation nor launch has been attempted yet.
+        run.workspace = None;
+        return Err(error);
+    }
     work::owned_checkout::create(host, checkout, &worktree, &new, &run.id, cancelled)?;
     let agent = work::Agent {
         kind: request.kind,
