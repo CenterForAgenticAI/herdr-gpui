@@ -13,6 +13,9 @@ fn non_claude_conversion_uses_the_bound_session_and_configuration() {
         (AgentKind::Opencode, sheprd_chat_protocol::Agent::Opencode),
     ] {
         let (core, mut peer) = connected();
+        // Conversion refuses a folder that is gone, so the pane's must exist.
+        let folder = tempfile::tempdir().unwrap();
+        let cwd = folder.path().to_str().unwrap().to_owned();
         let pid = std::process::id();
         let mut environment = BTreeMap::new();
         if kind == AgentKind::Codex {
@@ -48,8 +51,8 @@ fn non_claude_conversion_uses_the_bound_session_and_configuration() {
                             (pid, kind.name())
                         };
                         json!({"terminals":[{"address":"t1", "state":"live", "pid":100,
-                            "cwd":"/work", "status":{"app":kind.name(),"state":"idle"},
-                            "foreground":{"pid":pid,"name":name,"argv":[name],"cwd":"/work"}}]})
+                            "cwd":cwd, "status":{"app":kind.name(),"state":"idle"},
+                            "foreground":{"pid":pid,"name":name,"argv":[name],"cwd":cwd}}]})
                     }
                     "doc.get" => json!({"value":binding,"version":1}),
                     "terminal.keys" => {
