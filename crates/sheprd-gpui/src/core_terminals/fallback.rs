@@ -148,7 +148,11 @@ impl SheprdWindow {
             }
         };
         let (look, painter) = (self.core_look(), self.painter.clone());
-        let to_window = super::asks::window_call(cx);
+        let to_window = super::asks::window_call(
+            cx,
+            super::Host::Local,
+            Some(sheprd_client::ConnectTarget::Local),
+        );
         let view = cx.new(|cx| {
             CoreTerminalView::new(terminal, link, look, painter, false, cx).with_window(to_window)
         });

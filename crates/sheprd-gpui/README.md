@@ -2888,6 +2888,12 @@ claim it; see [Herdr Plugins](#herdr-plugins).
 
 ## Herdr Plugins
 
+Herdr 2 desktop panes support explicitly configured [link-handler
+adapters](../../docs/link-handlers.md), independently of a Herdr 1 daemon.
+These run compatible commands on the clicked pane's host; they do not load
+Herdr's registry or emulate its plugin API. The daemon contract below applies
+to Herdr 1.
+
 Herdr runs plugins; this client never reads plugin manifests, runs plugin
 commands, or touches the plugin registry. It works with the parts of a plugin
 the daemon exposes to clients:

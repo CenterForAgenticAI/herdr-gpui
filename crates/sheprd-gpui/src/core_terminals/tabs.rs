@@ -190,7 +190,8 @@ impl SheprdWindow {
             let painter = self.painter.clone();
             let look = look.clone();
             let observe = role == Role::Observer;
-            let to_window = super::asks::window_call(cx);
+            let target = self.core_terminals.link_target(&host).cloned();
+            let to_window = super::asks::window_call(cx, host.clone(), target);
             let view = cx.new(|cx| {
                 CoreTerminalView::new(terminal.clone(), link, look, painter, observe, cx)
                     .with_window(to_window)
