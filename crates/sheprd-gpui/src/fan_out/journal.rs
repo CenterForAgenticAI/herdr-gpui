@@ -296,7 +296,10 @@ impl Record {
                     return false;
                 }
                 lane.checkout = Some(saved);
-                Checkpoint::CreatingWorktree
+                lane.step = Checkpoint::CreatingWorktree;
+                // The launch already saved CreatingWorktree before resolving
+                // its path. Adding that path is itself a durable change.
+                return true;
             }
             Progress::CreatingWorktree => {
                 if lane.checkout.is_some() {
@@ -725,6 +728,19 @@ impl Journal {
         {
             lane.step = step;
         }
+    }
+
+    /// The saved ownership and step of a lane whose host may return.
+    pub(super) fn saved_lane(&self, id: u64, index: usize) -> Option<SavedLane> {
+        let state = self.0.state.lock().ok()?;
+        state
+            .records
+            .iter()
+            .chain(&state.unsaved)
+            .find(|record| record.id == id)?
+            .lanes
+            .get(index)
+            .cloned()
     }
 
     /// The step lane `index` of fan-out `id` last reached.

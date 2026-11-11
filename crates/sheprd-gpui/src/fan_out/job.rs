@@ -38,8 +38,8 @@ pub(crate) struct Checkout {
     pub(crate) host: Host,
     /// Its folder, and Herdr 1's workspace and pane when Herdr 1 made it.
     pub(crate) worktree: work::Worktree,
-    /// On Herdr 2, the herdr-core shell its agent was typed into, once that
-    /// started; Herdr 1's agent runs in the worktree's own pane.
+    /// On Herdr 2, the owned core agent terminal once its address is known;
+    /// Herdr 1's agent runs in the worktree's own pane.
     pub(crate) terminal: Option<String>,
     /// New lanes carry an atomic core label for recovery after a lost run reply.
     pub(crate) recoverable: bool,
@@ -83,7 +83,7 @@ pub(crate) enum Progress {
     CreatingOwned(Box<Checkout>),
     Created(Box<Checkout>),
     StartingAgent,
-    /// The herdr-core shell a Herdr 2 lane's agent was typed into.
+    /// The owned herdr-core terminal of a Herdr 2 lane.
     Terminal(String),
     Prompting,
     /// The agent took the prompt and is working on it.

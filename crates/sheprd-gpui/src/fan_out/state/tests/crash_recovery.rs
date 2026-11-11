@@ -17,6 +17,9 @@ fn owned_creation_and_start_intents_survive_restart_without_guessing_completion(
         ..checkout(0)
     };
     journal
+        .record(42, &Report::Lane(0, Progress::CreatingWorktree))
+        .unwrap();
+    journal
         .record(
             42,
             &Report::Lane(0, Progress::CreatingOwned(Box::new(owned.clone()))),
