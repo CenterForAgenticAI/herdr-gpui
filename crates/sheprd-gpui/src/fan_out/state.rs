@@ -380,13 +380,15 @@ impl FanOut {
     /// choices on top.
     pub(super) fn lane_hosts(&self) -> Vec<String> {
         let lanes = self.picks.total();
-        if !self.spread || !self.hosts.offers_choice() {
+        if !self.spread {
             return vec![self.origin.endpoint_id.clone(); lanes];
         }
         let mut hosts = self.hosts.spread(lanes);
         hosts.resize(lanes, self.origin.endpoint_id.clone());
         for (host, chosen) in hosts.iter_mut().zip(&self.overrides) {
-            if let Some(chosen) = chosen.as_ref().filter(|id| self.hosts.online(id).is_some()) {
+            // A pinned destination going offline is not permission to run
+            // that lane on another host. Launch will resolve it or refuse.
+            if let Some(chosen) = chosen.as_ref() {
                 host.clone_from(chosen);
             }
         }
