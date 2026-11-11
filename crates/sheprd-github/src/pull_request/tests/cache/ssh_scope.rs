@@ -16,7 +16,11 @@ fn ssh_answers_are_fenced_after_host_account_or_connection_changes() {
             peer.cache
                 .scope(scope.clone(), tokens.clone(), "fixture", origin.clone())
         );
-        assert!(!peer.cache.scope(scope, tokens, "fixture", origin.clone()));
+        assert!(
+            !peer
+                .cache
+                .scope(scope, tokens.clone(), "fixture", origin.clone())
+        );
         let input = Input {
             checkout: Some("/work/checkout".into()),
             ..input("feature")
@@ -27,9 +31,14 @@ fn ssh_answers_are_fenced_after_host_account_or_connection_changes() {
         assert_eq!(host, origin);
         assert_eq!(requested, [input.clone()]);
         let profile = crate::Profile::fixture(login, Arc::new(login.into()), &[]);
+        let next_tokens = if login == "fixture" {
+            tokens
+        } else {
+            crate::Tokens::new(&profile, [])
+        };
         assert!(peer.cache.scope(
             (0, generation, String::new()),
-            crate::Tokens::new(&profile, []),
+            next_tokens,
             login,
             next_origin
         ));
