@@ -17,7 +17,7 @@ struct Recovery {
     next: Option<Instant>,
 }
 
-impl gpui::Global for Recovery {}
+impl Global for Recovery {}
 
 fn directory() -> Option<PathBuf> {
     Store::path().and_then(|path| Some(path.parent()?.join("teleport-arrivals")))
