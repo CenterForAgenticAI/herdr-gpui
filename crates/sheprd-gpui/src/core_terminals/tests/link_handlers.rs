@@ -13,7 +13,10 @@ fn remote_file_hyperlink_keeps_raw_target_and_only_emits_on_click(cx: &mut TestA
     for cell in &mut screen.cells[..5] {
         cell.hyperlink = Some(0);
     }
-    backend.push(vec![SurfaceUpdate::Frame(screen)]);
+    backend.push(vec![
+        SurfaceUpdate::Frame(screen),
+        SurfaceUpdate::MouseReporting(true),
+    ]);
     until(|| {
         cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx)))
             .then_some(())

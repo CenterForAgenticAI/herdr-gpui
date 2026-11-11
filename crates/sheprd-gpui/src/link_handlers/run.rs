@@ -12,17 +12,32 @@ const LIMITS: ScriptLimits = ScriptLimits {
 const REMOVE: &[&str] = &[
     "HERDR_API_SOCKET",
     "HERDR_SOCKET_PATH",
+    "HERDR_CLIENT_SOCKET_PATH",
+    "HERDR_SESSION",
     "HERDR_ENV",
     "HERDR_PANE_ID",
     "HERDR_TAB_ID",
     "HERDR_WORKSPACE_ID",
+    "HERDR_PLUGIN_ACTION_ID",
+    "HERDR_PLUGIN_CONFIG_DIR",
+    "HERDR_PLUGIN_STATE_DIR",
+    "HERDR_PLUGIN_EVENT",
+    "HERDR_PLUGIN_EVENT_JSON",
+    "HERDR_BIN_PATH",
     "HC_SOCKET",
     "HC_SESSION",
     "HC_TERMINAL_ID",
+    "HC_TERMINAL_SOCKET",
 ];
 
-fn environment(handler: &Handler, url: &str, terminal: &str) -> Vec<(&'static str, String)> {
-    vec![
+fn environment(
+    handler: &Handler,
+    url: &str,
+    terminal: &str,
+    cwd: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    let mut values = vec![
+        ("HERDR_PLUGIN_ROOT", handler.directory.clone()),
         ("HERDR_PLUGIN_ID", handler.plugin.clone()),
         ("HERDR_PLUGIN_LINK_HANDLER_ID", handler.id.clone()),
         ("HERDR_PLUGIN_CLICKED_URL", url.to_owned()),
@@ -33,15 +48,26 @@ fn environment(handler: &Handler, url: &str, terminal: &str) -> Vec<(&'static st
             serde_json::json!({
                 "invocation_source": "link_click", "clicked_url": url,
                 "link_handler_id": handler.id,
+                "focused_pane_cwd": cwd,
             })
             .to_string(),
         ),
-    ]
+    ];
+    for (key, value) in [
+        ("HERDR_PLUGIN_ACTION_ID", &handler.action),
+        ("HERDR_PLUGIN_CONFIG_DIR", &handler.config_directory),
+        ("HERDR_PLUGIN_STATE_DIR", &handler.state_directory),
+    ] {
+        if let Some(value) = value {
+            values.push((key, value.clone()));
+        }
+    }
+    values
 }
 
-fn script(handler: &Handler, url: &str, terminal: &str) -> String {
+fn script(handler: &Handler, url: &str, terminal: &str, cwd: Option<&str>) -> String {
     let mut script = format!("set -eu\nunset {}\n", REMOVE.join(" "));
-    for (key, value) in environment(handler, url, terminal) {
+    for (key, value) in environment(handler, url, terminal, cwd) {
         script.push_str(&format!("export {key}={}\n", shell_quote(&value)));
     }
     script.push_str(&format!(
@@ -63,9 +89,10 @@ pub(crate) fn run(
     target: &ConnectTarget,
     url: &str,
     terminal: &str,
+    cwd: Option<&str>,
     cancelled: &AtomicBool,
 ) -> Result<(), Error> {
-    let text = script(handler, url, terminal);
+    let text = script(handler, url, terminal, cwd);
     let host = match target {
         ConnectTarget::Local | ConnectTarget::Session { .. } | ConnectTarget::Socket(_) => {
             let mut command = sheprd_client::new_command(&handler.command[0]);
@@ -75,7 +102,7 @@ pub(crate) fn run(
             for key in REMOVE {
                 command.env_remove(key);
             }
-            command.envs(environment(handler, url, terminal));
+            command.envs(environment(handler, url, terminal, cwd));
             sheprd_client::run_script_command(
                 command,
                 std::io::empty(),
@@ -123,3 +150,7 @@ pub(crate) fn run(
     )?;
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+#[path = "tests/transport.rs"]
+mod tests;

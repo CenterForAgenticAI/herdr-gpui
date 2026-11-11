@@ -132,10 +132,14 @@ impl CoreTerminalView {
             .and_then(|cell| self.link_at(cell))
             .and_then(|link| match &link.target {
                 RowTarget::Web(_) | RowTarget::External(_) => Some(link),
+                RowTarget::OtherHost(_) | RowTarget::Malformed if self.remote => Some(link),
                 RowTarget::OtherHost(_) | RowTarget::Malformed => None,
                 RowTarget::Path { .. } => {
                     if self.remote {
-                        return None;
+                        // Verification here is only of an explicit hyperlink,
+                        // never of a file on this machine. This also lets a
+                        // modifier click escape a mouse-reporting program.
+                        return Some(link);
                     }
                     let file = self.file_link(&link.target)?;
                     examined = true;

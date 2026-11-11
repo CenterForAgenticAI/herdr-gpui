@@ -18,6 +18,9 @@ fn click() -> LinkClick {
 fn configure(view: &mut SheprdWindow, directory: &str, command: Vec<String>) {
     view.config.open_links_in = crate::config::LinkTarget::System;
     view.config.link_handlers = Handlers::compile(vec![Handler {
+        action: None,
+        config_directory: None,
+        state_directory: None,
         plugin: "fixture".into(),
         id: "capture".into(),
         host: "local".into(),

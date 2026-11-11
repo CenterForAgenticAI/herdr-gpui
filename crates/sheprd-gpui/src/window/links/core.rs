@@ -73,8 +73,16 @@ impl SheprdWindow {
         });
         let url = url.clone();
         let terminal = click.terminal.to_string();
+        let cwd = click.cwd.clone();
         let job = cx.background_executor().spawn(async move {
-            link_handlers::run(&handler, &target, &url, &terminal, &cancelled)
+            link_handlers::run(
+                &handler,
+                &target,
+                &url,
+                &terminal,
+                cwd.as_deref(),
+                &cancelled,
+            )
         });
         cx.spawn(async move |this, cx| {
             let result = job.await;

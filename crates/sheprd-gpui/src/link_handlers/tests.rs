@@ -2,6 +2,9 @@ use super::*;
 
 fn handler(plugin: &str, id: &str) -> Handler {
     Handler {
+        action: None,
+        config_directory: None,
+        state_directory: None,
         plugin: plugin.into(),
         id: id.into(),
         host: "local".into(),
@@ -81,6 +84,7 @@ fn command_receives_literal_url_and_failure_never_invokes_another_handler() {
         &sheprd_client::ConnectTarget::Local,
         url,
         "term_test",
+        None,
         &std::sync::atomic::AtomicBool::new(false),
     )
     .unwrap_err();
@@ -108,6 +112,7 @@ fn handled_command_and_cancelled_command() {
         &sheprd_client::ConnectTarget::Local,
         "file:///x",
         "t",
+        None,
         &std::sync::atomic::AtomicBool::new(false),
     )
     .unwrap();
@@ -122,6 +127,7 @@ fn handled_command_and_cancelled_command() {
             &sheprd_client::ConnectTarget::Local,
             "file:///x",
             "t",
+            None,
             &std::sync::atomic::AtomicBool::new(true)
         )
         .is_err()

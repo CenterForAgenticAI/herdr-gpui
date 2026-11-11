@@ -34,6 +34,7 @@ aes                  = "0.9.3"
 ammonia              = "4.2.1"
 cbc                  = { features = ["block-padding"], version = "0.2.1" }
 percent-encoding     = "2"
+process-wrap         = { version = "10.0.1", default-features = false, features = ["std", "job-object", "creation-flags"] }
 pbkdf2               = { default-features = false, features = ["hmac"], version = "0.13.0" }
 pulldown-cmark       = { default-features = false, features = ["html"], version = "0.13.6" }
 # The remote control pairing QR, drawn as quads; no image or SVG renderer.

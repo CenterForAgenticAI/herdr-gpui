@@ -12,6 +12,11 @@ use serde::Deserialize;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Handler {
+    /// Original manifest action ID, when the adapter uses it.
+    #[serde(default)]
+    pub(crate) action: Option<String>,
+    #[serde(default)]
+    pub(crate) config_directory: Option<String>,
     pub(crate) plugin: String,
     pub(crate) id: String,
     /// Saved device scope, or `local`. Never a wildcard.
@@ -20,6 +25,8 @@ pub(crate) struct Handler {
     pub(crate) command: Vec<String>,
     /// Trusted plugin directory on the host, not the terminal cwd.
     pub(crate) directory: String,
+    #[serde(default)]
+    pub(crate) state_directory: Option<String>,
     #[serde(default = "enabled")]
     pub(crate) enabled: bool,
 }
@@ -55,6 +62,17 @@ impl Handlers {
                     .iter()
                     .any(|s| s.len() > 8192 || s.contains('\0'))
                 || handler.pattern.len() > 4096
+                || handler.action.as_ref().is_some_and(|action| {
+                    action.is_empty() || action.len() > 256 || action.chars().any(char::is_control)
+                })
+                || [&handler.config_directory, &handler.state_directory]
+                    .into_iter()
+                    .flatten()
+                    .any(|path| {
+                        !absolute_directory(path)
+                            || path.len() > 4096
+                            || path.chars().any(char::is_control)
+                    })
             {
                 return Err(Error::Invalid(
                     "invalid identity, directory, command, or pattern bounds",
