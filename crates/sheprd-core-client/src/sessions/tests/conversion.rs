@@ -13,9 +13,8 @@ fn non_claude_conversion_uses_the_bound_session_and_configuration() {
         (AgentKind::Opencode, sheprd_chat_protocol::Agent::Opencode),
     ] {
         let (core, mut peer) = connected();
-        // Conversion refuses a folder that is gone, so the pane's must exist.
-        let folder = tempfile::tempdir().unwrap();
-        let cwd = folder.path().to_str().unwrap().to_owned();
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().to_str().unwrap().to_owned();
         let pid = std::process::id();
         let mut environment = BTreeMap::new();
         if kind == AgentKind::Codex {

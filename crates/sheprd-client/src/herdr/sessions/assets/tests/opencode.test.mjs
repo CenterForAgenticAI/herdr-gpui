@@ -17,7 +17,11 @@ function fixture(env = { HC_TERMINAL_ID: "terminal", HC_TERMINAL_SOCKET: "/ownin
     process: { pid: 1234, env },
     setInterval(fn) { poll = fn; return fn; },
     clearInterval() { poll = undefined; },
-    setTimeout(fn) { deadlines.add(fn); return fn; },
+    setTimeout(fn) {
+      const timer = () => { deadlines.delete(timer); fn(); };
+      deadlines.add(timer);
+      return timer;
+    },
     clearTimeout(fn) { deadlines.delete(fn); },
     spawn(program, args, options) {
       const child = new EventEmitter();
@@ -152,4 +156,21 @@ test("failed selection and clear are retried without reverting to an older route
   [...f.deadlines][0]();
   assert.equal(f.children[5].payload.session_id, null);
   f.children[5].emit("close");
+});
+
+test("a replacement plugin supersedes an old failed cleanup without endless helpers", () => {
+  const f = fixture();
+  const stopOld = f.start();
+  f.children[0].emit("close");
+  f.select({ type: "session", sessionID: "a" });
+  stopOld();
+  const stopNew = f.start();
+  assert.equal(f.children.length, 3);
+  f.children[1].emit("close", 1);
+  f.children[2].emit("close");
+  [...f.deadlines][0]();
+  assert.equal(f.children.length, 3);
+  assert.equal(f.deadlines.size, 0);
+  stopNew();
+  f.children[3].emit("close");
 });

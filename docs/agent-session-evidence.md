@@ -91,6 +91,10 @@ phone end-to-end, remote conversion and live OpenCode plugin loading still need
 verification. Native Windows conversion, remote OpenCode service attribution,
 and full agent flag mapping remain incomplete. Unsupported
 server flags refuse conversion rather than silently changing launch policy.
+Codex's initial chat mode keeps the server's effective session policy: it sends
+no sandbox/approval overrides until the user explicitly chooses a mode. The
+effective model and reasoning effort are retained even for custom models absent
+from the model catalog.
 
 Linux birth tokens use `/proc/PID/stat` start ticks. macOS uses the kernel's
 microsecond birth stamp through the maintained safe `libproc` wrapper; Windows

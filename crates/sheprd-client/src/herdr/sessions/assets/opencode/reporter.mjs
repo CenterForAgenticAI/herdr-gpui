@@ -29,6 +29,7 @@ export function setup(api, runtime = {
   function pump() {
     if (active || pending === undefined) return;
     if (retry !== undefined) { runtime.clearTimeout(retry); retry = undefined; }
+    if (pending.sequence < state.sequence) { pending = undefined; return; }
     const payload = pending;
     pending = undefined;
     active = true;
@@ -57,18 +58,18 @@ export function setup(api, runtime = {
     child.once("error", finish);
     child.once("close", finish);
     child.stdin.on("error", () => {});
-    child.stdin.end(payload);
+    child.stdin.end(JSON.stringify(payload));
   }
 
   function report(sessionID) {
     if (previous === sessionID) return;
     previous = sessionID;
     update((draft) => { draft.sequence++; });
-    pending = JSON.stringify({
+    pending = {
       pid: runtime.process.pid,
       session_id: sessionID,
       sequence: state.sequence,
-    });
+    };
     pump();
   }
 
