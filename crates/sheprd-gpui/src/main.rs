@@ -154,6 +154,7 @@ mod terminal;
 mod terminal_notes;
 mod terminal_painter;
 mod text_editing;
+mod text_shortcuts;
 mod theme_picker;
 mod titlebar;
 mod toggles;
