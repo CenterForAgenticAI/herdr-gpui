@@ -20,7 +20,7 @@ use std::time::Instant;
 
 /// Windows can run scripts through SSH, WSL and cloud connectors, but has
 /// no native local POSIX shell. Check the route rather than hiding every host.
-fn scriptable(target: &sheprd_client::ConnectTarget) -> bool {
+pub(crate) fn scriptable(target: &sheprd_client::ConnectTarget) -> bool {
     (cfg!(any(target_os = "linux", target_os = "macos")) || (cfg!(windows) && target.is_remote()))
         && host_for(target).is_ok()
 }
@@ -339,14 +339,9 @@ impl SheprdWindow {
         }
         let composing = self.fan_out.as_ref().filter(|fan_out| fan_out.composing());
         if let Some(repo) = composing.map(|fan_out| fan_out.repo_label().to_owned()) {
-            let mut candidates = self.dispatch_candidates(&repo, cx);
-            // The fan-out consumer must adopt typed destination preparation
-            // before it can offer lanes on another host's core.
-            for candidate in &mut candidates {
-                if !candidate.current && self.dispatch_keeps(&candidate.endpoint_id) {
-                    candidate.online = false;
-                }
-            }
+            // Fan-out resolves the same typed destination and prepared
+            // repository as dispatch, so both generations are eligible.
+            let candidates = self.dispatch_candidates(&repo, cx);
             if let Some(fan_out) = &mut self.fan_out
                 && fan_out.update_hosts(candidates, now)
             {
