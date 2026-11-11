@@ -22,7 +22,7 @@ use crate::{
     control::protocol::{Call, Caller, ErrorCode, Response, work::WorkOp},
 };
 use gpui::App;
-use sheprd_client::protocol::{ClientShellSnapshot, ClientShellWorkspace};
+use sheprd_client::protocol::ClientShellSnapshot;
 
 pub(super) fn serve(call: Call<WorkOp>, incoming: socket::Incoming, _: &mut Watches, cx: &mut App) {
     let Call { caller, op } = call;
@@ -66,30 +66,13 @@ pub(super) struct Found<'a> {
     pub index: usize,
     /// The workspace as the session model has it, whichever keeps it.
     pub workspace: sheprd_session::Workspace,
-    /// Herdr 1's state of it; `None` for a workspace the app keeps for
-    /// Herdr 2, which has none of what mutes, scripts, and fan-out keep.
+    /// Herdr 1's state of it; `None` for a workspace the app keeps.
     pub herdr: Option<Herdr<'a>>,
 }
 
 /// A workspace as Herdr 1's snapshot holds it.
 pub(super) struct Herdr<'a> {
     pub snapshot: &'a ClientShellSnapshot,
-    pub workspace: &'a ClientShellWorkspace,
-}
-
-impl<'a> Found<'a> {
-    /// Herdr 1's state, or why a workspace the app keeps cannot do `what`.
-    pub(super) fn herdr(&self, what: &str) -> Result<&Herdr<'a>, Response> {
-        self.herdr.as_ref().ok_or_else(|| {
-            Response::error(
-                ErrorCode::Unsupported,
-                format!(
-                    "Workspace {} is a Herdr 2 workspace, where {what} is not available yet",
-                    self.workspace.label
-                ),
-            )
-        })
-    }
 }
 
 /// Finds the caller's workspace in `view`: on the caller's own daemon only
@@ -98,10 +81,22 @@ impl<'a> Found<'a> {
 /// it: Herdr 1's, or one the app keeps for Herdr 2.
 pub(super) fn find<'a>(view: &'a SheprdWindow, caller: &Caller) -> Result<Found<'a>, Response> {
     let target = target(caller);
-    let (index, id) = target
-        .strictness()
-        .iter()
-        .find_map(|strict| view.control_target(&target, *strict))
+    let focused_kept = (target.workspace.is_none()
+        && target.terminal.is_none()
+        && target.pane.is_none()
+        && target.daemon.is_none())
+    .then(|| {
+        view.kept_in_front()
+            .map(|id| (view.selected_endpoint, id.to_owned()))
+    })
+    .flatten();
+    let (index, id) = focused_kept
+        .or_else(|| {
+            target
+                .strictness()
+                .iter()
+                .find_map(|strict| view.control_target(&target, *strict))
+        })
         .ok_or_else(|| match &caller.workspace_id {
             Some(id) => Response::error(
                 ErrorCode::WorkspaceNotFound,
@@ -137,7 +132,7 @@ pub(super) fn find<'a>(view: &'a SheprdWindow, caller: &Caller) -> Result<Found<
     let snapshot = live.snapshot.as_deref().ok_or_else(|| {
         unsupported().unwrap_or_else(|| not_found("The window has no state from that host yet"))
     })?;
-    let workspace = snapshot
+    snapshot
         .workspaces
         .iter()
         .find(|workspace| workspace.workspace_id == id)
@@ -153,10 +148,7 @@ pub(super) fn find<'a>(view: &'a SheprdWindow, caller: &Caller) -> Result<Found<
     Ok(Found {
         index,
         workspace: session,
-        herdr: Some(Herdr {
-            snapshot,
-            workspace,
-        }),
+        herdr: Some(Herdr { snapshot }),
     })
 }
 

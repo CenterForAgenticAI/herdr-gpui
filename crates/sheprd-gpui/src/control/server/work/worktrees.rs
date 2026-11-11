@@ -6,7 +6,7 @@ use crate::{
         Caller, ErrorCode, Response,
         work::{Reply, WorktreeInfo},
     },
-    menu::WorkspaceAction,
+    menu::{Page, WorkspaceAction},
 };
 use gpui::{Context, Point, Window};
 
@@ -82,21 +82,20 @@ pub(super) fn dialog(
             "This operation needs a Git checkout; deletion requires a linked worktree",
         );
     }
-    view.open_workspace_dialog_for(
-        &id,
-        if delete {
-            WorkspaceAction::DeleteWorktree
-        } else {
-            WorkspaceAction::NewWorktree
-        },
-        Point::default(),
-        window,
-        cx,
-    );
+    let action = if delete {
+        WorkspaceAction::DeleteWorktree
+    } else {
+        WorkspaceAction::NewWorktree
+    };
+    view.open_workspace_dialog_for(&id, action, Point::default(), window, cx);
+    if view.menu.page != Some(Page::Dialog(action)) {
+        view.dismiss_menu(window, cx);
+        return Response::error(ErrorCode::Failed, "The worktree dialog did not open");
+    }
     match dialog {
         Dialog::Create(Some(branch)) => {
             if let Some(input) = &mut view.menu.input {
-                input.text = branch;
+                *input = crate::dialog_input::DialogInput::branch(branch);
             }
         }
         Dialog::Open => view.show_existing_worktrees(window, cx),

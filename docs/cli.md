@@ -43,10 +43,11 @@ Every command accepts:
   session the app does not show, the command exits 5 rather than act on
   another session's window. Outside both, it acts in the frontmost window.
   From a herdr-core terminal in a workspace Sheprd keeps for Herdr 2, `work`
-  notes, `checkpoint restore`, and `host pr` act on that workspace's
-  checkout; mutes, scripts, and fan-out, which keep Herdr 1's
-  workspace state, exit 8 there for now, as every `work` command does from
-  a terminal in no workspace the window keeps.
+  notes, mutes, scripts, fan-out, `checkpoint restore`, and `host pr` target
+  that workspace without requiring a Herdr 1 snapshot. Scripts and fan-out
+  use the same host capabilities and trust/confirmation flow as its menu;
+  dialogs refuse a caller on a host the window is not currently showing.
+  A terminal in no workspace the window keeps cannot use these workspace commands.
   Teleport works from a workspace the app keeps for Herdr 2 on this
   computer, as its menu does.
 

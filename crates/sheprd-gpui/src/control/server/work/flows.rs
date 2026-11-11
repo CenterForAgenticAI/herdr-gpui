@@ -68,6 +68,7 @@ fn kept_workspace(view: &SheprdWindow, caller: &Caller) -> Option<Result<String,
     if target.workspace.is_none()
         && target.terminal.is_none()
         && target.pane.is_none()
+        && target.daemon.is_none()
         && let Some(id) = view.kept_in_front()
     {
         return Some(Ok(id.to_owned()));
@@ -103,12 +104,6 @@ fn open_kept_menu(
         ));
     }
     Ok(id.to_owned())
-}
-
-/// Refuses a flow that needs Herdr 1's state for a caller in a workspace
-/// the app keeps for Herdr 2, before any menu opens.
-fn needs_herdr(view: &SheprdWindow, caller: &Caller, what: &str) -> Result<(), Response> {
-    find(view, caller)?.herdr(what).map(|_| ())
 }
 
 /// What the caller's workspace is checked out on, for messages.
@@ -384,10 +379,11 @@ pub(super) fn fan_out(
             "This window's last fan-out is still open for comparison; keep a lane or close it from the workspace menu first",
         );
     }
-    if let Err(response) = needs_herdr(view, caller, "fan-out") {
-        return response;
-    }
-    let workspace = match open_menu(view, caller, window, cx) {
+    let opened = match kept_workspace(view, caller) {
+        Some(kept) => kept.and_then(|id| open_kept_menu(view, &id, window, cx)),
+        None => open_menu(view, caller, window, cx),
+    };
+    let workspace = match opened {
         Ok(workspace) => workspace,
         Err(response) => return response,
     };

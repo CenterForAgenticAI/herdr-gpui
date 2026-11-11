@@ -280,7 +280,7 @@ private struct MiniTerminal: View {
                 }
                 .defaultScrollAnchor(.bottom)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                TermWaitingView(store: store)
             }
         }
         .onAppear { store = model.fleet.openTerm(key) }
