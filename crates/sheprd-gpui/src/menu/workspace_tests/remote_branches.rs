@@ -1,4 +1,3 @@
-use super::*;
 use crate::{
     browser::{Location, Scope},
     core_terminals::{Hub, panes::Panes},
