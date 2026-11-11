@@ -104,6 +104,29 @@ import Testing
         #expect(sync.home(1_000, from: "a", now: Self.now).isEmpty)
     }
 
+    @Test func aFetchStillOutCannotUndoASaveMadeMeanwhile() {
+        // The phone knows A at 100 there, and fetches C at 200.
+        var sync = ShortcutSync(local: Self.list("a", at: 100))
+        _ = sync.home(100, from: "x", now: Self.now)
+        _ = sync.answered(Self.list("a", at: 100), offered: sync.local, by: "x", now: Self.now)
+        #expect(sync.home(200, from: "x", now: Self.now) == [.fetch(device: "x")])
+        // A save while it is out asks nothing more of that computer.
+        #expect(sync.edit([TextShortcut(id: "b", title: "", text: "b")], now: 300).isEmpty)
+        let b = sync.local
+        // C comes back: an edit made there before this save, not after.
+        let actions = sync.fetched(Self.list("c", at: 200), from: "x", now: Self.now)
+        #expect(sync.local == b)
+        #expect(actions == [.offer(b, device: "x")])
+    }
+
+    @Test func aFailedFetchLeavesTheComputerFreeForALaterEdit() {
+        var sync = ShortcutSync(local: Self.list("a", at: 100))
+        #expect(sync.home(200, from: "x", now: Self.now) == [.fetch(device: "x")])
+        #expect(sync.edit([TextShortcut(id: "b", title: "", text: "b")], now: 300).isEmpty)
+        // Not asked again at once, but the save goes now that it is free.
+        #expect(sync.fetchFailed("x") == [.offer(sync.local, device: "x")])
+    }
+
     @Test func aDelayedAnswerCannotUndoASaveMadeSince() {
         // X goes to two computers; the first stamps it earlier, by a slower
         // clock. A save comes after X here, whatever the clock reads.

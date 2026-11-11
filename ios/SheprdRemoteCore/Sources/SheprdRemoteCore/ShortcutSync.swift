@@ -35,7 +35,8 @@ public struct ShortcutSync: Sendable {
     private var known: [String: TextShortcuts] = [:]
     private var settled: [String: Settled] = [:]
     /// The edit time here when a fetch from each computer was asked for,
-    /// so what it brings back is known to answer that copy, not a later edit.
+    /// so what it brings back is known to answer that copy, not a later
+    /// edit. Set while that fetch is out; a computer has one at a time.
     private var fetching: [String: UInt64] = [:]
 
     /// How far past this phone's clock a computer's edit time may be. The
@@ -110,6 +111,14 @@ public struct ShortcutSync: Sendable {
         return actions()
     }
 
+    /// A fetch from `device` failed: the computer is free for an offer of a
+    /// later edit here. The same fetch is asked again once it reports news
+    /// or comes back, not at once, so a failing computer is not hammered.
+    public mutating func fetchFailed(_ device: String) -> [Action] {
+        fetching[device] = nil
+        return actions()
+    }
+
     /// The computer went away or was forgotten: whatever it reports next is
     /// news, so a failed fetch or offer is tried again.
     public mutating func offline(_ device: String) {
@@ -134,6 +143,10 @@ public struct ShortcutSync: Sendable {
     private mutating func actions() -> [Action] {
         var actions: [Action] = []
         for (device, updatedMs) in reported.sorted(by: { $0.key < $1.key }) {
+            // One fetch per computer at a time: its answer is checked
+            // against the copy here when it was asked for, so a second
+            // fetch must not move that. It is decided again once back.
+            guard fetching[device] == nil else { continue }
             let now = Settled(reported: updatedMs, local: local)
             guard settled[device] != now else { continue }
             settled[device] = now

@@ -307,6 +307,10 @@ final class ShortcutStore {
         }
     }
 
+    func fetchFailed(_ device: String) {
+        run { $0.fetchFailed(device) }
+    }
+
     func offline(_ device: String) {
         sync.offline(device)
     }

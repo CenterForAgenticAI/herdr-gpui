@@ -305,6 +305,8 @@ final class Fleet {
     /// A computer's copy of the text shortcuts, as fetched, or as it stood
     /// after the offer that goes with it.
     @ObservationIgnored var onShortcuts: ((TextShortcuts, _ offered: TextShortcuts?, String) -> Void)?
+    /// A computer's shortcuts could not be read.
+    @ObservationIgnored var onShortcutsFetchFailed: ((String) -> Void)?
     /// A computer's link is not online, or the computer was forgotten.
     @ObservationIgnored var onOffline: ((String) -> Void)?
     /// Offers of text shortcuts on their way, one at a time per computer.
@@ -495,6 +497,7 @@ final class Fleet {
                 onShortcuts?(copy, nil, device)
             } catch {
                 log.error("could not read shortcuts: \(String(describing: error), privacy: .public)")
+                onShortcutsFetchFailed?(device)
             }
         }
     }
