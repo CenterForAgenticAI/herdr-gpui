@@ -80,6 +80,7 @@ pub(crate) struct State {
     /// Streams open per device.
     pub(crate) connected: Mutex<HashMap<DeviceId, usize>>,
     pub(crate) fingerprint: String,
+    pub(crate) github: crate::native::changes::github::Reader,
     pub(crate) hub: Arc<Hub>,
     /// How much this computer lets Live Activities say.
     pub(crate) live_activities: crate::app::config::ActivityDetail,

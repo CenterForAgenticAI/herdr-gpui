@@ -17,6 +17,7 @@ struct ChangesScreen: View {
     @State private var scope = ChangeScope.uncommitted
     @State private var files = Loading<ChangeList>.waiting
     @State private var checks: PullRequestChecks?
+    @State private var checksError: String?
     @State private var sending: PullRequestCheck?
     #if DEBUG
     /// The simulator loop's `-openDiff PATH` opens that file's diff.
@@ -58,6 +59,17 @@ struct ChangesScreen: View {
                 .listRowInsets(EdgeInsets())
             }
             if let checks, !checks.checks.isEmpty { checksSection(checks) }
+            if let checksError {
+                Section("Pull request checks") {
+                    Text(checksError).foregroundStyle(.secondary)
+                }
+            }
+            if machine?.home?.github == false {
+                Section {
+                    Text("Standalone GitHub reads are not enabled on this computer. Its owner can sign in with gh and enable remote GitHub CLI reads there.")
+                        .foregroundStyle(.secondary)
+                }
+            }
             filesSection
         }
         .navigationTitle("Changes")
@@ -108,18 +120,22 @@ struct ChangesScreen: View {
         }
     }
 
-    /// Checks are extra here, so failing to read them only leaves them out.
+    /// Ask even before a badge arrives: absence of metadata is not proof
+    /// that this branch has no PR. Failures remain visible and retryable.
     private func loadChecks() async {
-        guard let number = workspace?.pullRequest?.number else {
-            checks = nil
-            return
-        }
         let (device, id) = (key.device, key.workspace)
-        let read = try? await model.fleet.call(device) { client, token in
-            try await client.checks(workspace: id, bearer: token)
+        checksError = nil
+        do {
+            let read = try await model.fleet.call(device) { client, token in
+                try await client.checks(workspace: id, bearer: token)
+            }
+            guard !Task.isCancelled else { return }
+            checks = read
+        } catch {
+            guard !Task.isCancelled else { return }
+            checks = nil
+            checksError = error.localizedDescription
         }
-        guard !Task.isCancelled, number == workspace?.pullRequest?.number else { return }
-        checks = read
     }
 
     @ViewBuilder private var filesSection: some View {

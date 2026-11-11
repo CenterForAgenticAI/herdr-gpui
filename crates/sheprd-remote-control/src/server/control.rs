@@ -251,7 +251,7 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                     message: "The daemon layout changed".into(),
                 };
             }
-            if state.pull_requests.borrow().as_ref() != &snapshot {
+            if !state.github.enabled() && state.pull_requests.borrow().as_ref() != &snapshot {
                 state.pull_requests.send_replace(Arc::new(snapshot));
             }
             return Response::Done;
