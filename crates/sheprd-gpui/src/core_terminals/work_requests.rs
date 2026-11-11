@@ -16,6 +16,16 @@ pub(super) struct Seen {
 }
 
 impl Seen {
+    fn pause(&mut self, now: Instant) {
+        self.known = None;
+        self.connected_at = Some(now);
+    }
+
+    fn fresh(&self, read: Option<Instant>) -> bool {
+        read.zip(self.connected_at)
+            .is_some_and(|(read, connected)| read > connected)
+    }
+
     fn take(&mut self, listed: HashSet<(TerminalId, String)>) -> HashSet<(TerminalId, String)> {
         if self.saturated || listed.len() > MAX_SEEN {
             // Do not forget an unrecorded request and later replay it when
@@ -68,14 +78,21 @@ impl CoreTerminals {
                     ..Default::default()
                 };
             }
+            let host = Host::Remote(scope.clone());
+            if !self
+                .tabs
+                .values()
+                .any(|shown| shown.host == host && !shown.observe)
+            {
+                // A host with no driving tabs is not polled. Reopening one
+                // must baseline its first fresh list, not execute requests
+                // accumulated while the window was not observing the host.
+                remote.work_requests.pause(Instant::now());
+                continue;
+            }
             // A retained list from a lost connection cannot establish the
             // new baseline. Wait for a list asked on this connection.
-            if !remote
-                .infos
-                .read_at()
-                .zip(remote.work_requests.connected_at)
-                .is_some_and(|(read, connected)| read > connected)
-            {
+            if !remote.work_requests.fresh(remote.infos.read_at()) {
                 continue;
             }
             let listed = remote
@@ -90,7 +107,6 @@ impl CoreTerminals {
                 .take(MAX_SEEN + 1)
                 .collect();
             let new = remote.work_requests.take(listed);
-            let host = Host::Remote(scope.clone());
             for info in remote.infos.all() {
                 let tokens: Vec<_> = info
                     .labels

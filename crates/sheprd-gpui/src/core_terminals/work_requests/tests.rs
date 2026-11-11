@@ -31,3 +31,19 @@ fn exceeding_capacity_cannot_replay_when_labels_disappear() {
     assert!(seen.take(labels(&strings)).is_empty());
     assert!(seen.take(labels(&["0"])).is_empty());
 }
+
+#[test]
+fn reopening_a_host_waits_for_a_new_list_and_suppresses_queued_labels() {
+    let now = Instant::now();
+    let mut seen = Seen::default();
+    seen.take(labels(&[]));
+    seen.pause(now);
+    assert!(!seen.fresh(None));
+    assert!(!seen.fresh(Some(now)));
+    assert!(seen.fresh(Some(now + std::time::Duration::from_millis(1))));
+    assert!(seen.take(labels(&["queued-while-hidden"])).is_empty());
+    assert_eq!(
+        seen.take(labels(&["queued-while-hidden", "new"])),
+        labels(&["new"])
+    );
+}
