@@ -5,6 +5,7 @@ use super::*;
 use crate::merged_cleanup::kept::kept_candidates;
 use sheprd_session::{Keeper, Workspace, Worktree};
 
+/// Keep checkout paths and repository keys absolute on this platform.
 const ROOT: &str = if cfg!(windows) { "C:/src" } else { "/src" };
 
 pub(super) fn kept(id: &str, linked: bool, keeper: Keeper) -> Workspace {
