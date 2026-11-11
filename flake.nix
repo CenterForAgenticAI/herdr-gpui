@@ -92,7 +92,12 @@
               ./scripts/release/herdr-core-licenses.txt
             ];
           };
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            # All Moonframe crates share this pinned Git checkout, including
+            # when the optional feature is off and Cargo only vendors it.
+            outputHashes."moonframe-0.3.1" = "sha256-DSroyTi58a5T15DKmZCs7v0vnYI6CtHxhaeMUw4xyYQ=";
+          };
           # The app starts chats with the sheprd-acp beside its executable,
           # runs the sheprd-remote-control beside it as a user service, runs
           # automations in the sheprd-automate there, and starts sheprd-nearby
