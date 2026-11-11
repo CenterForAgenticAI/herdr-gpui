@@ -211,6 +211,7 @@ pub fn run(
             session: selected.value.clone(),
         }
     };
+    resume.folder_here()?;
     let endpoint = EndpointId::random();
     let line = bound_line(&resume, program, &endpoint, &binding.environment)?;
     // Read again after constructing the line; selection can change without
