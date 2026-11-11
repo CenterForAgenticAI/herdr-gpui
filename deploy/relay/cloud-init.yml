@@ -1,7 +1,7 @@
 #cloud-config
 # DigitalOcean user data for one relay droplet (Ubuntu 24.04). It installs
 # Docker, opens only SSH, HTTP, HTTPS, and QUIC (UDP 443), writes the
-# compose files, makes a dashboard password, and starts the relay at
+# compose files, makes a dashboard token, and starts the relay at
 # https://IP.sslip.io unless RELAY_DOMAIN is filled in below. create-droplet.sh fills the two
 # placeholders; to use this by hand, replace them yourself.
 #
@@ -40,10 +40,15 @@ write_files:
       fi
       if [ ! -f .env ]; then
         umask 077
-        password=$(head -c 24 /dev/urandom | base64 | tr -d '/+=')
-        printf 'RELAY_DASHBOARD_USER=admin\nRELAY_DASHBOARD_PASSWORD=%s\n' "$password" > .env
-        printf 'https://%s/dashboard\nuser: admin\npassword: %s\n' "$domain" "$password" > /root/sheprd-relay-login.txt
+        # 32 random bytes: guessing is hopeless, and three wrong tries
+        # block an address for 15 minutes anyway.
+        token=$(head -c 32 /dev/urandom | base64 | tr -d '/+=\n')
+        printf 'RELAY_DASHBOARD_TOKEN=%s\n' "$token" > .env
+        printf 'https://%s/dashboard\naccess token: %s\n' "$domain" "$token" > /root/sheprd-relay-login.txt
       fi
+      # Ranges to ban by hand, one per line; the relay re-reads it.
+      mkdir -p bans
+      [ -f bans/list ] || printf '# One address or range per line, e.g. 203.0.113.0/24\n' > bans/list
       printf 'RELAY_DOMAIN=%s\n' "$domain" > compose.env
       docker compose --env-file compose.env up -d --pull always
 

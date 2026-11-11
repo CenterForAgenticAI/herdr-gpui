@@ -120,7 +120,7 @@ Statuses: `0` ok, `1` offline, `2` busy, `3` timeout, `4` limited,
 | `GET /v1/accept/{session}` | The listener's socket for one dial. The session id is 128 random bits that only the listener learns, and it can be claimed once. |
 | `GET /v1/info` | `{"protocol":1,"version","listen_token":bool,"quic":{"port","pin"},"websocket":bool}`, so a client can check an endpoint, know to ask for a token, and reach QUIC, before saving it. |
 | `GET /healthz` | For uptime checks. |
-| `/dashboard` | The read-only dashboard, when a password is set. |
+| `/dashboard` | The read-only dashboard, when an access token is set. |
 
 WebSocket proofs cover the relay's own name, `RELAY_PUBLIC_HOST` (set from
 the domain by `deploy/relay`), which the relay checks against its
@@ -166,6 +166,40 @@ and then charge time, so interactive sessions stay snappy while a bulk
 transfer is held to its rate. Each direction has its own bucket, so a
 throttled download never stalls typing.
 
+### Banning toxic clients (`guard`)
+
+On by default, with nothing to set up. Each address (an IPv4 address, or
+an IPv6 /64) earns points for misbehaving, fading one a minute; 10 points
+ban it:
+
+| Offense | Points |
+| --- | --- |
+| Hitting a rate limit or the per-address connection cap; dialing with a key the computer did not name | 1 |
+| Probing: a route or session id that does not parse, a stream held open with no request | 2 |
+| A forged proof or wrong listen token; malformed messages or frames | 3 |
+| Three wrong dashboard tokens; moving more than `max-transfer-per-hour` (20 GiB, both sides of every session) | 10, a ban at once |
+
+- Bans last 10 minutes, then an hour, then a day for repeat offenders, and
+  a clean day after the last one starts over.
+- A banned address is refused before any work: before the QUIC handshake
+  (even before a retry), and before every HTTP route but `/healthz`. Its
+  open sessions end (QUIC code 8, WebSocket 4429) and its listeners close.
+- One point for a disallowed dial key, fading a point a minute, means a
+  revoked device retrying about once a minute never adds up, so it cannot
+  get its household's shared address, and that household's computer,
+  banned. A burst does.
+- Loopback and private addresses are never banned automatically: behind a
+  reverse proxy that is misconfigured, every caller can look like the
+  proxy, and banning it would lock everyone out.
+- By hand: `RELAY_BAN=203.0.113.0/24,2001:db8::/32`, or `--ban-file FILE`,
+  one range per line, re-read every 30 seconds. A manual ban applies to any
+  address, private ones included, and ends what it covers at once.
+- `RELAY_AUTO_BAN=off` turns automatic bans off. The dashboard lists active
+  bans with their reason and time left; `/metrics` has
+  `sheprd_relay_strikes_total{offense}`, `sheprd_relay_bans_total{offense}`,
+  and `sheprd_relay_banned`. Logs say a ban happened and why, never the
+  address.
+
 ### Telemetry
 
 `/metrics` listens on its own port (default `127.0.0.1:9090`; `off` turns it
@@ -185,14 +219,19 @@ off), optionally behind `RELAY_METRICS_TOKEN`. Series:
 `sheprd_relay_dials_total{outcome="unauthorized"}` counts dials with a key
 the computer did not name; peers were told `offline`.
 
-The dashboard (`/dashboard`) is on only when `RELAY_DASHBOARD_PASSWORD` (or
-`--dashboard-password-file`) is set, at least 12 characters. It shows
-sessions, listeners, connections, throughput over ten minutes, bytes
-carried, refusals, dial and listen outcomes, and the busiest sessions by
-the first eight characters of their route. It changes nothing.
+The dashboard (`/dashboard`) is on only when `RELAY_DASHBOARD_TOKEN` (or
+`--dashboard-token-file`) is set, at least 24 characters; `deploy/relay`
+generates 32 random bytes. It shows sessions, listeners, connections,
+throughput over ten minutes, bytes carried, refusals, dial and listen
+outcomes, and the busiest sessions by the first eight characters of their
+route, live: `GET /dashboard/api/live` streams a snapshot a second as
+Server-Sent Events. It changes nothing.
 
-- One account. The password is compared in constant time, and logins are
-  limited to 10 a minute per address and 60 a minute overall.
+- One access token, compared in constant time. Three wrong tries from an
+  address (an IPv4 address or IPv6 /64) block it for 15 minutes; while
+  blocked, its tries are refused unchecked. Logins across all addresses
+  are also limited to 60 a minute, against guessing from many addresses.
+- A live stream ends when its login expires; 16 may be open at once.
 - The session cookie is HMAC-signed with a key drawn at start, lasts
   12 hours, and is `HttpOnly; Secure; SameSite=Strict; Path=/dashboard`.
 - The page has a strict CSP (no inline script or style), `frame-ancestors
@@ -465,7 +504,7 @@ distroless `nonroot` image. `deploy/relay` holds the rest:
   on `127.0.0.1` only.
 - `cloud-init.yml`: DigitalOcean user data for Ubuntu 24.04. Installs
   Docker, allows only 22, 80, and 443 through `ufw`, makes a dashboard
-  password, and starts the relay at `IP.sslip.io` unless a domain is given.
+  token, and starts the relay at `IP.sslip.io` unless a domain is given.
 - `create-droplet.sh REGION...`: one droplet per region with `doctl`.
 - `app.yaml`: DigitalOcean App Platform, with no server: WebSockets only,
   since App Platform has no UDP. The relay listens on `PORT` and reads

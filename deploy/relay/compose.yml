@@ -19,11 +19,17 @@ services:
       RELAY_PUBLIC_HOST: ${RELAY_DOMAIN:?set RELAY_DOMAIN}
       # Clients reach QUIC on 443, mapped to the container's 8443.
       RELAY_QUIC_PORT: "443"
+      # Ranges banned by hand, re-read every 30 s: edit ./bans/list to ban.
+      # The directory is mounted, not the file, so editors that replace
+      # the file on save still reach the relay.
+      RELAY_BAN_FILE: /bans/list
     ports:
       - "443:8443/udp"
       # /metrics stays on the host. Scrape it locally, through an SSH
       # tunnel, or over a private network with RELAY_METRICS_TOKEN set.
       - "127.0.0.1:9090:9090"
+    volumes:
+      - ./bans:/bans:ro
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

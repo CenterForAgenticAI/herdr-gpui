@@ -12,7 +12,7 @@ pub use peer::Peer;
 use crate::{
     bucket::Throttle,
     hub::Session,
-    metrics::{Direction, End, Throttled},
+    metrics::{Direction, End, Offense, Throttled},
 };
 use peer::{Next, Sink, Source};
 use std::{
@@ -47,6 +47,8 @@ pub mod code {
     pub const FULL: u16 = 4503;
     /// The listener stopped allowing the dial key this session used.
     pub const REVOKED: u16 = 4403;
+    /// One side's address was banned for misbehaving.
+    pub const BANNED: u16 = 4429;
 }
 
 /// Bounds one session runs under.
@@ -60,8 +62,10 @@ pub struct Bounds {
     pub chunk: usize,
 }
 
-/// Runs a session until a peer leaves, it idles, it expires, or the
-/// listener revokes the key it was dialed with.
+/// Runs a session until a peer leaves, it idles, it expires, the listener
+/// revokes the key it was dialed with, or either side is banned. A side
+/// that breaks the protocol is counted toward a ban, and every second both
+/// sides' bytes are charged to their hourly transfer budgets.
 pub async fn splice(dialer: Peer, listener: Peer, session: Session) {
     let bounds = session.bounds();
     let (from_dialer, mut to_dialer) = dialer.split();
@@ -94,8 +98,9 @@ pub async fn splice(dialer: Peer, listener: Peer, session: Session) {
         tokio::select! {
             end = pump_up => end,
             end = pump_down => end,
-            end = watchdog(&last, started, bounds.idle, bounds.longest) => end,
+            end = watchdog(&session, &last, started, bounds.idle, bounds.longest) => end,
             () = session.revoked() => End::Revoked,
+            () = session.banned() => End::Banned,
         }
     };
     let _ = tokio::join!(
@@ -125,7 +130,15 @@ async fn pump(
     loop {
         let bytes = match from.next(chunk).await {
             Next::Data(bytes) => bytes,
-            Next::Violation => return End::Protocol,
+            Next::Violation => {
+                // Only the side that broke the protocol is counted.
+                let culprit = match direction {
+                    Direction::FromDialer => session.dialer(),
+                    Direction::FromListener => session.listener(),
+                };
+                session.hub_arc().offend(culprit, Offense::Malformed);
+                return End::Protocol;
+            }
             Next::End => return End::Closed,
         };
         let length = bytes.len();
@@ -151,10 +164,26 @@ async fn pump(
     }
 }
 
-/// Resolves when the session has idled or run too long.
-async fn watchdog(last: &AtomicU64, started: Instant, idle: Duration, longest: Duration) -> End {
+/// Resolves when the session has idled or run too long. Each turn also
+/// charges what crossed since the last one to both sides' budgets.
+async fn watchdog(
+    session: &Session,
+    last: &AtomicU64,
+    started: Instant,
+    idle: Duration,
+    longest: Duration,
+) -> End {
     let deadline = started + longest;
+    let mut charged = 0;
     loop {
+        let carried =
+            session.traffic.from_dialer.load(Relaxed) + session.traffic.from_listener.load(Relaxed);
+        if carried > charged {
+            let hub = session.hub_arc();
+            hub.charge(session.dialer(), carried - charged);
+            hub.charge(session.listener(), carried - charged);
+            charged = carried;
+        }
         let quiet_since = started + Duration::from_millis(last.load(Relaxed));
         let idle_at = quiet_since + idle;
         if Instant::now() >= deadline {

@@ -59,15 +59,26 @@ Every option is optional, and each can also be set as a RELAY_* variable
   --accept-timeout DURATION      Wait for a listener to accept (default 10s)
   --dials-per-minute N           Per address (default 120)
   --listens-per-minute N         Per address (default 30)
-  --dashboard-user NAME          Dashboard login (default admin)
-  --dashboard-password-file FILE The dashboard password, at least 12
-                                 characters; or RELAY_DASHBOARD_PASSWORD.
-                                 Without one, the dashboard is off.
+  --dashboard-token-file FILE    The dashboard's access token, at least 24
+                                 characters; or RELAY_DASHBOARD_TOKEN. Without
+                                 one, the dashboard is off. Three wrong tries
+                                 block an address for 15 minutes.
   --listen-token-file FILE       Only listeners presenting this token may
                                  listen; or RELAY_LISTEN_TOKEN. Dialers never
                                  need it.
   --metrics-token-file FILE      Require `Authorization: Bearer TOKEN` on
                                  /metrics; or RELAY_METRICS_TOKEN.
+  --auto-ban on|off              Ban addresses that misbehave: limits hit,
+                                 forged proofs, malformed messages, dialing
+                                 without an allowed key (default on). Private
+                                 and loopback addresses are never auto-banned.
+  --max-transfer-per-hour BYTES  Ban an address moving more than this in an
+                                 hour, on either side of its sessions; 0 is
+                                 no budget (default 20GiB)
+  --ban RANGES                   Ban these by hand, comma-separated:
+                                 203.0.113.7,198.51.100.0/24,2001:db8::/32
+  --ban-file FILE                Ban the ranges in this file, one per line, #
+                                 comments allowed; re-read every 30 s
   --help                         Show this.
 
 BYTES takes k, M, or G (binary): 64k, 4MiB. DURATION takes ms, s, m, h, or d.";
@@ -89,10 +100,12 @@ pub enum Kind {
 pub const SETTINGS: &[(&str, Kind)] = &[
     // keep-sorted start
     ("accept-timeout", Kind::Duration),
+    ("auto-ban", Kind::Text),
+    ("ban", Kind::Text),
+    ("ban-file", Kind::File),
     ("behind-proxy", Kind::Flag),
     ("client-ip-header", Kind::Text),
-    ("dashboard-password-file", Kind::File),
-    ("dashboard-user", Kind::Text),
+    ("dashboard-token-file", Kind::File),
     ("dials-per-minute", Kind::Count),
     ("idle-timeout", Kind::Duration),
     ("listen", Kind::Address),
@@ -105,6 +118,7 @@ pub const SETTINGS: &[(&str, Kind)] = &[
     ("max-session-duration", Kind::Duration),
     ("max-sessions", Kind::Count),
     ("max-sessions-per-route", Kind::Count),
+    ("max-transfer-per-hour", Kind::Bytes),
     ("metrics", Kind::Address),
     ("metrics-token-file", Kind::File),
     ("public-host", Kind::Text),
@@ -117,7 +131,7 @@ pub const SETTINGS: &[(&str, Kind)] = &[
 
 /// Secrets read only from variables, beside their `*_FILE` settings.
 const SECRET_VARIABLES: [&str; 3] = [
-    "RELAY_DASHBOARD_PASSWORD",
+    "RELAY_DASHBOARD_TOKEN",
     "RELAY_LISTEN_TOKEN",
     "RELAY_METRICS_TOKEN",
 ];
@@ -129,11 +143,15 @@ const FRAME_RANGE: std::ops::RangeInclusive<u64> = 1024..=(16 * 1024 * 1024);
 /// What the relay was started with. `Debug` redacts the secrets.
 #[derive(Clone, Debug)]
 pub struct Options {
+    /// Ranges banned by hand, from `--ban`.
+    pub bans: Vec<crate::guard::Cidr>,
+    /// A file of ranges banned by hand, re-read every 30 seconds.
+    pub ban_file: Option<PathBuf>,
     pub behind_proxy: bool,
     /// The header the proxy in front puts the caller's address in.
     pub client_ip_header: Option<String>,
-    pub dashboard_password: Option<SecretString>,
-    pub dashboard_user: String,
+    /// The dashboard's access token; without one, the dashboard is off.
+    pub dashboard_token: Option<SecretString>,
     pub limits: Limits,
     pub listen: SocketAddr,
     pub listen_token: Option<SecretString>,
@@ -153,10 +171,11 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            bans: Vec::new(),
+            ban_file: None,
             behind_proxy: false,
             client_ip_header: None,
-            dashboard_password: None,
-            dashboard_user: "admin".to_owned(),
+            dashboard_token: None,
             limits: Limits::default(),
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
             listen_token: None,
@@ -238,7 +257,7 @@ impl Options {
             .filter(|text| !text.is_empty())
             .map(SecretString::from);
         match name {
-            "RELAY_DASHBOARD_PASSWORD" => self.dashboard_password = text,
+            "RELAY_DASHBOARD_TOKEN" => self.dashboard_token = text,
             "RELAY_LISTEN_TOKEN" => self.listen_token = text,
             _ => self.metrics_token = text,
         }
@@ -284,7 +303,22 @@ impl Options {
         let limits = &mut self.limits;
         match name {
             "accept-timeout" => limits.accept_timeout = duration()?,
-            "dashboard-password-file" => self.dashboard_password = Some(read(name, text)?),
+            "auto-ban" => {
+                limits.auto_ban = match text.trim() {
+                    "on" | "1" | "true" => true,
+                    "off" | "0" | "false" => false,
+                    _ => return Err(invalid()),
+                }
+            }
+            "ban" => {
+                let (ranges, bad) = crate::guard::parse_list(text);
+                if !bad.is_empty() {
+                    return Err(invalid());
+                }
+                self.bans = ranges;
+            }
+            "ban-file" => self.ban_file = Some(PathBuf::from(text)),
+            "dashboard-token-file" => self.dashboard_token = Some(read(name, text)?),
             "client-ip-header" => {
                 let name = text.trim().to_ascii_lowercase();
                 let token = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'-';
@@ -292,9 +326,6 @@ impl Options {
                     return Err(invalid());
                 }
                 self.client_ip_header = Some(name);
-            }
-            "dashboard-user" if !text.trim().is_empty() => {
-                self.dashboard_user = text.trim().to_owned()
             }
             "dials-per-minute" => limits.dials_per_minute = per_minute()?,
             "idle-timeout" => limits.idle_timeout = duration()?,
@@ -314,6 +345,7 @@ impl Options {
             "max-session-duration" => limits.max_session_duration = duration()?,
             "max-sessions" => limits.max_sessions = count()?,
             "max-sessions-per-route" => limits.max_sessions_per_route = count()?,
+            "max-transfer-per-hour" => limits.max_transfer_per_hour = bytes()?,
             "metrics" if text == "off" => self.metrics = None,
             "metrics" => self.metrics = Some(text.parse().map_err(|_| invalid())?),
             "metrics-token-file" => self.metrics_token = Some(read(name, text)?),

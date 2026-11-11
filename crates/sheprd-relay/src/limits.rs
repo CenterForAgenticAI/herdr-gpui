@@ -20,6 +20,11 @@ pub struct Limits {
     pub listener_silence: Duration,
     /// Listens one address may start per minute.
     pub listens_per_minute: u32,
+    /// Whether addresses that misbehave are banned automatically (`guard`).
+    pub auto_ban: bool,
+    /// Bytes one address may move in an hour, on either side of its
+    /// sessions, before it is banned; 0 for no budget.
+    pub max_transfer_per_hour: u64,
     /// Open sockets of every kind.
     pub max_connections: usize,
     /// Open sockets from one IPv4 address or IPv6 /64.
@@ -47,6 +52,8 @@ impl Default for Limits {
             idle_timeout: Duration::from_secs(5 * 60),
             listener_silence: Duration::from_secs(60),
             listens_per_minute: 30,
+            auto_ban: true,
+            max_transfer_per_hour: 20 * 1024 * 1024 * 1024,
             max_connections: 10_000,
             max_connections_per_ip: 64,
             max_frame: 64 * 1024,

@@ -14,8 +14,7 @@
   <p class="muted">Read-only dashboard</p>
   <!--message-->
   <form method="post" action="/dashboard/login">
-    <label>User <input name="user" autocomplete="username" required maxlength="256" autofocus></label>
-    <label>Password <input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
+    <label>Access token <input name="token" type="password" autocomplete="current-password" required maxlength="256" autofocus spellcheck="false"></label>
     <button type="submit">Sign in</button>
   </form>
 </main>

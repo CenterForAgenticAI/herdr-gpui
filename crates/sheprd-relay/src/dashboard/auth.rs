@@ -1,5 +1,9 @@
-//! The dashboard's login: one operator account, a signed session cookie,
-//! and the login form's fields.
+//! The dashboard's login: one access token, a signed session cookie, and
+//! the login form's field.
+//!
+//! The token, not a password, is what keeps guessing hopeless: at least 24
+//! characters, and `deploy/relay` generates 32 random bytes. The lockout in
+//! `lockout` then stops an address after three wrong tries.
 
 use crate::secret::Secret;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -12,18 +16,19 @@ use std::{fmt, time::Duration};
 pub const COOKIE: &str = "sheprd_relay";
 /// How long a login lasts.
 pub const SESSION: Duration = Duration::from_secs(12 * 60 * 60);
-/// The shortest password the relay accepts.
-pub const MIN_PASSWORD: usize = 12;
+/// The shortest token the relay accepts. `openssl rand -base64 32` or
+/// cloud-init's own gives 43 or more.
+pub const MIN_TOKEN: usize = 24;
 /// The longest field the login form may carry.
 const MAX_FIELD: usize = 256;
 const CONTEXT: &[u8] = b"sheprd-relay/dashboard/v1\0";
 
-/// Who may read the dashboard, and the key its cookies are signed with.
+/// Who may read the dashboard: whoever holds the token. Also the key its
+/// cookies are signed with.
 pub struct Account {
-    password: Secret,
     /// Drawn at start, so a restart signs everyone out.
     signing: [u8; 64],
-    user: Secret,
+    token: Secret,
 }
 
 impl fmt::Debug for Account {
@@ -33,30 +38,26 @@ impl fmt::Debug for Account {
 }
 
 impl Account {
-    /// An account for `user` and `password`, refusing a short password.
-    pub fn new(user: &str, password: &str) -> crate::Result<Self> {
-        if password.chars().count() < MIN_PASSWORD {
+    /// An account for `token`, refusing a short one.
+    pub fn new(token: &str) -> crate::Result<Self> {
+        if token.chars().count() < MIN_TOKEN {
             return Err(crate::Error::WeakSecret {
-                min: MIN_PASSWORD,
-                name: "the dashboard password",
+                min: MIN_TOKEN,
+                name: "the dashboard token",
             });
         }
         let mut signing = [0; 64];
         getrandom::fill(&mut signing).map_err(crate::Error::Random)?;
         Ok(Self {
-            password: Secret::new(password.as_bytes())?,
             signing,
-            user: Secret::new(user.as_bytes())?,
+            token: Secret::new(token.as_bytes())?,
         })
     }
 
-    /// Whether the pair is right. Both are always checked, so timing does
-    /// not tell which one was wrong.
+    /// Whether `token` is the dashboard's, in constant time.
     #[must_use]
-    pub fn check(&self, user: &str, password: &str) -> bool {
-        let user = self.user.matches(user.as_bytes());
-        let password = self.password.matches(password.as_bytes());
-        user & password
+    pub fn check(&self, token: &str) -> bool {
+        self.token.matches(token.as_bytes())
     }
 
     fn mac(&self, expires: u64) -> Hmac<Sha256> {
@@ -72,6 +73,14 @@ impl Account {
         let expires = now_secs.saturating_add(SESSION.as_secs());
         let tag = self.mac(expires).finalize().into_bytes();
         format!("{expires}.{}", URL_SAFE_NO_PAD.encode(tag))
+    }
+
+    /// When a cookie this relay issued expires, if it has not yet.
+    #[must_use]
+    pub fn expiry(&self, value: &str, now_secs: u64) -> Option<u64> {
+        let (expires, _) = value.split_once('.')?;
+        let expires = expires.parse().ok()?;
+        self.valid(value, now_secs).then_some(expires)
     }
 
     /// Whether `value` is a cookie this relay issued that has not expired.
@@ -109,24 +118,26 @@ pub fn set_cookie(value: Option<&str>) -> String {
     }
 }
 
-/// The user and password from a urlencoded login form.
+/// The token from a urlencoded login form.
 #[must_use]
-pub fn login_form(body: &[u8]) -> Option<(String, String)> {
+pub fn login_form(body: &[u8]) -> Option<String> {
     let body = std::str::from_utf8(body).ok()?;
-    let mut user = None;
-    let mut password = None;
+    let mut token = None;
     for pair in body.split('&') {
         let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
         if value.len() > MAX_FIELD * 3 {
             return None;
         }
-        let value = value.replace('+', " ");
-        let value = percent_decode_str(&value).decode_utf8().ok()?.into_owned();
-        match name {
-            "user" => user = Some(value),
-            "password" => password = Some(value),
-            _ => {}
+        if name == "token" {
+            let value = value.replace('+', " ");
+            token = Some(
+                percent_decode_str(&value)
+                    .decode_utf8()
+                    .ok()?
+                    .trim()
+                    .to_owned(),
+            );
         }
     }
-    Some((user?, password?))
+    token
 }

@@ -17,7 +17,7 @@ use crate::{
     RouteId, SessionId, broker,
     endpoint::{Info, PROTOCOL},
     hub::{Accepted, Hub},
-    metrics::{Dial, Kind, Listen, Refused},
+    metrics::{Dial, Kind, Listen, Offense, Refused},
     socket::{self, FromListener, Hello, NONCE_LEN, ToPeer},
     splice::{Peer, code, splice},
     wire::Status,
@@ -25,10 +25,11 @@ use crate::{
 use axum::{
     Json, Router,
     extract::{
-        ConnectInfo, Path, State,
+        ConnectInfo, FromRequestParts, Path, Request, State,
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
+    middleware::Next,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -114,8 +115,31 @@ async fn info(State(shared): State<Shared>) -> Json<Info> {
     })
 }
 
+/// Refuses a banned caller before any route but `/healthz`, so a ban costs
+/// it every endpoint, the dashboard included.
+pub async fn refuse_banned(State(shared): State<Shared>, request: Request, next: Next) -> Response {
+    // Every server this router runs under records the peer; a router used
+    // without one has no caller to judge.
+    let (mut parts, body) = request.into_parts();
+    let peer = ConnectInfo::<SocketAddr>::from_request_parts(&mut parts, &())
+        .await
+        .ok()
+        .map(|info| info.0);
+    let request = Request::from_parts(parts, body);
+    let banned = peer.is_some_and(|peer| {
+        let address = shared.address(peer, request.headers());
+        shared.hub.is_banned(address)
+    });
+    if request.uri().path() != "/healthz" && banned {
+        shared.hub.metrics.refuse(Refused::Banned);
+        return refused(Refused::Banned);
+    }
+    next.run(request).await
+}
+
 fn refused(reason: Refused) -> Response {
     match reason {
+        Refused::Banned => StatusCode::FORBIDDEN.into_response(),
         Refused::PerAddress => StatusCode::TOO_MANY_REQUESTS.into_response(),
         Refused::Total => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
@@ -166,10 +190,12 @@ async fn listen(
 
 async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, host: Arc<str>) {
     let Some((nonce, hello)) = challenge(&mut socket).await else {
+        hub.offend(address, Offense::Malformed);
         return close(socket, code::PROTOCOL).await;
     };
     let token = hello.token.as_deref().unwrap_or_default().as_bytes();
     let Some((key, signature)) = hello.decode() else {
+        hub.offend(address, Offense::Malformed);
         return close(socket, code::REFUSED).await;
     };
     let signed = socket::listen_signed(&host, &nonce);
@@ -216,6 +242,7 @@ async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, h
                         .ok()
                         .and_then(|message| message.decode());
                     let Some(message) = message else {
+                        hub.offend(address, Offense::Malformed);
                         return close_within(socket, code::PROTOCOL, silence).await;
                     };
                     let status = broker::apply(&registration, message);
@@ -224,6 +251,7 @@ async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, h
                     }
                 }
                 Some(Ok(Message::Binary(_))) => {
+                    hub.offend(address, Offense::Malformed);
                     return close_within(socket, code::PROTOCOL, silence).await;
                 }
                 Some(Ok(Message::Close(_)) | Err(_)) | None => return,
@@ -252,11 +280,12 @@ async fn dial(
     let Some(host) = shared.public_host.clone() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let address = shared.address(peer, &headers);
     let Some(route) = RouteId::parse(&route) else {
         hub.metrics.dial(Dial::BadRoute);
+        hub.offend(address, Offense::Probe);
         return StatusCode::NOT_FOUND.into_response();
     };
-    let address = shared.address(peer, &headers);
     let permit = match hub.admit(address, Kind::Dial) {
         Ok(permit) => permit,
         Err(reason) => return refused(reason),
@@ -281,9 +310,11 @@ async fn serve_dialer(
     route: RouteId,
 ) {
     let Some((nonce, hello)) = challenge(&mut socket).await else {
+        hub.offend(address, Offense::Malformed);
         return close(socket, code::PROTOCOL).await;
     };
     let Some((key, signature)) = hello.decode() else {
+        hub.offend(address, Offense::Malformed);
         return answer(socket, Status::Offline).await;
     };
     let signed = socket::dial_signed(&host, &nonce, &route);
@@ -317,11 +348,18 @@ async fn accept(
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let hub = &shared.hub;
-    let permit = match hub.admit(shared.address(peer, &headers), Kind::Accept) {
+    let address = shared.address(peer, &headers);
+    let permit = match hub.admit(address, Kind::Accept) {
         Ok(permit) => permit,
         Err(reason) => return refused(reason),
     };
-    let Some(accepted) = SessionId::parse(&session).and_then(|session| hub.accept(session)) else {
+    let Some(session) = SessionId::parse(&session) else {
+        // Not even an id: probing. A real listener's late accept, after
+        // its dial gave up, parses and is not counted.
+        hub.offend(address, Offense::Probe);
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(accepted) = hub.accept(session) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let max_frame = hub.limits.max_frame;

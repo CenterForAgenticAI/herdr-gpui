@@ -23,7 +23,7 @@ fn nothing_set_gives_safe_defaults() {
     let options = parse(&[], &[]).unwrap().unwrap();
     assert_eq!(options.listen.to_string(), "127.0.0.1:8080");
     assert_eq!(options.metrics.unwrap().to_string(), "127.0.0.1:9090");
-    assert!(options.dashboard_password.is_none());
+    assert!(options.dashboard_token.is_none());
     assert_eq!(options.limits, crate::Limits::default());
     assert!(!options.behind_proxy);
 }
@@ -42,7 +42,7 @@ fn flags_win_over_variables() {
             ("RELAY_MAX_CONNECTIONS", "3"),
             ("RELAY_IDLE_TIMEOUT", "2m"),
             ("RELAY_METRICS", "off"),
-            ("RELAY_DASHBOARD_PASSWORD", "  a long enough password "),
+            ("RELAY_DASHBOARD_TOKEN", "  a long enough dashboard token "),
         ],
     )
     .unwrap()
@@ -53,8 +53,8 @@ fn flags_win_over_variables() {
     assert!(options.metrics.is_none());
     assert!(options.behind_proxy);
     assert_eq!(
-        options.dashboard_password.unwrap().expose_secret(),
-        "a long enough password"
+        options.dashboard_token.unwrap().expose_secret(),
+        "a long enough dashboard token"
     );
 }
 
@@ -73,7 +73,12 @@ fn every_setting_is_read_from_its_variable() {
             Kind::File => file.to_str().unwrap(),
             Kind::Flag => "1",
             Kind::Port => "443",
-            Kind::Text => "operator",
+            Kind::Text => match *name {
+                "auto-ban" => "off",
+                "ban" => "203.0.113.0/24, 2001:db8::/32",
+                "client-ip-header" => "do-connecting-ip",
+                _ => "operator",
+            },
         };
         let variable = variable(name);
         assert!(
@@ -105,7 +110,7 @@ fn bad_values_are_refused_with_their_name() {
         Error::Argument { .. }
     ));
     assert!(matches!(
-        parse(&["--dashboard-password", "x"], &[]).unwrap_err(),
+        parse(&["--dashboard-token", "x"], &[]).unwrap_err(),
         Error::Argument { .. }
     ));
 }
@@ -117,7 +122,7 @@ fn help_asks_for_usage() {
 
 #[test]
 fn debug_hides_secrets() {
-    let options = parse(&[], &[("RELAY_DASHBOARD_PASSWORD", "hunter2hunter2")])
+    let options = parse(&[], &[("RELAY_DASHBOARD_TOKEN", "hunter2hunter2")])
         .unwrap()
         .unwrap();
     assert!(!format!("{options:?}").contains("hunter2"));

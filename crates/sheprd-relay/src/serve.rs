@@ -5,6 +5,7 @@ use crate::{
     Error, Options, Result,
     dashboard::{self, auth::Account},
     endpoint::QuicInfo,
+    guard::{Cidr, parse_list},
     hub::{Access, Hub},
     quic::{self, tls::Identity},
     secret::Secret,
@@ -25,7 +26,7 @@ use tokio::net::TcpListener;
 /// The shortest listen or metrics token the relay accepts.
 const MIN_TOKEN: usize = 16;
 
-/// The relay's HTTP routes and, with a password, the dashboard. `quic` is
+/// The relay's HTTP routes and, with a token, the dashboard. `quic` is
 /// what `/v1/info` says about QUIC.
 pub fn app(options: &Options, quic: Option<QuicInfo>) -> Result<(Router, Arc<Hub>)> {
     let hub = Arc::new(Hub::new(options.limits, access(options)?));
@@ -36,10 +37,16 @@ pub fn app(options: &Options, quic: Option<QuicInfo>) -> Result<(Router, Arc<Hub
         source: source(options),
     };
     let mut router = web::router(shared.clone());
-    if let Some(password) = &options.dashboard_password {
-        let account = Account::new(&options.dashboard_user, password.expose_secret())?;
-        router = router.merge(dashboard::router(shared, account));
+    if let Some(token) = &options.dashboard_token {
+        let account = Account::new(token.expose_secret())?;
+        router = router.merge(dashboard::router(shared.clone(), account));
     }
+    hub.guard.set_manual(options.bans.clone());
+    // Bans apply to every route, the dashboard included.
+    let router = router.layer(axum::middleware::from_fn_with_state(
+        shared,
+        web::refuse_banned,
+    ));
     Ok((router, hub))
 }
 
@@ -92,10 +99,57 @@ async fn metrics(
             header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
         )],
-        hub.metrics.render(),
+        hub.metrics.render() + &banned_now(&hub),
     )
         .into_response()
 }
+
+/// The gauge of addresses banned now, which only the guard knows.
+fn banned_now(hub: &Hub) -> String {
+    let active = hub.guard.active(std::time::Instant::now());
+    format!(
+        "# HELP sheprd_relay_banned Addresses banned automatically now.\n\
+         # TYPE sheprd_relay_banned gauge\nsheprd_relay_banned {active}\n"
+    )
+}
+
+/// Keeps the guard's manual ranges in step with `file` (and `--ban`),
+/// re-reading it every [`BAN_FILE_EVERY`] and ending what newly falls in
+/// them. A missing or unreadable file keeps the last good list.
+pub(crate) async fn watch_ban_file(hub: Arc<Hub>, file: std::path::PathBuf, fixed: Vec<Cidr>) {
+    let mut ticks = tokio::time::interval(BAN_FILE_EVERY);
+    let mut last: Option<String> = None;
+    loop {
+        ticks.tick().await;
+        let path = file.clone();
+        let read = tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await;
+        let text = match read {
+            Ok(Ok(text)) => text,
+            Ok(Err(error)) => {
+                if last.is_some() {
+                    tracing::warn!(%error, "could not read the ban file; keeping its last bans");
+                }
+                continue;
+            }
+            Err(_) => continue,
+        };
+        if last.as_ref() == Some(&text) {
+            continue;
+        }
+        let (ranges, bad) = parse_list(&text);
+        if !bad.is_empty() {
+            tracing::warn!(entries = ?bad, "some ban file entries are not addresses or ranges");
+        }
+        tracing::info!(ranges = ranges.len(), "loaded the ban file");
+        let all: Vec<Cidr> = fixed.iter().copied().chain(ranges).collect();
+        hub.guard.set_manual(all.clone());
+        hub.kick_ranges(&all);
+        last = Some(text);
+    }
+}
+
+/// How often the ban file is re-read.
+const BAN_FILE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn strong(token: &str, name: &'static str) -> Result<()> {
     if token.chars().count() < MIN_TOKEN {
@@ -120,6 +174,12 @@ pub async fn serve(options: Options) -> Result<()> {
         .map(|address| bind_quic(address, options.quic_port))
         .transpose()?;
     let (router, hub) = app(&options, quic.as_ref().map(|(_, info)| info.clone()))?;
+    if let Some(file) = options.ban_file.clone() {
+        tokio::spawn(watch_ban_file(Arc::clone(&hub), file, options.bans.clone()));
+    }
+    if !options.limits.auto_ban {
+        tracing::info!("automatic bans are off");
+    }
     if let Some((endpoint, info)) = &quic {
         tokio::spawn(quic::run(endpoint.clone(), Arc::clone(&hub)));
         tracing::info!(port = info.port, pin = %info.pin, "serving QUIC");
@@ -151,10 +211,10 @@ pub async fn serve(options: Options) -> Result<()> {
     if options.public_host.is_none() {
         tracing::warn!("the WebSocket fallback is off: set RELAY_PUBLIC_HOST to the relay's name");
     }
-    if options.dashboard_password.is_some() {
+    if options.dashboard_token.is_some() {
         tracing::info!("the dashboard is at /dashboard");
     } else {
-        tracing::info!("the dashboard is off: set RELAY_DASHBOARD_PASSWORD to turn it on");
+        tracing::info!("the dashboard is off: set RELAY_DASHBOARD_TOKEN to turn it on");
     }
     tracing::info!(
         address = %options.listen,

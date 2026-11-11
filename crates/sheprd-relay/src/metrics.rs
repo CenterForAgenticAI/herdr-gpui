@@ -69,6 +69,7 @@ labels! {
 labels! {
     /// Why a socket was refused before it opened.
     Refused {
+        Banned => "banned",
         PerAddress => "per_address",
         Total => "total",
     }
@@ -82,6 +83,7 @@ labels! {
         Idle => "idle",
         Protocol => "protocol",
         Revoked => "revoked",
+        Banned => "banned",
     }
 }
 
@@ -96,9 +98,24 @@ labels! {
 labels! {
     /// How a dashboard login went.
     Login {
+        Blocked => "blocked",
         Failed => "failed",
         Limited => "limited",
         Succeeded => "succeeded",
+    }
+}
+
+labels! {
+    /// What counts against an address toward a ban (`guard`).
+    Offense {
+        BadProof => "bad_proof",
+        Bandwidth => "bandwidth",
+        ConnectionCap => "connection_cap",
+        Limited => "limited",
+        Lockout => "lockout",
+        Malformed => "malformed",
+        Probe => "probe",
+        Unauthorized => "unauthorized",
     }
 }
 
@@ -125,7 +142,9 @@ pub struct Metrics {
     frames: [AtomicU64; Direction::ALL.len()],
     listeners: AtomicU64,
     listens: [AtomicU64; Listen::ALL.len()],
+    bans: [AtomicU64; Offense::ALL.len()],
     logins: [AtomicU64; Login::ALL.len()],
+    strikes: [AtomicU64; Offense::ALL.len()],
     pending: AtomicU64,
     refused: [AtomicU64; Refused::ALL.len()],
     sessions: AtomicU64,
@@ -146,7 +165,9 @@ impl Default for Metrics {
             frames: Default::default(),
             listeners: AtomicU64::default(),
             listens: Default::default(),
+            bans: Default::default(),
             logins: Default::default(),
+            strikes: Default::default(),
             pending: AtomicU64::default(),
             refused: Default::default(),
             sessions: AtomicU64::default(),
@@ -204,6 +225,16 @@ impl Metrics {
 
     pub fn refuse(&self, reason: Refused) {
         self.refused[reason.index()].fetch_add(1, Relaxed);
+    }
+
+    /// An offense counted against an address.
+    pub fn strike(&self, offense: Offense) {
+        self.strikes[offense.index()].fetch_add(1, Relaxed);
+    }
+
+    /// An address banned for `offense`.
+    pub fn ban(&self, offense: Offense) {
+        self.bans[offense.index()].fetch_add(1, Relaxed);
     }
 
     pub fn login(&self, outcome: Login) {
@@ -390,6 +421,26 @@ impl Metrics {
             Throttled::ALL,
             Throttled::label,
             |scope| load(&self.throttled_us[scope.index()]) as f64 / 1e6,
+        );
+        series(
+            &mut out,
+            "sheprd_relay_strikes_total",
+            "counter",
+            "Offenses counted against addresses, by kind.",
+            "offense",
+            Offense::ALL,
+            Offense::label,
+            |offense| load(&self.strikes[offense.index()]),
+        );
+        series(
+            &mut out,
+            "sheprd_relay_bans_total",
+            "counter",
+            "Addresses banned automatically, by the offense that did it.",
+            "offense",
+            Offense::ALL,
+            Offense::label,
+            |offense| load(&self.bans[offense.index()]),
         );
         series(
             &mut out,

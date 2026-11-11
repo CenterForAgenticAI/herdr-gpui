@@ -1,16 +1,21 @@
-//! The read-only dashboard, behind one login: connections, sessions,
-//! traffic, and refusals, refreshed every few seconds. It is served only
-//! when the operator set a password, and changes nothing on the relay.
+//! The read-only dashboard, behind one access token: connections,
+//! sessions, traffic, and refusals, live. It is served only when the
+//! operator set a token, and changes nothing on the relay.
 //!
 //! - `GET /dashboard`: the page, or a redirect to the login.
-//! - `GET`/`POST /dashboard/login`, `POST /dashboard/logout`.
-//! - `GET /dashboard/api/stats`: the numbers the page draws.
+//! - `GET`/`POST /dashboard/login`, `POST /dashboard/logout`. Three wrong
+//!   tokens block the address for 15 minutes (`lockout`).
+//! - `GET /dashboard/api/live`: a snapshot a second, as Server-Sent Events.
+//! - `GET /dashboard/api/stats`: one snapshot.
 
 pub mod auth;
 pub mod history;
+pub mod live;
+pub mod lockout;
 
 use crate::{
     bucket::{Limiter, Rate},
+    guard::BanRow,
     hub::{Hub, SessionRow},
     metrics::{Login, Totals},
     web::Shared,
@@ -21,15 +26,17 @@ use axum::{
     body::Bytes,
     extract::{ConnectInfo, DefaultBodyLimit, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response, sse::Sse},
     routing::get,
 };
 use history::{History, Sample};
+use live::Streams;
+use lockout::{Lockout, Verdict};
 use serde::Serialize;
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 const INDEX: &str = include_str!("dashboard/assets/index.html");
@@ -37,9 +44,9 @@ const LOGIN: &str = include_str!("dashboard/assets/login.html");
 const SCRIPT: &str = include_str!("dashboard/assets/app.js");
 const STYLE: &str = include_str!("dashboard/assets/style.css");
 const ICON: &str = include_str!("dashboard/assets/icon.svg");
-const FAILED: &str = r#"<p class="error" role="alert">That user and password do not match.</p>"#;
-const LIMITED: &str =
-    r#"<p class="error" role="alert">Too many attempts. Wait a minute and try again.</p>"#;
+const FAILED: &str = r#"<p class="error" role="alert">That token is not right. After 3 wrong tries, this address is blocked for 15 minutes.</p>"#;
+const BLOCKED: &str = r#"<p class="error" role="alert">Too many wrong tokens from this address. It is blocked for 15 minutes.</p>"#;
+const LIMITED: &str = r#"<p class="error" role="alert">Too many sign-in attempts right now. Wait a minute and try again.</p>"#;
 const MESSAGE_SLOT: &str = "<!--message-->";
 const MAX_FORM: usize = 2 * 1024;
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
@@ -49,10 +56,11 @@ img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 #[derive(Clone, Debug)]
 struct Board {
     account: Arc<Account>,
-    /// Logins from all addresses, so a botnet cannot guess faster.
+    /// Logins from all addresses, so many addresses cannot guess faster.
     everyone: Arc<Mutex<Limiter<()>>>,
     history: Arc<Mutex<History>>,
-    per_address: Arc<Mutex<Limiter<IpAddr>>>,
+    live: Arc<Streams>,
+    lockout: Arc<Lockout>,
     shared: Shared,
 }
 
@@ -73,16 +81,15 @@ pub fn router(shared: Shared, account: Account) -> Router {
             per_minute: 60,
         }))),
         history,
-        per_address: Arc::new(Mutex::new(Limiter::new(Rate {
-            burst: 5,
-            per_minute: 10,
-        }))),
+        live: Arc::default(),
+        lockout: Arc::default(),
         shared,
     };
     Router::new()
         .route("/dashboard", get(index))
         .route("/dashboard/login", get(login_page).post(login))
         .route("/dashboard/logout", axum::routing::post(logout))
+        .route("/dashboard/api/live", get(live_stats))
         .route("/dashboard/api/stats", get(stats))
         .route(
             "/dashboard/app.js",
@@ -106,13 +113,18 @@ fn now_secs() -> u64 {
         .map_or(0, |since| since.as_secs())
 }
 
-fn signed_in(board: &Board, headers: &HeaderMap) -> bool {
+/// When the request's login expires, in Unix seconds, if it has one.
+fn login_expiry(board: &Board, headers: &HeaderMap) -> Option<u64> {
     headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .filter_map(auth::cookie)
-        .any(|value| board.account.valid(value, now_secs()))
+        .find_map(|value| board.account.expiry(value, now_secs()))
+}
+
+fn signed_in(board: &Board, headers: &HeaderMap) -> bool {
+    login_expiry(board, headers).is_some()
 }
 
 /// Headers every dashboard response carries.
@@ -156,6 +168,7 @@ async fn index(State(board): State<Board>, headers: HeaderMap) -> Response {
 
 async fn login_page(RawQuery(query): RawQuery) -> Response {
     let message = match query.as_deref() {
+        Some("blocked") => BLOCKED,
         Some("failed") => FAILED,
         Some("limited") => LIMITED,
         _ => "",
@@ -171,23 +184,34 @@ async fn login(
 ) -> Response {
     let metrics = &board.shared.hub.metrics;
     let address = board.shared.address(peer, &headers);
-    let now_ms = now_secs().saturating_mul(1000);
-    let allowed = allow(
-        &board.per_address,
-        crate::bucket::source_key(address),
-        now_ms,
-    ) && allow(&board.everyone, (), now_ms);
-    if !allowed {
+    let now = Instant::now();
+    // A blocked address is refused before its token is looked at, so it
+    // learns nothing from trying.
+    if let Verdict::Blocked(_) = board.lockout.check(address, now) {
+        metrics.login(Login::Blocked);
+        return redirect("/dashboard/login?blocked", None);
+    }
+    if !allow(&board.everyone, (), now_secs().saturating_mul(1000)) {
         metrics.login(Login::Limited);
         return redirect("/dashboard/login?limited", None);
     }
-    let accepted = auth::login_form(&body)
-        .is_some_and(|(user, password)| board.account.check(&user, &password));
+    let accepted = auth::login_form(&body).is_some_and(|token| board.account.check(&token));
     if !accepted {
         metrics.login(Login::Failed);
+        let verdict = board.lockout.fail(address, now);
+        if let Verdict::Blocked(_) = verdict {
+            tracing::warn!("an address was blocked after wrong dashboard tokens");
+            // Three wrong tokens is also a ban from the whole relay.
+            board
+                .shared
+                .hub
+                .offend(address, crate::metrics::Offense::Lockout);
+            return redirect("/dashboard/login?blocked", None);
+        }
         tracing::warn!("a dashboard login failed");
         return redirect("/dashboard/login?failed", None);
     }
+    board.lockout.succeed(address);
     metrics.login(Login::Succeeded);
     let cookie = board.account.issue(now_secs());
     redirect("/dashboard", Some(auth::set_cookie(Some(&cookie))))
@@ -207,6 +231,8 @@ fn allow<K: Eq + std::hash::Hash>(limiter: &Mutex<Limiter<K>>, key: K, now_ms: u
 /// The numbers the page draws.
 #[derive(Debug, Serialize)]
 pub struct Stats {
+    /// Bans now, earned and manual.
+    pub bans: Vec<BanRow>,
     /// Throughput samples, oldest first.
     pub history: Vec<Sample>,
     pub limits: LimitsView,
@@ -231,6 +257,7 @@ pub struct LimitsView {
 pub fn snapshot(hub: &Hub, history: Vec<Sample>) -> Stats {
     let limits = hub.limits;
     Stats {
+        bans: hub.guard.bans(Instant::now()),
         history,
         limits: LimitsView {
             max_connections: limits.max_connections,
@@ -246,13 +273,31 @@ pub fn snapshot(hub: &Hub, history: Vec<Sample>) -> Stats {
     }
 }
 
-async fn stats(State(board): State<Board>, headers: HeaderMap) -> Response {
-    if !signed_in(&board, &headers) {
-        return hardened(StatusCode::UNAUTHORIZED.into_response());
-    }
+fn current(board: &Board) -> Stats {
     let history = match board.history.lock() {
         Ok(history) => history.samples(),
         Err(poisoned) => poisoned.into_inner().samples(),
     };
-    hardened(Json(snapshot(&board.shared.hub, history)).into_response())
+    snapshot(&board.shared.hub, history)
+}
+
+async fn stats(State(board): State<Board>, headers: HeaderMap) -> Response {
+    if !signed_in(&board, &headers) {
+        return hardened(StatusCode::UNAUTHORIZED.into_response());
+    }
+    hardened(Json(current(&board)).into_response())
+}
+
+/// A snapshot a second until the login expires.
+async fn live_stats(State(board): State<Board>, headers: HeaderMap) -> Response {
+    let Some(expires) = login_expiry(&board, &headers) else {
+        return hardened(StatusCode::UNAUTHORIZED.into_response());
+    };
+    let Some(place) = board.live.open() else {
+        return hardened(StatusCode::SERVICE_UNAVAILABLE.into_response());
+    };
+    let (events, keep_alive) = live::events(place, expires, move || {
+        serde_json::to_string(&current(&board)).unwrap_or_default()
+    });
+    hardened(Sse::new(events).keep_alive(keep_alive).into_response())
 }

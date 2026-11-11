@@ -1,8 +1,11 @@
-// The relay dashboard: polls /dashboard/api/stats and draws it. Read-only;
-// every value goes in through textContent, never as HTML.
+// The relay dashboard: draws the snapshots /dashboard/api/live streams each
+// second (Server-Sent Events), falling back to polling /dashboard/api/stats
+// when a stream cannot open. Read-only; every value goes in through
+// textContent, never as HTML.
 "use strict";
 
 const POLL_MS = 5000;
+let lastTotals = null; // { t, bytes } for the live throughput tile
 const SAMPLES = 120; // ten minutes of the relay's five-second samples
 let samples = []; // { t, up, down } in bytes per second, from the relay
 
@@ -45,7 +48,8 @@ function rows(body, entries) {
       cells.forEach((cell, index) => {
         const td = document.createElement("td");
         td.textContent = cell;
-        if (index > 0 && !(body === "active" && index === 1)) td.className = "num";
+        const text = (body === "active" && index === 1) || (body === "bans" && index === 1);
+        if (index > 0 && !text) td.className = "num";
         row.append(td);
       });
       return row;
@@ -81,8 +85,18 @@ function render(stats) {
   samples = stats.history
     .slice(-SAMPLES)
     .map((sample) => ({ t: sample.at_ms, up: sample.from_dialers, down: sample.from_listeners }));
-  const last = samples[samples.length - 1];
-  setText("rate", last ? `${bytes(last.up + last.down)}/s` : "–");
+  // The tile shows this second's rate, from the live totals; the chart
+  // keeps the relay's five-second history.
+  const carried = totals.bytes_from_dialers + totals.bytes_from_listeners;
+  const now = Date.now();
+  if (lastTotals && now > lastTotals.t) {
+    const rate = Math.max(0, carried - lastTotals.bytes) / ((now - lastTotals.t) / 1000);
+    setText("rate", `${bytes(rate)}/s`);
+  } else {
+    const last = samples[samples.length - 1];
+    setText("rate", last ? `${bytes(last.up + last.down)}/s` : "–");
+  }
+  lastTotals = { t: now, bytes: carried };
 
   rows("dials", totals.dials.map(([name, value]) => [label(name), count(value)]));
   rows("listens", totals.listens.map(([name, value]) => [label(name), count(value)]));
@@ -97,6 +111,15 @@ function render(stats) {
     ]),
   );
   if (stats.sessions.length === 0) rows("active", [["No sessions", "", "", "", ""]]);
+  rows(
+    "bans",
+    stats.bans.map((ban) => [
+      ban.address,
+      label(ban.reason),
+      ban.manual ? "When removed" : duration(ban.seconds_left),
+    ]),
+  );
+  if (stats.bans.length === 0) rows("bans", [["No bans", "", ""]]);
   draw();
   showHover();
 }
@@ -196,11 +219,48 @@ async function poll() {
   }
 }
 
+let polling = null;
+
+// Polls instead, while the live stream cannot open (for example when the
+// relay already serves as many streams as it allows).
+function startPolling() {
+  if (polling) return;
+  poll();
+  polling = setInterval(poll, POLL_MS);
+}
+
+function live() {
+  const source = new EventSource("/dashboard/api/live");
+  source.addEventListener("stats", (event) => {
+    if (polling) {
+      clearInterval(polling);
+      polling = null;
+    }
+    render(JSON.parse(event.data));
+    setText("status", "Live");
+  });
+  source.addEventListener("error", async () => {
+    // EventSource reconnects on its own after a drop; a refused stream
+    // (signed out, or too many open) closes it instead.
+    if (source.readyState !== EventSource.CLOSED) {
+      setText("status", "Reconnecting…");
+      return;
+    }
+    const check = await fetch("/dashboard/api/stats", { credentials: "same-origin", cache: "no-store" });
+    if (check.status === 401) {
+      window.location.assign("/dashboard/login");
+      return;
+    }
+    setText("status", "Live updates unavailable; refreshing every 5 s");
+    startPolling();
+    setTimeout(live, 30000);
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const svg = $("chart");
   svg.addEventListener("pointermove", hover);
   svg.addEventListener("pointerleave", leave);
   window.addEventListener("resize", draw);
-  poll();
-  setInterval(poll, POLL_MS);
+  live();
 });

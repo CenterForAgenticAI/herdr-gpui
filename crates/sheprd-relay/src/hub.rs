@@ -17,7 +17,8 @@ pub use guards::{Permit, Registration, Session, Slot, Unclaimed, Waiting};
 use crate::{
     Limits, RouteId, SessionId,
     bucket::{Limiter, Rate, Throttle, source_key},
-    metrics::{Direction, Gauge, Kind, Metrics, Refused},
+    guard::Guard,
+    metrics::{Direction, Gauge, Kind, Metrics, Offense, Refused},
     splice::Peer,
     wire::{Key, MAX_DIAL_KEYS},
 };
@@ -47,6 +48,8 @@ pub const PAIRING_SESSION: Duration = Duration::from_secs(10 * 60);
 pub struct Hub {
     pub access: Access,
     dials: Mutex<Limiter<IpAddr>>,
+    /// Bans, earned and manual.
+    pub guard: Guard,
     pub limits: Limits,
     listens: Mutex<Limiter<IpAddr>>,
     pub metrics: Metrics,
@@ -71,6 +74,8 @@ struct State {
 
 #[derive(Debug)]
 struct Listener {
+    /// Where it connects from, as limits key it, so a ban reaches it.
+    address: IpAddr,
     dial_keys: HashSet<Key>,
     generation: u64,
     incoming: mpsc::Sender<Incoming>,
@@ -101,7 +106,12 @@ pub struct Accepted {
 
 #[derive(Debug)]
 struct Live {
+    /// Ends the session when either side is banned.
+    ban: Arc<Notify>,
+    /// Both sides' addresses, as limits key them.
+    dialer: IpAddr,
     key: Key,
+    listener: IpAddr,
     pairing: bool,
     revoke: Arc<Notify>,
     route: RouteId,
@@ -147,6 +157,7 @@ impl Hub {
         Self {
             access,
             dials: Mutex::new(Limiter::new(Rate::per_minute(limits.dials_per_minute))),
+            guard: Guard::new(limits.auto_ban, limits.max_transfer_per_hour),
             limits,
             listens: Mutex::new(Limiter::new(Rate::per_minute(limits.listens_per_minute))),
             metrics: Metrics::default(),
@@ -199,6 +210,7 @@ impl Hub {
         if held >= self.limits.max_connections_per_ip {
             drop(state);
             self.metrics.refuse(Refused::PerAddress);
+            self.offend(address, Offense::ConnectionCap);
             return Err(Refused::PerAddress);
         }
         state.connections += 1;
@@ -211,7 +223,11 @@ impl Hub {
     /// Makes this socket the listener for `route`, replacing any other,
     /// unless the relay is full. No one may dial it until it names its dial
     /// keys, and its keys go with it when it leaves.
-    pub fn register(self: &Arc<Self>, route: RouteId) -> Result<Registration, Full> {
+    pub fn register(
+        self: &Arc<Self>,
+        route: RouteId,
+        address: IpAddr,
+    ) -> Result<Registration, Full> {
         let (sender, incoming) = mpsc::channel(INCOMING_QUEUE);
         let generation = self.next.fetch_add(1, Relaxed);
         let mut state = self.state();
@@ -222,6 +238,7 @@ impl Hub {
         state.listeners.insert(
             route,
             Listener {
+                address: source_key(address),
                 dial_keys: HashSet::new(),
                 generation,
                 incoming: sender,
@@ -291,6 +308,7 @@ impl Hub {
         self: &Arc<Self>,
         route: RouteId,
         key: Key,
+        dialer: IpAddr,
     ) -> crate::Result<Result<Waiting, DialRefusal>> {
         let session = SessionId::random()?;
         let (accepted, receiver) = oneshot::channel();
@@ -309,6 +327,7 @@ impl Hub {
             return Ok(Err(DialRefusal::Unauthorized));
         }
         let incoming = listener.incoming.clone();
+        let listener_address = listener.address;
         let on_route = state.routes.get(&route).copied().unwrap_or(0);
         if on_route >= self.limits.max_sessions_per_route || state.slots >= self.limits.max_sessions
         {
@@ -332,7 +351,13 @@ impl Hub {
         Ok(Ok(Waiting {
             accepted: receiver,
             pending: Unclaimed::new(Arc::clone(self), session),
-            slot: Slot::new(Arc::clone(self), route, key, pairing),
+            slot: Slot::new(
+                Arc::clone(self),
+                route,
+                key,
+                pairing,
+                (source_key(dialer), listener_address),
+            ),
         }))
     }
 
@@ -353,6 +378,7 @@ impl Hub {
         let id = self.next.fetch_add(1, Relaxed);
         let traffic = Arc::new(Traffic::default());
         let revoke = Arc::new(Notify::new());
+        let ban = Arc::new(Notify::new());
         let mut state = self.state();
         let allowed = slot.pairing
             || state
@@ -365,7 +391,10 @@ impl Hub {
         state.sessions.insert(
             id,
             Live {
+                ban: Arc::clone(&ban),
+                dialer: slot.dialer,
                 key: slot.key,
+                listener: slot.listener,
                 pairing: slot.pairing,
                 revoke: Arc::clone(&revoke),
                 route: slot.route,
@@ -375,7 +404,92 @@ impl Hub {
         );
         drop(state);
         self.metrics.raise(Gauge::Sessions);
-        Some(Session::new(Arc::clone(self), id, slot, traffic, revoke))
+        Some(Session::new(
+            Arc::clone(self),
+            id,
+            slot,
+            traffic,
+            [revoke, ban],
+        ))
+    }
+
+    /// Counts `offense` against `address`, banning it, and ending its
+    /// sessions and listeners, if that was one too many.
+    pub fn offend(self: &Arc<Self>, address: IpAddr, offense: Offense) {
+        self.metrics.strike(offense);
+        if let Some(length) = self.guard.offend(address, offense, Instant::now()) {
+            self.banned(address, offense, length);
+        }
+    }
+
+    /// Counts `bytes` a session carried for `address` against its hourly
+    /// budget, banning it if that goes over.
+    pub fn charge(self: &Arc<Self>, address: IpAddr, bytes: u64) {
+        if let Some(length) = self.guard.charge(address, bytes, Instant::now()) {
+            self.metrics.strike(Offense::Bandwidth);
+            self.banned(address, Offense::Bandwidth, length);
+        }
+    }
+
+    /// Whether `address` is banned now.
+    #[must_use]
+    pub fn is_banned(&self, address: IpAddr) -> bool {
+        self.guard.banned(address, Instant::now())
+    }
+
+    /// `address` was just banned: count it and end what it holds. The log
+    /// line, like every other, names no address.
+    fn banned(&self, address: IpAddr, offense: Offense, length: Duration) {
+        self.metrics.ban(offense);
+        tracing::warn!(
+            reason = offense.label(),
+            minutes = length.as_secs() / 60,
+            "an address was banned"
+        );
+        self.kick(address);
+    }
+
+    /// Ends every session and listener whose address falls in `ranges`:
+    /// a manual ban takes effect at once. Addresses are kept as limits key
+    /// them, so IPv6 ranges match from /64 up.
+    pub fn kick_ranges(&self, ranges: &[crate::guard::Cidr]) {
+        let banned = |address: IpAddr| ranges.iter().any(|range| range.contains(address));
+        let mut state = self.state();
+        for live in state.sessions.values() {
+            if banned(live.dialer) || banned(live.listener) {
+                live.ban.notify_one();
+            }
+        }
+        let before = state.listeners.len();
+        state
+            .listeners
+            .retain(|_, listener| !banned(listener.address));
+        let removed = before - state.listeners.len();
+        drop(state);
+        for _ in 0..removed {
+            self.metrics.lower(Gauge::Listeners);
+        }
+    }
+
+    /// Ends every session and listener of `address`.
+    pub fn kick(&self, address: IpAddr) {
+        let key = source_key(address);
+        let mut state = self.state();
+        for live in state.sessions.values() {
+            if live.dialer == key || live.listener == key {
+                live.ban.notify_one();
+            }
+        }
+        let before = state.listeners.len();
+        // A removed listener's channel closes, which ends its socket.
+        state
+            .listeners
+            .retain(|_, listener| listener.address != key);
+        let removed = before - state.listeners.len();
+        drop(state);
+        for _ in 0..removed {
+            self.metrics.lower(Gauge::Listeners);
+        }
     }
 
     /// The busiest sessions, for the dashboard.

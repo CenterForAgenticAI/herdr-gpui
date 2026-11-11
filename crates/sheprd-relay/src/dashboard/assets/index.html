@@ -48,6 +48,15 @@
     </section>
   </div>
 
+  <section aria-labelledby="bans-title">
+    <h2 id="bans-title">Banned</h2>
+    <p class="muted">Addresses that misbehaved are banned automatically, for 10 minutes, then an hour, then a day. Manual bans come from RELAY_BAN or the ban file.</p>
+    <table>
+      <thead><tr><th>Address</th><th>Reason</th><th class="num">Lifts in</th></tr></thead>
+      <tbody id="bans"></tbody>
+    </table>
+  </section>
+
   <section aria-labelledby="active-title">
     <h2 id="active-title">Busiest sessions</h2>
     <p class="muted">Routes show their first eight characters only.</p>

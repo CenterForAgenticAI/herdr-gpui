@@ -2,11 +2,14 @@
 //! sockets that speak its protocol.
 
 mod auth;
+mod bans;
 mod binding;
 mod bucket;
 mod dashboard;
+mod guard;
 mod history;
 mod keys;
+mod lockout;
 mod metrics;
 mod options;
 mod quic;
@@ -35,11 +38,11 @@ use tokio_tungstenite::{
 
 pub(crate) type Socket = WebSocketStream<TcpStream>;
 
-pub(crate) const PASSWORD: &str = "correct horse battery";
+pub(crate) const TOKEN: &str = "a dashboard token of enough length";
 
 pub(crate) fn options(limits: Limits) -> Options {
     Options {
-        dashboard_password: Some(SecretString::from(PASSWORD)),
+        dashboard_token: Some(SecretString::from(TOKEN)),
         limits,
         ..Options::default()
     }

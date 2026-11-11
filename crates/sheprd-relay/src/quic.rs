@@ -12,7 +12,7 @@ pub use error::Error;
 use crate::{
     broker,
     hub::{Accepted, Hub, Registration},
-    metrics::{Kind, Listen},
+    metrics::{Kind, Listen, Offense, Refused},
     splice::{Peer, splice},
     wire::{
         self, EXPORTER_LABEL, EXPORTER_LEN, INCOMING, MAX_MESSAGE, MAX_REQUEST, Message, Parse,
@@ -77,6 +77,12 @@ fn windows(transport: &mut TransportConfig) {
 /// Accepts connections until the endpoint closes.
 pub async fn run(endpoint: Endpoint, hub: Arc<Hub>) {
     while let Some(incoming) = endpoint.accept().await {
+        // A banned address is refused before any work, even a retry.
+        if hub.is_banned(incoming.remote_address().ip()) {
+            hub.metrics.refuse(Refused::Banned);
+            incoming.refuse();
+            continue;
+        }
         // A source address on a UDP packet can be forged. A stateless retry
         // makes the peer prove it receives at that address before anything
         // counts against it, so forged packets cannot use up another
@@ -116,14 +122,25 @@ async fn serve(connection: Connection, hub: Arc<Hub>) {
 }
 
 async fn stream(connection: Connection, mut send: SendStream, mut recv: RecvStream, hub: Arc<Hub>) {
+    let address = connection.remote_address().ip();
     let request = match timeout(REQUEST_TIMEOUT, read_request(&mut recv)).await {
-        Ok(Some(request)) => request,
-        Ok(None) | Err(_) => return reply_and_end(&mut send, Status::Malformed).await,
+        Ok(Ok(request)) => request,
+        // Bytes that are not a request: fishy.
+        Ok(Err(Unread::Malformed)) => {
+            hub.offend(address, Offense::Malformed);
+            return reply_and_end(&mut send, Status::Malformed).await;
+        }
+        // The peer gave up on the stream, which a client may do.
+        Ok(Err(Unread::Closed)) => return,
+        // A stream held open with no request: a slow probe.
+        Err(_) => {
+            hub.offend(address, Offense::Probe);
+            return reply_and_end(&mut send, Status::Malformed).await;
+        }
     };
     let Some(exported) = export(&connection) else {
         return reply_and_end(&mut send, Status::Refused).await;
     };
-    let address = connection.remote_address().ip();
     match request {
         Request::Listen {
             key,
@@ -165,17 +182,27 @@ fn export(connection: &Connection) -> Option<[u8; EXPORTER_LEN]> {
     Some(exported)
 }
 
+/// Why no request could be read.
+enum Unread {
+    /// The stream ended or broke before a whole request.
+    Closed,
+    /// The bytes are not a request.
+    Malformed,
+}
+
 /// Reads exactly one request, never past it: what follows belongs to the
 /// session. Not cancel-safe, so it runs alone, under a timeout.
-async fn read_request(recv: &mut RecvStream) -> Option<Request> {
+async fn read_request(recv: &mut RecvStream) -> Result<Request, Unread> {
     let mut bytes = Vec::with_capacity(MAX_REQUEST);
     loop {
-        match Request::parse(&bytes).ok()? {
-            Parse::Done(request, _) => return Some(request),
+        match Request::parse(&bytes).map_err(|_| Unread::Malformed)? {
+            Parse::Done(request, _) => return Ok(request),
             Parse::Need(total) => {
                 let have = bytes.len();
                 bytes.resize(total, 0);
-                recv.read_exact(&mut bytes[have..]).await.ok()?;
+                recv.read_exact(&mut bytes[have..])
+                    .await
+                    .map_err(|_| Unread::Closed)?;
             }
         }
     }

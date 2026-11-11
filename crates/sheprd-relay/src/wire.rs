@@ -346,6 +346,8 @@ pub mod code {
     pub const SHUTDOWN: u32 = 6;
     /// The listener stopped allowing the dial key this session used.
     pub const REVOKED: u32 = 7;
+    /// One side's address was banned for misbehaving.
+    pub const BANNED: u32 = 8;
 }
 
 /// The bytes a listener signs on a connection whose TLS exporter gave

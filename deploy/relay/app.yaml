@@ -10,7 +10,7 @@
 # App Platform sets PORT, which the relay listens on; puts the caller's
 # address in do-connecting-ip; and fills ${APP_DOMAIN} with the app's own
 # name, which WebSocket proofs must cover. To turn the dashboard on, add
-# RELAY_DASHBOARD_PASSWORD (12+ characters) as an encrypted variable in the
+# RELAY_DASHBOARD_TOKEN (24+ characters) as an encrypted variable in the
 # app's settings, then open https://APP_DOMAIN/dashboard.
 name: sheprd-relay
 region: nyc

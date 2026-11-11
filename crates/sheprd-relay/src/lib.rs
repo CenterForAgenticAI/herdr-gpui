@@ -23,6 +23,7 @@
 //! - [`bucket`]: keyed rate limits and bandwidth throttles.
 //! - [`route`]: route and session ids, and the listener's proof.
 //! - [`secret`]: secrets compared in constant time.
+//! - [`guard`]: banning addresses that misbehave, automatically or by hand.
 //! - [`hub`]: who is listening, who waits, and what each address holds.
 //! - [`splice`]: carrying frames between a dialer and a listener.
 //! - [`metrics`]: Prometheus counters and the dashboard's snapshot.
@@ -46,6 +47,8 @@ pub mod bucket;
 pub mod dashboard;
 pub mod endpoint;
 mod error;
+#[cfg(feature = "server")]
+pub mod guard;
 #[cfg(feature = "server")]
 pub mod hub;
 #[cfg(feature = "server")]

@@ -6,7 +6,7 @@
 use crate::{
     RouteId,
     hub::{Accepted, DialRefusal, Hub, Registration, Session},
-    metrics::{Dial, Listen},
+    metrics::{Dial, Listen, Offense},
     route::prove,
     wire::{Key, Message, Status},
 };
@@ -24,22 +24,33 @@ pub fn listen(
     signature: &[u8],
     signed: &[u8],
 ) -> Result<Registration, Status> {
-    let refuse = |status, outcome| {
+    // Each refusal counts its outcome and, when the caller was at fault,
+    // an offense toward a ban.
+    let refuse = |status, outcome, offense: Option<Offense>| {
         hub.metrics.listen(outcome);
+        if let Some(offense) = offense {
+            hub.offend(address, offense);
+        }
         status
     };
     if !hub.allow_listen(address) {
-        return Err(refuse(Status::Limited, Listen::Limited));
+        return Err(refuse(
+            Status::Limited,
+            Listen::Limited,
+            Some(Offense::Limited),
+        ));
     }
     if !hub.access.admit((!token.is_empty()).then_some(token)) {
-        return Err(refuse(Status::Forbidden, Listen::Forbidden));
+        let offense = Some(Offense::BadProof);
+        return Err(refuse(Status::Forbidden, Listen::Forbidden, offense));
     }
     let Ok(route) = prove(key, signature, signed) else {
-        return Err(refuse(Status::Refused, Listen::BadProof));
+        let offense = Some(Offense::BadProof);
+        return Err(refuse(Status::Refused, Listen::BadProof, offense));
     };
     let registration = hub
-        .register(route)
-        .map_err(|_| refuse(Status::Full, Listen::Full))?;
+        .register(route, address)
+        .map_err(|_| refuse(Status::Full, Listen::Full, None))?;
     hub.metrics.listen(Listen::Ready);
     Ok(registration)
 }
@@ -75,31 +86,46 @@ pub async fn dial(
     signature: &[u8],
     signed: &[u8],
 ) -> Result<(Accepted, Session), Status> {
-    let refuse = |status, outcome| {
+    let refuse = |status, outcome, offense: Option<Offense>| {
         hub.metrics.dial(outcome);
+        if let Some(offense) = offense {
+            hub.offend(address, offense);
+        }
         status
     };
     if !hub.allow_dial(address) {
-        return Err(refuse(Status::Limited, Dial::Limited));
+        return Err(refuse(
+            Status::Limited,
+            Dial::Limited,
+            Some(Offense::Limited),
+        ));
     }
     if prove(key, signature, signed).is_err() {
-        return Err(refuse(Status::Offline, Dial::Unauthorized));
+        let offense = Some(Offense::BadProof);
+        return Err(refuse(Status::Offline, Dial::Unauthorized, offense));
     }
-    let waiting = match hub.dial(route, *key) {
+    let waiting = match hub.dial(route, *key, address) {
         Ok(Ok(waiting)) => waiting,
-        Ok(Err(DialRefusal::Offline)) => return Err(refuse(Status::Offline, Dial::Offline)),
-        Ok(Err(DialRefusal::Unauthorized)) => {
-            return Err(refuse(Status::Offline, Dial::Unauthorized));
+        // An empty route is no one's fault: a computer can be off.
+        Ok(Err(DialRefusal::Offline)) => {
+            return Err(refuse(Status::Offline, Dial::Offline, None));
         }
-        Ok(Err(DialRefusal::Busy)) | Err(_) => return Err(refuse(Status::Busy, Dial::Busy)),
+        Ok(Err(DialRefusal::Unauthorized)) => {
+            let offense = Some(Offense::Unauthorized);
+            return Err(refuse(Status::Offline, Dial::Unauthorized, offense));
+        }
+        Ok(Err(DialRefusal::Busy)) | Err(_) => {
+            return Err(refuse(Status::Busy, Dial::Busy, None));
+        }
     };
     let accepted = match timeout(hub.limits.accept_timeout, waiting.accepted).await {
         Ok(Ok(accepted)) => accepted,
-        Ok(Err(_)) | Err(_) => return Err(refuse(Status::Timeout, Dial::Timeout)),
+        Ok(Err(_)) | Err(_) => return Err(refuse(Status::Timeout, Dial::Timeout, None)),
     };
     drop(waiting.pending);
     let Some(session) = hub.open(waiting.slot) else {
-        return Err(refuse(Status::Offline, Dial::Unauthorized));
+        // Revoked while it waited: the device may not know yet.
+        return Err(refuse(Status::Offline, Dial::Unauthorized, None));
     };
     hub.metrics.dial(Dial::Spliced);
     Ok((accepted, session))

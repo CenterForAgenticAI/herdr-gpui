@@ -103,15 +103,26 @@ impl Drop for Registration {
 #[derive(Debug)]
 pub struct Slot {
     hub: Arc<Hub>,
+    /// The dialer's and listener's addresses, as limits key them.
+    pub(super) dialer: IpAddr,
+    pub(super) listener: IpAddr,
     pub(super) key: Key,
     pub(super) pairing: bool,
     pub(super) route: RouteId,
 }
 
 impl Slot {
-    pub(super) fn new(hub: Arc<Hub>, route: RouteId, key: Key, pairing: bool) -> Self {
+    pub(super) fn new(
+        hub: Arc<Hub>,
+        route: RouteId,
+        key: Key,
+        pairing: bool,
+        (dialer, listener): (IpAddr, IpAddr),
+    ) -> Self {
         Self {
+            dialer,
             hub,
+            listener,
             key,
             pairing,
             route,
@@ -173,7 +184,9 @@ impl Drop for Unclaimed {
 pub struct Session {
     hub: Arc<Hub>,
     id: u64,
+    /// Fire when the listener revokes the key, and when a side is banned.
     revoke: Arc<Notify>,
+    ban: Arc<Notify>,
     slot: Slot,
     pub started: Instant,
     pub traffic: Arc<Traffic>,
@@ -185,9 +198,10 @@ impl Session {
         id: u64,
         slot: Slot,
         traffic: Arc<Traffic>,
-        revoke: Arc<Notify>,
+        [revoke, ban]: [Arc<Notify>; 2],
     ) -> Self {
         Self {
+            ban,
             hub,
             id,
             revoke,
@@ -220,6 +234,29 @@ impl Session {
     /// Resolves when the listener stops allowing this session's key.
     pub async fn revoked(&self) {
         self.revoke.notified().await;
+    }
+
+    /// Resolves when either side's address is banned.
+    pub async fn banned(&self) {
+        self.ban.notified().await;
+    }
+
+    /// The dialer's address, as limits key it.
+    #[must_use]
+    pub fn dialer(&self) -> IpAddr {
+        self.slot.dialer
+    }
+
+    /// The listener's address, as limits key it.
+    #[must_use]
+    pub fn listener(&self) -> IpAddr {
+        self.slot.listener
+    }
+
+    /// The hub, to count offenses and charge bandwidth.
+    #[must_use]
+    pub fn hub_arc(&self) -> &Arc<Hub> {
+        &self.hub
     }
 }
 

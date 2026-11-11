@@ -115,6 +115,7 @@ fn socket_code(end: End) -> u16 {
         End::Idle => code::IDLE,
         End::Protocol => code::PROTOCOL,
         End::Revoked => code::REVOKED,
+        End::Banned => code::BANNED,
     }
 }
 
@@ -125,5 +126,6 @@ fn stream_code(end: End) -> u32 {
         End::Idle => wire::code::IDLE,
         End::Protocol => wire::code::PROTOCOL,
         End::Revoked => wire::code::REVOKED,
+        End::Banned => wire::code::BANNED,
     }
 }

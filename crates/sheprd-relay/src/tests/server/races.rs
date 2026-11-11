@@ -2,6 +2,8 @@
 //! a key revoked while its dial waits, and forged source addresses.
 
 use super::{quic::*, *};
+const LOCAL: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+
 use crate::{
     hub::Access,
     metrics::Gauge,
@@ -80,9 +82,9 @@ async fn a_message_sent_in_pieces_while_dials_arrive_still_applies() {
 async fn a_key_revoked_while_its_dial_waits_never_opens_a_session() {
     let hub = Arc::new(Hub::new(Limits::default(), Access::Open));
     let route = RouteId::of(signing_key(94).verifying_key());
-    let registration = hub.register(route).unwrap();
+    let registration = hub.register(route, LOCAL).unwrap();
     registration.set_dial_keys(&[public(&phone())]);
-    let waiting = hub.dial(route, public(&phone())).unwrap().unwrap();
+    let waiting = hub.dial(route, public(&phone()), LOCAL).unwrap().unwrap();
     // Revoked after the dial's check, before its session opens.
     registration.set_dial_keys(&[]);
     assert!(hub.open(waiting.slot).is_none());
@@ -93,10 +95,10 @@ async fn a_key_revoked_while_its_dial_waits_never_opens_a_session() {
 async fn a_pairing_slot_opens_after_its_key_is_spent() {
     let hub = Arc::new(Hub::new(Limits::default(), Access::Open));
     let route = RouteId::of(signing_key(95).verifying_key());
-    let registration = hub.register(route).unwrap();
+    let registration = hub.register(route, LOCAL).unwrap();
     let pairing = public(&signing_key(96));
     assert!(registration.add_pairing_key(pairing, Duration::from_secs(60)));
-    let waiting = hub.dial(route, pairing).unwrap().unwrap();
+    let waiting = hub.dial(route, pairing, LOCAL).unwrap().unwrap();
     assert!(hub.open(waiting.slot).is_some());
 }
 

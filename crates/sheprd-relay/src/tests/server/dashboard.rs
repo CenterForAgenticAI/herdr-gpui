@@ -13,14 +13,24 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 fn router() -> axum::Router {
-    let (router, _hub) = app(&options(Limits::default()), None).unwrap();
-    router.layer(MockConnectInfo(SocketAddr::from(([192, 0, 2, 1], 1))))
+    // Behind a proxy, so each test request can name its caller's address.
+    let options = Options {
+        behind_proxy: true,
+        ..options(Limits::default())
+    };
+    let (router, _hub) = app(&options, None).unwrap();
+    router.layer(MockConnectInfo(SocketAddr::from(([10, 0, 0, 1], 1))))
 }
 
-async fn login(router: &axum::Router, body: &str) -> axum::response::Response {
+const HOME: &str = "198.51.100.7";
+
+/// Signs in from `from` with `token`.
+async fn login_from(router: &axum::Router, from: &str, token: &str) -> axum::response::Response {
+    let body = format!("token={}", token.replace(' ', "+"));
     let request = Request::post("/dashboard/login")
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(Body::from(body.to_owned()))
+        .header("x-forwarded-for", from)
+        .body(Body::from(body))
         .unwrap();
     router.clone().oneshot(request).await.unwrap()
 }
@@ -29,56 +39,53 @@ fn location(response: &axum::response::Response) -> &str {
     response.headers()[header::LOCATION].to_str().unwrap()
 }
 
-#[tokio::test]
-async fn the_page_and_stats_need_a_login() {
-    let router = router();
-    let page = router
+fn cookie_pair(response: &axum::response::Response) -> String {
+    let set = response.headers()[header::SET_COOKIE].to_str().unwrap();
+    set.split(';').next().unwrap().to_owned()
+}
+
+async fn get(router: &axum::Router, path: &str, cookie: Option<&str>) -> axum::response::Response {
+    let mut request = Request::get(path);
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
+    router
         .clone()
-        .oneshot(Request::get("/dashboard").body(Body::empty()).unwrap())
+        .oneshot(request.body(Body::empty()).unwrap())
         .await
-        .unwrap();
-    assert_eq!(page.status(), StatusCode::SEE_OTHER);
-    assert_eq!(location(&page), "/dashboard/login");
-    let stats = router
-        .clone()
-        .oneshot(
-            Request::get("/dashboard/api/stats")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(stats.status(), StatusCode::UNAUTHORIZED);
+        .unwrap()
 }
 
 #[tokio::test]
-async fn a_good_login_sets_a_cookie_that_opens_the_stats() {
+async fn the_page_stats_and_live_stream_need_a_login() {
     let router = router();
-    let response = login(
-        &router,
-        &format!("user=admin&password={}", PASSWORD.replace(' ', "+")),
-    )
-    .await;
+    let page = get(&router, "/dashboard", None).await;
+    assert_eq!(page.status(), StatusCode::SEE_OTHER);
+    assert_eq!(location(&page), "/dashboard/login");
+    for path in ["/dashboard/api/stats", "/dashboard/api/live"] {
+        assert_eq!(
+            get(&router, path, None).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+        let forged = get(&router, path, Some("sheprd_relay=99999999999.AAAA")).await;
+        assert_eq!(forged.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn the_token_sets_a_cookie_that_opens_the_stats() {
+    let router = router();
+    let response = login_from(&router, HOME, TOKEN).await;
     assert_eq!(location(&response), "/dashboard");
-    let set = response.headers()[header::SET_COOKIE].to_str().unwrap();
-    let pair = set.split(';').next().unwrap().to_owned();
+    let pair = cookie_pair(&response);
     assert!(
         response.headers()[header::CONTENT_SECURITY_POLICY]
             .to_str()
             .unwrap()
             .contains("frame-ancestors 'none'")
     );
-
-    let stats = router
-        .clone()
-        .oneshot(
-            Request::get("/dashboard/api/stats")
-                .header(header::COOKIE, &pair)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let stats = get(&router, "/dashboard/api/stats", Some(&pair)).await;
     assert_eq!(stats.status(), StatusCode::OK);
     let body = stats.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -87,21 +94,117 @@ async fn a_good_login_sets_a_cookie_that_opens_the_stats() {
 }
 
 #[tokio::test]
-async fn a_bad_login_fails_and_repeated_ones_are_limited() {
+async fn three_wrong_tokens_block_the_address_even_for_the_right_one() {
     let router = router();
-    let response = login(&router, "user=admin&password=wrong+password").await;
-    assert_eq!(location(&response), "/dashboard/login?failed");
-    assert!(response.headers().get(header::SET_COOKIE).is_none());
-    let mut limited = false;
-    for _ in 0..10 {
-        let response = login(&router, "user=admin&password=wrong+password").await;
-        limited |= location(&response) == "/dashboard/login?limited";
+    let attacker = "203.0.113.9";
+    for attempt in 1..=2 {
+        let response = login_from(&router, attacker, "a wrong token of enough length").await;
+        assert_eq!(
+            location(&response),
+            "/dashboard/login?failed",
+            "try {attempt}"
+        );
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
     }
-    assert!(limited);
+    let third = login_from(&router, attacker, "a wrong token of enough length").await;
+    assert_eq!(location(&third), "/dashboard/login?blocked");
+    // A public address is now banned from the whole relay, so even the
+    // right token meets a 403 before it is looked at.
+    let right = login_from(&router, attacker, TOKEN).await;
+    assert_eq!(right.status(), StatusCode::FORBIDDEN);
+    assert!(right.headers().get(header::SET_COOKIE).is_none());
+    // Its IPv6 neighbours in the same /64 are the same guesser.
+    for from in ["2001:db8::1", "2001:db8::2", "2001:db8::3"] {
+        login_from(&router, from, "wrong").await;
+    }
+    let neighbour = login_from(&router, "2001:db8::ffff", TOKEN).await;
+    assert_eq!(neighbour.status(), StatusCode::FORBIDDEN);
+    // A private address is never banned, but the dashboard still locks
+    // it out: the right token is refused, unchecked, for 15 minutes.
+    let inside = "10.1.2.3";
+    for _ in 0..3 {
+        login_from(&router, inside, "wrong").await;
+    }
+    let right = login_from(&router, inside, TOKEN).await;
+    assert_eq!(location(&right), "/dashboard/login?blocked");
+    // Everyone else still signs in.
+    assert_eq!(
+        location(&login_from(&router, HOME, TOKEN).await),
+        "/dashboard"
+    );
 }
 
 #[tokio::test]
-async fn the_dashboard_is_absent_without_a_password() {
+async fn signing_in_forgets_earlier_wrong_tries() {
+    let router = router();
+    for _ in 0..2 {
+        login_from(&router, HOME, "wrong").await;
+    }
+    assert_eq!(
+        location(&login_from(&router, HOME, TOKEN).await),
+        "/dashboard"
+    );
+    for _ in 0..2 {
+        let response = login_from(&router, HOME, "wrong").await;
+        assert_eq!(location(&response), "/dashboard/login?failed");
+    }
+}
+
+#[tokio::test]
+async fn the_login_page_explains_each_refusal() {
+    let router = router();
+    for (query, text) in [
+        ("failed", "After 3 wrong tries"),
+        ("blocked", "blocked for 15 minutes"),
+        ("limited", "Too many sign-in attempts"),
+    ] {
+        let page = get(&router, &format!("/dashboard/login?{query}"), None).await;
+        let body = page.into_body().collect().await.unwrap().to_bytes();
+        assert!(
+            std::str::from_utf8(&body).unwrap().contains(text),
+            "{query}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_live_stream_sends_snapshots() {
+    let router = router();
+    let pair = cookie_pair(&login_from(&router, HOME, TOKEN).await);
+    let live = get(&router, "/dashboard/api/live", Some(&pair)).await;
+    assert_eq!(live.status(), StatusCode::OK);
+    assert_eq!(live.headers()[header::CONTENT_TYPE], "text/event-stream");
+    let mut body = live.into_body();
+    let frame = tokio::time::timeout(Duration::from_secs(5), body.frame())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let text = String::from_utf8(frame.into_data().unwrap().to_vec()).unwrap();
+    assert!(text.starts_with("event: stats\ndata: {"), "{text}");
+    assert!(text.contains("\"totals\""), "{text}");
+}
+
+#[tokio::test]
+async fn live_streams_are_capped() {
+    let router = router();
+    let pair = cookie_pair(&login_from(&router, HOME, TOKEN).await);
+    let mut open = Vec::new();
+    for _ in 0..crate::dashboard::live::MAX_STREAMS {
+        let live = get(&router, "/dashboard/api/live", Some(&pair)).await;
+        assert_eq!(live.status(), StatusCode::OK);
+        open.push(live);
+    }
+    let one_more = get(&router, "/dashboard/api/live", Some(&pair)).await;
+    assert_eq!(one_more.status(), StatusCode::SERVICE_UNAVAILABLE);
+    // Closing one frees its place.
+    open.pop();
+    let again = get(&router, "/dashboard/api/live", Some(&pair)).await;
+    assert_eq!(again.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_dashboard_is_absent_without_a_token() {
     let (router, _hub) = app(&Options::default(), None).unwrap();
     let response = router
         .oneshot(Request::get("/dashboard").body(Body::empty()).unwrap())
