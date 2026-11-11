@@ -12,6 +12,7 @@ mod cross_workspace;
 mod effects;
 mod fall_through;
 mod fallback_bells;
+mod file_images;
 mod focus;
 mod folders;
 mod history;
