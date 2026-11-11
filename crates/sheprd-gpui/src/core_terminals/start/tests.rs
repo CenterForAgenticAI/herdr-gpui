@@ -16,7 +16,7 @@ fn started() -> TerminalInfo {
 
 #[test]
 fn cancelling_a_start_ends_only_the_terminal_returned_by_its_original_core() {
-    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let (send, receive) = mpsc::sync_channel(1);
     drop(receive);
     let mut ended = None;
     deliver(Ok(started()), send, |terminal| {
@@ -27,7 +27,7 @@ fn cancelling_a_start_ends_only_the_terminal_returned_by_its_original_core() {
 
 #[test]
 fn an_accepted_start_stays_running_and_a_failed_start_never_kills_anything() {
-    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let (send, receive) = mpsc::sync_channel(1);
     std::thread::scope(|scope| {
         scope.spawn(|| deliver(Ok(started()), send, |_| panic!("accepted terminal killed")));
         assert_eq!(
@@ -39,7 +39,7 @@ fn an_accepted_start_stays_running_and_a_failed_start_never_kills_anything() {
             started()
         );
     });
-    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let (send, receive) = mpsc::sync_channel(1);
     drop(receive);
     deliver(Err(sheprd_core_client::Error::Busy), send, |_| {
         panic!("failure killed a terminal")
@@ -48,7 +48,7 @@ fn an_accepted_start_stays_running_and_a_failed_start_never_kills_anything() {
 
 #[test]
 fn dropping_a_buffered_unclaimed_result_also_ends_the_created_terminal() {
-    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let (send, receive) = mpsc::sync_channel(1);
     let mut ended = None;
     std::thread::scope(|scope| {
         scope.spawn(|| {

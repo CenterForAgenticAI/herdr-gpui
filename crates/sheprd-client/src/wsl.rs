@@ -19,6 +19,8 @@ use crate::{
     transport::Stream,
 };
 use std::{path::Path, sync::atomic::AtomicBool};
+#[cfg(not(windows))]
+use std::process::Command;
 #[cfg(windows)]
 use std::{
     path::PathBuf,
@@ -126,7 +128,7 @@ pub(crate) fn command(distro: &str, script: &str) -> Command {
 }
 
 /// Runs a script with the distribution's shell, leaving stdin for a protocol.
-pub fn script_command(distro: &str, script: &str) -> Result<std::process::Command> {
+pub fn script_command(distro: &str, script: &str) -> Result<Command> {
     if !valid_distro(distro) {
         return Err(Error::InvalidDistro.into());
     }
@@ -164,7 +166,7 @@ pub fn wsl_shell_command(distro: &str) -> Result<Command> {
 }
 
 #[cfg(not(windows))]
-pub fn wsl_shell_command(distro: &str) -> Result<std::process::Command> {
+pub fn wsl_shell_command(distro: &str) -> Result<Command> {
     if !valid_distro(distro) {
         return Err(Error::InvalidDistro.into());
     }

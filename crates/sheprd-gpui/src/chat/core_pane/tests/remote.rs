@@ -67,7 +67,7 @@ fn an_ended_chat_or_recovered_shell_cannot_retain_the_old_overlay() {
     });
     assert!(targets_on(&host, &route, [&terminal]).is_empty());
     terminal.foreground.as_mut().unwrap().name = "sheprd-acp".into();
-    terminal.state = sheprd_backend::RunState::Lost;
+    terminal.state = RunState::Lost;
     assert!(targets_on(&host, &route, [&terminal]).is_empty());
 }
 

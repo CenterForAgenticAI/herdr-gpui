@@ -67,7 +67,7 @@ impl CoreTerminals {
         self.tabs
             .values()
             .filter(|shown| shown.holds_chats())
-            .flat_map(|shown| {
+            .flat_map(move |shown| {
                 shown
                     .panes
                     .terminals()

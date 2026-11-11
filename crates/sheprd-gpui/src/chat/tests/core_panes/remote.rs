@@ -12,7 +12,7 @@ fn remote_conversion_needs_its_own_core_even_when_the_desktop_has_no_acp(cx: &mu
         let key = view.core_chat_key(TabId::test(DRIVEN), &id("t1"));
         assert!(matches!(
             view.convert_to_chat(Some(&key)),
-            Err(crate::chat::ConvertError::NotConnected)
+            Err(ConvertError::NotConnected)
         ));
     });
 }
@@ -31,7 +31,7 @@ fn a_core_forwarded_terminal_cannot_launch_a_chat_on_the_connecting_host(cx: &mu
             );
             assert!(matches!(
                 view.start_core_chat(sheprd_chat_protocol::Agent::Codex, tab, cx),
-                Err(crate::chat::StartError::NotLocal)
+                Err(StartError::NotLocal)
             ));
         });
     });

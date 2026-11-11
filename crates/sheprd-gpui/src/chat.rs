@@ -115,7 +115,7 @@ pub enum Error {
     Read(#[source] sheprd_chat_protocol::Error),
     #[error("This is a read-only transcript; use the agent's terminal to reply")]
     ReadOnly,
-    #[error("could not reach the chat program over SSH")]
+    #[error("could not reach the chat program on its host")]
     Remote(#[source] sheprd_client::Error),
     #[error("could not start the chat worker")]
     Spawn(#[source] io::Error),
