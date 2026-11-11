@@ -45,8 +45,16 @@ public struct TextShortcut: Codable, Hashable, Identifiable, Sendable {
         return line.count > 40 ? String(line.prefix(40)) + "…" : String(line)
     }
 
-    /// Worth saving: there is text to send once a computer tidies it.
-    public var isUsable: Bool { bounded != nil }
+    /// Worth saving: there is text to send once a computer tidies it, and
+    /// none of it would be cut, so a long prompt is never shortened unseen.
+    public var isUsable: Bool { bounded != nil && !isTooLong }
+
+    /// The text runs past what a computer keeps (`maxText`, in Unicode
+    /// scalars as the daemon counts them).
+    public var isTooLong: Bool { textLength > Self.maxText }
+
+    /// The text's length as the limit counts it.
+    public var textLength: Int { text.unicodeScalars.count }
 
     /// The shortcut as a computer keeps it, or `nil` when it would drop it:
     /// a one-line title of single spaces, text without control characters

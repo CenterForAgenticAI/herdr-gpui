@@ -17,11 +17,14 @@ pub trait Edited: Clone + Default + Eq + Serialize + DeserializeOwned {
 
     /// What stands once `offer` meets this copy at `now_ms`. A clock running
     /// ahead cannot make an edit outlast every later one, so an offer counts
-    /// as made by `now_ms` at the latest. On a tie the stored copy stays, so
-    /// offering the same copy twice changes nothing.
+    /// as made by `now_ms` at the latest, or just after this copy when this
+    /// clock went back since it was saved: an edit made after it, stamped
+    /// after it, still wins. On a tie the stored copy stays, so offering the
+    /// same copy twice changes nothing.
     #[must_use]
     fn merged(self, offer: Self, now_ms: u64) -> Self {
-        let updated_ms = offer.updated_ms().min(now_ms);
+        let latest = now_ms.max(self.updated_ms().saturating_add(1));
+        let updated_ms = offer.updated_ms().min(latest);
         if updated_ms > self.updated_ms() {
             offer.bounded(updated_ms)
         } else {

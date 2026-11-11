@@ -118,3 +118,25 @@ fn editing_keeps_the_shortcuts_place(cx: &mut TestAppContext) {
     assert_eq!(list.shortcuts[0].id, "a");
     assert_eq!(list.shortcuts[0].text, "Please continue now");
 }
+
+#[gpui::test]
+fn a_prompt_past_the_limit_shows_its_length_and_cannot_be_saved(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx);
+    click(cx, "text-shortcuts-add-button");
+    let long = "z".repeat(sheprd_remote_control::control::shortcuts::MAX_TEXT_CHARS + 1);
+    view.update_in(cx, |view, window, cx| {
+        let editing = view.text_shortcuts.editing().unwrap().clone();
+        editing.update(cx, |input, cx| {
+            input.replace_text_in_range(None, &long, window, cx);
+        });
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("text-shortcut-length").is_some());
+    click(cx, "text-shortcut-save");
+    assert!(
+        cx.debug_bounds("text-shortcut-form").is_some(),
+        "nothing is cut unseen: the form stays open"
+    );
+    let list = cx.update(|_, cx| Store::current(cx));
+    assert_eq!(list.shortcuts.len(), 2);
+}

@@ -102,3 +102,16 @@ fn the_largest_list_fits_its_requests() {
     let lines = TextShortcuts::new([shortcut("n", "", &"\n".repeat(MAX_TEXT_CHARS / 2))], 1);
     assert!(serde_json::to_vec(&lines).unwrap().len() < MAX_WIRE_BYTES / MAX_SHORTCUTS);
 }
+
+#[test]
+fn an_edit_after_a_clock_went_back_still_wins() {
+    // Saved at 1000; both clocks now read 900. The phone stamps its edit
+    // just after the copy it replaces.
+    let saved = TextShortcuts::new([shortcut("a", "", "old")], 1_000);
+    let edit = TextShortcuts::new([shortcut("a", "", "new")], 1_001);
+    assert_eq!(saved.clone().merged(edit.clone(), 900), edit);
+    // A clock far ahead still counts as just after the saved copy, not as
+    // its own time.
+    let ahead = TextShortcuts::new([shortcut("b", "", "ahead")], 9_999);
+    assert_eq!(saved.merged(ahead, 900).updated_ms, 1_001);
+}

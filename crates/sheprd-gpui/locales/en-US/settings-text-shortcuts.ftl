@@ -10,6 +10,8 @@ settings-text-shortcuts-title = Title
 settings-text-shortcuts-title-placeholder = Shown in the menu; blank shows the start of the text
 settings-text-shortcuts-text = Text
 settings-text-shortcuts-text-placeholder = Sent to the agent
+# $count is how many characters the text has; $limit is the most a shortcut keeps.
+settings-text-shortcuts-length = { $count } of { $limit } characters
 settings-text-shortcuts-up = Up
 settings-text-shortcuts-down = Down
 settings-text-shortcuts-edit = Edit

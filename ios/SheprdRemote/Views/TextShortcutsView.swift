@@ -63,9 +63,17 @@ private struct ShortcutEditor: View {
                 Section("Title") {
                     TextField("Shown in the menu", text: $shortcut.title)
                 }
-                Section("Text") {
+                Section {
                     TextField("Sent to the agent", text: $shortcut.text, axis: .vertical)
                         .lineLimit(3...10)
+                } header: {
+                    Text("Text")
+                } footer: {
+                    // Shown near the limit, and why Save is off past it.
+                    if shortcut.textLength > TextShortcut.maxText * 9 / 10 {
+                        Text("\(shortcut.textLength) of \(TextShortcut.maxText) characters")
+                            .foregroundStyle(shortcut.isTooLong ? .red : .secondary)
+                    }
                 }
             }
             .navigationTitle(isNew ? "New Shortcut" : "Edit Shortcut")

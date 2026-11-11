@@ -105,6 +105,19 @@ import Testing
         #expect(TextShortcut(id: "a", title: "T", text: "\u{7}\n ").bounded == nil)
     }
 
+    @Test func aPromptPastTheLimitCannotBeSavedSoItIsNeverCutUnseen() {
+        let fits = TextShortcut(id: "a", title: "", text: String(repeating: "z", count: TextShortcut.maxText))
+        #expect(fits.isUsable)
+        #expect(!fits.isTooLong)
+        let over = TextShortcut(id: "a", title: "", text: String(repeating: "z", count: TextShortcut.maxText + 1))
+        #expect(over.isTooLong)
+        #expect(!over.isUsable)
+        // Counted in Unicode scalars, as the daemon counts `char`s.
+        let flags = TextShortcut(id: "a", title: "", text: String(repeating: "🇫🇷", count: TextShortcut.maxText / 2 + 1))
+        #expect(flags.textLength == TextShortcut.maxText + 2)
+        #expect(!flags.isUsable)
+    }
+
     @Test func idsArePlainAndUUIDsFit() {
         #expect(TextShortcut(title: "", text: "x").isUsable)
         #expect(TextShortcut.proceed.bounded == .proceed)

@@ -13,7 +13,7 @@ use crate::{
     text_shortcuts::{self, Store},
 };
 use gpui::{prelude::*, *};
-use sheprd_remote_control::control::shortcuts::{MAX_SHORTCUTS, TextShortcut};
+use sheprd_remote_control::control::shortcuts::{MAX_SHORTCUTS, MAX_TEXT_CHARS, TextShortcut};
 
 /// The page's state: the shortcut being written, if any.
 #[derive(Default)]
@@ -116,7 +116,9 @@ impl SettingsWindow {
             title: editing.title.read(cx).text().to_owned(),
             text: editing.text.read(cx).text().to_owned(),
         };
-        if shortcut.text.trim().is_empty() {
+        // Text past the limit would be cut by every computer: refused here,
+        // so a long prompt is never shortened unseen.
+        if shortcut.text.trim().is_empty() || shortcut.text.chars().count() > MAX_TEXT_CHARS {
             return;
         }
         self.text_shortcuts.editing = None;
@@ -296,7 +298,10 @@ impl SettingsWindow {
     /// The title and text being written, with Save and Cancel.
     fn text_shortcut_form(&self, editing: &Editing, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
-        let ready = !editing.text.read(cx).text().trim().is_empty();
+        let written = editing.text.read(cx).text();
+        let length = written.chars().count();
+        let too_long = length > MAX_TEXT_CHARS;
+        let ready = !written.trim().is_empty() && !too_long;
         let field = |selector: &'static str| {
             div()
                 .debug_selector(move || selector.into())
@@ -348,6 +353,24 @@ impl SettingsWindow {
                     })
                     .child(editing.text.clone()),
             )
+            // Shown near the limit, and why Save is off past it.
+            .when(length > MAX_TEXT_CHARS / 10 * 9, |form| {
+                form.child(
+                    div()
+                        .debug_selector(|| "text-shortcut-length".into())
+                        .text_size(px(11.))
+                        .text_color(rgb(if too_long {
+                            theme.ink(theme.palette[1])
+                        } else {
+                            theme.subtext()
+                        }))
+                        .child(fl!(
+                            "settings-text-shortcuts-length",
+                            count = length,
+                            limit = MAX_TEXT_CHARS
+                        )),
+                )
+            })
             .child(
                 div()
                     .flex()
