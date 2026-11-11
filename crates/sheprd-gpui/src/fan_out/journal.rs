@@ -295,8 +295,12 @@ impl Record {
                 if !saved.fits() || lane.checkout.is_some() {
                     return false;
                 }
+                // The planned checkout is what recovery needs if the app
+                // stops while Git creates it, so it is saved even when the
+                // lane already reported creating its worktree.
                 lane.checkout = Some(saved);
-                Checkpoint::CreatingWorktree
+                lane.step = Checkpoint::CreatingWorktree;
+                return true;
             }
             Progress::CreatingWorktree => {
                 if lane.checkout.is_some() {
