@@ -11,8 +11,16 @@ export default function setup(api, runtime = { process, spawn, globalThis, setTi
   const state = runtime.globalThis[key] ??= { sequence: 0 };
   let pending;
   let active = false;
+  let retry;
+  function later() {
+    if (retry !== undefined) return;
+    retry = runtime.setTimeout(() => { retry = undefined; pump(); }, 1000);
+    retry.unref?.();
+  }
   function pump() {
     if (active || !pending) return;
+    if (retry !== undefined) { runtime.clearTimeout(retry); retry = undefined; }
+    if (pending.sequence < state.sequence) { pending = undefined; return; }
     const payload = pending;
     pending = undefined;
     active = true;
@@ -21,7 +29,7 @@ export default function setup(api, runtime = { process, spawn, globalThis, setTi
       child = runtime.spawn(PROGRAM, ["session-report", AGENT], {
         env: runtime.process.env, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
       });
-    } catch { active = false; pending ??= payload; return; }
+    } catch { active = false; pending ??= payload; later(); return; }
     const timeout = runtime.setTimeout(() => child.kill("SIGKILL"), 2000);
     timeout.unref?.();
     let finished = false;
@@ -33,24 +41,23 @@ export default function setup(api, runtime = { process, spawn, globalThis, setTi
       if (code === 0) pump();
       else {
         pending ??= payload;
-        const retry = runtime.setTimeout(pump, 1000);
-        retry.unref?.();
+        later();
       }
     };
     child.once("error", finish);
     child.once("close", finish);
     child.stdin.on("error", () => {});
-    child.stdin.end(payload);
+    child.stdin.end(JSON.stringify(payload));
   }
   function report(context, clear = false) {
     if (!context?.hasUI) return;
     let path;
     try { path = context.sessionManager.getSessionFile(); } catch {}
-    pending = JSON.stringify({
+    pending = {
       pid: runtime.process.pid,
       sequence: ++state.sequence,
       session_path: !clear && typeof path === "string" && isAbsolute(path) && path.length <= 4096 ? path : null,
-    });
+    };
     pump();
   }
   api.on("session_start", (_event, context) => report(context));
