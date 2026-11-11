@@ -304,6 +304,7 @@ impl SettingsWindow {
             Section::Tabs => self.render_tabs(cx),
             Section::Chat => self.render_chat(cx),
             Section::Notifications => self.render_notifications(cx),
+            Section::TextShortcuts => self.render_text_shortcuts(cx),
             Section::Configuration => self.render_configuration(cx),
             Section::Theme | Section::Integrations | Section::Plugins | Section::Code => div(),
             #[cfg(feature = "cloud")]
