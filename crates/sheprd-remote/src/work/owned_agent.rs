@@ -125,7 +125,15 @@ pub fn inspect(
     if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
         argv.extend(["--model".into(), model.into()]);
     }
-    select(list, &tree.path, owner, &argv, expected, include_finished)
+    select(
+        list,
+        &tree.path,
+        owner,
+        &argv,
+        expected,
+        include_finished,
+        agent.kind,
+    )
 }
 
 fn select(
@@ -135,6 +143,7 @@ fn select(
     argv: &[String],
     expected: Option<&str>,
     include_finished: bool,
+    kind: crate::teleport::AgentKind,
 ) -> Result<Started> {
     let mut matches = list.terminals.into_iter().filter(|terminal| {
         terminal
@@ -148,6 +157,12 @@ fn select(
             || (include_finished && terminal.state == TerminalState::Finished))
         || terminal.cwd != path
         || terminal.argv != argv
+        || (terminal.state == TerminalState::Live
+            && !terminal.foreground.as_ref().is_some_and(|foreground| {
+                crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
+                    == Some(kind)
+                    || foreground.argv == argv
+            }))
         || expected.is_some_and(|expected| terminal.address != expected)
     {
         return Err(Error::Uncertain);
