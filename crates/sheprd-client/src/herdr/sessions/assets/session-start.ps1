@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-if (-not $env:HC_TERMINAL_ID) { exit 0 }
+if (-not $env:HC_TERMINAL_ID -or -not $env:HC_TERMINAL_SOCKET) { exit 0 }
 $agent = '__AGENT__'
 $program = 'sheprd-acp'
 # Keep hook input bounded before passing it to the native helper. The helper

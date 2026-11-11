@@ -60,7 +60,7 @@ clear evidence for that process rather than guessing which event is newest.
 Host-local helper commands:
 
 ```sh
-sheprd-acp session-report AGENT       # hook JSON on stdin; HC_TERMINAL_ID required
+sheprd-acp session-report AGENT       # hook JSON on stdin; injected HC_TERMINAL_ID/SOCKET required
 sheprd-acp session-discover TERMINAL AGENT
 sheprd-acp session-convert TERMINAL AGENT
 ```
@@ -69,6 +69,8 @@ Discovery prints binding JSON and exits 0; absent or explicitly cleared evidence
 exits 3; invalid/stale evidence or transport failures exit 1; CLI errors exit 2.
 Use the same `HC_SOCKET`/`HC_SESSION` as the owning core. Routed addresses are
 rejected: execute the helper on the owning host instead of reading a local PID.
+Reporting is different: it requires and uses the injected `HC_TERMINAL_SOCKET`,
+ignoring shell endpoint/session overrides so it reports to its actual owner.
 Remote callers must clear unrelated inherited `HC_SOCKET`/`HC_SESSION` before
 selecting the intended endpoint, and set `SHEPRD_EXPECT_CORE` to the core ID from
 their captured connection. A different core fails before discovery or mutation.

@@ -6,7 +6,7 @@ const AGENT = "__AGENT__";
 const PROGRAM = "sheprd-acp";
 
 export default function setup(api, runtime = { process, spawn, globalThis, setTimeout, clearTimeout }) {
-  if (!runtime.process.env.HC_TERMINAL_ID) return;
+  if (!runtime.process.env.HC_TERMINAL_ID || !runtime.process.env.HC_TERMINAL_SOCKET) return;
   const key = Symbol.for(`sheprd.session.${AGENT}`);
   const state = runtime.globalThis[key] ??= { sequence: 0 };
   let pending;

@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { setup } from "../opencode/reporter.mjs";
 
-function fixture(env = { HC_TERMINAL_ID: "terminal" }) {
+function fixture(env = { HC_TERMINAL_ID: "terminal", HC_TERMINAL_SOCKET: "/owning.sock" }) {
   let route = { type: "home" };
   let poll;
   const children = [];
@@ -99,7 +99,7 @@ test("requires core routing and honors only an absolute managed override", () =>
     [undefined, "sheprd-acp"], ["relative", "sheprd-acp"],
     ["/managed path/sheprd-acp", "/managed path/sheprd-acp"],
   ]) {
-    const f = fixture({ HC_TERMINAL_ID: "core", SHEPRD_ACP_BINARY: override });
+    const f = fixture({ HC_TERMINAL_ID: "core", HC_TERMINAL_SOCKET: "/owning.sock", SHEPRD_ACP_BINARY: override });
     const stop = f.start();
     assert.equal(f.children[0].program, expected);
     assert.deepEqual(f.children[0].args, ["session-report", "opencode"]);

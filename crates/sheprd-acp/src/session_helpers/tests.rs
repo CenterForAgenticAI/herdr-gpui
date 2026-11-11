@@ -3,6 +3,37 @@ use super::*;
 mod install;
 
 #[test]
+fn reporter_uses_the_injected_terminal_socket_not_shell_selection() {
+    let socket = OsString::from("/owning/core.sock");
+    let inherited = |name: &str| match name {
+        "HC_SOCKET" => Some("/other/core.sock".into()),
+        "HC_SESSION" => Some("other-session".into()),
+        "HOME" => Some("/home/test".into()),
+        _ => None,
+    };
+    assert_eq!(
+        endpoint_variable("HC_SOCKET", Some(&socket), inherited),
+        Some(socket)
+    );
+    assert_eq!(
+        endpoint_variable(
+            "HC_SESSION",
+            Some(&OsString::from("/owning/core.sock")),
+            inherited
+        ),
+        None
+    );
+    assert_eq!(
+        endpoint_variable("HC_SOCKET", None, inherited),
+        Some("/other/core.sock".into())
+    );
+    assert_eq!(
+        endpoint_variable("HOME", None, inherited),
+        Some("/home/test".into())
+    );
+}
+
+#[test]
 fn bounded_input_accepts_the_limit_and_reads_only_one_byte_beyond() {
     let bytes = vec![b'x'; MAX_RECORD];
     assert_eq!(read_record(bytes.as_slice()).unwrap(), bytes);

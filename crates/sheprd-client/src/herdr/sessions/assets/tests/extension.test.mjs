@@ -11,7 +11,7 @@ for (const agent of ["pi", "omp"]) {
     const callbacks = new Map();
     const children = [];
     const runtime = {
-      process: { pid: 42, env: { HC_TERMINAL_ID: "t1" } }, globalThis: {},
+      process: { pid: 42, env: { HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/owning.sock" } }, globalThis: {},
       setTimeout: () => 1, clearTimeout: () => {},
       spawn(program, args) {
         const child = new EventEmitter();

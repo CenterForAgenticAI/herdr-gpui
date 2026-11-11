@@ -24,7 +24,8 @@ sheprd-acp session-discover TERMINAL AGENT
 sheprd-acp session-convert TERMINAL AGENT
 ```
 
-`session-report` requires `HC_TERMINAL_ID` and reads at most 64 KiB of JSON
+`session-report` requires `HC_TERMINAL_ID` and `HC_TERMINAL_SOCKET`, uses that
+injected socket instead of any shell `HC_SOCKET`/`HC_SESSION` override, and reads at most 64 KiB of JSON
 from stdin. The core-client validates the event and its process ownership.
 `session-discover` prints the verified session binding as JSON (exit 0).
 It exits 3 only for absent evidence or an explicitly cleared selection; invalid,

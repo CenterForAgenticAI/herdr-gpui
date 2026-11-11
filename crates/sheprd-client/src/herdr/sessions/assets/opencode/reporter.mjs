@@ -6,7 +6,7 @@ export function setup(api, runtime = {
   spawn, process, setInterval, clearInterval, setTimeout, clearTimeout,
 }) {
   const env = runtime.process.env;
-  if (!env.HC_TERMINAL_ID) return () => {};
+  if (!env.HC_TERMINAL_ID || !env.HC_TERMINAL_SOCKET) return () => {};
   const override = env.SHEPRD_ACP_BINARY;
   const program = override && isAbsolute(override) ? override : "sheprd-acp";
   // Memory survives plugin reloads within this TUI; stale child completions must
