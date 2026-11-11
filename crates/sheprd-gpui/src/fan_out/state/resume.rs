@@ -133,7 +133,12 @@ impl FanOut {
         let checkout = lane.checkout.as_ref()?;
         let from = match lane.state {
             LaneState::Interrupted(_) | LaneState::Failed(_) => {
-                self.journal.step(self.id, index)?.resume()?
+                let step = self.journal.step(self.id, index)?;
+                if step == Checkpoint::CreatingWorktree && checkout.recoverable {
+                    Resume::Creation
+                } else {
+                    step.resume()?
+                }
             }
             _ => return None,
         };
@@ -141,7 +146,7 @@ impl FanOut {
         // mean the app died after the agent started but before saving its
         // address. Never interpret that uncertainty as permission to start
         // another agent: the user can keep the checkout and inspect it.
-        if from == Resume::Prompt && checkout.started().is_none() {
+        if from == Resume::Prompt && checkout.started().is_none() && !checkout.recoverable {
             return None;
         }
         Some(from)
@@ -160,7 +165,7 @@ impl FanOut {
             return false;
         };
         view.state = match from {
-            Resume::Start => LaneState::StartingAgent,
+            Resume::Creation | Resume::Start => LaneState::StartingAgent,
             Resume::Prompt => LaneState::Prompting,
         };
         let lane = view.lane.clone();

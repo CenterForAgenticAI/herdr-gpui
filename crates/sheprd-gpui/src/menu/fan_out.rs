@@ -79,10 +79,6 @@ impl SheprdWindow {
         let Some(origin) = self.fan_out.as_ref().map(FanOut::origin) else {
             return false;
         };
-        // The app keeps the workspace; Git reads its folder at launch.
-        if origin.kept() {
-            return self.is_kept_workspace(&origin.workspace_id);
-        }
         let Some(index) = self
             .endpoints
             .iter()
@@ -90,6 +86,22 @@ impl SheprdWindow {
         else {
             return false;
         };
+        if host_for(&self.endpoints[index].connection.target)
+            .ok()
+            .as_ref()
+            != Some(&origin.host)
+        {
+            return false;
+        }
+        // Look in the captured host's session even after a host switch.
+        if let Some(checkout) = &origin.checkout {
+            return self
+                .sessions(index)
+                .core
+                .as_ref()
+                .and_then(|session| session.workspace(&origin.workspace_id))
+                .is_some_and(|workspace| workspace.cwd == *checkout);
+        }
         self.endpoint_snapshot(index)
             .and_then(|snapshot| {
                 snapshot
@@ -125,10 +137,7 @@ impl SheprdWindow {
 
     /// The host `source`'s lanes are made on: the shown one, or this
     /// computer for a workspace the app keeps, which is always here.
-    fn fan_out_host(&self, source: &Source) -> Option<Host> {
-        if source.checkout.is_some() {
-            return Host::new(&sheprd_client::ConnectTarget::Local).ok();
-        }
+    fn fan_out_host(&self, _source: &Source) -> Option<Host> {
         host_for(&self.endpoints[self.selected_endpoint].connection.target).ok()
     }
 

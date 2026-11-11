@@ -163,13 +163,18 @@ pub(super) enum Kept {
     /// Herdr 1's workspace for it.
     Herdr1 { endpoint: String, workspace: String },
     /// The checkout of a Herdr 2 lane, whose kept workspace is found by it.
-    Herdr2 { label: String, path: String },
+    Herdr2 {
+        endpoint: String,
+        label: String,
+        path: String,
+    },
 }
 
 /// A Herdr 2 lane's agent shell, for the window to show in a workspace it
 /// keeps for the lane's checkout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Shown {
+    pub(super) endpoint: String,
     pub(super) label: String,
     pub(super) path: String,
     pub(super) terminal: String,
@@ -210,7 +215,7 @@ pub(crate) struct FanOut {
     /// Herdr 2 agent shells the window has yet to show; see [`Self::take_kept`].
     shown: Vec<Shown>,
     /// Removed Herdr 2 lanes' folders whose kept workspaces have yet to close.
-    closed: Vec<String>,
+    closed: Vec<(String, String)>,
 }
 
 impl Drop for FanOut {
@@ -344,11 +349,9 @@ impl FanOut {
         &mut self.hosts
     }
 
-    /// Whether lanes may go to other hosts at all. A kept workspace's lanes
-    /// stay on this computer: other hosts are set up through a Herdr 1
-    /// workspace of the repository, which it has none of.
+    /// Whether the shared destination picker offers another eligible host.
     pub(super) fn can_spread(&self) -> bool {
-        self.composing() && self.hosts.offers_choice() && !self.origin.kept()
+        self.composing() && self.hosts.offers_choice()
     }
 
     pub(super) fn toggle_spread(&mut self) -> bool {
@@ -377,7 +380,7 @@ impl FanOut {
     /// choices on top.
     pub(super) fn lane_hosts(&self) -> Vec<String> {
         let lanes = self.picks.total();
-        if !self.spread || !self.hosts.offers_choice() || self.origin.kept() {
+        if !self.spread || !self.hosts.offers_choice() {
             return vec![self.origin.endpoint_id.clone(); lanes];
         }
         let mut hosts = self.hosts.spread(lanes);
@@ -589,7 +592,13 @@ impl FanOut {
             .into_iter()
             .filter_map(|(index, worktree)| {
                 let host = self.lanes[index].checkout.as_ref()?.host.clone();
-                Some((index, host, worktree, self.lanes[index].lane.branch.clone()))
+                let lane = &self.lanes[index];
+                let owner = lane
+                    .checkout
+                    .as_ref()?
+                    .recoverable
+                    .then(|| lane.lane.agent.clone());
+                Some((index, host, worktree, lane.lane.branch.clone(), owner))
             })
             .collect();
         let (sender, cancelled) = (self.sender.clone(), self.work.clone());
@@ -598,10 +607,17 @@ impl FanOut {
         spawn(move || {
             let removed: Vec<_> = doomed
                 .into_iter()
-                .map(|(index, host, worktree, branch)| {
+                .map(|(index, host, worktree, branch, owner)| {
                     (
                         index,
-                        job::remove(&host, &worktree, &repo_key, &branch, &cancelled),
+                        job::remove(
+                            &host,
+                            &worktree,
+                            &repo_key,
+                            &branch,
+                            owner.as_deref(),
+                            &cancelled,
+                        ),
                     )
                 })
                 .collect();
@@ -641,7 +657,7 @@ impl FanOut {
     /// asked: Herdr 2 lanes whose agent's shell started, to show each in a
     /// kept workspace of its own, and the folders of removed lanes, whose
     /// kept workspaces close.
-    pub(super) fn take_kept(&mut self) -> (Vec<Shown>, Vec<String>) {
+    pub(super) fn take_kept(&mut self) -> (Vec<Shown>, Vec<(String, String)>) {
         (
             std::mem::take(&mut self.shown),
             std::mem::take(&mut self.closed),
@@ -673,6 +689,10 @@ impl FanOut {
                     lane.state = match progress {
                         Progress::SettingUp => LaneState::SettingUp,
                         Progress::CreatingWorktree => LaneState::CreatingWorktree,
+                        Progress::CreatingOwned(checkout) => {
+                            lane.checkout = Some(*checkout);
+                            LaneState::CreatingWorktree
+                        }
                         Progress::Created(checkout) => {
                             lane.checkout = Some(*checkout);
                             continue;
@@ -682,6 +702,7 @@ impl FanOut {
                             if let Some(checkout) = &mut lane.checkout {
                                 checkout.terminal = Some(terminal.clone());
                                 self.shown.push(Shown {
+                                    endpoint: checkout.endpoint_id.clone(),
                                     label: lane.lane.branch.clone(),
                                     path: checkout.path().to_owned(),
                                     terminal,
@@ -751,7 +772,9 @@ impl FanOut {
                                         .as_ref()
                                         .filter(|c| c.workspace_id().is_none())
                                 });
-                                self.closed.extend(kept.map(|c| c.path().to_owned()));
+                                self.closed.extend(
+                                    kept.map(|c| (c.endpoint_id.clone(), c.path().to_owned())),
+                                );
                                 removed.push(index);
                             }
                             Err(error) => {
@@ -769,6 +792,7 @@ impl FanOut {
                                     workspace: workspace.to_owned(),
                                 },
                                 None => Kept::Herdr2 {
+                                    endpoint: checkout.endpoint_id.clone(),
                                     label: lane.lane.branch.clone(),
                                     path: checkout.path().to_owned(),
                                 },

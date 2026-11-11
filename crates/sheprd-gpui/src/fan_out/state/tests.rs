@@ -63,6 +63,7 @@ fn checkout(n: usize) -> Checkout {
             },
         },
         terminal: None,
+        recoverable: false,
     }
 }
 

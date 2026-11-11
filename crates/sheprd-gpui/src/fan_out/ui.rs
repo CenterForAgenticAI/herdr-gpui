@@ -152,8 +152,12 @@ impl SheprdWindow {
                     endpoint,
                     workspace,
                 } => self.teleport_follow = Some(Follow::new(endpoint, workspace)),
-                Kept::Herdr2 { label, path } => {
-                    self.open_local_kept_folder(&label, path.into(), cx);
+                Kept::Herdr2 {
+                    endpoint,
+                    label,
+                    path,
+                } => {
+                    self.open_fan_out_folder(&endpoint, &label, &path, cx);
                 }
             }
             return;
@@ -207,7 +211,7 @@ impl SheprdWindow {
             .map(|fan_out| fan_out.lane_hosts())
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|endpoint| self.herdr_1_destination(&endpoint))
+            .filter_map(|endpoint| self.dispatch_destination(&endpoint))
             .collect();
         // A restored fan-out's other worktrees are removed only once each is
         // confirmed to still be its lane's.
@@ -273,9 +277,13 @@ impl SheprdWindow {
             return;
         };
         let Some(workspace) = checkout.workspace_id() else {
-            let (label, path) = (lane.lane.branch.clone(), checkout.path().to_owned());
+            let (endpoint, label, path) = (
+                checkout.endpoint_id.clone(),
+                lane.lane.branch.clone(),
+                checkout.path().to_owned(),
+            );
             self.dismiss_menu(window, cx);
-            self.open_local_kept_folder(&label, path.into(), cx);
+            self.open_fan_out_folder(&endpoint, &label, &path, cx);
             return;
         };
         let follow = Follow::new(checkout.endpoint_id.clone(), workspace.to_owned());
@@ -290,11 +298,12 @@ impl SheprdWindow {
     fn show_fan_out_lanes(
         &mut self,
         shown: Vec<Shown>,
-        closed: Vec<String>,
+        closed: Vec<(String, String)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         for Shown {
+            endpoint,
             label,
             path,
             terminal,
@@ -307,11 +316,10 @@ impl SheprdWindow {
                 crate::core_terminals::panes::Panes::single(terminal),
                 false,
             );
-            self.open_kept_workspace_behind(&label, std::path::Path::new(&path), location, cx);
+            self.show_fan_out_terminal(&endpoint, &label, &path, location, cx);
         }
-        // Lanes are this computer's, whichever host is shown now.
-        for path in closed {
-            self.close_local_kept_folder(std::path::Path::new(&path), window, cx);
+        for (endpoint, path) in closed {
+            self.close_fan_out_folder(&endpoint, &path, window, cx);
         }
     }
 
@@ -493,7 +501,12 @@ impl SheprdWindow {
                                     .terminal
                                     .clone()
                                     .and_then(|t| sheprd_backend::TerminalId::new(t).ok())
-                                    .and_then(|t| self.core_terminals.local_info(&t))
+                                    .and_then(|t| {
+                                        self.core_terminals.reported(
+                                            &self.fan_out_core_host(&checkout.endpoint_id)?,
+                                            &t,
+                                        )
+                                    })
                                     .map_or_else(
                                         || lane.state.label(),
                                         |info| status_text(info.agent),
@@ -543,7 +556,7 @@ impl SheprdWindow {
                     // No lane is kept while another is still being finished.
                     let keepable = actionable && settled;
                     let resume = fan_out.resumable(index).map(|from| match from {
-                        Resume::Start => fl!("fan-out-start-agent"),
+                        Resume::Creation | Resume::Start => fl!("fan-out-start-agent"),
                         Resume::Prompt => fl!("fan-out-send-prompt"),
                     });
                     body = body.child(

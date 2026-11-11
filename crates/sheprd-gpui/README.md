@@ -2446,6 +2446,13 @@ reason. Lanes on another host show it next to their status, and Open, Keep and
 the comparison work across hosts; a host that cannot be read marks only its
 own lanes, keeping the changes read before.
 
+Herdr 2 origins use the same host picker, including Herdr 2-only destinations
+and mixed Herdr 1/2 destinations. The destination's backend creates its lanes:
+Herdr 1 through its daemon, Herdr 2 through Git and labelled core agent runs.
+Each lane retains its endpoint when the selected host changes; its kept
+workspace, status, Open and Keep actions follow that endpoint. A failed tab
+presentation leaves the running agent intact.
+
 Each fan-out's lanes and the last step each one reached are kept in
 `fan-outs.json` in the state directory, written before and after every step,
 until a lane is kept or the comparison is forgotten. A lane whose next step
@@ -2455,10 +2462,20 @@ warning, and each lane says where it stopped: while creating its worktree (the
 branch may exist), before its agent started, while the agent was starting, or
 while the prompt was being sent. Nothing runs by itself. Start agent or Send
 prompt finishes a lane only when clicked, and Send prompt never starts a second
-agent. A lane that fails, finishing included, offers the same button again,
-except when a Herdr 2 agent may have started but its terminal address was not
-saved before a crash. That lane cannot be resumed safely: keep its checkout
-and inspect the running terminals before starting another agent.
+agent. New Herdr 2 lanes save the exact destination before creation and write
+an ownership receipt after Git succeeds. Start agent recovers an interrupted
+creation only when that receipt, linked checkout root and branch still match.
+If creation stopped before the receipt was written, the checkout stays for
+inspection; a matching path or branch alone never grants ownership.
+
+Herdr 2 agent runs carry an atomic ownership label. After a lost run reply,
+Send prompt recovers only one live terminal matching that label, the saved
+checkout, original agent command and any saved terminal address. It never
+starts a replacement agent. Old journals without labels cannot recover a
+missing terminal address. Once a prompt send has been attempted, interrupted
+or failed delivery remains explicitly uncertain and is not offered for replay:
+neither backend provides an idempotency key that could prove exactly-once
+delivery after a lost acknowledgement. Inspect the retained agent instead.
 Keep removes the other worktrees after its usual confirmation; a lane whose
 worktree may exist or sits on a host no longer set up stays saved until Forget,
 which lets the fan-out go and leaves every worktree as it is. Up to four
