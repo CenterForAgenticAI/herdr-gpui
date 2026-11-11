@@ -80,4 +80,20 @@ async fn saved_and_daemon_owned_workspaces_answer_without_desktop_or_herdr_one()
     let home: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(home["github"], true);
     assert_eq!(home["workspaces"][0]["pull_request"]["number"], 42);
+    for path in ["/f/checks/core:saved", "/f/checks/core:saved/123"] {
+        let (status, ..) = send(&state, get(path)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _, body) = send(&state, request(&token, path)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        if path.ends_with("123") {
+            assert!(
+                body.contains("&lt;script&gt;untrusted log&lt;/script&gt;"),
+                "{body}"
+            );
+            assert!(!body.contains("<script>"));
+        } else {
+            assert!(body.contains("Pull request #42"), "{body}");
+            assert!(body.contains("Read failing log"));
+        }
+    }
 }

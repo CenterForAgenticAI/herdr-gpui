@@ -18,6 +18,7 @@ struct ChangesScreen: View {
     @State private var files = Loading<ChangeList>.waiting
     @State private var checks: PullRequestChecks?
     @State private var checksError: String?
+    @State private var checksGeneration = UUID()
     @State private var sending: PullRequestCheck?
     #if DEBUG
     /// The simulator loop's `-openDiff PATH` opens that file's diff.
@@ -45,6 +46,8 @@ struct ChangesScreen: View {
     private struct ChecksReading: Equatable {
         var status: LinkStatus?
         var number: UInt64?
+        var branch: String?
+        var cwd: String?
     }
 
     var body: some View {
@@ -77,7 +80,8 @@ struct ChangesScreen: View {
         .toolbar(.hidden, for: .tabBar)
         .refreshable { await reload() }
         .task(id: Reading(scope: scope, status: machine?.status)) { await loadFiles() }
-        .task(id: ChecksReading(status: machine?.status, number: workspace?.pullRequest?.number)) { await loadChecks() }
+        .task(id: ChecksReading(status: machine?.status, number: workspace?.pullRequest?.number,
+                               branch: workspace?.branch, cwd: workspace?.cwd)) { await loadChecks() }
         .sheet(item: $sending) { check in SendLogSheet(key: key, check: check) }
         #if DEBUG
         .navigationDestination(item: $debugFile) { FileDiffScreen(key: key, scope: scope, file: $0) }
@@ -124,15 +128,24 @@ struct ChangesScreen: View {
     /// that this branch has no PR. Failures remain visible and retryable.
     private func loadChecks() async {
         let (device, id) = (key.device, key.workspace)
+        let generation = UUID()
+        checksGeneration = generation
+        let branch = workspace?.branch
+        let cwd = workspace?.cwd
+        let number = workspace?.pullRequest?.number
         checksError = nil
         do {
             let read = try await model.fleet.call(device) { client, token in
                 try await client.checks(workspace: id, bearer: token)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, checksGeneration == generation,
+                  branch == workspace?.branch, cwd == workspace?.cwd,
+                  number == workspace?.pullRequest?.number else { return }
             checks = read
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, checksGeneration == generation,
+                  branch == workspace?.branch, cwd == workspace?.cwd,
+                  number == workspace?.pullRequest?.number else { return }
             checks = nil
             checksError = error.localizedDescription
         }

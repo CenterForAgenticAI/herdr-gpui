@@ -47,7 +47,11 @@ pub(crate) struct DiffQuery {
 /// Answers `wanted` about `workspace`: Sheprd's answer while it is open
 /// and lists the workspace, else Git's. A workspace this daemon does not
 /// list is refused here, so only ones the phone could see are read.
-async fn ask(state: &Shared, workspace: String, wanted: Wanted) -> Result<Answer, ApiError> {
+pub(crate) async fn ask(
+    state: &Shared,
+    workspace: String,
+    wanted: Wanted,
+) -> Result<Answer, ApiError> {
     let (boot, cwd, branch) = {
         let layout = state.hub.layout();
         let listed = layout.workspace(&workspace).ok_or(ApiError::NotFound)?;

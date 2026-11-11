@@ -5,6 +5,12 @@ impl Reader {
     pub(crate) fn fixture(cwd: &str) -> Self {
         let reader = Self::new(true);
         populate(&reader, cwd);
+        reader.cache.lock().unwrap().entries[0].logs.push((
+            123,
+            Ok(CheckLog {
+                excerpt: "<script>untrusted log</script>".into(),
+            }),
+        ));
         reader
     }
 }
@@ -270,4 +276,87 @@ fn expired_entries_and_remote_changes_require_a_new_lookup() {
         reader.answer(cwd, &Wanted::Checks),
         Err(Failure::RateLimited)
     );
+}
+
+#[test]
+fn effective_includes_and_arbitrary_remotes_invalidate_answers() {
+    let dir = repository();
+    let cwd = dir.path().to_str().unwrap();
+    let include = dir.path().join("included-config");
+    std::fs::write(
+        &include,
+        "[remote \"fork\"]\nurl = https://github.com/first/repo.git\n",
+    )
+    .unwrap();
+    git(
+        dir.path(),
+        &["config", "include.path", include.to_str().unwrap()],
+    );
+    let reader = Reader::new(true);
+    populate(&reader, cwd);
+    std::fs::write(
+        &include,
+        "[remote \"fork\"]\nurl = https://github.com/second/repo.git\n",
+    )
+    .unwrap();
+    assert_eq!(
+        reader.answer(cwd, &Wanted::Checks),
+        Err(Failure::RateLimited)
+    );
+}
+
+#[test]
+fn remote_changes_during_pr_or_log_reads_discard_the_answer_and_cache() {
+    for log in [false, true] {
+        let dir = repository();
+        let cwd = dir.path().to_str().unwrap();
+        let reader = Reader::new(true);
+        if log {
+            populate(&reader, cwd);
+            reader.cache.lock().unwrap().next = None;
+        }
+        let result = reader.answer_using(
+            cwd,
+            &if log {
+                Wanted::CheckLog { job: 123 }
+            } else {
+                Wanted::Checks
+            },
+            |_| {
+                git(
+                    dir.path(),
+                    &[
+                        "remote",
+                        "add",
+                        "fork",
+                        "https://github.com/replaced/repo.git",
+                    ],
+                );
+                Ok(Some(pr()))
+            },
+            |_, _| {
+                git(
+                    dir.path(),
+                    &[
+                        "remote",
+                        "add",
+                        "fork",
+                        "https://github.com/replaced/repo.git",
+                    ],
+                );
+                Ok("old log".into())
+            },
+        );
+        assert_eq!(result, Err(Failure::Gone));
+        assert!(reader.cache.lock().unwrap().entries.is_empty());
+    }
+}
+
+#[test]
+fn temporary_failures_keep_a_matching_badge_but_absence_and_identity_changes_remove_it() {
+    assert!(!replaces_badge(&Ok(Err(Failure::RateLimited))));
+    assert!(!replaces_badge(&Ok(Err(Failure::GitHubUnavailable))));
+    assert!(replaces_badge(&Ok(Ok(None))));
+    assert!(replaces_badge(&Ok(Err(Failure::Gone))));
+    assert!(replaces_badge(&Ok(Ok(Some(pr())))));
 }

@@ -255,8 +255,16 @@ asks without requiring an existing badge and displays failures and whether
 standalone reads were enabled (`github` in `/api/v2/home`). Older daemons leave
 that capability out.
 
+In the mobile web app, each workspace's **Checks** link opens the authenticated
+check list even before a PR badge is available. Failed Actions jobs offer
+**Read failing log**; errors stay visible with Refresh/Retry. Log excerpts are
+escaped text, and the service worker caches only the app shell, never checks
+or logs.
+
 The cache holds at most 128 checkouts for 60 seconds, keyed by folder, branch,
-HEAD and remote/tracking configuration. Only one GitHub read runs at once;
+HEAD and a digest of Git's effective configuration (including arbitrary tracked
+remotes and includes). Identity is checked again after each completed read,
+including log downloads. Only one GitHub read runs at once;
 cache misses are paced at two seconds, errors pause the account for a minute,
 and rate-limit errors for an hour. Badges prefetch one listed checkout per tick,
 so large workspace lists converge incrementally. Logs are offered only for

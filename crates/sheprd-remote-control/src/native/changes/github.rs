@@ -33,7 +33,7 @@ struct Cache {
 struct Entry {
     input: Input,
     head: String,
-    repository: String,
+    repository: [u8; 32],
     until: Instant,
     value: Result<Option<PullRequest>, Failure>,
     logs: Vec<(u64, Result<CheckLog, Failure>)>,
@@ -160,27 +160,7 @@ impl Reader {
         }
         let mut cache = self.cache.try_lock().map_err(|_| Failure::RateLimited)?;
         let cwd = Path::new(cwd);
-        let branch = super::local::git(cwd, &["symbolic-ref", "--quiet", "--short", "HEAD"])
-            .map_err(|_| Failure::NoRepository)?
-            .trim()
-            .to_owned();
-        let head = super::local::git(cwd, &["rev-parse", "--verify", "HEAD"])
-            .map_err(|_| Failure::NoRepository)?
-            .trim()
-            .to_owned();
-        let repository = super::local::git(
-            cwd,
-            &[
-                "config",
-                "--local",
-                "--get-regexp",
-                "^(remote\\.(origin|upstream)\\.url|branch\\..*\\.(remote|merge))$",
-            ],
-        )
-        .unwrap_or_default();
-        if branch.len() > 512 || repository.len() > 8192 {
-            return Err(Failure::NoRepository);
-        }
+        let (branch, head, repository) = identity(cwd)?;
         let input = Input {
             checkout: Some(cwd.to_string_lossy().into_owned()),
             repo_key: None,
@@ -198,14 +178,6 @@ impl Reader {
                     cache.pause(&error);
                     failure(error)
                 });
-                let current_branch =
-                    super::local::git(cwd, &["symbolic-ref", "--quiet", "--short", "HEAD"])
-                        .map_err(|_| Failure::Gone)?;
-                let current_head = super::local::git(cwd, &["rev-parse", "--verify", "HEAD"])
-                    .map_err(|_| Failure::Gone)?;
-                if current_branch.trim() != input.branch || current_head.trim() != head {
-                    return Err(Failure::Gone);
-                }
                 cache
                     .entries
                     .retain(|entry| entry.input.checkout != input.checkout);
@@ -223,8 +195,34 @@ impl Reader {
                 cache.entries.len() - 1
             }
         };
-        read(&mut cache, index)
+        let answer = read(&mut cache, index);
+        let entry = &cache.entries[index];
+        // Includes logs and cache hits: no requested read may return or
+        // retain data for a checkout that changed while it ran.
+        if !identity(cwd).is_ok_and(|(branch, head, repository)| {
+            branch == entry.input.branch && head == entry.head && repository == entry.repository
+        }) {
+            cache.entries.remove(index);
+            return Err(Failure::Gone);
+        }
+        answer
     }
+}
+
+fn identity(cwd: &Path) -> Result<(String, String, [u8; 32]), Failure> {
+    use sha2::{Digest, Sha256};
+    let git = |args: &[&str]| super::local::git(cwd, args).map_err(|_| Failure::NoRepository);
+    let branch = git(&["symbolic-ref", "--quiet", "--short", "HEAD"])?
+        .trim()
+        .to_owned();
+    let head = git(&["rev-parse", "--verify", "HEAD"])?.trim().to_owned();
+    if branch.len() > 512 {
+        return Err(Failure::NoRepository);
+    }
+    // Include Git's effective settings and arbitrary tracked remotes. Keep
+    // only a digest, never values which may themselves contain credentials.
+    let config = git(&["config", "--null", "--list", "--includes"])?;
+    Ok((branch, head, Sha256::digest(config.as_bytes()).into()))
 }
 
 #[cfg(test)]
@@ -327,8 +325,9 @@ pub(crate) async fn badges(state: crate::web::Shared) {
                 ..Default::default()
             }
         };
+        let replace = replaces_badge(&result);
         snapshot.entries.retain(|entry| {
-            entry.workspace_id != workspace.id
+            (!replace || entry.workspace_id != workspace.id)
                 && current.workspace(&entry.workspace_id).is_some_and(|now| {
                     now.cwd == entry.cwd && now.branch.as_deref() == Some(&entry.branch)
                 })
@@ -350,4 +349,17 @@ pub(crate) async fn badges(state: crate::web::Shared) {
             state.pull_requests.send_replace(Arc::new(snapshot));
         }
     }
+}
+
+fn replaces_badge(
+    result: &Result<Result<Option<PullRequest>, Failure>, tokio::task::JoinError>,
+) -> bool {
+    matches!(
+        result,
+        Ok(Ok(_))
+            | Ok(Err(Failure::Gone
+                | Failure::NoRepository
+                | Failure::GitHubSignIn
+                | Failure::GitHubScope))
+    )
 }
