@@ -204,6 +204,8 @@ impl SheprdWindow {
             .map(|workspace| workspace.id.clone())
     }
 
+    // Tests only: production keeps and closes by the lane's own scope.
+    #[cfg(test)]
     /// This computer's scope, whose workspaces the app keeps, whichever
     /// host is shown.
     pub(crate) fn local_kept_scope(&self) -> Option<Scope> {
@@ -219,6 +221,8 @@ impl SheprdWindow {
             .map(|workspace| workspace.id.clone())
     }
 
+    // Tests only: production keeps and closes by the lane's own scope.
+    #[cfg(test)]
     /// Closes the workspace this computer keeps at `cwd`, without showing
     /// this computer; whether there was one.
     pub(crate) fn close_local_kept_folder(
@@ -237,6 +241,8 @@ impl SheprdWindow {
         true
     }
 
+    // Tests only: production keeps and closes by the lane's own scope.
+    #[cfg(test)]
     /// Keeps a new workspace on this computer for a checkout at `cwd` whose
     /// first tab shows `location`, leaving whatever is in front, and which
     /// host is shown, as they are, as Herdr 1 opens a fan-out lane's
