@@ -40,23 +40,27 @@ pub(crate) enum Settled {
     /// The computer had an edit this copy has not: it becomes the copy, and
     /// goes to the other computers.
     Take(TextShortcuts),
-    /// The copy was edited while the exchange ran, so the computer has not
-    /// heard of that edit yet: offer it again.
+    /// The computer holds these shortcuts edited later, such as changed and
+    /// changed back: the copy takes the later time, so its next edit is
+    /// stamped after it, and needs to go nowhere else.
+    Raise(TextShortcuts),
+    /// The copy was edited while the exchange ran, or the computer does not
+    /// hold what it was thought to: offer the copy again.
     Again,
-    /// The computer holds these shortcuts, or nothing changed there.
+    /// The computer holds this copy.
     Keep,
 }
 
 /// What `stood`, the computer's answer to an exchange made when the copy
 /// was edited at `offered_ms`, does to `current`, the copy now, at
-/// `now_ms`. `known` is what that computer answered before.
+/// `now_ms`. `known` is what that computer answered before, whole.
 ///
 /// Edit times come from different clocks, so they only order edits made
-/// on one. An answer whose shortcuts changed since `known` is an edit made
-/// there, however its clock runs, and is taken stamped after the copy it
-/// replaces. Stamps are never lowered: an answer still on its way cannot
-/// undo an edit made here since. An answer more than
-/// [`FUTURE_TOLERANCE_MS`] ahead is not taken.
+/// on one. An answer that changed since `known` without being newer than
+/// the copy is still an edit made there, however its clock runs: it is
+/// taken stamped after the copy it replaces. The copy's time is never
+/// lowered, so an answer still on its way cannot undo a save made since.
+/// An answer more than [`FUTURE_TOLERANCE_MS`] ahead is not taken.
 pub(crate) fn settle(
     current: &TextShortcuts,
     offered_ms: u64,
@@ -64,28 +68,33 @@ pub(crate) fn settle(
     known: Option<&TextShortcuts>,
     now_ms: u64,
 ) -> Settled {
-    if stood.updated_ms > now_ms.saturating_add(FUTURE_TOLERANCE_MS)
-        || stood.shortcuts == current.shortcuts
-    {
+    if stood.updated_ms > now_ms.saturating_add(FUTURE_TOLERANCE_MS) {
         Settled::Keep
+    } else if stood.shortcuts == current.shortcuts {
+        if stood.updated_ms > current.updated_ms {
+            Settled::Raise(stood)
+        } else {
+            Settled::Keep
+        }
     } else if stood.updated_ms > current.updated_ms {
         Settled::Take(stood)
-    } else if current.updated_ms != offered_ms {
+    } else if current.updated_ms != offered_ms || known == Some(&stood) {
+        // Edited here meanwhile; or nothing changed there, yet it holds
+        // other shortcuts than it was thought to have received.
         Settled::Again
-    } else if known.is_some_and(|known| known.shortcuts != stood.shortcuts) {
+    } else {
         let updated_ms = stood.updated_ms.max(current.updated_ms.saturating_add(1));
         Settled::Take(TextShortcuts::new(stood.shortcuts, updated_ms))
-    } else {
-        Settled::Keep
     }
 }
 
-/// Whether an exchange with a computer that last answered `known` offers
-/// `current`: only when that computer does not hold these shortcuts yet.
-/// Offering a copy it holds would stamp it again there, by this clock,
-/// past an edit made on that computer since.
-pub(crate) fn offers(current: &TextShortcuts, known: Option<&TextShortcuts>) -> bool {
-    known.is_none_or(|known| known.shortcuts != current.shortcuts)
+/// Whether an exchange offers the copy edited at `current_ms` to a
+/// computer that last held this app's copy as edited at `held_ms`: only an
+/// edit it has not received. Offering one it holds would stamp it again
+/// there, by this clock, past an edit made on that computer since; matching
+/// text alone is no proof, as an edit and its undo read the same.
+pub(crate) fn offers(current_ms: u64, held_ms: Option<u64>) -> bool {
+    held_ms != Some(current_ms)
 }
 
 /// `shortcuts` as edited here at `now_ms`: always later than `current`, so
@@ -168,6 +177,9 @@ struct Link {
     /// What the computer answered last, to tell an edit made there from
     /// one this copy already holds.
     known: Option<TextShortcuts>,
+    /// The edit of this app's copy, by its time here, that the computer
+    /// holds: an exchange offers only a later one.
+    held_ms: Option<u64>,
 }
 
 /// The newest copy of the shortcuts and each computer's link to its daemon.
@@ -270,7 +282,7 @@ impl Store {
             link.running = true;
             link.due = false;
             link.last = Some(Instant::now());
-            let offer = offers(&current, link.known.as_ref()).then(|| (*current).clone());
+            let offer = offers(current.updated_ms, link.held_ms).then(|| (*current).clone());
             let offered_ms = current.updated_ms;
             let task = cx
                 .background_executor()
@@ -303,21 +315,34 @@ impl Store {
                 return false;
             };
             let known = link.known.replace(stood.clone());
-            match settle(&this.list, offered_ms, stood, known.as_ref(), now_ms()) {
-                Settled::Take(stood) => {
-                    this.list = Arc::new(stood);
+            let held = stood.shortcuts.clone();
+            let changed = match settle(&this.list, offered_ms, stood, known.as_ref(), now_ms()) {
+                Settled::Take(taken) => {
+                    this.list = Arc::new(taken);
                     // Every other computer still holds the older copy.
                     for other in this.daemons.keys().filter(|other| *other != id) {
                         this.links.entry(other.clone()).or_default().due = true;
                     }
                     true
                 }
-                Settled::Again => {
-                    this.links.entry(id.to_owned()).or_default().due = true;
+                Settled::Raise(raised) => {
+                    this.list = Arc::new(raised);
                     false
                 }
+                Settled::Again => {
+                    let link = this.links.entry(id.to_owned()).or_default();
+                    link.due = true;
+                    link.held_ms = None;
+                    return false;
+                }
                 Settled::Keep => false,
+            };
+            // The computer holds the copy as it stands here now.
+            if held == this.list.shortcuts {
+                let updated_ms = this.list.updated_ms;
+                this.links.entry(id.to_owned()).or_default().held_ms = Some(updated_ms);
             }
+            changed
         });
         if changed {
             cx.refresh_windows();

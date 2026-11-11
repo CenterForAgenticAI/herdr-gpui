@@ -170,8 +170,8 @@ fn an_edit_on_a_computer_with_a_slower_clock_is_taken() {
     let current = list(&["carry on"], 5_000);
     let held = list(&["carry on"], 4_000);
     assert!(
-        !offers(&current, Some(&held)),
-        "a held copy is not offered again"
+        !offers(5_000, Some(5_000)),
+        "an edit the host holds is not offered again"
     );
     // A phone edits there, stamped by the host's slower clock.
     let phone = list(&["review the diff"], 4_500);
@@ -180,11 +180,12 @@ fn an_edit_on_a_computer_with_a_slower_clock_is_taken() {
         Settled::Take(list(&["review the diff"], 5_001)),
         "taken after the copy it replaces, so it goes on to the others"
     );
-    // The same answer heard twice is not an edit.
+    // The same answer heard twice is not an edit made there: the host
+    // does not hold the copy after all, so it is offered again.
     let again = list(&["old"], 4_000);
     assert_eq!(
         settle(&current, 5_000, again.clone(), Some(&again), NOW),
-        Settled::Keep
+        Settled::Again
     );
 }
 
@@ -215,19 +216,23 @@ fn computers_converge_on_the_latest_edit() {
         list(&["middle"], 20),
     ];
     let mut known: [Option<TextShortcuts>; 3] = Default::default();
+    let mut held: [Option<u64>; 3] = Default::default();
     let mut copy = TextShortcuts::default();
     // Two rounds: the first finds the newest, the second hands it on.
     for _ in 0..2 {
-        for (computer, known) in computers.iter_mut().zip(&mut known) {
+        for ((computer, known), held) in computers.iter_mut().zip(&mut known).zip(&mut held) {
             let offered_ms = copy.updated_ms;
-            if offers(&copy, known.as_ref()) {
+            if offers(copy.updated_ms, *held) {
                 *computer = computer.clone().merged(copy.clone(), 100);
             }
             let before = known.replace(computer.clone());
-            if let Settled::Take(stood) =
-                settle(&copy, offered_ms, computer.clone(), before.as_ref(), NOW)
-            {
-                copy = stood;
+            match settle(&copy, offered_ms, computer.clone(), before.as_ref(), NOW) {
+                Settled::Take(taken) | Settled::Raise(taken) => copy = taken,
+                Settled::Again => *held = None,
+                Settled::Keep => {}
+            }
+            if computer.shortcuts == copy.shortcuts {
+                *held = Some(copy.updated_ms);
             }
         }
     }
@@ -236,6 +241,41 @@ fn computers_converge_on_the_latest_edit() {
         computers
             .iter()
             .all(|computer| computer.shortcuts == copy.shortcuts)
+    );
+}
+
+#[test]
+fn a_later_time_for_the_same_shortcuts_is_kept() {
+    // A phone edited the list and changed it back, at 300 there.
+    let current = list(&["carry on"], 100);
+    let back = list(&["carry on"], 300);
+    assert_eq!(
+        settle(&current, 100, back.clone(), None, NOW),
+        Settled::Raise(back.clone())
+    );
+    // So a save here, by a clock reading 250, still comes after it.
+    let save = edited(&back, vec![shortcut("s", "", "review")], 250);
+    assert_eq!(save.updated_ms, 301);
+}
+
+#[test]
+fn an_edit_and_its_undo_made_here_still_reach_a_computer_that_was_away() {
+    use sheprd_remote_control::control::edited::Edited;
+    // The host held A, edited here at 100, then went away.
+    let held = Some(100);
+    // Here: B at 200, then back to A at 300. There: C at 250.
+    let current = list(&["carry on"], 300);
+    let host = list(&["from the host"], 250);
+    assert!(
+        offers(current.updated_ms, held),
+        "matching text is no proof it was received"
+    );
+    // The host takes the later edit, stamped by its own clock.
+    let stood = host.clone().merged(current.clone(), 260);
+    assert_eq!(stood.shortcuts, current.shortcuts);
+    assert_eq!(
+        settle(&current, 300, stood, Some(&host), NOW),
+        Settled::Keep
     );
 }
 

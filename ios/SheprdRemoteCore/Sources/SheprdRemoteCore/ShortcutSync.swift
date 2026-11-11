@@ -34,6 +34,9 @@ public struct ShortcutSync: Sendable {
     /// fetched or offered again although its clock stamped it differently.
     private var known: [String: TextShortcuts] = [:]
     private var settled: [String: Settled] = [:]
+    /// The edit time here when a fetch from each computer was asked for,
+    /// so what it brings back is known to answer that copy, not a later edit.
+    private var fetching: [String: UInt64] = [:]
 
     /// How far past this phone's clock a computer's edit time may be. The
     /// daemon counts an offer as made by its own now at the latest, so a
@@ -77,21 +80,33 @@ public struct ShortcutSync: Sendable {
     }
 
     /// What a computer answered `GET` with at `now`.
+    ///
+    /// Edit times come from different clocks, so they only order edits made
+    /// on one. A copy that changed since the computer's last one, while
+    /// nothing was edited here, is an edit made there however its clock
+    /// runs: it is kept, stamped after the copy here, and offered on.
     public mutating func fetched(_ copy: TextShortcuts, from device: String, now: UInt64) -> [Action] {
+        let base = fetching.removeValue(forKey: device)
         guard Self.isPlausible(copy.updatedMs, now: now) else { return [] }
-        heard(copy.bounded, from: device)
+        let copy = copy.bounded
+        let previous = known[device]
+        heard(copy, from: device)
+        if let previous, previous != copy, copy.shortcuts != local.shortcuts,
+           base == local.updatedMs, copy.updatedMs <= local.updatedMs {
+            let (next, overflow) = local.updatedMs.addingReportingOverflow(1)
+            local = TextShortcuts(bounding: copy.shortcuts, updatedMs: max(copy.updatedMs, overflow ? .max : next))
+        }
         return actions()
     }
 
     /// What stood after `offered` reached a computer, answered at `now`.
-    /// While nothing was edited here since, it replaces the copy here even
-    /// when older: the daemon counts an offer from a clock running ahead as
-    /// made at its own now, so it may be.
-    public mutating func answered(_ copy: TextShortcuts, offered: TextShortcuts, by device: String, now: UInt64) -> [Action] {
+    /// The time here is never lowered to the computer's, although a daemon
+    /// counts an offer from a clock running ahead as made at its own now: a
+    /// lower time would let an answer still on its way undo a save made
+    /// since. The computer's copy is known, so it is not offered again.
+    public mutating func answered(_ copy: TextShortcuts, offered _: TextShortcuts, by device: String, now: UInt64) -> [Action] {
         guard Self.isPlausible(copy.updatedMs, now: now) else { return [] }
-        let copy = copy.bounded
-        if local == offered { local = copy }
-        heard(copy, from: device)
+        heard(copy.bounded, from: device)
         return actions()
     }
 
@@ -101,6 +116,7 @@ public struct ShortcutSync: Sendable {
         reported[device] = nil
         known[device] = nil
         settled[device] = nil
+        fetching[device] = nil
     }
 
     /// Keeps `copy` as what `device` holds, and the newest copy any online
@@ -127,7 +143,10 @@ public struct ShortcutSync: Sendable {
                 if copy.shortcuts != local.shortcuts, updatedMs < local.updatedMs {
                     actions.append(.offer(local, device: device))
                 }
-            } else if updatedMs > local.updatedMs {
+            } else if known[device] != nil || updatedMs > local.updatedMs {
+                // Newer, or changed there since its last copy: an edit made
+                // there, which an offer would overwrite whatever its time.
+                fetching[device] = local.updatedMs
                 actions.append(.fetch(device: device))
             } else if updatedMs < local.updatedMs {
                 actions.append(.offer(local, device: device))

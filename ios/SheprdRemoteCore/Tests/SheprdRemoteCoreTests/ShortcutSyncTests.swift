@@ -99,8 +99,42 @@ import Testing
         #expect(sync.home(100, from: "a", now: Self.now) == [.offer(mine, device: "a")])
         let kept = Self.list("mine", at: 1_000)
         #expect(sync.answered(kept, offered: mine, by: "a", now: Self.now).isEmpty)
-        #expect(sync.local == kept)
+        // The time here is never lowered to the computer's.
+        #expect(sync.local == mine)
         #expect(sync.home(1_000, from: "a", now: Self.now).isEmpty)
+    }
+
+    @Test func aDelayedAnswerCannotUndoASaveMadeSince() {
+        // X goes to two computers; the first stamps it earlier, by a slower
+        // clock. A save comes after X here, whatever the clock reads.
+        let x = Self.list("x", at: 5_000)
+        var sync = ShortcutSync(local: x)
+        _ = sync.home(100, from: "a", now: Self.now)
+        _ = sync.home(100, from: "b", now: Self.now)
+        _ = sync.answered(Self.list("x", at: 4_000), offered: x, by: "a", now: Self.now)
+        _ = sync.edit([TextShortcut(id: "y", title: "", text: "y")], now: 4_500)
+        let y = sync.local
+        #expect(y.updatedMs == 5_001)
+        // The second computer's answer, X at 5000, arrives late: Y stands.
+        _ = sync.answered(x, offered: x, by: "b", now: Self.now)
+        #expect(sync.local == y)
+    }
+
+    @Test func anEditOnAComputerWithASlowerClockIsKeptAndOfferedOn() {
+        // This phone's clock runs ahead: the computer holds the list at 4000.
+        let mine = Self.list("mine", at: 5_000)
+        var sync = ShortcutSync(local: mine)
+        _ = sync.home(100, from: "a", now: Self.now)
+        _ = sync.home(5_000, from: "b", now: Self.now)
+        _ = sync.answered(Self.list("mine", at: 4_000), offered: mine, by: "a", now: Self.now)
+        // Someone edits there, stamped by its slower clock: it is fetched,
+        // not overwritten by an offer of the older list here.
+        #expect(sync.home(4_500, from: "a", now: Self.now) == [.fetch(device: "a")])
+        let theirs = Self.list("theirs", at: 4_500)
+        let actions = sync.fetched(theirs, from: "a", now: Self.now)
+        #expect(sync.local.shortcuts == theirs.shortcuts)
+        #expect(sync.local.updatedMs == 5_001)
+        #expect(actions == [.offer(sync.local, device: "b")])
     }
 
     @Test func anOfferTheComputerRefusedLeavesItsCopyHere() {
