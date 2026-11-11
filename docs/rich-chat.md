@@ -203,9 +203,8 @@ Limitations:
 - Only Herdr 1 on this machine, on macOS and Linux, where the `herdr` CLI
   answers `pane process-info`. Windows, SSH hosts, WSL, cloud machines, and a
   daemon behind a custom socket are not continued.
-- Herdr 2 (herdr-core) is not continued yet. Its chats run `sheprd-acp` as the
-  terminal's own program, which records nothing there, and herdr-core shows no
-  boot identity to tell a restart from a chat that ended.
+- Herdr 2 is not continued automatically; it has the explicit recovery path
+  below. Reattaching to a chat that survived a core restart needs no recovery.
 - A chat Sheprd never saw live (started and ended while no window was
   connected) is not continued, because nothing says which boot it ran under.
 - A pane identity can still be reused: a chat whose pane was closed while no
@@ -224,6 +223,56 @@ Limitations:
 - On a Linux shutdown, where chats may die before their daemon, a window
   still connected 30 seconds later counts them as ended, and they are not
   continued.
+
+### Explicit Herdr 2 recovery
+
+Desktop and phone-created chats use kept terminals. After an unexpected
+program loss or a stopped core starting again, core preserves the terminal's
+address, folder and launch environment overrides and starts a shell. Normal
+program exits and explicit terminal kills still end the terminal. A recovered
+shell is shown as a terminal, not as a live chat merely because it retained the
+old endpoint label.
+
+For new built-in chats without extra agent arguments, `sheprd-acp` keeps the
+exact opened agent session under `restore/core/<endpoint>.json` beside its
+attach sockets **on the terminal's host**. A normal quit or successful agent
+exit removes this record; process loss, a failed headless agent, or a failed
+view preserves it. Closing a viewer does not close the chat. Herdr 1's restore
+scanner never consumes these records.
+
+At that terminal's recovered shell prompt, run:
+
+```sh
+sheprd-acp restore "$HERDR_ACP_ENDPOINT"
+```
+
+In PowerShell, use `sheprd-acp restore $env:HERDR_ACP_ENDPOINT`. The command
+requires the original endpoint, injected terminal ID and terminal socket, and
+canonical working directory. It refuses a different terminal, named session,
+folder, or host instead of searching for a recent agent session. It takes an
+OS-held endpoint lock **before** starting an agent, and holds it for the whole
+chat lifetime; another launch cannot steal a slow starter's claim. A crash
+releases the lock. Empty `.lock` files remain so concurrent processes always
+lock the same file.
+
+Recovery uses the recorded adapter choice and the existing strict `--resume`
+path, including its agent-specific history support and Pi limitation described
+above. Environment overrides passed when core created the terminal remain core's
+responsibility; the record does not serialize credentials or the entire process
+environment. This path requires `HERDR_ACP_ENDPOINT` in the recovered shell;
+terminal-to-chat conversions that only set it for the original child cannot yet
+use this command.
+
+**Automatic desktop and phone recovery remains incomplete.** The current core
+API has no process-identity-fenced in-place launch. Reading a safe shell and
+then calling `terminal.send` can deliver the line to a different foreground
+program after its draft/quiet wait. Its `if` parameter fences only `idle` or
+`working` status, not the shell identity, cwd, or recovery generation. This
+implementation does not introduce that unattended command-injection race.
+A fenced core operation, or a separate restart-launch design with durable
+saved-layout remapping and explicit-close tombstones, is still needed. This is
+not full Herdr 2 chat-recovery parity. Native, phone, remote-host and reboot QA
+remain required; unit tests do not establish those results.
 
 ## What the agent is doing
 

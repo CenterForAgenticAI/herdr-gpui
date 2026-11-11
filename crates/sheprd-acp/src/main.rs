@@ -55,6 +55,13 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Ok(cli::Parsed::Restore(id)) => match restore::core::run(id) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("sheprd-acp: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
         Ok(cli::Parsed::Mirror(options)) => match mirror::run(options) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {

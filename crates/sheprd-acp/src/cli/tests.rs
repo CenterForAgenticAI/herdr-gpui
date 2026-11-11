@@ -4,6 +4,7 @@ use super::*;
 
 mod connect;
 mod mirror;
+mod restore;
 mod transcripts;
 
 fn args(list: &[&str]) -> Vec<OsString> {

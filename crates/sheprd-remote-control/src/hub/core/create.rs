@@ -59,9 +59,11 @@ impl Source {
             argv: &argv,
             cwd: Some(cwd).filter(|cwd| !cwd.is_empty()),
             env: BTreeMap::from([(ENDPOINT_ENV, endpoint.as_str()), (PANE_ENV, "")]),
-            // A recovery shell cannot serve the labelled chat endpoint.
-            // Let a lost chat finish instead of advertising a dead chat.
-            keep: false,
+            // Keep the tab and folder after an unexpected loss, as on desktop.
+            // Core still ends normal exits and explicit kills. Chat projection
+            // checks the foreground program, so a recovery shell is a terminal,
+            // not a live chat just because it retained the endpoint label.
+            keep: true,
             labels,
             ..Run::default()
         })

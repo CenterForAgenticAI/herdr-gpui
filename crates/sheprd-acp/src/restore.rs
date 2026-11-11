@@ -11,6 +11,16 @@ use sheprd_chat_protocol::{Agent, EndpointId, restore};
 
 use crate::{cli::AgentChoice, herdr::Target};
 
+pub(crate) mod core;
+
+/// A detached view or a failed agent is not a request to forget continuity.
+pub(crate) fn expected_end(input: &crate::session::Input) -> bool {
+    matches!(
+        input,
+        crate::session::Input::Shutdown | crate::session::Input::AgentExited { code: Some(0), .. }
+    )
+}
+
 /// One chat's record, waiting for the agent's session id.
 #[derive(Clone, Debug)]
 pub(crate) struct Keeper {
@@ -24,6 +34,35 @@ pub(crate) struct Keeper {
 }
 
 impl Keeper {
+    /// A core terminal has its own identity, even when its daemon inherited
+    /// Herdr 1's environment. Keep these records away from the Herdr 1 scanner:
+    /// a core address must never be interpreted as a Herdr pane.
+    pub(crate) fn core(
+        dir: Option<PathBuf>,
+        endpoint: Option<&EndpointId>,
+        agent: &AgentChoice,
+        adapter: bool,
+        cwd: &Path,
+        var: impl Fn(&str) -> Option<std::ffi::OsString>,
+    ) -> Option<Self> {
+        let pane = var("HC_TERMINAL_ID")?.into_string().ok()?;
+        let socket = PathBuf::from(var("HC_TERMINAL_SOCKET")?);
+        // These are the identity variables core injects into the terminal,
+        // not HC_SOCKET, which can name the caller's unrelated core.
+        if pane.is_empty() || pane.contains('/') || !socket.is_absolute() {
+            return None;
+        }
+        let target = Target { pane, socket };
+        Self::new(
+            dir.map(|dir| dir.join("core")),
+            Some(&target),
+            endpoint,
+            agent,
+            adapter,
+            cwd,
+        )
+    }
+
     /// A keeper for a chat a client could continue: a built-in agent, in a
     /// Herdr pane, listening for clients. A custom command, a chat outside
     /// Herdr, or one that does not listen keeps nothing.
