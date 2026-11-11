@@ -560,10 +560,35 @@ pub(crate) fn remove(
     repo_key: &str,
     branch: &str,
     owner: Option<&str>,
+    agent: Option<(AgentKind, Option<&str>)>,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     if matches!(worktree.opened, work::Opened::Herdr2) {
         if let Some(owner) = owner {
+            work::fanout::checkouts::verify(host, worktree, branch, owner, cancelled)
+                .map_err(fanout_failed)?;
+            if let Some((kind, terminal)) = agent {
+                work::owned_agent::end(
+                    host,
+                    worktree,
+                    work::owned_agent::Owner {
+                        key: "sheprd.fanout.lane",
+                        value: owner,
+                    },
+                    &work::Agent {
+                        kind,
+                        name: owner,
+                        model: None,
+                        prompt: None,
+                    },
+                    terminal,
+                    cancelled,
+                )
+                .map_err(fanout_failed)?;
+            } else {
+                work::owned_agent::checkout_idle(host, worktree, cancelled)
+                    .map_err(fanout_failed)?;
+            }
             return work::fanout::checkouts::discard(host, worktree, branch, owner, cancelled)
                 .map_err(fanout_failed);
         }

@@ -21,6 +21,16 @@ fn a_remote_lane_is_kept_once_and_closed_on_its_host_while_local_stays_selected(
             ));
             let selected = view.selected_endpoint;
             let host = crate::teleport::host_for(&view.endpoints[1].connection.target).unwrap();
+            let checkout = crate::fan_out::job::Checkout {
+                endpoint_id: "ssh:fanout".into(),
+                host: host.clone(),
+                worktree: sheprd_remote::work::Worktree {
+                    path: "/work/lane".into(),
+                    opened: sheprd_remote::work::Opened::Herdr2,
+                },
+                terminal: Some("t-owned".into()),
+                recoverable: true,
+            };
             let scope = Scope::endpoint("ssh:fanout");
             let location =
                 Location::core_terminal(Panes::single(TerminalId::new("t-owned").unwrap()), false);
@@ -49,13 +59,13 @@ fn a_remote_lane_is_kept_once_and_closed_on_its_host_while_local_stays_selected(
                 target: "replacement.invalid".into(),
                 session: "work".into(),
             };
-            view.close_fan_out_folder("ssh:fanout", &host, "/work/lane", window, cx);
+            view.close_fan_out_folder(&checkout, window, cx);
             assert!(
                 view.kept_workspace_in(&scope, Path::new("/work/lane"), cx)
                     .is_some()
             );
             view.endpoints[1].connection.target = target;
-            view.close_fan_out_folder("ssh:fanout", &host, "/work/lane", window, cx);
+            view.close_fan_out_folder(&checkout, window, cx);
             assert_eq!(view.selected_endpoint, selected);
             assert!(
                 view.kept_workspace_in(&scope, Path::new("/work/lane"), cx)

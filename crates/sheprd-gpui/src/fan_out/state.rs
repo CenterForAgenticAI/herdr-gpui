@@ -598,7 +598,21 @@ impl FanOut {
                     .as_ref()?
                     .recoverable
                     .then(|| lane.lane.agent.clone());
-                Some((index, host, worktree, lane.lane.branch.clone(), owner))
+                let checkout = lane.checkout.as_ref()?;
+                let attempted = checkout.terminal.is_some()
+                    || self
+                        .journal
+                        .step(self.id, index)
+                        .is_some_and(|step| step >= Checkpoint::StartingAgent);
+                let agent = attempted.then(|| (lane.lane.kind, checkout.terminal.clone()));
+                Some((
+                    index,
+                    host,
+                    worktree,
+                    lane.lane.branch.clone(),
+                    owner,
+                    agent,
+                ))
             })
             .collect();
         let (sender, cancelled) = (self.sender.clone(), self.work.clone());
@@ -607,7 +621,7 @@ impl FanOut {
         spawn(move || {
             let removed: Vec<_> = doomed
                 .into_iter()
-                .map(|(index, host, worktree, branch, owner)| {
+                .map(|(index, host, worktree, branch, owner, agent)| {
                     (
                         index,
                         job::remove(
@@ -616,6 +630,9 @@ impl FanOut {
                             &repo_key,
                             &branch,
                             owner.as_deref(),
+                            agent
+                                .as_ref()
+                                .map(|(kind, terminal)| (*kind, terminal.as_deref())),
                             &cancelled,
                         ),
                     )

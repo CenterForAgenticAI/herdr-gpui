@@ -349,13 +349,7 @@ impl SheprdWindow {
             self.show_fan_out_terminal(&endpoint, &host, &label, &path, location, cx);
         }
         for checkout in closed {
-            self.close_fan_out_folder(
-                &checkout.endpoint_id,
-                &checkout.host,
-                checkout.path(),
-                window,
-                cx,
-            );
+            self.close_fan_out_folder(&checkout, window, cx);
         }
     }
 

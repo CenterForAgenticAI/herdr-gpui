@@ -142,15 +142,12 @@ impl SheprdWindow {
         }
         let source = self.fan_out_source()?;
         let target = &self.endpoints[self.selected_endpoint].connection.target;
-        let local = sheprd_client::ConnectTarget::Local;
-        let routed = if source.checkout.is_some()
-            && matches!(target, sheprd_client::ConnectTarget::Socket(_))
-        {
-            &local
+        let keeper = if source.checkout.is_some() {
+            sheprd_session::Keeper::App
         } else {
-            target
+            sheprd_session::Keeper::Herdr1
         };
-        let scriptable = crate::dispatch::scriptable(routed);
+        let scriptable = crate::dispatch::scriptable_for(target, keeper);
         (scriptable && self.fan_out_host(&source).is_some()).then_some(Label::FAN_OUT)
     }
 

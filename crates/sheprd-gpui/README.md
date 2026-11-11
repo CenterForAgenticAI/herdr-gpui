@@ -2494,6 +2494,13 @@ Recovery also checks the live foreground process: a replacement shell does
 not inherit the departed agent's ownership. If a removed device is configured
 again with the same host/session identity, its saved lanes rejoin the open
 comparison without replaying creation, launch or prompts.
+Before discarding a newly owned Herdr 2 lane, the worker verifies its receipt,
+disables terminal keep, ends the owned agent and checks the resulting inventory.
+A live replacement, unreadable result or unrelated program in the checkout
+keeps the checkout intact. Closing its removed workspace then only drops the
+presentation, without sending a second kill through a stale terminal address.
+These checks do not make ownership validation and terminal control atomic.
+
 Keep removes the other worktrees after its usual confirmation; a lane whose
 worktree may exist or sits on a host no longer set up stays saved until Forget,
 which lets the fan-out go and leaves every worktree as it is. Up to four
