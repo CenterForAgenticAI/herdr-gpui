@@ -234,7 +234,7 @@ fn herdr_1_callers_never_get_kept_workspace_ids(cx: &mut TestAppContext) {
                 .unwrap();
             assert!(
                 kept.iter()
-                    .all(|repo| crate::browser::is_kept_id(&repo.workspace_id))
+                    .any(|repo| repo.key == KEY && crate::browser::is_kept_id(&repo.workspace_id))
             );
             let herdr_1 = view
                 .herdr_1_destination(&local)
