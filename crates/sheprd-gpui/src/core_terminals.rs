@@ -717,15 +717,8 @@ impl SheprdWindow {
             .name("herdr-core-spawn".into())
             .spawn(move || {
                 let started = backend.spawn(&spawn);
-                // The program removes its file; a failed start leaves it
-                // here, where dropping it removes it.
-                if started.is_ok()
-                    && let Some(file) = file
-                    && let Err(error) = file.keep()
-                {
-                    tracing::warn!(%error, "Could not hand a file to a herdr-core program");
-                }
-                start::deliver(started, send, |terminal| {
+                let succeeded = started.is_ok();
+                let handed = start::deliver(started, send, |terminal| {
                     // The receiver vanished with its host/window. End only
                     // the terminal this worker created, on its captured core;
                     // never retry its ID against a replacement saved host.
@@ -733,6 +726,13 @@ impl SheprdWindow {
                         tracing::warn!(%error, %terminal, "Could not end an abandoned herdr-core start");
                     }
                 });
+                // Keep a program's handoff file only after its window accepts
+                // the start; failed/cancelled starts retain local cleanup.
+                if handed && succeeded
+                    && let Some(file) = file
+                    && let Err(error) = file.keep() {
+                    tracing::warn!(%error, "Could not hand a file to a herdr-core program");
+                }
             });
         match spawned {
             Ok(_) => terminals.starting = Some((purpose, host, receive)),

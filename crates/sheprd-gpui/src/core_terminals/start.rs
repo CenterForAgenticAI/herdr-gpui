@@ -19,7 +19,7 @@ impl Outcome {
         self.result
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn unwatched(result: Result<TerminalInfo, sheprd_core_client::Error>) -> Self {
         Self {
             result,
@@ -32,7 +32,7 @@ pub(super) fn deliver(
     result: Result<TerminalInfo, sheprd_core_client::Error>,
     sender: SyncSender<Outcome>,
     end: impl FnOnce(&TerminalId),
-) {
+) -> bool {
     let created = result.as_ref().ok().map(|info| info.id.clone());
     let (received, accepted) = mpsc::sync_channel(1);
     let handed = sender
@@ -45,6 +45,7 @@ pub(super) fn deliver(
     if !handed && let Some(terminal) = created {
         end(&terminal);
     }
+    handed
 }
 
 #[cfg(test)]
