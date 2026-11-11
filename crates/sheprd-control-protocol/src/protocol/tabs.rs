@@ -65,6 +65,8 @@ pub enum TabOp {
     Orchestrator {
         #[serde(default)]
         repo: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        restart: Option<String>,
     },
     /// The review of the caller's workspace's uncommitted changes.
     Review,
