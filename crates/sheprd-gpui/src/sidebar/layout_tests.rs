@@ -688,6 +688,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         checkpoints: Default::default(),
         port_forwards: Default::default(),
         remote_browser: Vec::new(),
+        remote_updates: Default::default(),
         #[cfg(feature = "cloud")]
         cloud_jobs: Default::default(),
         #[cfg(feature = "cloud")]
@@ -783,6 +784,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         menu: crate::menu::MenuState::new(cx),
         settings: Default::default(),
         integrations: Default::default(),
+        kept_scripts: Default::default(),
         kept_worktree_done: Vec::new(),
         install_warning_shown: false,
         version_notice_shown: false,

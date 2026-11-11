@@ -110,6 +110,12 @@ impl CoreTerminals {
         self.infos_of(&self.tabs.get(&tab)?.host)?.get(terminal)
     }
 
+    /// What this computer's core reports of `terminal`, whichever tab
+    /// shows it.
+    pub(crate) fn local_info(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
+        self.infos_of(&Host::Local)?.get(terminal)
+    }
+
     /// Whether `tab` types into its terminals, on any host: a tab rather
     /// than a watch-only mirror.
     pub(crate) fn types_into(&self, tab: TabId) -> bool {
@@ -142,17 +148,6 @@ impl CoreTerminals {
         std::iter::once(Host::Local)
             .chain(self.remote.keys().cloned().map(Host::Remote))
             .collect()
-    }
-
-    /// Says what Git would of the folder `cwd`, for tests outside this
-    /// module that keep workspaces in checkouts without running Git.
-    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
-    pub(crate) fn seed_checkout_for_test(
-        &mut self,
-        cwd: &str,
-        identity: Option<sheprd_vcs::git::Identity>,
-    ) {
-        self.checkouts.seed(cwd, identity);
     }
 
     /// Uses `hub` for the core of the host `scope` names, as the first ask
