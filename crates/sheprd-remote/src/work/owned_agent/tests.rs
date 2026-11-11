@@ -99,3 +99,5 @@ fn a_kept_shell_does_not_inherit_the_original_agents_ownership() {
         Err(Error::Uncertain)
     ));
 }
+
+mod unlabelled;

@@ -172,6 +172,66 @@ fn select(
     })
 }
 
+/// A terminal saved before launches carried ownership labels: an unlabelled
+/// shell at `expected` with the agent typed into it. Only that exact live
+/// terminal, in the saved checkout with `kind` in its foreground, is
+/// accepted, and only while no terminal carries this owner's label, so a
+/// labelled launch is never bypassed.
+pub fn recover_unlabelled(
+    host: &Host,
+    tree: &Worktree,
+    owner: Owner<'_>,
+    kind: crate::teleport::AgentKind,
+    expected: &str,
+    cancelled: &AtomicBool,
+) -> Result<Started> {
+    owner.validate()?;
+    let output = host
+        .capture("core_cli ls --all --json\n", cancelled)
+        .map_err(script(Step::List))?;
+    let list: List =
+        serde_json::from_slice(output.trim_ascii()).map_err(|source| super::Error::Decode {
+            step: Step::List,
+            source,
+        })?;
+    select_unlabelled(list, &tree.path, owner, kind, expected)
+}
+
+fn select_unlabelled(
+    list: List,
+    path: &str,
+    owner: Owner<'_>,
+    kind: crate::teleport::AgentKind,
+    expected: &str,
+) -> Result<Started> {
+    if list.terminals.iter().any(|terminal| {
+        terminal
+            .labels
+            .get(owner.key)
+            .is_some_and(|value| value == owner.value)
+    }) {
+        return Err(Error::Uncertain);
+    }
+    let terminal = list
+        .terminals
+        .into_iter()
+        .find(|terminal| terminal.address == expected)
+        .ok_or(Error::Uncertain)?;
+    if terminal.state != TerminalState::Live
+        || terminal.cwd != path
+        || terminal.labels.contains_key(owner.key)
+        || !terminal.foreground.as_ref().is_some_and(|foreground| {
+            crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
+                == Some(kind)
+        })
+    {
+        return Err(Error::Uncertain);
+    }
+    Ok(Started::Herdr2 {
+        terminal: terminal.address,
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests;

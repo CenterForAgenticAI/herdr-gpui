@@ -155,7 +155,45 @@ pub(super) fn recover(
     session: &HerdrSession,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
-    inspect(host, run, session, false, cancelled)
+    match inspect(host, run, session, false, cancelled) {
+        Err(Error::OwnedAgent(work::owned_agent::Error::Uncertain)) => {
+            recover_unlabelled(host, run, session, cancelled)
+        }
+        found => found,
+    }
+}
+
+/// Runs saved before launches were labelled keep their unlabelled shell;
+/// Stop and Send still reach it once its saved address, checkout, and
+/// foreground agent check out.
+fn recover_unlabelled(
+    host: &Host,
+    run: &Run,
+    session: &HerdrSession,
+    cancelled: &AtomicBool,
+) -> Result<Started> {
+    let Pane::Herdr2 { terminal } = &session.pane else {
+        return Err(work::owned_agent::Error::Uncertain.into());
+    };
+    let path = run
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.path.as_ref())
+        .ok_or(Error::NothingToOpen)?
+        .to_string_lossy();
+    let kind = sheprd_remote::teleport::AgentKind::parse(&run.agent).ok_or(Error::NothingToOpen)?;
+    let tree = Worktree {
+        path: path.into_owned(),
+        opened: work::Opened::Herdr2,
+    };
+    Ok(work::owned_agent::recover_unlabelled(
+        host,
+        &tree,
+        owner(run),
+        kind,
+        terminal,
+        cancelled,
+    )?)
 }
 
 pub(super) fn inspect(
