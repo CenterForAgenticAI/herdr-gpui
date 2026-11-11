@@ -292,9 +292,11 @@ Add `--json` to any command for machine-readable output; errors then come
 back as `{"error": {"code", "message"}}`. Exit statuses are the ones in the
 table above. A command acts in the window that shows your workspace; it
 exits 5 rather than act in another session's window. A Herdr 2 caller is resolved
-through the app-kept workspace of its tab. Notes, mutes, checkpoint restore,
-scripts, Teleport, and fan-out can target a kept workspace; each still enforces
-its checkout, host and platform requirements. Local support does not imply
+through the app-kept workspace of its tab. Notes, checkpoint restore, and
+Teleport can target a kept workspace; each still enforces its checkout, host
+and platform requirements. The CLI paths for worktree mutes, scripts, and
+fan-out still require Herdr 1 workspace state and exit 8 for app-kept Herdr 2
+workspaces, even where the corresponding desktop menu works. Local support does not imply
 Herdr 2-only remote worktree support. A terminal outside a workspace the window
 keeps is refused rather than targeting an unrelated workspace. Chat conversion
 on Herdr 2 currently needs a local Claude process with an exact session record;
