@@ -12,6 +12,7 @@
 //! screens.
 
 mod adopt;
+mod agent_row;
 mod asks;
 mod attention;
 mod checkouts;
@@ -912,7 +913,7 @@ impl SheprdWindow {
     }
 
     /// The view of `tab`'s active pane.
-    fn core_pane_view(&self, tab: TabId) -> Option<&Entity<CoreTerminalView>> {
+    pub(crate) fn core_pane_view(&self, tab: TabId) -> Option<&Entity<CoreTerminalView>> {
         let active = &self.core_terminals.tabs.get(&tab)?.active;
         self.core_terminals.views.get(&(tab, active.clone()))
     }
