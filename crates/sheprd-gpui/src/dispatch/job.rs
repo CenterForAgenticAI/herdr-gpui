@@ -15,6 +15,9 @@ use std::sync::{
     mpsc,
 };
 
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests;
+
 enum Event {
     Step(Step),
     /// A step of making the new machine.
@@ -137,6 +140,8 @@ impl Then {
 }
 
 pub(crate) struct Job {
+    arrival: Option<Dispatched>,
+    arrival_deadline: Option<std::time::Instant>,
     /// The destination's name, for the dialog and the flash.
     pub(crate) host: String,
     /// The repository's name, recorded in the history once the job succeeds.
@@ -178,6 +183,8 @@ impl Job {
             tracing::warn!(%error, "could not start the dispatch worker");
         }
         Self {
+            arrival: None,
+            arrival_deadline: None,
             host,
             repo,
             step: None,
@@ -295,6 +302,8 @@ impl Job {
         let (sender, events) = mpsc::channel();
         let _ = sender.send(Event::Done(result));
         Self {
+            arrival: None,
+            arrival_deadline: None,
             host: host.to_owned(),
             repo: repo.to_owned(),
             step: None,
@@ -316,6 +325,9 @@ impl Job {
     /// Take reported steps. Returns whether the status changed, and the
     /// outcome once, with its failure as display text.
     pub(crate) fn poll(&mut self) -> (bool, Option<Result<Dispatched, String>>) {
+        if let Some(arrival) = self.arrival.take() {
+            return (false, Some(Ok(arrival)));
+        }
         let mut changed = false;
         while let Ok(event) = self.events.try_recv() {
             changed = true;
@@ -340,6 +352,23 @@ impl Job {
             }
         }
         (changed, None)
+    }
+
+    /// Catalog reads lag provisioning. Retain one completed result while its
+    /// saved device appears, without replaying creation or blocking the UI.
+    pub(crate) fn await_destination(
+        &mut self,
+        arrival: Dispatched,
+        now: std::time::Instant,
+    ) -> Option<Dispatched> {
+        let deadline = self
+            .arrival_deadline
+            .get_or_insert(now + std::time::Duration::from_secs(120));
+        if now >= *deadline {
+            return Some(arrival);
+        }
+        self.arrival = Some(arrival);
+        None
     }
 
     /// What the job is doing, for the dialog.

@@ -1,6 +1,45 @@
 use super::*;
 
 #[gpui::test]
+fn a_delayed_catalog_arrival_rechecks_identity_before_landing(cx: &mut TestAppContext) {
+    let (view, cx, _) = window(cx, false);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let mut endpoint = view.endpoints.remove(1);
+            let identity = crate::teleport::host_for(&endpoint.connection.target)
+                .unwrap()
+                .identity();
+            view.dispatch_job = Some(Job::finished(
+                "Box",
+                "app",
+                Ok(Dispatched::Kept {
+                    endpoint_id: endpoint.id.clone(),
+                    host_identity: identity,
+                    path: NEW.into(),
+                    label: None,
+                    checkout: None,
+                }),
+            ));
+            view.poll_dispatch(window, cx);
+            assert!(
+                view.dispatch_job.is_some(),
+                "creation waits for the catalog"
+            );
+            assert!(view.kept_workspace_at(Path::new(NEW)).is_none());
+            endpoint.connection.target = sheprd_client::ConnectTarget::Ssh {
+                target: "different@host.invalid".into(),
+                session: "default".into(),
+            };
+            view.endpoints.push(endpoint);
+            view.poll_dispatch(window, cx);
+            assert!(view.dispatch_job.is_none());
+            assert_eq!(view.selected_endpoint, 0);
+            assert!(view.kept_workspace_at(Path::new(NEW)).is_none());
+        });
+    });
+}
+
+#[gpui::test]
 fn remote_routing_uses_that_hosts_availability_not_the_selected_hosts(cx: &mut TestAppContext) {
     let (view, cx, _) = window(cx, true);
     view.update(cx, |view, _| {
