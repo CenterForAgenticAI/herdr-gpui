@@ -349,6 +349,7 @@ impl SheprdWindow {
     /// even with the CPU display off.
     pub(crate) fn dispatch_sampling(&self) -> bool {
         self.menu.dispatch.is_some()
+            || self.orchestrator_sampling
             || self
                 .fan_out
                 .as_ref()
