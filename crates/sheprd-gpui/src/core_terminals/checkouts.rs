@@ -113,6 +113,17 @@ impl Checkouts {
 
 #[cfg(test)]
 impl super::CoreTerminals {
+    pub(crate) fn seed_remote_checkout_for_test(
+        &mut self,
+        scope: &crate::browser::Scope,
+        cwd: &str,
+        identity: Option<Identity>,
+    ) {
+        if let Some(remote) = self.remote.get_mut(scope) {
+            remote.checkouts.seed(cwd, identity);
+        }
+    }
+
     /// Answers for `cwd` as Git would, for tests outside this module.
     pub(crate) fn seed_checkout(&mut self, cwd: &str, identity: Option<Identity>) {
         self.checkouts.seed(cwd, identity);
