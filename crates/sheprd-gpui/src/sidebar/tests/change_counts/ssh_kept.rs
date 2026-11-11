@@ -34,7 +34,8 @@ fn ssh_kept_badge_and_counts_read_the_prefetch_input_without_h1_lookup() {
     );
     let marks = crate::teleport::Marks::detached();
     let theme = Theme::default();
-    let badge = |workspace, view| {
+    // Owned results, so no call holds `workspace` or a `View` past itself.
+    let badge = |workspace: &_, view: &View| {
         workspace_badge(
             workspace,
             Some((&cache, view)),
@@ -43,14 +44,16 @@ fn ssh_kept_badge_and_counts_read_the_prefetch_input_without_h1_lookup() {
             (None, false),
             &theme,
         )
+        .map(|found| {
+            let counts = found
+                .counts
+                .map(|counts| (counts.additions.to_string(), counts.deletions.to_string()));
+            (found.pr.map(|pr| pr.number.to_string()), counts)
+        })
     };
-    let found = badge(&workspace, &view).unwrap();
-    assert_eq!(found.pr.unwrap().number, "#8");
-    let counts = found.counts.unwrap();
-    assert_eq!(
-        (counts.additions.as_str(), counts.deletions.as_str()),
-        ("+1730", "-31")
-    );
+    let (number, counts) = badge(&workspace, &view).unwrap();
+    assert_eq!(number.as_deref(), Some("#8"));
+    assert_eq!(counts, Some(("+1730".into(), "-31".into())));
     for wrong in [
         View {
             origin: Origin::Local,

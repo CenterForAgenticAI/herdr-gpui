@@ -112,11 +112,14 @@ fn the_new_worktree_dialog_reads_the_kept_folder(cx: &mut TestAppContext) {
             assert_eq!(view.kept_checkout().as_deref(), Some(LINKED));
             assert!(view.menu.worktree.is_some());
             assert!(view.menu.dispatch.is_none(), "no other host makes them");
-            // Read through Git's names, with no daemon to ask.
+            // Read through Git's names, with no daemon to ask, and keyed as
+            // the sidebar's badge is: by repository, not by this folder.
             let input = view
                 .menu_target_input(&crate::pull_request::Origin::Local)
                 .unwrap();
-            assert_eq!(input.checkout.as_deref(), Some(LINKED));
+            let key = Path::new(MAIN).join(".git").display().to_string();
+            assert_eq!(input.checkout, None);
+            assert_eq!(input.repo_key.as_deref(), Some(key.as_str()));
             assert_eq!(input.branch, "feature");
         })
     });
@@ -311,33 +314,37 @@ fn work_finishing_together_all_lands(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn another_hosts_kept_workspace_offers_no_local_git(cx: &mut TestAppContext) {
+fn another_hosts_kept_workspace_runs_its_git_on_that_host(cx: &mut TestAppContext) {
     let (view, cx, id) = window(cx, LINKED, Some(true));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.open_workspace_menu(&id, gpui::Point::default(), window, cx);
             // Shown as if kept on an SSH host: its folder is that host's,
-            // which Git on this computer must never touch.
+            // which Git on this computer must never touch, so its worktree
+            // work runs through that host's scripts instead.
+            let ssh = sheprd_client::ConnectTarget::Ssh {
+                target: "box".into(),
+                session: "work".into(),
+            };
             view.endpoints.push(crate::endpoint::Endpoint::new(
                 "ssh:box".into(),
                 "Box".into(),
-                sheprd_client::ConnectTarget::Ssh {
-                    target: "box".into(),
-                    session: "work".into(),
-                },
+                ssh.clone(),
                 true,
             ));
             view.selected_endpoint = view.endpoints.len() - 1;
-            assert!(view.kept_checkout().is_none());
+            assert_eq!(view.kept_checkout().as_deref(), Some(LINKED));
+            let host = sheprd_remote::work::host_for_kept(&ssh).unwrap();
+            // Windows has no local POSIX route, so there is nothing to mistake.
+            if let Ok(local) = crate::teleport::host_for(&sheprd_client::ConnectTarget::Local) {
+                assert_ne!(host, local);
+            }
             let rows: Vec<_> = view
                 .workspace_items()
                 .into_iter()
                 .map(|(action, _)| action)
                 .collect();
-            assert!(!rows.contains(&WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree)));
-            assert!(!rows.contains(&WorkspaceMenuAction::Dialog(
-                WorkspaceAction::DeleteWorktree
-            )));
+            assert!(rows.contains(&WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree)));
         })
     });
 }

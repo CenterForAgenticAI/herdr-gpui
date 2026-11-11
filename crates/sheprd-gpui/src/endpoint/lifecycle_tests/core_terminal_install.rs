@@ -1,6 +1,7 @@
 //! A host's herdr-core seen from the window's other features: installing
 //! one clears what the window remembered of a host without it, and the
-//! agents working there count when dispatch ranks hosts.
+//! agents working there count when dispatch ranks hosts only while its
+//! core answers.
 
 use super::*;
 use crate::{
@@ -81,7 +82,7 @@ fn installing_herdr_core_lets_the_host_take_herdr_2_tabs_again(cx: &mut gpui::Te
 }
 
 #[gpui::test]
-fn a_hosts_working_herdr_core_agents_count_when_ranking_it(cx: &mut gpui::TestAppContext) {
+fn a_disconnected_cores_agents_never_count_when_ranking_it(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
     let (mut remote, _server) = connected_endpoint("ssh:fixture");
     remote.connection.target = ssh();
@@ -99,15 +100,16 @@ fn a_hosts_working_herdr_core_agents_count_when_ranking_it(cx: &mut gpui::TestAp
             view.core_terminals
                 .record_for_test(&host, agent(id, status));
         }
-        // Without a tab of that core here, its list is not kept current,
-        // so agents that may have stopped since do not count.
+        // Dispatch samples a connected core with or without a tab of it
+        // here. This one never answered, so what it last listed may have
+        // stopped since: its agents count for nothing, tab or not.
         assert_eq!(view.core_terminals.working(&host), 0);
         view.core_terminals.show_on_host_for_test(
             crate::browser::TabId::test(1),
             host.clone(),
             TerminalId::new("t1").unwrap(),
         );
-        assert_eq!(view.core_terminals.working(&host), 2);
+        assert_eq!(view.core_terminals.working(&host), 0);
         if !cfg!(any(target_os = "linux", target_os = "macos")) {
             return;
         }
@@ -116,7 +118,7 @@ fn a_hosts_working_herdr_core_agents_count_when_ranking_it(cx: &mut gpui::TestAp
             .iter()
             .find(|candidate| candidate.endpoint_id == "ssh:fixture")
             .unwrap();
-        assert_eq!(candidate.working, 2);
+        assert_eq!(candidate.working, 0);
     });
 }
 
