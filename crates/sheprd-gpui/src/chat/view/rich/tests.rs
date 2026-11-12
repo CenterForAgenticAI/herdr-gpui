@@ -5,6 +5,7 @@ use crate::{
 };
 
 mod accents;
+mod baseline;
 mod imessage;
 mod line_breaks;
 mod math_size;

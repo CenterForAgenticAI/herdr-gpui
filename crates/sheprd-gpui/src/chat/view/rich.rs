@@ -23,7 +23,7 @@ use super::{
 };
 use crate::chat::selection::Cell;
 use accents::{Accents, code_ink};
-use inline::{Piece, Runs};
+use inline::{Piece, Runs, rise, text_baseline};
 use links::Links;
 
 /// The prose's line height, in ems; inline formulas find its baseline with it.
@@ -371,9 +371,7 @@ impl SheprdWindow {
         let scale = size / self.chat_text_size();
         let (width, height) = (drawn.width * scale, drawn.height * scale);
         ground(if inline {
-            // GPUI reports no text baselines to layout, so a row's words line
-            // up by the bottoms of their line boxes. Find where the prose's
-            // baseline sits in its line from its font's ascent and descent.
+            // The prose font's own metrics place its baseline in the line.
             let font = if layout.mono_prose() {
                 &self.config.terminal
             } else {
@@ -382,18 +380,16 @@ impl SheprdWindow {
             let line = size * LINE_HEIGHT;
             let text = cx.text_system();
             let id = text.resolve_font(&font.font());
-            let ascent = f32::from(text.ascent(id, px(size)));
-            // Fonts report descent with either sign (font-kit's is negative),
-            // which `TextSystem::baseline_offset` adds as is; lines are laid
-            // out with its magnitude, centered in the line height.
-            let descent = f32::from(text.descent(id, px(size))).abs();
-            let text_baseline = (line - ascent - descent) / 2. + ascent;
-            let below = line - text_baseline;
+            let prose = text_baseline(
+                line,
+                f32::from(text.ascent(id, px(size))),
+                f32::from(text.descent(id, px(size))),
+            );
             let baseline = drawn.baseline.unwrap_or(drawn.height) * scale;
-            let top = (text_baseline - baseline).max(0.);
             // Room for the 1px border `Fragment::atomic` draws around a
             // selectable formula, so the picture still starts at its padding.
             let border = 1.;
+            let rise = rise(line, prose, baseline, height, border);
             div()
                 .debug_selector(|| "chat-math-inline".into())
                 .flex_none()
@@ -403,17 +399,14 @@ impl SheprdWindow {
                 .mx(px(-super::super::rich::MATH_PADDING * scale - border))
                 .max_w_full()
                 .w(px(width + 2. * border))
-                // The box ends as far below the TeX baseline as a word's line
-                // ends below the prose's, so the baselines meet; a deeper
-                // formula keeps its room below as a margin, outside alignment.
-                .h(px(border + top + baseline + below))
-                .mb(px((height - baseline - below).max(0.)))
+                .h(px(rise.height))
+                .mb(px(rise.margin_bottom))
                 // Like KaTeX's HTML, no fit to the column: a percentage
                 // width on this absolute picture shrank short formulas.
                 .child(
                     img(drawn.texture.clone())
                         .absolute()
-                        .top(px(top))
+                        .top(px(rise.top))
                         .left(px(0.))
                         .w(px(width))
                         .h(px(height)),

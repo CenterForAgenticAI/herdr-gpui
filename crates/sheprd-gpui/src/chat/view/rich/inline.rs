@@ -60,3 +60,39 @@ impl Runs {
         }
     }
 }
+
+/// Distance from the top of a line of prose to its baseline. GPUI centers
+/// the font's ascent and descent in the line height. Fonts report descent
+/// with either sign (font-kit's is negative), which
+/// `TextSystem::baseline_offset` adds as is; lines use its magnitude.
+pub(super) fn text_baseline(line: f32, ascent: f32, descent: f32) -> f32 {
+    (line - ascent - descent.abs()) / 2. + ascent
+}
+
+/// The vertical layout of an inline formula's box, in points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Rise {
+    /// From the top of the box's content to the top of the picture.
+    pub(super) top: f32,
+    /// The box's height, border included.
+    pub(super) height: f32,
+    /// Room kept below the box for a formula deeper than a line of prose.
+    pub(super) margin_bottom: f32,
+}
+
+/// Lays out a formula whose picture is `height` tall with its TeX baseline
+/// `baseline` below its top, in a line `line` tall whose prose baseline is
+/// `text_baseline` below its top. GPUI reports no text baselines to layout,
+/// so a row's items line up by their bottom edges: the box ends as far below
+/// the TeX baseline as a word's line ends below the prose's. A deeper
+/// formula keeps the rest as a margin, which alignment ignores. `border` is
+/// the selection border inside the box, above the picture.
+pub(super) fn rise(line: f32, text_baseline: f32, baseline: f32, height: f32, border: f32) -> Rise {
+    let below = line - text_baseline;
+    let top = (text_baseline - baseline).max(0.);
+    Rise {
+        top,
+        height: border + top + baseline + below,
+        margin_bottom: (height - baseline - below).max(0.),
+    }
+}
