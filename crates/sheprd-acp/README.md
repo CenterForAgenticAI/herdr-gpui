@@ -1,0 +1,433 @@
+# sheprd-acp
+
+Runs a coding agent through the [Agent Client Protocol](https://agentclientprotocol.com)
+in a terminal pane, draws the conversation there, and lets Sheprd attach to it
+and show it as a native chat.
+
+```sh
+sheprd-acp claude             # or codex, copilot, gemini, opencode
+sheprd-acp -- goose acp       # any ACP agent command
+sheprd-acp --load ID codex    # continue one of the agent's sessions
+sheprd-acp --resume ID codex  # the same, but never start a new session instead
+```
+
+`sheprd-acp --help` lists every option and key.
+
+## Herdr-core session helpers
+
+These commands connect to the local core using `HC_SOCKET`, its configured
+socket, or its default endpoint (`HC_SESSION` selects the session):
+
+```sh
+sheprd-acp session-report AGENT < session-event.json
+sheprd-acp session-discover TERMINAL AGENT
+sheprd-acp session-convert TERMINAL AGENT
+```
+
+`session-report` requires `HC_TERMINAL_ID` and `HC_TERMINAL_SOCKET`, uses that
+injected socket instead of any shell `HC_SOCKET`/`HC_SESSION` override, and reads at most 64 KiB of JSON
+from stdin. The core-client validates the event and its process ownership.
+`session-discover` prints the verified session binding as JSON (exit 0).
+It exits 3 only for absent evidence or an explicitly cleared selection; invalid,
+stale, unknown, and process-mismatched evidence fail with exit 1. Other runtime
+failures exit 1; command-line errors exit 2.
+`session-convert` moves an idle agent into a chat and prints its endpoint ID.
+Terminal IDs must be local, not routed addresses. All three accept `--help`
+without reading stdin or connecting to a daemon.
+
+### Installing session reporters
+
+Run `sheprd-acp session-install claude|codex|copilot|opencode|pi|omp|letta` explicitly on each host
+where reporting is wanted. This command authorizes installation on that host;
+discovery, conversion, and normal startup never install anything. Linux/macOS
+use POSIX hooks; Windows uses bounded PowerShell hooks and a CIM process-birth
+probe. Windows runtime verification remains a platform CI/manual check; native
+Windows terminal-to-chat launch still follows the existing unsupported policy.
+
+The installer copies the bundled owned assets into `sheprd-session-report/`
+inside the agent's configuration directory, then adds a registration preserving
+unrelated keys and existing hooks/plugins. Re-running is idempotent. Files are
+atomically replaced with private permissions. Codex uses `$CODEX_HOME` (default
+`~/.codex`), Copilot uses `$COPILOT_HOME` (default `~/.copilot`), and OpenCode V2
+uses `$XDG_CONFIG_HOME/opencode` (default `~/.config/opencode`). Custom paths
+must be absolute and UTF-8. The installer pins its own executable path; reinstall
+after moving it. Claude honors `CLAUDE_CONFIG_DIR`. Pi uses
+`PI_CODING_AGENT_DIR` (default `~/.pi/agent`); OMP uses that override or
+`$HOME/$PI_CONFIG_DIR/agent` (default `~/.omp/agent`). Their separately named
+extensions report exact session-manager paths. Letta's `~/.letta/settings.json`
+hook reports its explicit conversation ID, qualifying `default` with its agent.
+
+### Manual session reporter installation
+
+JSONC/comments or malformed config are refused without modifying the file:
+this build has no comment-preserving JSON editor. For manual installation,
+copy the relevant bundled files from
+`crates/sheprd-client/src/herdr/sessions/assets/` into the configuration
+directory's `sheprd-session-report/` subdirectory, then merge these entries
+using your editor, retaining existing array entries and comments:
+
+- Codex `hooks.json`: append
+  `{"hooks":[{"type":"command","command":"sh '/absolute/path/sheprd-session-report/codex-session-start.sh'","timeout":5}]}`
+  to `hooks.SessionStart`. In `config.toml`, set `hooks = true` under
+  `[features]`, preserving other features.
+- Copilot `settings.json`: append
+  `{"type":"command","bash":"sh '/absolute/path/sheprd-session-report/copilot-session-start.sh'","timeoutSec":5}`
+  directly to `hooks.SessionStart`.
+- OpenCode V2: copy all three files in `assets/opencode/` to the owned
+  directory, and append `{"package":"/absolute/path/sheprd-session-report"}`
+  to `plugins` in `cli.json`. This is a TUI-only package, not a server plugin.
+
+Use actual absolute paths and shell-escape apostrophes when needed. Restart the
+agent after installation. `HC_TERMINAL_ID` must be present for reports to bind
+to a core terminal; installing a reporter does not create session evidence.
+
+## Why a program in the pane
+
+Herdr owns terminals, not conversations. The agent's structured conversation
+has to live in something Herdr already keeps running, so it lives in this
+program: Herdr starts it in a pane like any other command, keeps it alive when
+Sheprd closes, and the Herdr TUI shows its chat because it is an ordinary
+terminal program. Normal ACP sessions read no agent logs or terminal screen;
+the optional read-only mirror below reads an explicitly selected native log.
+
+`sheprd-acp` is the only ACP client of the agent. Every view is a client of
+`sheprd-acp` instead:
+
+- **The pane itself.** The chat drawn in the terminal, so the session works in
+  the Herdr TUI, a plain terminal, or over SSH.
+- **Sheprd.** On a local daemon, it finds the pane's `acp` metadata token,
+  connects to the endpoint it names, and draws the same conversation natively
+  over the pane. Both views stay live: a prompt or a permission answer from
+  either one shows in both, and the first answer to a permission request wins.
+- **Anything else that speaks the attach protocol** in
+  `crates/sheprd-chat-protocol`.
+
+## Viewing an existing CLI session
+
+Sheprd can automatically render existing Linux Codex/Claude sessions with
+`[chat] render_existing = true`. It resolves exact session and process identity,
+then runs a bounded `sheprd-acp observe AGENT SESSION_ID PID START_TICKS --pane ID`
+child over standard streams. The observer pins and validates the session file;
+it exits if the original process ends or its identity changes. It starts no
+agent and writes no Herdr lifecycle metadata. The GUI retains the original
+terminal editor and approval interface directly below the rich conversation.
+No separate conversation, prompt injection or terminal/view round trip is needed.
+
+The manual, read-only historical mirror remains available separately:
+
+`mirror` watches one existing Codex rollout or Claude Code JSONL transcript.
+It starts no agent, resumes no session, and sends no Herdr metadata or activity
+reports. Prompts, approvals, cancellation, and settings stay in the original
+terminal; the mirror refuses every command even from another attach client.
+
+Start the watcher separately, leaving the running agent alone:
+
+```sh
+sheprd-acp mirror codex /absolute/path/to/rollout.jsonl \
+  --pane PANE_ID --endpoint 0123456789abcdef0123456789abcdef
+# Or: sheprd-acp mirror claude /absolute/path/to/session.jsonl ...
+```
+
+The endpoint is 32 lowercase hexadecimal digits. Omit `--endpoint` to generate
+one; the watcher prints its ID once ready. Stop that watcher with Ctrl+C when
+finished. This only stops the viewer. The GUI can show it over the selected
+existing pane using its own config (normally `config-gpui.toml`):
+
+```toml
+[[chat.mirrors]]
+pane = "PANE_ID"
+endpoint = "0123456789abcdef0123456789abcdef"
+# host = "my-saved-ssh-target"  # For a watcher running on that exact SSH host.
+```
+
+The pane must already exist on the matching host. An ordinary ACP endpoint
+advertised by the pane takes precedence. Remote watchers run beside their
+transcript on the SSH host and use the existing `sheprd-acp connect ID` relay;
+the GUI does not launch them or deploy a binary. Remove the mirror's config
+entry when finished. No daemon configuration needs changing.
+
+The viewer refreshes once a second when the file changes. It reads at most the
+last 8 MiB and retains at most 2,000 entries / 2 MiB of text / 8 MiB of image
+data. Individual text fields are capped at 128 KiB. Records are limited to
+1 MiB, except Codex messages containing typed images, which may use the full
+8 MiB read window. Within retained records, unsupported images or encoded image
+data over the 5 MiB attachment limit show an unavailable notice while their captions
+remain visible. Other oversized records, unsupported record kinds, and malformed
+lines are skipped. A partially written final line waits for its newline. The
+displayed tool history is descriptive and never an approval UI.
+Messages, tool text, and bounded embedded Codex raster images are supported;
+linked files, complete session settings, and live permission state are not
+reconstructed from logs. Image paths and external image URLs are never fetched
+by the observer. Codex uses `response_item` records so matching `event_msg`
+records are not repeated;
+Claude sidechain records are excluded. Choose the exact session file yourself:
+the watcher does not guess from folders, recent timestamps, or terminal text.
+
+Claude's sub-agents and background shells are followed from the log the way
+the native bridge follows them live, timed by each record's timestamp; a
+sub-agent's own steps are in a log of their own and are not shown. A manual
+mirror of a session that has ended still lists what was running when its log
+stopped. Codex rollouts are not followed this way.
+
+Claude records marked as internal task notifications or scheduled reminders
+appear as compact notices. Expand a notice to inspect or copy its retained
+source text; instructions, output-file paths, and links in it are inert.
+Ordinary user messages containing similar text remain user messages.
+
+Codex environment updates use the content's explicit harness provenance to
+become compact notices, keeping adjacent user text separate. Recognized image
+wrappers around a typed embedded image also become compact source notices;
+the image and its user caption remain visible. Literal user-pasted XML is not
+reclassified by its spelling. Expanded notice details retain the original text.
+
+The mirror's native-log format support is best effort because those storage
+formats can change. A missing or unreadable source ends the watcher with an
+error. It never repairs or writes to the transcript.
+
+Explicit exit and error fields and background command or script ids refine a
+logged tool's status: a command still running stays so until a poll of the same
+id ends it. Returning from a delegation or wait call does not establish that a
+child agent finished, and unknown results are not read as evidence of an end.
+
+## What it tells Herdr
+
+Inside a Herdr pane (`HERDR_PANE_ID` and `HERDR_SOCKET_PATH` set), it reports
+through Herdr's JSON API:
+
+- `pane.report_agent` with the source `sheprd-acp`, the agent label `acp`, and
+  the state `idle`, `working`, or `blocked`, so the sidebar and notifications
+  are exact rather than detected from the screen;
+- `pane.report_metadata` with the agent's display name and the `acp` token, the
+  attach socket's id;
+- each prompt the agent received, on one line and cut to 80 characters, as
+  the pane's `title`, which Sheprd's sidebar and the phone's chat list
+  show; a report or rename Herdr fails is tried again a few times;
+- `tab.rename` of its tab to the agent and that prompt (`Claude: fix the…`,
+  at most 40 characters), only while the chat is the tab's one pane and the
+  tab still has the agent's name, a number, or the label the chat gave it, so
+  a name the user typed stays (Herdr has no conditional rename, so a name
+  saved in the instant between reading the label and renaming is replaced);
+- on exit, the token and title are cleared, the tab gets the agent's name
+  back unless the user renamed it, and the agent is released.
+
+Herdr does not keep the token, or the program, when it restores a pane after
+a reboot or a server restart. So once the agent's session opens, a chat of a
+built-in agent in a Herdr pane also writes a restore record to
+`restore/<endpoint>.json` beside the attach sockets (`~/.local/state/herdr/acp`,
+or `$XDG_STATE_HOME/herdr/acp`; private to this user): the pane, the Herdr API
+socket, the agent, whether `--acp` was used, the folder, and the session id.
+It removes the record when it ends on its own, because the user quit or the
+agent ended; a killed chat, as a reboot kills it, leaves it behind for Sheprd
+to continue the session with `--resume` (see
+[Chats after a reboot](../../docs/rich-chat.md#chats-after-a-reboot), which
+also covers how Sheprd drops the record of a chat it saw end). A custom command (`-- COMMAND`), a
+chat started with extra agent arguments, one with `--no-attach`, and a chat
+outside a Herdr pane (including a Herdr 2 terminal) keep no record.
+
+It also writes OSC 7501 program status to the terminal, for terminals that read
+it; terminals that do not ignore it.
+
+## Agents
+
+| Name | Started as |
+| --- | --- |
+| `claude` | `claude` itself (see below); with `--acp`, `claude-agent-acp`, else `npx -y @agentclientprotocol/claude-agent-acp` |
+| `codex` | `codex app-server` (see below); with `--acp`, `codex-acp`, else `npx -y @agentclientprotocol/codex-acp` |
+| `copilot` | `copilot --acp` |
+| `gemini` | `gemini --acp` |
+| `opencode` | `opencode acp` |
+| `pi` | `pi --mode rpc` (see below); with `--acp`, `pi-acp`, else `npx -y pi-acp` |
+
+Arguments after `--` go to the agent. Each agent signs in its own way; when it
+reports that it needs authentication, the chat says how.
+
+### Claude without the adapter
+
+Where `claude` is installed, `sheprd-acp claude` runs it directly in its
+`stream-json` mode, the JSON lines Anthropic's own Agent SDKs speak, and
+translates between that and ACP on a thread of its own (`src/claude.rs`).
+There is no Node process or `npx` download in between, and a chat is ready
+about twice as fast. A turn takes as long either way: the model's time
+dominates it. The control messages on that pipe (the handshake, interrupt,
+permission questions, and setting changes) are not a published interface;
+they follow Anthropic's Python Agent SDK. `--acp`, or `HERDR_ACP_ADAPTER=1`
+in the environment, goes back to the ACP adapter, for when a Claude Code
+release changes them.
+
+What it offers: Claude Code's permission modes (Default, Accept Edits, Plan,
+Bypass Permissions), its models and effort levels from its handshake, its
+slash commands, its task list as the plan, diffs for edits, permission
+questions with Claude's own "don't ask again" suggestion, a plan to approve
+when leaving plan mode, and questions with choices. `--load` continues a
+session with its context. Claude sends none of its earlier messages when a
+session opens, so they come from the last 8 MiB of its own log, along with its
+context window use; a log that cannot be read leaves a warning and an empty
+chat.
+
+Run this way Claude Code offers no task tools unless asked, so `claude` starts
+with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` unless that is already set; setting it
+to `0` turns them off. The plan is kept from the calls of a running session, so
+a continued session shows none until Claude lists its tasks again.
+
+### The plan
+
+ACP's `plan` update is the one dependable source, and Codex's plan and Claude's
+task list reach it through their translators. OpenCode and Copilot send no plan
+but keep a list with a tool of their own (`todowrite`, `update_todo`), so those
+calls show as the plan rather than as cards (`src/project/todos.rs`). This goes
+by the tool's name and input, which neither agent promises to keep, and an agent
+that sends a `plan` update is taken at its word instead. OpenCode offers its tool
+only with `{"experimental": {"todo": true}}` in its config, and Copilot's
+checklist says only what is done, so no step shows as in progress. Gemini's
+tool calls carry no input to read and the pi translator reads no list, so
+neither shows a plan.
+
+OpenCode V2 release builds default `experimental.todo` to false. If no to-do
+tool is exposed to the model, Sheprd cannot supply a plan from its prose.
+Enable that setting in OpenCode to make `todowrite` available; Sheprd does not
+change the agent's configuration. Structured pending, in-progress, and completed
+items appear in **Plan**; cancelled items are omitted. Child-session plans and
+to-do calls never replace the parent conversation's plan.
+
+### Codex and pi without an adapter
+
+The same holds for two more agents, each through a translator of its own
+(`src/codex.rs`, `src/pi.rs`) behind the `Translator` trait in
+`src/harness.rs`, which Claude's uses too:
+
+- **Codex** runs as `codex app-server`, the JSON-RPC protocol OpenAI's editor
+  extension and Python SDK drive; OpenAI marks it experimental. Its modes are
+  Codex's approval presets (Read Only, Auto, Full Access), its models and
+  reasoning efforts come from `model/list` and go with each turn, and command,
+  file-change, and extra-access approvals become permission requests. A
+  configured model the account does not offer gives way to Codex's default.
+  `--load` shows earlier messages from Codex's own rollout log, as for Claude.
+- **pi** (`@earendil-works/pi-coding-agent`) runs as `pi --mode rpc`, the JSON
+  lines its `docs/rpc.md` documents. pi asks no tool approvals of its own; an
+  extension's `select` and `confirm` dialogs become permission requests, and
+  its models and thinking levels are the session's settings. `--load` passes
+  pi's `--session`; earlier messages are not shown again.
+
+Tools report as they run through the same bounded batching: the first change
+of a call shows at once, later ones share a 50 ms deadline, and an idle bridge
+has no timer. Up to 16 calls stream at a time; the rest show their start and
+their end.
+
+- **Codex** command output deltas extend the running card, and the final output
+  replaces them.
+- **pi** partial tool results replace each other, since each tool defines what
+  its partial result means, and the final result replaces the last one.
+- **Claude Code** reports how long a tool has run, shown in its title, and the
+  progress of background tasks, each on a card of its own that can outlive its
+  turn. These report progress, not stdout: a command's output still arrives with
+  its result, and a task's `output_file` is never read.
+
+### Enterprise endpoints
+
+`sheprd-acp` starts the agent with its own environment, untouched, so each
+agent reaches whatever endpoint its configuration names, exactly as it does
+when run by hand in the same pane:
+
+- Copilot on GitHub Enterprise Cloud with data residency: `GH_HOST` set to
+  the enterprise host (such as `mycompany.ghe.com`) after `copilot login
+  --host`, or a token in `COPILOT_GITHUB_TOKEN`; on GitHub Enterprise
+  Server, `COPILOT_PROVIDER_GHES_HOST` and its token.
+- Claude: `ANTHROPIC_BASE_URL` for an LLM gateway, `CLAUDE_CODE_USE_BEDROCK`
+  or `CLAUDE_CODE_USE_VERTEX`, `HTTPS_PROXY`, and `NODE_EXTRA_CA_CERTS`, or
+  the same keys in the `env` block of Claude Code's settings; both the direct
+  path and the ACP adapter read them.
+- Codex: a `[model_providers]` entry with its `base_url` in
+  `~/.codex/config.toml`. Gemini: `GOOGLE_CLOUD_PROJECT` and Vertex AI
+  settings, or `.gemini/.env`. OpenCode: a provider's `baseURL`, or its
+  GitHub Enterprise URL when signing in to Copilot.
+
+These must be set where the pane's shell sees them: the shell startup files
+of the machine the chat runs on, which for a chat on an SSH host is that host.
+
+## The chat
+
+The header shows the agent, whether it works and for how long, its model,
+thinking level, and mode, how full its context window is, and what the
+session has cost when the agent says. Each finished turn leaves a line saying
+how long it took and the tokens it used. Settings the agent offers through
+ACP's session config options (model, thinking level, mode, and any others)
+change from **Ctrl+O** here and from the header's buttons in Sheprd; the
+agent's slash commands complete after `/`, and Up and Down step through the
+session's earlier prompts, whichever client sent them.
+
+## Behaviour
+
+- Prompts sent while the agent works are queued and sent in order; cancelling
+  ends the turn, declines pending permission requests, and drops the queue.
+- The agent runs in its own process group and stops with the program.
+- The program advertises no file system, terminal, or elicitation support, so
+  agents use their own tools; it answers only permission requests.
+- The transcript keeps at most 2,000 entries and 2 MiB of text, dropping the
+  oldest, so a snapshot always fits one frame.
+- Sub-agents and background shells are listed as activities beside the
+  conversation (see the chat protocol's README), and a sub-agent's own calls
+  show under its call, at most 64 per sub-agent. The bridges know them:
+  - **Claude** (native): an `Agent` call is a sub-agent, ending with its
+    result, or, launched in the background, with Claude Code's task
+    notification for its agent id. A `Bash` call with `run_in_background`,
+    or one Claude Code moved to the background after a timeout, keeps running
+    past its turn until a task notification, a `TaskStop`, or a
+    `TaskOutput` result that reports an exit says how it ended. A `Monitor`
+    call is a monitor, which ends the same way. Each can be stopped, with
+    Claude Code's `stop_task`, once it has a task id.
+  - **Claude** through the ACP adapter: only sub-agents in the foreground and
+    their calls. The adapter drops Claude Code's task notifications, so the
+    end of background work cannot be known there and it stays an ordinary
+    card.
+  - **Codex**: a `spawnAgent` call is a sub-agent; its thread's calls show
+    under it, and it ends with its thread's turn, a collab call that reports
+    its state, or a `subAgentActivity` item. Codex does not say a command went
+    to the background: a command still running when its turn ends is listed
+    from then on, until it completes. A sub-agent can be stopped, by
+    interrupting its thread's turn, once that turn is known; a command
+    cannot, as Codex has no request for one inside a thread.
+  - **OpenCode with child-session updates**: the handshake negotiates
+     `clientCapabilities._meta["opencode/child-session-updates"]`; a peer must
+     advertise the same capability. Its `opencode/session/child_update`
+     notifications create session-identity cards for foreground and background
+     children. Explicit `completed`, `failed`, and `interrupted` statuses end
+     them, including after the parent prompt returns or is cancelled. Completing
+     the launch tool never ends a child. Concurrent and nested children retain
+     their own steps through the notification's child ID and OpenCode's
+     session-prefixed tool IDs. An explicit new `running` execution can reopen
+     a continued child. The existing bounded activity/step limits apply; no
+     unbounded child-session registry or polling worker is added. Losing the
+     ACP process settles running activities as stopped. No Stop button is
+     offered because the extension supplies no per-child stop request.
+     This was checked against OpenCode 2.0.24's live handshake and upstream
+     [child wire contract](https://github.com/anomalyco/opencode/blob/966168800cb80f336cb4267f0484f193a15f1292/packages/cli/src/acp/child.ts),
+     [capability negotiation](https://github.com/anomalyco/opencode/blob/966168800cb80f336cb4267f0484f193a15f1292/packages/cli/src/acp/capabilities.ts),
+     and [cross-turn event consumer](https://github.com/anomalyco/opencode/blob/966168800cb80f336cb4267f0484f193a15f1292/packages/cli/src/acp/turn.ts).
+     Only events delivered by the peer are followed; this does not reconstruct
+     background jobs predating the ACP attachment or infer a terminal state
+     when a live peer stops reporting a child.
+  - **Copilot** and **older OpenCode without the extension**: a call whose
+    input names an agent and a
+    prompt is a sub-agent, ending with its call, or with its turn if the agent
+    never says. One sent to the background stays an ordinary card, as its end
+    cannot be known. OpenCode marks a child session's updates in `_meta`: its
+    calls show under the sub-agent while only one runs, since nothing names
+    which it belongs to, and its words stay out of the conversation. Copilot
+    sends none of its sub-agent's steps. Neither can be stopped, as ACP has no
+    request for it.
+  - **Gemini** and **Pi** report no sub-agents or background shells.
+  - Anything still running when the agent exits is marked as stopped.
+
+## Limits
+
+- Sheprd attaches through `sheprd_client::private_endpoint`: on Unix a
+  socket in `$XDG_STATE_HOME/herdr/acp` (or `~/.local/state/herdr/acp`), on
+  Windows the named pipe `\\.\pipe\herdr-acp-<id>`, either one reachable by
+  this user alone, so only from a Sheprd on the same machine.
+- A chat that is killed rather than quit leaves its Unix socket file behind;
+  the next chat to start removes sockets nothing answers on. A pipe goes away
+  with its process.
+- Resuming after a restart needs `--load` with the agent's session id, and an
+  agent that supports `session/load`. With `--load` an agent that cannot
+  load starts a new session with a warning; with `--resume` the chat fails
+  instead.

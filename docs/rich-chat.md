@@ -1,0 +1,579 @@
+# Rich chat
+
+Sheprd renders Markdown, equations, code and native interactive cards in ACP
+chats. It can also show existing Codex and Claude CLI conversations above their
+original terminal input, without restarting, resuming or replacing the agent.
+
+## Enable and configure
+
+**ACP chats** are on by default; Settings > General turns them off. Configure
+them in the [GUI configuration](../crates/sheprd-gpui/README.md#configuration):
+
+```toml
+[chat]
+layout = "bubbles"
+render_existing = true
+```
+
+`render_existing` opts into discovery of running Codex and Claude sessions.
+It is disabled by default. The chat header cycles
+through **Timeline**, **Bubbles**, **Terminal**, **Document**, **Cards**,
+**iMessage**, **iA**, and **OpenCode**. **iA** sets the chat like iA Writer: one
+column at about 70 characters a line, your prompts and the agent's steps as quiet
+notes hung from a gutter mark, the agent's prose in full ink, and earlier turns
+muted until you point at them. **OpenCode** uses the terminal's font, draws
+prompts and open tool calls as tinted blocks behind a bar, folds finished calls
+to one line, and adds a status row under the composer.
+
+Once your prompt scrolls away, every layout pins it over the top of the
+conversation, drawn in that layout's style and cut to two lines. Reading back
+through earlier turns pins the prompt of the turn you are in. Click it to go to
+the prompt.
+
+Pick one from **View > Agent Layout**, or select a layout directly with:
+
+```sh
+sheprd config set chat.layout bubbles
+```
+
+In **Settings > Chat**, turn on **Full-width chat** to use the available
+conversation area, or set **Chat width** with the slider or numeric field.
+The default is 800 logical pixels; custom widths range from 320 to 4,000 and
+shrink to fit narrower windows. The transcript and native composer use the
+same width. At the default, the agent's prose keeps to about 70 characters a
+line, the length that reads most easily, while code, tables, and pictures use
+the whole column; a width you choose is followed as set. This applies to every
+layout, including **Terminal**. The equivalent commands are:
+
+```sh
+sheprd config set chat.max_width 0     # full width
+sheprd config set chat.max_width 1200  # custom width
+sheprd config unset chat.max_width    # restore the default
+```
+
+The Terminal layout keeps its composer controls on one row below the input.
+Model and effort choices use short labels, and long model names truncate to
+leave room for context usage and Send/Stop. In exceptionally narrow panes,
+the settings scroll horizontally while context usage and Send/Stop stay visible.
+
+The Terminal layout still renders chat. The terminal button and
+`sheprd chat hide` show the agent's actual terminal;
+`sheprd chat show` restores the chat view. These commands change presentation
+without starting or stopping the agent. See the [CLI guide](cli.md#existing-agent-rendering).
+
+## Chats in Herdr 2 panes
+
+In a Herdr 2 (herdr-core) tab, starting a chat from the tab strip's launcher
+or the group menu splits the pane in use and runs the chat beside it. A tab
+can hold several chats side by side, each in its own pane, along with plain
+terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
+it passes the id in `HERDR_ACP_ENDPOINT` and labels the terminal `acp=<id>`
+in herdr-core. Because herdr-core keeps the label, the chat view comes back
+after a restart and appears in every window that shows the pane.
+`sheprd-acp` reports its status to herdr-core with OSC 7501, so the pane's
+activity dot behaves as it does in Herdr.
+
+The window attaches to this computer's core and cores on saved SSH, cloud,
+and WSL hosts. The host's own ACP opens its endpoint through the existing
+authenticated transport; identical terminal IDs on different hosts keep
+separate conversations and split/focus state. A forwarded terminal that one
+core added from another machine (`other/t1`) still keeps its terminal view:
+its forwarding label does not identify a saved authenticated chat route.
+Mirror tabs only watch, so they show the terminal rather than a chat.
+A `sheprd-acp` started by hand in a Herdr 2 pane has no label, so it also
+keeps its terminal view.
+
+## Moving a terminal agent into a chat
+
+An agent running in its own CLI can move into a chat without leaving its pane
+or its conversation. Right-click its tab and choose **Move Agent into Chat**,
+run the same command from the palette with the agent's pane focused, or:
+
+```sh
+sheprd chat convert [--pane ID]
+```
+
+The agent's CLI stops, `sheprd-acp --resume` continues the same session in the
+shell it leaves, and the chat view attaches. The agent keeps its whole context,
+and the chat opens with the conversation so far and its context window use.
+
+| Agent | Moves | Earlier messages come from |
+| --- | --- | --- |
+| Claude | Yes, with its command line's flags, such as `--model` | Its session log, read by `sheprd-acp` |
+| Codex | Yes | Its rollout log, read by `sheprd-acp` |
+| Copilot | Yes | The agent, through ACP's `session/load` |
+| OpenCode | Yes | The agent, through ACP's `session/load` |
+| Gemini | No: Herdr reports no session for it | |
+| Pi | No: nothing shows its earlier messages yet | |
+
+Herdr must know the agent's session, which takes its integration: run
+`herdr integration install claude` (or `codex`, `copilot`, `opencode`), then
+restart the agent. Without it the move is refused and the agent keeps running.
+
+Sheprd Remote on a phone offers the same move as **Move Agent into Chat** in a
+terminal tab's menu, for agents on the computer it is paired with, and opens
+the chat once it is up. In a Herdr 2 terminal it moves Claude Code, through
+the same herdr-core path as the desktop (`sheprd_core_client::convert`).
+
+The tab's menu offers the row for an agent that can move, on a host chats reach,
+and shows a refusal in the menu. In a tab with several such agents it moves the
+one in the focused pane, else the first; use `--pane` to choose another.
+
+Only an idle agent moves, since stopping one mid-turn would lose the turn, and
+a refusal leaves it running in its terminal. Everything that can refuse is
+checked before the agent is touched. It stops on Ctrl+C alone, sent until its
+shell is back, so nothing in its input is ever submitted or answered. Text in
+its input is lost, and whatever it ran in the background stops with it. If it
+has not stopped after 30 seconds, the move gives up. Leaving its host,
+losing the connection, or turning chats off during a move ends it at once, and
+no more keys are sent.
+
+Limitations:
+
+- Herdr 1 panes only, on this machine or an SSH host, and not on Windows. A
+  Herdr 2 pane reports no agent session.
+- Permissions follow the chat's own settings. Claude's flags, including
+  `--dangerously-skip-permissions`, carry over; other agents start with their
+  default model and permissions, which the composer can change.
+- A chat that keeps Claude's flags is not continued after a reboot (see
+  [Chats after a reboot](#chats-after-a-reboot)), like any chat started with
+  extra agent arguments.
+- Claude and Codex show the last 8 MiB of their logs, like an existing
+  conversation does. Older messages stay in the agent's context.
+- If `sheprd-acp` cannot continue the session, the pane keeps its error, and
+  the agent's own command (such as `claude --resume ID`) still can.
+
+## Chats after a reboot
+
+When Herdr restores its panes after a reboot or a server restart, a pane that
+ran a chat comes back as a shell in the chat's folder: Herdr keeps neither the
+`sheprd-acp` that ran there nor the token Sheprd found it by. Sheprd
+continues those chats itself. Each chat writes a restore record (see the
+[`sheprd-acp` README](../crates/sheprd-acp/README.md#what-it-tells-herdr)) and
+removes it when the user quits it, and Sheprd types
+`sheprd-acp --resume <session> <agent>` into the restored shell. The program
+continues the agent's session, announces itself, and the chat view attaches
+as for any chat, with its earlier messages. Herdr itself is unchanged.
+
+To type into the right shell, and only once, Sheprd continues a record
+only when all of these hold:
+
+- a Sheprd instance saw the chat live under an earlier boot of the daemon, and never
+  under the current one, so a chat that died while Herdr kept running is not
+  started again;
+- the record names this Herdr session (by its socket) and a pane it has, with
+  no agent or chat reported in that pane, and no other record names the pane;
+- nothing listens on the chat's old endpoint;
+- `herdr pane process-info` reports the pane's shell itself in the
+  foreground, in the record's folder; an answer that does not name both the
+  shell and the foreground job counts as busy;
+- this window claimed the record first (an atomic rename), so several windows
+  or Sheprd processes never start the chat twice;
+- when the line is typed, at most ten seconds after the check, the window
+  still shows the same daemon boot and connection, chats are still on, and
+  the pane is still free. Otherwise the claim is given back.
+
+The check runs for each daemon boot and connection a window sees: at once,
+then up to five more times, five seconds apart, for shells still starting.
+Each run asks Herdr about at most 16 panes and reads on from where the last
+run stopped, so no record is passed over for good. Its last run removes
+records seen under an earlier boot whose pane no longer exists, and records
+no window ever saw live once they are a week old.
+
+Typing a line only queues it, so the record stays claimed until a chat shows
+in its pane, and is removed only then. If the daemon restarts, the
+connection drops or is replaced, chats are turned off, or no chat shows
+within a minute, the claim is given back. Since the pane's shell is busy
+while a chat starts, a given-back record is never typed twice into one
+running chat. A window that closes gives back what it holds, and a claim an
+exited or crashed app left behind is given back after five minutes.
+
+While connected, Sheprd also watches the chats it saw live. One that stays
+missing for 30 seconds while the daemon keeps running (its pane was closed,
+or the program was killed) has ended, and its record is removed, so a pane
+that later reuses its id is never handed the old chat. Missing chats are not
+counted across a restart or a reconnect, which is what continuing them is
+for. A chat newly live in a pane replaces any older record of this Herdr
+session that names the same pane. Records of other Herdr sessions on the
+machine never block or replace this one's.
+
+With `--resume`, an agent that cannot continue a session stops with an
+error instead of starting a new one, and a session Claude, Codex, or an ACP
+agent no longer has fails the same way. Pi without its adapter is given the
+id as `pi --session`; what it does with an id it does not have is up to Pi.
+
+Limitations:
+
+- Only Herdr 1 on this machine, on macOS and Linux, where the `herdr` CLI
+  answers `pane process-info`. Windows, SSH hosts, WSL, cloud machines, and a
+  daemon behind a custom socket are not continued.
+- Herdr 2 (herdr-core) is not continued yet. Its chats run `sheprd-acp` as the
+  terminal's own program, which records nothing there, and herdr-core shows no
+  boot identity to tell a restart from a chat that ended.
+- A chat Sheprd never saw live (started and ended while no window was
+  connected) is not continued, because nothing says which boot it ran under.
+- A pane identity can still be reused: a chat whose pane was closed while no
+  Sheprd was connected keeps its record. If Herdr, after a restart, gives a
+  new workspace the closed one's id, a new idle pane with that id in the same
+  folder could be handed the old chat.
+- A chat whose shell folder differs from the chat's own (started with
+  `--cwd`) is not continued.
+- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`,
+  `opencode`, `pi`) started without extra agent arguments. Custom commands
+  are not continued.
+- `[chat.env]` variables are not set again: typing their values into a shell
+  would show them on screen. The restored shell has Herdr's own environment.
+- The line is typed with the shell at its prompt; text the user starts
+  typing in that instant is mixed with it, as with Herdr's own agent resume.
+- On a Linux shutdown, where chats may die before their daemon, a window
+  still connected 30 seconds later counts them as ended, and they are not
+  continued.
+
+## What the agent is doing
+
+While a turn runs, the row above the composer says what the agent is doing.
+A step that names a file says what it does to it (`Editing server/purpose.ts`);
+any other step shows its title, usually the command. After it come how long
+that step has run and how many others run beside it, and the turn's own time
+stays at the far right, as in `Editing server/purpose.ts… · 42s +1 more 11m 10s`.
+Click the row to list the running steps in full, each with its own time; click
+again to close the list. It keeps the newest 16 and says how many more run. A chat from an older `sheprd-acp` has no step times.
+
+The row's dot pulses in a color for what the agent does: thinking, writing, or
+running a step. When the agent stops on your answer, the dot gives way to a
+still mark and the row says where to answer. The header gives the same state in
+a word and a mark: **Working**, **Needs input**, and once the agent is idle how
+its last turn ended, **Completed**, **Stopped** (cancelled, refused, or out of
+turns) or **Failed**. An observed CLI agent's state comes from the daemon, and
+its log only shows steps it recorded, so between them the row says **Working**.
+Times and token counts appear only when reported: the turn's line in the
+conversation has them, and the composer the context meter. A chat with no
+composer shows that meter in its header, when the pane is wide enough.
+
+## Tool calls
+
+A folded tool call says what it did: the command, file, search, or sub-agent
+task. Click anywhere on its header to open or fold it. Screen readers hear the
+same expanded state and can use the Expand and Collapse actions.
+
+Opening a call shows each thing it reported as source: a command as shell, known
+arguments as JSON, and edits as a red and green diff with a little context and
+syntax colors. **Copy diff** or **Copy code** copies what is drawn, and
+**Copy original** gives the exact payload when the preview left part of it out.
+Output the app can't read as structure stays as plain text.
+
+A diff compares only the text the agent reported, so its line numbers are not
+the file's. When the agent didn't report a file's earlier text, as with a
+whole-file write, the card shows the written text and counts its lines without
+claiming any were removed. Changes too large to compare show their text before
+and after. A tool the app doesn't know keeps its own name.
+
+A running call updates in place. Native Codex shows a command's output as it
+prints, pi shows each partial result its tools report, and Claude Code shows how
+long a tool has run and what its background tasks report, though a Claude
+command's own output still arrives with its result. The final output replaces
+what streamed, and other ACP agents show whatever updates they send. A chat
+following an existing CLI session can only show what that CLI saves to its log.
+
+## Sub-agents, background shells, and monitors
+
+When the agent hands a task to a sub-agent, leaves a command running in the
+background, or starts a monitor, the row above the composer says so after what
+the agent is doing, such as `Writing… 12s · 2 sub-agents · 1 background shell`.
+A background shell outlives the turn that started it, so once the agent is idle
+the row keeps saying what still runs (`1 background shell still running`) and
+clears when everything has ended.
+
+The rail beside the conversation lists each one under **Sub-agents**,
+**Shells**, or **Monitors**, running work first with how long it has run and
+its latest step, and what ended folded under **N ended**. Click a row to go to
+its card. Hover a running row and its time becomes a Stop button, which ends
+that one piece of work at once, without asking, and leaves the turn running.
+Only work the agent can really stop offers it: Claude's sub-agents, shells, and
+monitors once Claude has named them, and Codex's sub-agents. Codex offers no
+way to stop a command inside a thread, so its shells have no Stop, and Copilot's
+and OpenCode's sub-agents are listed without one, as ACP has no request for it.
+Gemini and Pi report none of this, so these sections stay away.
+
+OpenCode versions advertising child-session updates show both foreground and
+background sub-agents. Each gets a card linked from the rail, with its own
+steps even when several run concurrently. Background cards survive the parent
+turn and end when OpenCode reports that child completed, failed, or was
+interrupted. Older OpenCode versions without that extension can only track
+foreground launch calls reliably.
+
+For structured tasks in OpenCode V2, enable `"experimental": {"todo": true}`
+in your OpenCode configuration ([OpenCode's setting](https://opencode.ai/v2/docs/config#todos)).
+It defaults to false in release builds. The resulting `todowrite` calls feed
+the **Plan** section; an assistant's Markdown checklist does not. Child tasks
+remain separate from the parent's plan. Sheprd does not enable agent tools
+or change OpenCode configuration automatically.
+
+Every rail section folds to one line. While anything runs, **Plan** and
+**Changed** fold on their own to leave room, showing the current step and the
+change totals; once nothing runs they open again. Clicking a section's header
+overrides that for as long as the chat is open.
+
+When the rail is hidden or the pane is too narrow for it, click the row above
+the composer for a table instead: what each one is, how long it has run or ran,
+and whether it is running, done, failed, or stopped.
+
+A sub-agent's call is marked **Sub-agent** in the conversation, with the number
+of steps it took; open it to list them. Its steps stay in its card rather than
+in the conversation. A call that started a background shell says `running`
+until the shell ends, even though the call itself is done. Which agents report
+this, and how, is in the [`sheprd-acp` README](../crates/sheprd-acp/README.md#behaviour).
+
+## Messages and controls
+
+Write normal Markdown and TeX in user and agent messages. Rich chat supports
+headings, lists, links, aligned tables with horizontal scrolling, Mermaid,
+attached images, and explicitly loaded remote pictures. Conversation prose uses
+the UI font (the terminal font in **Terminal** layout), at the terminal's
+configured font size with the same zoom controls. Inline code and code fences
+use the terminal font. Code blocks
+preserve blank lines, show tabs at four-column stops and scroll sideways
+without wrapping. **Copy code** preserves the parsed source's tabs, indentation
+and Unicode.
+
+A code block's **Wrap** button, beside **Copy code**, wraps that block's long
+lines, and **Unwrap** stops it. Settings > Chat sets how every block starts
+out: **Wrap code** (`chat.wrap_code`), **Number code lines**
+(`chat.code_line_numbers`), and **Alternate code line colors**
+(`chat.code_stripes`). Line numbers and alternating colors tell a wrapped line
+from the next one; neither is copied. Unwrapped, the numbers stay put while the
+code scrolls sideways. A diff keeps its added and removed colors rather than
+alternating.
+
+An agent's `html` block starts as a card with **Show page**, unless
+**HTML blocks** (`chat.render_html`) says otherwise: `always` loads its page
+without a click, `never` shows its code, and `default` keeps the card. Every
+HTML block keeps a switch: **Show code** on its card or page, and
+**Render webpage** (**Open in browser** on Linux) on its code. `always` loads
+each block's page once; one you hide, or the oldest closed for a fifth, stays a
+card. Linux cannot show pages inside the window, so there `always` keeps the
+card rather than opening a browser for every block. A choice made with a
+block's own button lasts until the app quits.
+
+```sh
+sheprd config set chat.wrap_code true
+sheprd config set chat.render_html '"never"'
+```
+
+Inline and display equations accept dollar and bracket delimiters outside code.
+Multiline display equations preserve TeX line breaks, including a standalone
+`=`. Equations scale with prose and align with inline baselines. Failed display
+previews show a notice and readable LaTeX; copying retains the formula source.
+
+With rich chat focused, **Ctrl+-**, **Ctrl++** (or **Ctrl+=**) and **Ctrl+0**
+change or reset text size on Linux and Windows, including while typing in the
+original agent editor. macOS uses Cmd. The **View** menu provides the same font
+size actions. Adjustments last for the window until reset or configuration reload.
+
+The conversation follows new output while it is at its end. Scrolled above it,
+it stays where you left it and a round button appears at the bottom of the
+conversation, which says **New output below** once more arrives. Click it to go
+back to the end and follow again.
+
+Drag across conversation text to select across paragraphs, code, table cells and
+messages. **Shift-click** extends the selection; double-click selects a word and
+triple-click selects a paragraph or code line. Drag beyond the list edge to
+scroll while selecting. With the conversation reader focused, **Ctrl+C** copies,
+**Ctrl+A** selects all retained readable text, and **Esc** clears the selection
+(macOS uses Cmd for copy/select-all). Click the composer or original CLI editor
+to return typing there. Copying from the reader never sends an interrupt to the
+agent. Dragging across a link selects its label; a plain click still opens it.
+
+Selected code preserves original tabs; tables copy as tab-separated cells and
+newline-separated rows. Formulas are atomic selections and copy their original
+TeX. Collapsed card details and retained hidden source are omitted until opened;
+copy buttons remain available for complete retained code or original records.
+Image pixels, embedded webviews and widget controls are separate surfaces, not
+selectable conversation text.
+
+Text shortcuts are prompts you send often, such as asking the agent to carry
+on. Type `/` in the composer to see them first, above the agent's own slash
+commands, matched against what follows the slash by label or text; **Tab** or a
+click takes the selected one. The shortcuts button beside **+** opens them in a
+popover with a search field, where **Enter** takes the first match. Either way a
+shortcut sends at once when nothing else is drafted, as on the phone, and
+otherwise joins the end of the draft. Add, edit, reorder and delete them in
+Settings > Text Shortcuts, or **Edit Shortcuts…** at the foot of the popover;
+`sheprd chat shortcuts` lists them. They are one list: each computer's
+`sheprd-remote-control` keeps a copy for its phones, and Sheprd reads this
+computer's and every connected SSH host's that has the program, keeps the
+latest edit, and offers it to the others, so an edit made anywhere reaches all
+of them. A host without the program is skipped.
+
+ACP chats retain their native composer, permissions, tools, plans, context
+information and file attachments. Tool and thinking cards start collapsed and
+expand to show retained text and diffs.
+
+Native chats support permission buttons and the single-choice questions exposed
+by their agent bridge. Multi-question, multi-select and free-text prompts are
+not universally supported. Attached CLI sessions answer live questions in their
+original terminal input; the historical question cards below are read-only.
+
+A closed `herdr-ui` fence can render native cards, metrics, choices, toggles,
+sliders, inputs, tables, bar charts and prompt actions. See the
+[catalog](../crates/sheprd-gpui/src/chat/widgets/README.md) and
+[example](../crates/sheprd-gpui/src/chat/widgets/example.json). Editing a control
+only changes local state. An explicit action with `mode: "draft"` adds the
+selected values to the composer for review; `mode: "send"` uses the normal
+prompt flow. Rendering or editing a native card cannot run code, submit a
+prompt or answer a permission request. Existing CLI sessions and read-only mirrors cannot submit widget actions.
+
+The catalog is application-specific, not an A2UI implementation or MCP Apps
+host. Embedded HTML pages use the platform webview; see the
+[Linux browser plan](linux-browser-plan.md). Rich chat does not provide hosted
+ChatGPT services such as account history, voice/video chat or hosted tools.
+
+## Existing CLI sessions
+
+Discovery checks Herdr's session metadata and the foreground process identity.
+The conversation appears in the same pane, with the original CLI editor and
+status area below it. Keyboard input, IME, image paste, drafts, slash commands
+and approvals remain owned by that CLI. Attaching does not inject or submit
+text. Blocked questions and approvals automatically expand the original agent
+input. Choose **Compact input** to reclaim the conversation area; the editor
+still grows enough to keep its cursor visible. Automatic sizing returns to
+compact after the answer; an explicit expanded choice stays expanded.
+Drag the horizontal divider above **Agent input · same session** up or down
+to choose its height; double-click the divider to restore automatic sizing.
+The choice belongs to this pane and is bounded when the window shrinks. The
+original editor's cursor remains visible even if it needs more rows than chosen.
+Unusual full-screen dialogs may require the terminal view.
+Leaving the agent returns to the ordinary terminal.
+
+Until the first transcript arrives, a loading view covers the old terminal
+output and leaves the original editor below it usable. **Use terminal** dismisses
+it and keeps the terminal once the conversation is ready; **Show chat** then
+brings the conversation back. A question or approval is never covered, and a
+session that cannot be found or read leaves the ordinary terminal in place.
+
+CLI logs keep only a tool's name and arguments, so the reader takes the command,
+file, search term, or task from the arguments of the tools it knows.
+
+If another window owns a larger terminal grid, **Activate to fit agent input**
+and **Fit input** let the normal window geometry update restore the editor and
+status rows. An inactive window does not repeatedly resize another window's
+terminal. Goal status stays in the original CLI interface; it is not inferred
+from conversation text.
+
+Observation requires a Linux agent host, its Herdr CLI metadata API, and a
+matching `sheprd-acp` helper. Local helpers are paired with the GUI; SSH observers
+run on the agent's host through the existing encrypted connection. Remote helper
+installation is explicit. Observation creates no listening port or persistent
+service. Closing the GUI stops its observer children and leaves agents running.
+Unsupported hosts or unverifiable identities retain the original terminal.
+Explicit historical mirrors remain available through `chat.mirrors`, but are
+ignored while `render_existing` is enabled so they cannot mask a changed or lost
+live session.
+
+Only a bounded log tail is projected: up to 8 MiB read, with at most 2,000
+entries, 2 MiB of text and 8 MiB of image data retained. Older history remains
+with the original agent. Model, thinking level and context usage appear only
+when reported in the retained tail; missing values stay unknown. Activity comes
+from Herdr's live snapshot. Historical permissions never become actionable
+buttons. `sheprd chat status --json` reports the input mode and session ID.
+
+System activity becomes a compact notice only when transcript metadata verifies
+its origin. Notice details remain inert, expandable and copyable; oversized
+source includes a truncation marker. Ordinary user text that resembles a notice
+stays literal.
+
+Verified Codex question replies matched to their original questions appear as
+read-only **Question answered** cards. Questions and answers support Markdown,
+code and equations. **Copy answers** copies readable text; **Original record**
+keeps the source separately copyable. These cards never replay approvals or
+submit answers. Verified retained answers survive compaction without duplicating
+unchanged answers. Unmatched or malformed wrappers stay literal, and compacted
+replacement history is not replayed.
+
+Embedded raster attachments use the transcript's image data and retain their
+captions. The observer never fetches image paths or URLs from message text.
+Local Markdown file links open only on an explicit click. Remote file paths stay
+readable without opening a same-named local file.
+
+## Implementation and bounds
+
+Rich parsing lives in [`chat/rich`](../crates/sheprd-gpui/src/chat/rich.rs), with
+native layout in [`chat/view/rich.rs`](../crates/sheprd-gpui/src/chat/view/rich.rs).
+Math rasterization and syntax highlighting use the bounded visual worker queue,
+which a window's chats share: what is on screen goes first, a hidden chat starts
+nothing, and discarded streamed revisions retain their worker slots until
+completion. Scrolling back rebuilds evicted formulas and code, and a formula the
+texture budget refused is drawn again once it is on screen and room exists.
+
+- Message preparation is limited to 256 KiB and 2,000 lines. Rich fragments
+  exceeding 4,096 words or 16,384 parser events use the bounded source renderer.
+  Message copying retains the complete retained message.
+- Code previews show at most 512 lines and 4,000 characters per line, with a
+  visible truncation notice. **Copy code** retains the parsed block within the
+  message preparation limit. Each rich fragment highlights at most 32 blocks of
+  32 KiB each; larger blocks remain readable code.
+- Formula input, nesting, dimensions and pixel allocations are bounded.
+  Unsupported or oversized formulas remain readable source.
+- Widget JSON is validated before presentation. Unknown types or keys, invalid
+  bounds, unfinished fences and oversized cards remain source. Callbacks are
+  bound to the pane, connection epoch, entry and exact current document.
+- Observers bound JSONL tail reads and retained transcript memory, avoid loading
+  transcript-linked files, and never replace the agent or overwrite its lifecycle
+  metadata.
+
+## Developer verification
+
+Run the repository's normal `just ci` checks. Focused tests cover rich parsing,
+render bounds, widget events and focus, stale callbacks, transcript parsing and
+read-only protocol behavior. Use a temporary `HOME` and XDG directories when
+configuration tests must be independent of installed desktop themes. Preserve
+`CARGO_HOME` and `RUSTUP_HOME` when changing `HOME` to reuse the toolchain and
+cache; system-wide packages remain visible.
+
+For native visual checks on Linux, install Xvfb and ImageMagick, then run:
+
+```sh
+cargo build --locked -p sheprd-gpui --features integration-test
+python3 scripts/check-rich-chat-native.py
+```
+
+The [capture script](../scripts/check-rich-chat-native.py) uses its own X server
+and temporary XDG directories, runs cases sequentially, and closes only its own
+processes. It requires no daemon or browser. PNGs and logs go to
+`target/rich-chat-native/`. The default cases cover math, code, diagrams, widgets,
+conversation layouts, original-session input, attachments and Q&A across light,
+dark, wide and narrow variants. Review the images for typography, clipping and
+contrast. Use `--case`, `--layout`, `--theme`, `--size` and `--output` to select captures;
+`--xvfb` and `--vulkan-library` select alternate test tools.
+
+The selection probe additionally requires `libX11` and `libXtst`. It sends
+native mouse/key events only to its private Xvfb fixture, checks exact selected
+and clipboard text, and records screenshots plus `selection.json`:
+
+```sh
+python3 scripts/check-rich-chat-native.py --case selection --theme dark --size narrow
+```
+
+For example, `--layout imessage --case user --theme light --size narrow`
+checks user-message contrast and wrapping in a narrow light-theme bubble.
+
+To move a debug fixture binary to another machine, embed the RaTeX fonts:
+
+```sh
+cargo build --locked -p sheprd-gpui --features integration-test \
+  --config 'profile.dev.package."ratex-katex-fonts".debug-assertions=false' \
+  --config 'profile.dev.package."rust-embed".debug-assertions=false'
+```
+
+Release builds embed these fonts automatically. Software-rendered captures
+verify appearance, not hardware GPU performance. Native input, focus and IME
+checks complement screenshots and headless geometry tests.
+
+## Dependencies
+
+TeX uses the MIT-licensed RaTeX engine crates pinned to 0.1.15. Their bundled
+KaTeX fonts use the SIL Open Font License 1.1; release notices include the font
+license and upstream provenance separately from the engine's MIT license.
+Markdown and syntax highlighting reuse the project's pulldown-cmark and Syntect
+dependencies.
+The implementation extends the existing native ACP chat renderer.

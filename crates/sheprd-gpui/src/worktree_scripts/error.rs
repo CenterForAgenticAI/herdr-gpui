@@ -1,0 +1,41 @@
+//! Why a worktree script could not be read or started.
+
+use std::io;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    // keep-sorted start
+    #[error("Another worktree script is still starting")]
+    Busy,
+    #[error("The daemon did not identify this workspace's checkout")]
+    Checkout,
+    #[error("Could not copy the files .worktreeinclude names: {0}")]
+    Copy(#[source] sheprd_client::Error),
+    /// A Windows client has no `/bin/sh` to run Git and the copy with.
+    #[cfg(windows)]
+    #[error(".worktreeinclude is not supported on Windows yet; its files were not copied")]
+    CopyUnsupported,
+    #[error(".herdr/worktree.toml is not valid UTF-8")]
+    Encoding(#[source] std::str::Utf8Error),
+    #[error("This workspace is not a Git checkout Herdr knows yet")]
+    NotGit,
+    #[error(".herdr/worktree.toml scripts must not contain NUL bytes")]
+    Nul,
+    #[error(".herdr/worktree.toml: {0}")]
+    Parse(#[source] toml::de::Error),
+    #[error("Could not read .herdr/worktree.toml: {0}")]
+    Read(#[source] io::Error),
+    #[error("Could not read .herdr/worktree.toml on the host: {0}")]
+    Remote(#[source] sheprd_client::Error),
+    #[error("{0}")]
+    Request(#[source] std::sync::Arc<crate::Error>),
+    #[error("Unexpected daemon response while opening the script's tab")]
+    Response,
+    #[error("The queued setup expired; run the setup script from the worktree menu")]
+    SetupExpired,
+    #[error(".herdr/worktree.toml exceeds {limit} bytes")]
+    Size { limit: u64 },
+    #[error("Worktree scripts cannot be read from a WSL distribution yet")]
+    UnsupportedHost,
+    // keep-sorted end
+}
