@@ -6,6 +6,7 @@ use crate::test_executable;
 
 mod journal;
 mod uncertain;
+mod verified_end;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.
 fn fake_core(dir: &Path, status: &str) {
@@ -15,6 +16,7 @@ printf '%s\n' "$*" >> "$HOME/core-calls"
 case "$1" in
 run) echo '{{"address":"t9"}}' ;;
 wait) echo '{{"ended":true,"exit_code":null,"reason":"status","status":"{status}","turn":0}}' ;;
+ls) echo '{{"terminals":[]}}' ;;
 *) echo '{{}}' ;;
 esac
 "#
@@ -119,7 +121,10 @@ fn a_herdr_2_run_is_stopped_messaged_and_removed_through_its_terminal() {
         [
             "send --json -- t9 --and the tests",
             "keys --json -- t9 esc ctrl+c",
+            "keep --off --json -- t9",
             "kill --json -- t9",
+            "ls --all --json",
+            "ls --all --json",
         ]
     );
     assert!(calls(dir.path()).is_empty());

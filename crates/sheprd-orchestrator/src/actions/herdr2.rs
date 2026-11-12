@@ -146,13 +146,19 @@ pub(super) fn send(host: &Host, terminal: &str, text: &str, cancelled: &AtomicBo
 }
 
 /// Ends the shell in `terminal` and the agent in it, as removing Herdr 1's
-/// workspace closes its panes. One already gone is no failure.
-pub(super) fn end(host: &Host, terminal: &str) {
-    let line = format!(
-        "core_cli kill --json -- {} >/dev/null 2>&1 || true\n",
-        shell_quote(terminal)
-    );
-    if let Err(error) = host.capture(&line, &AtomicBool::new(false)) {
-        tracing::debug!(category = "orchestrator", %error, "Cannot end a run's terminal");
-    }
+/// workspace closes its panes. One already gone is no failure; an
+/// unreachable host or a kill that left it running keeps the run and its
+/// checkout, so Remove can try again.
+pub(super) fn end(host: &Host, terminal: &str, cancelled: &AtomicBool) -> Result<()> {
+    Ok(work::owned_agent::end_verified(host, terminal, cancelled)?)
+}
+
+/// Proves no live herdr-core program works in `checkout`, as a failed
+/// start may have left a shell whose address never came back.
+pub(super) fn idle(host: &Host, checkout: &std::path::Path, cancelled: &AtomicBool) -> Result<()> {
+    let tree = work::Worktree {
+        path: checkout.to_string_lossy().into_owned(),
+        opened: work::Opened::Herdr2,
+    };
+    Ok(work::owned_agent::checkout_idle(host, &tree, cancelled)?)
 }

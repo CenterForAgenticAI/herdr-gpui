@@ -709,6 +709,7 @@ impl SheprdWindow {
             return;
         }
         let host = match self.chats.pane(pane_id).map(|pane| &pane.target.route) {
+            Some(super::Route::Remote(target)) => target.clone(),
             Some(super::Route::Ssh(host)) => sheprd_client::ConnectTarget::Ssh {
                 target: host.clone(),
                 session: String::new(),

@@ -319,32 +319,35 @@ fn another_hosts_kept_workspace_runs_its_git_on_that_host(cx: &mut TestAppContex
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.open_workspace_menu(&id, gpui::Point::default(), window, cx);
-            // Shown as if kept on an SSH host: its folder is that host's,
-            // which Git on this computer must never touch, so its worktree
-            // work runs through that host's scripts instead.
-            let ssh = sheprd_client::ConnectTarget::Ssh {
+            // Shown as if kept on an SSH host: its folder is that host's, so
+            // the worktree rows are offered and their Git goes to that host,
+            // never to this computer.
+            let target = sheprd_client::ConnectTarget::Ssh {
                 target: "box".into(),
                 session: "work".into(),
             };
             view.endpoints.push(crate::endpoint::Endpoint::new(
                 "ssh:box".into(),
                 "Box".into(),
-                ssh.clone(),
+                target.clone(),
                 true,
             ));
             view.selected_endpoint = view.endpoints.len() - 1;
             assert_eq!(view.kept_checkout().as_deref(), Some(LINKED));
-            let host = sheprd_remote::work::host_for_kept(&ssh).unwrap();
-            // Windows has no local POSIX route, so there is nothing to mistake.
-            if let Ok(local) = crate::teleport::host_for(&sheprd_client::ConnectTarget::Local) {
-                assert_ne!(host, local);
-            }
+            assert!(
+                !sheprd_remote::work::host_for_kept(&target)
+                    .unwrap()
+                    .is_local()
+            );
             let rows: Vec<_> = view
                 .workspace_items()
                 .into_iter()
                 .map(|(action, _)| action)
                 .collect();
             assert!(rows.contains(&WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree)));
+            assert!(rows.contains(&WorkspaceMenuAction::Dialog(
+                WorkspaceAction::DeleteWorktree
+            )));
         })
     });
 }
