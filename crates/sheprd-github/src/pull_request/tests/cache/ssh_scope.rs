@@ -29,7 +29,7 @@ fn ssh_answers_are_fenced_after_host_account_or_connection_changes() {
         peer.cache.poll(now);
         let (old, requested, host, _, _) = peer.incoming.try_recv().unwrap();
         assert_eq!(host, origin);
-        assert_eq!(requested, [input.clone()]);
+        assert_eq!(requested, std::slice::from_ref(&input));
         let profile = crate::Profile::fixture(login, Arc::new(login.into()), &[]);
         let next_tokens = if login == "fixture" {
             tokens
