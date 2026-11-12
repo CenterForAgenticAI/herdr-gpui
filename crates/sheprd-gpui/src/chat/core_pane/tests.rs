@@ -1,6 +1,5 @@
 use super::*;
 
-mod identity;
 use sheprd_backend::RunState;
 use sheprd_client::protocol::AgentStatus;
 
