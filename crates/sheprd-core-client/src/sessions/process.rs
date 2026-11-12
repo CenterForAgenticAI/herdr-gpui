@@ -1,10 +1,10 @@
 use super::Error;
 use crate::Result;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(windows, target_os = "macos")))]
 use sheprd_client::ScriptLimits;
 #[cfg(not(any(windows, target_os = "macos")))]
 use sheprd_client::{ScriptHost, run_script};
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(windows, target_os = "macos")))]
 use std::{sync::atomic::AtomicBool, time::Duration};
 
 pub(super) struct Process {
@@ -74,6 +74,9 @@ pub(super) fn read(pid: u32) -> Result<Process> {
 }
 
 #[cfg(windows)]
+mod powershell;
+
+#[cfg(windows)]
 pub(super) fn read(pid: u32) -> Result<Process> {
     if pid == 0 {
         return Err(Error::Identity.into());
@@ -83,23 +86,9 @@ pub(super) fn read(pid: u32) -> Result<Process> {
         std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
     let mut command = sheprd_client::new_command(program);
     command.args(["-NoProfile", "-NonInteractive", "-Command", &format!(
-        "$ErrorActionPreference='Stop'; $p=Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; if(!$p){{exit {ABSENT}}}; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); Write-Output $p.ParentProcessId; Write-Output ('windows:'+ $p.CreationDate.ToUniversalTime().Ticks); Write-Output $p.Name"
+        "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $p=Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; if(!$p){{exit {ABSENT}}}; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); Write-Output $p.ParentProcessId; Write-Output ('windows:'+ $p.CreationDate.ToUniversalTime().Ticks); Write-Output $p.Name"
     )]);
-    let mut output = Vec::new();
-    sheprd_client::run_script_command(
-        command,
-        &[][..],
-        &mut output,
-        ScriptLimits {
-            output: 1024,
-            // PowerShell writes nothing until its CIM query answers, which a
-            // cold start on a busy machine can take well over five seconds.
-            // A timeout is reported as doubt, never as a missing process.
-            idle: Duration::from_secs(30),
-        },
-        &AtomicBool::new(false),
-    )
-    .map_err(Error::Probe)?;
+    let output = powershell::run(command).map_err(Error::Probe)?;
     parse(&output)
 }
 
