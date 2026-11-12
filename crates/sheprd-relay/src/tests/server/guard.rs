@@ -41,11 +41,8 @@ fn points_add_up_to_a_ban() {
     assert!(guard.banned(address, now));
     assert!(guard.banned(address, now + BANS[0] - Duration::from_secs(1)));
     assert!(!guard.banned(address, now + BANS[0]));
-    // A dashboard lockout or blown budget bans at once.
-    assert_eq!(
-        offend_until_banned(&guard, ip("203.0.113.51"), Offense::Lockout, now),
-        1
-    );
+    // Overrunning the transfer budget many times bans at once.
+    assert!(guard.charge(ip("203.0.113.51"), 81 * GIB, now).is_some());
 }
 
 #[test]
@@ -53,14 +50,14 @@ fn points_fade_a_point_a_minute() {
     let guard = guard();
     let start = Instant::now();
     let address = ip(PUBLIC);
-    // One a minute never adds up: a revoked device retrying, say.
+    // One a minute never adds up: a phone retrying too fast, say.
     for minute in 0..120 {
         let now = start + Duration::from_secs(60 * minute);
-        assert!(guard.offend(address, Offense::RefusedDial, now).is_none());
+        assert!(guard.offend(address, Offense::Limited, now).is_none());
     }
     // A burst does.
     let now = start + Duration::from_secs(60 * 120);
-    assert!(offend_until_banned(&guard, address, Offense::RefusedDial, now) <= BAN_POINTS);
+    assert!(offend_until_banned(&guard, address, Offense::Limited, now) <= BAN_POINTS);
 }
 
 #[test]
@@ -69,34 +66,41 @@ fn bans_grow_then_are_forgiven() {
     let address = ip(PUBLIC);
     let mut now = Instant::now();
     for length in BANS.iter().chain([BANS[2]].iter()) {
-        guard.offend(address, Offense::Lockout, now);
+        offend_until_banned(&guard, address, Offense::Malformed, now);
         assert!(guard.banned(address, now + *length - Duration::from_secs(1)));
         assert!(!guard.banned(address, now + *length));
         now += *length;
     }
     // A clean day after the last ban: back to the shortest.
     now += Duration::from_secs(24 * 60 * 60);
-    guard.offend(address, Offense::Lockout, now);
+    offend_until_banned(&guard, address, Offense::Malformed, now);
     assert!(!guard.banned(address, now + BANS[0]));
 }
 
 #[test]
-fn the_transfer_budget_bans_when_spent() {
+fn the_transfer_budget_slows_when_spent_and_bans_when_overrun() {
+    use crate::guard::OVERRUN;
     let guard = Guard::new(true, 10 * GIB);
     let now = Instant::now();
     let address = ip(PUBLIC);
-    assert!(guard.charge(address, 9 * GIB, now).is_none());
-    assert!(guard.charge(address, GIB, now).is_none());
-    assert!(guard.charge(address, 1, now).is_some());
+    assert!(guard.charge(address, 10 * GIB, now).is_none());
+    assert!(!guard.over_budget(address, now));
+    // Over budget: slowed, not banned.
+    assert!(guard.charge(address, 1, now).is_none());
+    assert!(guard.over_budget(address, now));
+    assert!(!guard.banned(address, now));
+    // Moving many budgets anyway is a ban, and one that ends its work.
+    assert!(guard.charge(address, OVERRUN * 10 * GIB, now).is_some());
     assert!(guard.banned(address, now));
+    assert!(guard.evicts(address, now));
     // The budget is per hour.
     let other = ip("203.0.113.52");
-    guard.charge(other, 9 * GIB, now);
-    assert!(
-        guard
-            .charge(other, 9 * GIB, now + Duration::from_secs(3600))
-            .is_none()
-    );
+    guard.charge(other, 11 * GIB, now);
+    assert!(guard.over_budget(other, now));
+    let later = now + Duration::from_secs(3600);
+    assert!(!guard.over_budget(other, later));
+    assert!(guard.charge(other, 9 * GIB, later).is_none());
+    assert!(!guard.over_budget(other, later));
     // No budget, no ban.
     let unlimited = Guard::new(true, 0);
     assert!(unlimited.charge(address, u64::MAX, now).is_none());
@@ -119,16 +123,18 @@ fn private_addresses_and_auto_off_are_never_banned_automatically() {
         assert!(exempt(address), "{private}");
         for _ in 0..50 {
             assert!(
-                guard.offend(address, Offense::Lockout, now).is_none(),
+                guard.offend(address, Offense::Malformed, now).is_none(),
                 "{private}"
             );
         }
+        guard.charge(address, 100 * GIB, now);
         assert!(!guard.banned(address, now), "{private}");
+        assert!(!guard.over_budget(address, now), "{private}");
     }
     assert!(!exempt(ip(PUBLIC)));
     let off = Guard::new(false, 20 * GIB);
     for _ in 0..50 {
-        assert!(off.offend(ip(PUBLIC), Offense::Lockout, now).is_none());
+        assert!(off.offend(ip(PUBLIC), Offense::Malformed, now).is_none());
     }
     assert!(!off.banned(ip(PUBLIC), now));
 }
@@ -173,13 +179,13 @@ fn ranges_parse_and_refuse_nonsense() {
 fn the_dashboard_lists_earned_bans_with_their_reason() {
     let guard = guard();
     let now = Instant::now();
-    guard.offend(ip(PUBLIC), Offense::Lockout, now);
-    guard.charge(ip("2001:db8::7"), 21 * GIB, now);
+    offend_until_banned(&guard, ip(PUBLIC), Offense::Malformed, now);
+    guard.charge(ip("2001:db8::7"), 81 * GIB, now);
     let rows = guard.bans(now);
     assert_eq!(rows.len(), 2);
     assert!(
         rows.iter()
-            .any(|row| row.address == PUBLIC && row.reason == "lockout")
+            .any(|row| row.address == PUBLIC && row.reason == "malformed")
     );
     // IPv6 is banned, and shown, as its /64.
     assert!(
@@ -200,7 +206,7 @@ fn a_table_full_of_bans_never_lifts_one_and_bans_wide_instead() {
         ))
     };
     for index in 0..u32::try_from(MAX_RECORDS).unwrap() {
-        guard.offend(banned_address(index), Offense::Lockout, now);
+        offend_until_banned(&guard, banned_address(index), Offense::Malformed, now);
     }
     // Ordinary traffic from newcomers bans nothing: a lone point, or a
     // transfer still under budget, which every session charges each second.
@@ -209,10 +215,10 @@ fn a_table_full_of_bans_never_lifts_one_and_bans_wide_instead() {
     assert!(guard.charge(innocent, GIB, now).is_none());
     assert!(!guard.banned(innocent, now));
     assert!(!guard.banned(ip("198.51.100.1"), now));
-    // A newcomer whose offense would ban it alone is banned by its wide
+    // A newcomer whose offenses would ban it alone is banned by its wide
     // block (an IPv4 /24) ...
     let late = ip("203.0.113.99");
-    assert!(guard.offend(late, Offense::Lockout, now).is_some());
+    offend_until_banned(&guard, late, Offense::Malformed, now);
     assert!(guard.banned(late, now));
     assert!(guard.banned(ip("203.0.113.1"), now));
     // Counted among active bans, beside every address's.
@@ -228,7 +234,7 @@ fn a_table_full_of_bans_never_lifts_one_and_bans_wide_instead() {
     assert!(guard.banned(ip("192.0.2.200"), now));
     // So does transfer, against a block's larger budget.
     let heavy = ip("198.18.0.5");
-    let block_budget = 20 * GIB * crate::guard::WIDE_BUDGET;
+    let block_budget = 20 * GIB * crate::guard::WIDE_BUDGET * crate::guard::OVERRUN;
     assert!(guard.charge(heavy, block_budget, now).is_none());
     assert!(guard.charge(heavy, 1, now).is_some());
     assert!(guard.banned(heavy, now));
@@ -254,6 +260,6 @@ fn a_full_table_still_bans_new_offenders() {
     }
     // A new one is still counted and banned, rather than ignored.
     let late = ip("203.0.113.99");
-    assert!(guard.offend(late, Offense::Lockout, now).is_some());
+    offend_until_banned(&guard, late, Offense::Malformed, now);
     assert!(guard.banned(late, now));
 }

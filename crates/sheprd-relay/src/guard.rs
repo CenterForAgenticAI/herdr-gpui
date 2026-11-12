@@ -1,15 +1,20 @@
 //! Banning toxic clients, with nothing to set up.
 //!
 //! Each address (an IPv4 address, or an IPv6 /64, as the rate limits key
-//! them) earns points for each [`Offense`]: hitting limits, dialing
-//! without an allowed key, forged proofs, malformed messages, dashboard
-//! lockouts. Points fade by one a minute; at [`BAN_POINTS`] the address
-//! is banned, for 10 minutes, then an hour, then a day if it keeps at it.
-//! An address moving more than the hourly transfer budget, counted on both
-//! sides of every session, is banned at once.
+//! them) earns points for each [`Offense`]: hitting limits, probing,
+//! forged proofs, malformed messages, and moving far too much. Points fade by one a minute; at [`BAN_POINTS`] the address is banned,
+//! for 10 minutes, then an hour, then a day if it keeps at it.
 //!
-//! A banned address is refused before any work (before the QUIC handshake,
-//! before any HTTP route), and the hub ends its sessions and listeners.
+//! A banned address is refused before any new work (before the QUIC
+//! handshake, before any HTTP route). Whether the hub also ends what it
+//! has open depends on why: a ban that any [`severe`] offense led to ends
+//! its sessions and listeners, but one earned only by running into limits
+//! leaves them alone, since a household or a carrier's NAT can run into
+//! limits together without anyone misbehaving.
+//!
+//! Each side of a session is charged for the bytes it sends. An address
+//! over its hourly budget has its sessions slowed to [`SLOW`], not banned;
+//! only one at [`OVERRUN`] budgets is banned.
 //! Loopback and private addresses are never banned automatically: behind a
 //! reverse proxy that is misconfigured, every caller can look like the
 //! proxy, and banning it would lock everyone out. Operators can still ban
@@ -53,19 +58,34 @@ pub const WIDE_BUDGET: u64 = 16;
 /// The most bans the dashboard lists.
 const MAX_ROWS: usize = 50;
 
+/// An address over its hourly transfer budget has each session slowed to
+/// this many bytes a second each way, until the hour's window ends.
+pub const SLOW: u64 = 256 * 1024;
+/// An address that moves this many hourly budgets in the hour anyway, as
+/// many sessions slowed at once can, is banned.
+pub const OVERRUN: u64 = 4;
+
 /// What one offense costs.
 #[must_use]
 pub const fn points(offense: Offense) -> u32 {
     match offense {
-        // One point, fading one a minute: a revoked device, or a phone
-        // whose computer is off, retrying about once a minute never adds
-        // up, so it cannot get its household's shared address banned; a
-        // burst does.
-        Offense::ConnectionCap | Offense::Limited | Offense::RefusedDial => 1,
+        // One point, fading one a minute: only a burst adds up. The rate
+        // limits catch a phone retrying too fast, so a refused dial costs
+        // nothing of its own: a phone whose computer is off, retrying with
+        // backoff, never gets its household's shared address banned.
+        Offense::ConnectionCap | Offense::Limited => 1,
         Offense::Probe => 2,
         Offense::BadProof | Offense::Malformed => 3,
-        Offense::Bandwidth | Offense::Lockout => BAN_POINTS,
+        Offense::Bandwidth => BAN_POINTS,
     }
+}
+
+/// Whether `offense` shows a caller misbehaving, rather than a busy address
+/// running into a limit. A ban any of these led to ends what the address
+/// has open; one earned by limits alone only refuses new work.
+#[must_use]
+pub const fn severe(offense: Offense) -> bool {
+    !matches!(offense, Offense::ConnectionCap | Offense::Limited)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -73,6 +93,10 @@ struct Record {
     banned_until: Option<Instant>,
     /// Bans lately, which sets the next one's length.
     bans: u32,
+    /// Whether the current ban ends the address's open work ([`severe`]).
+    evicts: bool,
+    /// Whether the points held now include a [`severe`] offense's.
+    hostile: bool,
     last_ban_end: Option<Instant>,
     points: u32,
     reason: Offense,
@@ -86,6 +110,8 @@ impl Record {
         Self {
             banned_until: None,
             bans: 0,
+            evicts: false,
+            hostile: false,
             last_ban_end: None,
             points: 0,
             reason: Offense::Limited,
@@ -103,6 +129,7 @@ impl Record {
                 .points
                 .saturating_sub(u32::try_from(minutes).unwrap_or(u32::MAX));
             self.updated += FADE * u32::try_from(minutes).unwrap_or(u32::MAX);
+            self.hostile &= self.points > 0;
         }
         if now.saturating_duration_since(self.window_start) >= HOUR {
             self.window_start = now;
@@ -121,6 +148,15 @@ impl Record {
         self.banned_until.is_some_and(|until| until > now)
     }
 
+    /// Bytes moved in the current hour's window.
+    fn spent(&self, now: Instant) -> u64 {
+        if now.saturating_duration_since(self.window_start) >= HOUR {
+            0
+        } else {
+            self.window_bytes
+        }
+    }
+
     /// Bans for `reason`; how long.
     fn ban(&mut self, reason: Offense, now: Instant) -> Duration {
         let index = usize::try_from(self.bans)
@@ -130,6 +166,8 @@ impl Record {
         self.banned_until = Some(now + length);
         self.last_ban_end = Some(now + length);
         self.bans = self.bans.saturating_add(1);
+        self.evicts = self.hostile || severe(reason);
+        self.hostile = false;
         self.points = 0;
         self.reason = reason;
         length
@@ -253,6 +291,39 @@ impl Guard {
             .is_some_and(|record| record.banned(now))
     }
 
+    /// Whether a ban on `address` at `now` also ends what it has open: a
+    /// manual ban, or one a [`severe`] offense led to.
+    pub fn evicts(&self, address: IpAddr, now: Instant) -> bool {
+        if self.manually_banned(address) {
+            return true;
+        }
+        let evicts = |record: &Record| record.banned(now) && record.evicts;
+        if self.records().get(&source_key(address)).is_some_and(evicts) {
+            return true;
+        }
+        self.wide().get(&wide_key(address)).is_some_and(evicts)
+    }
+
+    /// Whether `address` moved more than its hourly budget in the current
+    /// window, so its sessions are slowed to [`SLOW`].
+    pub fn over_budget(&self, address: IpAddr, now: Instant) -> bool {
+        let budget = self.max_transfer_per_hour;
+        if !self.auto || budget == 0 || exempt(address) {
+            return false;
+        }
+        if self
+            .records()
+            .get(&source_key(address))
+            .is_some_and(|record| record.spent(now) > budget)
+        {
+            return true;
+        }
+        let wide_budget = budget.saturating_mul(WIDE_BUDGET);
+        self.wide()
+            .get(&wide_key(address))
+            .is_some_and(|record| record.spent(now) > wide_budget)
+    }
+
     fn wide(&self) -> MutexGuard<'_, HashMap<IpAddr, Record>> {
         match self.wide.lock() {
             Ok(wide) => wide,
@@ -347,12 +418,14 @@ impl Guard {
     pub fn offend(&self, address: IpAddr, offense: Offense, now: Instant) -> Option<Duration> {
         self.record(address, now, |record, _| {
             record.points = record.points.saturating_add(points(offense));
+            record.hostile |= severe(offense);
             (record.points >= BAN_POINTS).then(|| record.ban(offense, now))
         })
     }
 
-    /// Counts `bytes` carried for `address`; a ban for going over the
-    /// hourly budget, newly.
+    /// Counts `bytes` `address` sent; a ban for moving [`OVERRUN`] hourly
+    /// budgets, newly. Going over one budget only slows it
+    /// ([`Guard::over_budget`]).
     pub fn charge(&self, address: IpAddr, bytes: u64, now: Instant) -> Option<Duration> {
         if self.max_transfer_per_hour == 0 || bytes == 0 {
             return None;
@@ -360,7 +433,7 @@ impl Guard {
         let budget = self.max_transfer_per_hour;
         self.record(address, now, |record, scale| {
             record.window_bytes = record.window_bytes.saturating_add(bytes);
-            let budget = budget.saturating_mul(scale);
+            let budget = budget.saturating_mul(scale).saturating_mul(OVERRUN);
             (record.window_bytes > budget).then(|| record.ban(Offense::Bandwidth, now))
         })
     }

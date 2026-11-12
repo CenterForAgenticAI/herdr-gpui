@@ -122,6 +122,13 @@ Statuses: `0` ok, `1` offline, `2` busy, `3` timeout, `4` limited,
 | `GET /healthz` | For uptime checks. |
 | `/dashboard` | The read-only dashboard, when an access token is set. |
 
+`/v1/listen`, `/v1/dial`, and `/v1/accept` refuse with 403, before anything
+is counted or held, a request a browser sends for a page on another site:
+`Sec-Fetch-Site` other than `same-origin` or `none`, or an `Origin` that is
+not the relay's own host. Otherwise any web page could open them from its
+visitors' browsers, earn their addresses bans, and hold listener slots.
+Clients send neither header, or their own relay origin.
+
 WebSocket proofs cover the relay's own name, `RELAY_PUBLIC_HOST` (set from
 the domain by `deploy/relay`), which the relay checks against its
 configuration, never against the request's `Host`: a client sets that
@@ -174,20 +181,36 @@ ban it:
 
 | Offense | Points |
 | --- | --- |
-| Hitting a rate limit or the per-address connection cap; a refused dial, whether no one listens or the key is not named (the two cost the same, so a ban never reveals an occupied route) | 1 |
+| Hitting a rate limit or the per-address connection cap | 1 |
 | Probing: a route or session id that does not parse, a stream held open with no request | 2 |
 | A forged proof or wrong listen token; malformed messages or frames | 3 |
-| Three wrong dashboard tokens; moving more than `max-transfer-per-hour` (20 GiB, both sides of every session) | 10, a ban at once |
+| Sending more than four times `max-transfer-per-hour` (20 GiB) in an hour | 10, a ban at once |
+
+A refused dial costs nothing, whether no one listens or the key is not
+named: the two must cost the same, so a ban never reveals an occupied
+route, and a phone retrying while its computer is off must never get its
+household banned. The dial rate limit holds a flood of either back. Wrong
+dashboard tokens block that address from the dashboard for 15 minutes,
+never from the relay, so one person's typos cannot cost everyone behind a
+shared address their computers.
+
+Each side of a session is charged only for what it sends. An address over
+`max-transfer-per-hour` has its sessions slowed to 256 KiB/s each way until
+the hour's window ends (`sheprd_relay_throttled_seconds_total{limit="budget"}`);
+only one sending four budgets anyway is banned. One session at the 4 MiB/s
+limit both ways for an hour sends 14 GiB a side and is never slowed.
 
 - Bans last 10 minutes, then an hour, then a day for repeat offenders, and
   a clean day after the last one starts over.
-- A banned address is refused before any work: before the QUIC handshake
-  (even before a retry), and before every HTTP route but `/healthz`. Its
-  open sessions end (QUIC code 8, WebSocket 4429) and its listeners close.
-- One point for a refused dial, fading a point a minute, means a revoked
-  device, or a phone whose computer is off, retrying about once a minute
-  never adds up, so it cannot get its household's shared address, and that
-  household's computer, banned. A burst does.
+- A banned address is refused before any new work: before the QUIC
+  handshake (even before a retry), before every new stream, and before
+  every HTTP route but `/healthz`.
+- A ban that any probe, forged proof, malformed message, or overrun budget
+  led to also ends the address's open sessions (QUIC code 8, WebSocket
+  4429), its QUIC connections, and its listeners. A ban earned by hitting
+  limits alone leaves them open, and its listeners keep taking dials
+  (WebSocket accepts included): a household or a carrier's NAT can hit
+  limits together without anyone misbehaving.
 - Bans are checked under the same lock that opens sessions and registers
   listeners, so a ban cannot slip between a dial and its session. A ban
   closes the address's QUIC connections, and every new stream checks.
@@ -239,11 +262,13 @@ Server-Sent Events. It changes nothing.
 
 - Logins posted from another site (by `Sec-Fetch-Site`, or `Origin`
   against the relay's host) are refused before anything is counted, so a
-  hostile page cannot lock out, and ban, its visitors.
+  hostile page cannot lock its visitors out.
 - One access token, compared in constant time. Three wrong tries from an
-  address (an IPv4 address or IPv6 /64) block it for 15 minutes; while
-  blocked, its tries are refused unchecked. Logins across all addresses
-  are also limited to 60 a minute, against guessing from many addresses.
+  address (an IPv4 address or IPv6 /64) block it from the dashboard for
+  15 minutes, never from the relay; while blocked, its tries are refused
+  unchecked, before the limit below, so they cannot use it up. Logins
+  across all addresses are also limited to 60 a minute, against guessing
+  from many addresses.
 - A live stream ends when its login expires; 16 may be open at once.
 - The session cookie is HMAC-signed with a key drawn at start, lasts
   12 hours, and is `HttpOnly; Secure; SameSite=Strict; Path=/dashboard`.
@@ -299,9 +324,31 @@ relays = "default"   # Sheprd's relays (the default). Or one of:
   Adding or removing a relay is a change to `website/site/relays.json` and
   a site deploy; clients pick it up within the hour. The URL is compiled
   in, the parser strict (64 KiB, 64 relays, `https` only, duplicates
-  dropped, unknown fields ignored), and the file is not signed: a relay
-  only ever sees end-to-end encrypted bytes, so a tampered list can send
-  clients to relays that drop traffic, never to ones that read it.
+  dropped, unknown fields ignored).
+- The list is signed, so changing sheprd.org, its host, or its DNS cannot
+  redirect clients (planned, phase 3). Whoever controls the list would
+  otherwise learn every computer's address, route, dial keys, and online
+  times, could cut everyone off, and could aim every daemon at a host of
+  their choosing. Clients accept the list when either of two compiled-in
+  signers signed it, and Settings and `sheprd remote status` say which:
+  - **Fabien Penso's OpenPGP key**, `gpg@pen.so`, fingerprint
+    `3103 20A8 CC1C 5BA8 6AD0 9040 C045 1BAD F764 9BBF`, published on
+    pen.so so anyone can check it. The signing subkey lives on a YubiKey;
+    `relays.json.asc` is a detached armored signature made by hand
+    (`gpg --detach-sign --armor`). "Validated by Fabien Penso (OpenPGP
+    …9BBF)".
+  - **The site workflow's Ed25519 key**, a secret of a protected GitHub
+    environment, as the updater's manifest key is; the deploy writes
+    `relays.json.sig` after an approved run. "Validated by GitHub Actions
+    (sheprd-labs/sheprd)".
+  - The signed list carries a `serial` and an `expires` time: a client
+    refuses a list older than the one it keeps, or expired, so an old
+    signed list cannot be replayed. A list neither signer signed is
+    ignored and the last good one kept.
+  - Endpoints that name loopback, private, link-local, CGNAT, or `.local`
+    hosts, or an IP-in-a-name service pointing at one, are refused.
+  - The OpenPGP signing subkey expires on 2030-12-25: extend it, and ship
+    the refreshed public key, before then.
 - The daemon fetches the list at start and every hour, and keeps the last
   good one in its state directory, so a sheprd.org outage changes nothing.
   It listens on every relay listed and stops on any removed. Settings and

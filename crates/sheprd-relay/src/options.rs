@@ -37,8 +37,10 @@ Every option is optional, and each can also be set as a RELAY_* variable
                                  proofs are checked against it, never against a
                                  request's Host header; without it the
                                  WebSocket fallback is off. QUIC needs nothing.
-  --behind-proxy                 Take the caller's address from X-Forwarded-For.
-                                 Only when nothing reaches the relay but that proxy.
+  --behind-proxy                 Take the caller's address from the last entry
+                                 of the last X-Forwarded-For line. Only when
+                                 nothing reaches the relay but that proxy, and
+                                 it appends to the header or replaces it.
   --client-ip-header NAME        Take it from this header instead, which the
                                  platform in front sets to the caller's address:
                                  do-connecting-ip on DigitalOcean App Platform,
@@ -69,12 +71,12 @@ Every option is optional, and each can also be set as a RELAY_* variable
   --metrics-token-file FILE      Require `Authorization: Bearer TOKEN` on
                                  /metrics; or RELAY_METRICS_TOKEN.
   --auto-ban on|off              Ban addresses that misbehave: limits hit,
-                                 forged proofs, malformed messages, dialing
-                                 without an allowed key (default on). Private
-                                 and loopback addresses are never auto-banned.
-  --max-transfer-per-hour BYTES  Ban an address moving more than this in an
-                                 hour, on either side of its sessions; 0 is
-                                 no budget (default 20GiB)
+                                 forged proofs, malformed messages, probing
+                                 (default on). Private and loopback addresses
+                                 are never auto-banned.
+  --max-transfer-per-hour BYTES  Slow an address sending more than this in an
+                                 hour through its sessions, and ban one sending
+                                 four times it; 0 is no budget (default 20GiB)
   --ban RANGES                   Ban these by hand, comma-separated:
                                  203.0.113.7,198.51.100.0/24,2001:db8::/32
   --ban-file FILE                Ban the ranges in this file, one per line, #

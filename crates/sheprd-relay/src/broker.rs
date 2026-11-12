@@ -106,16 +106,16 @@ pub async fn dial(
     }
     let waiting = match hub.dial(route, *key, address) {
         Ok(Ok(waiting)) => waiting,
-        // An empty route and a key the listener did not name cost the
-        // same, as they answer the same: a caller's ban must not reveal
-        // whether a computer is online.
+        // Neither an empty route nor a key the listener did not name costs
+        // a point: they must cost the same, as they answer the same, so a
+        // caller's ban cannot reveal whether a computer is online; and a
+        // phone retrying while its computer is off must not get its
+        // household banned. The dial rate limit catches a flood of either.
         Ok(Err(DialRefusal::Offline)) => {
-            let offense = Some(Offense::RefusedDial);
-            return Err(refuse(Status::Offline, Dial::Offline, offense));
+            return Err(refuse(Status::Offline, Dial::Offline, None));
         }
         Ok(Err(DialRefusal::Unauthorized)) => {
-            let offense = Some(Offense::RefusedDial);
-            return Err(refuse(Status::Offline, Dial::Unauthorized, offense));
+            return Err(refuse(Status::Offline, Dial::Unauthorized, None));
         }
         Ok(Err(DialRefusal::Busy)) | Err(_) => {
             return Err(refuse(Status::Busy, Dial::Busy, None));

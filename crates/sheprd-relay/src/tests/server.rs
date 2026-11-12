@@ -5,6 +5,7 @@ mod auth;
 mod bans;
 mod binding;
 mod bucket;
+mod cross_site;
 mod dashboard;
 mod guard;
 mod history;
@@ -17,6 +18,7 @@ mod races;
 mod relay;
 mod review;
 mod review2;
+mod shared_address;
 
 pub(crate) use super::{hello, public, sign, signing_key};
 use crate::{

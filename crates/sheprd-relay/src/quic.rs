@@ -114,13 +114,14 @@ pub async fn run(endpoint: Endpoint, hub: Arc<Hub>) {
                 connection.close(VarInt::from_u32(wire::code::BANNED), b"");
                 return;
             }
-            // A ban ends the whole connection, not only its sessions: a
-            // banned address cannot keep opening streams on one it holds.
+            // A ban that evicts ends the whole connection, not only its
+            // sessions. One earned by limits alone leaves it open, with its
+            // listener and sessions; every new stream is still refused.
             let banned = async {
                 loop {
                     match notices.recv().await {
                         Ok(()) | Err(RecvError::Lagged(_)) => {
-                            if hub.is_banned(connection.remote_address().ip()) {
+                            if hub.is_evicted(connection.remote_address().ip()) {
                                 return;
                             }
                         }

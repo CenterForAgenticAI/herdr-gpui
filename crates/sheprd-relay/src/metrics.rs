@@ -88,8 +88,10 @@ labels! {
 }
 
 labels! {
-    /// Which throttle held a frame back.
+    /// Which throttle held a frame back; `budget` is a side over its
+    /// hourly transfer budget (`guard::SLOW`).
     Throttled {
+        Budget => "budget",
         Session => "session",
         Total => "total",
     }
@@ -112,10 +114,8 @@ labels! {
         Bandwidth => "bandwidth",
         ConnectionCap => "connection_cap",
         Limited => "limited",
-        Lockout => "lockout",
         Malformed => "malformed",
         Probe => "probe",
-        RefusedDial => "refused_dial",
     }
 }
 

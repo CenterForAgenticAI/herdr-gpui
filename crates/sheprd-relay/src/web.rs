@@ -28,7 +28,7 @@ use axum::{
         ConnectInfo, FromRequestParts, Path, Request, State,
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::get,
@@ -54,8 +54,10 @@ const PING_INTERVAL: Duration = Duration::from_secs(25);
 pub enum Source {
     /// The connection's peer.
     Peer,
-    /// The last `X-Forwarded-For` entry, which the proxy in front appended.
-    /// Only for a relay no one can reach except through that proxy.
+    /// The last `X-Forwarded-For` entry of the header's last line, which the
+    /// proxy in front appended or wrote. Only for a relay no one can reach
+    /// except through that proxy, and only behind one that appends to the
+    /// header or replaces it: a value the caller sent comes before it.
     Proxy,
     /// A header the platform in front sets to the caller's address, such as
     /// `do-connecting-ip`. The same condition as [`Source::Proxy`].
@@ -82,8 +84,13 @@ impl Shared {
     pub fn address(&self, peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
         let given = match &self.source {
             Source::Peer => None,
+            // A proxy may add its own line rather than append to the
+            // caller's, so the caller's line comes first and only the last
+            // line is the proxy's.
             Source::Proxy => headers
-                .get("x-forwarded-for")
+                .get_all("x-forwarded-for")
+                .iter()
+                .next_back()
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.rsplit(',').next()),
             Source::Header(name) => headers.get(name).and_then(|value| value.to_str().ok()),
@@ -96,13 +103,52 @@ impl Shared {
 
 /// The relay's own routes, without the dashboard.
 pub fn router(shared: Shared) -> Router {
-    Router::new()
-        .route("/healthz", get(|| async { "ok" }))
-        .route("/v1/info", get(info))
+    // The sockets refuse a browser on another site before anything is
+    // counted: otherwise any web page could open them from its visitors'
+    // browsers, earn their addresses bans, and hold listener slots.
+    let sockets = Router::new()
         .route("/v1/listen", get(listen))
         .route("/v1/dial/{route}", get(dial))
         .route("/v1/accept/{session}", get(accept))
+        .route_layer(axum::middleware::from_fn(refuse_cross_site));
+    Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/v1/info", get(info))
+        .merge(sockets)
         .with_state(shared)
+}
+
+/// Refuses a request a browser sends for a page on another site.
+async fn refuse_cross_site(request: Request, next: Next) -> Response {
+    if !same_origin(request.headers()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
+/// Whether a request comes from the relay's own pages, or from no page at
+/// all. Browsers send `Sec-Fetch-Site`, or at least `Origin`, on every
+/// cross-site form post and WebSocket; a client that sends neither, such
+/// as `curl` or Sheprd, is not a browser being used against its owner.
+#[must_use]
+pub fn same_origin(headers: &HeaderMap) -> bool {
+    let text = |name| {
+        headers
+            .get(name)
+            .and_then(|value: &HeaderValue| value.to_str().ok())
+    };
+    if let Some(site) = text("sec-fetch-site") {
+        return matches!(site, "same-origin" | "none");
+    }
+    let Some(origin) = text("origin") else {
+        return true;
+    };
+    let host = text("host").unwrap_or_default();
+    let origin_host = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"));
+    origin_host
+        .is_some_and(|origin_host| !host.is_empty() && origin_host.eq_ignore_ascii_case(host))
 }
 
 async fn info(State(shared): State<Shared>) -> Json<Info> {
@@ -116,7 +162,10 @@ async fn info(State(shared): State<Shared>) -> Json<Info> {
 }
 
 /// Refuses a banned caller before any route but `/healthz`, so a ban costs
-/// it every endpoint, the dashboard included.
+/// it every endpoint, the dashboard included. A listener accepting a dial
+/// is refused only by a ban that evicts it (`guard::severe`): one earned
+/// by limits alone leaves its listener up, and the accept, which names a
+/// session id only that listener was told, is part of that.
 pub async fn refuse_banned(State(shared): State<Shared>, request: Request, next: Next) -> Response {
     // Every server this router runs under records the peer; a router used
     // without one has no caller to judge.
@@ -126,9 +175,14 @@ pub async fn refuse_banned(State(shared): State<Shared>, request: Request, next:
         .ok()
         .map(|info| info.0);
     let request = Request::from_parts(parts, body);
+    let accepting = request.uri().path().starts_with("/v1/accept/");
     let banned = peer.is_some_and(|peer| {
         let address = shared.address(peer, request.headers());
-        shared.hub.is_banned(address)
+        if accepting {
+            shared.hub.is_evicted(address)
+        } else {
+            shared.hub.is_banned(address)
+        }
     });
     if request.uri().path() != "/healthz" && banned {
         shared.hub.metrics.refuse(Refused::Banned);

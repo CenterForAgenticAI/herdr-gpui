@@ -11,12 +11,13 @@ pub use peer::Peer;
 
 use crate::{
     bucket::Throttle,
+    guard::SLOW,
     hub::Session,
     metrics::{Direction, End, Offense, Throttled},
 };
 use peer::{Next, Sink, Source};
 use std::{
-    sync::atomic::{AtomicU64, Ordering::Relaxed},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
     time::Duration,
 };
 use tokio::time::{Instant, sleep_until, timeout};
@@ -62,27 +63,53 @@ pub struct Bounds {
     pub chunk: usize,
 }
 
+/// What each side of a session has been charged for so far, and whether
+/// either side is over its hourly transfer budget. Kept outside the
+/// watchdog, which is dropped when a pump finishes, so the rest is settled
+/// after.
+#[derive(Debug, Default)]
+pub(crate) struct Ledger {
+    from_dialer: AtomicU64,
+    from_listener: AtomicU64,
+    /// Either side is over budget, so both directions run at [`SLOW`].
+    slow: AtomicBool,
+}
+
+/// The throttles one direction runs under.
+#[derive(Clone, Copy, Debug)]
+struct Lane<'a> {
+    /// The session's bandwidth, if limited.
+    session: Option<&'a Throttle>,
+    /// [`SLOW`], while the ledger says a side is over budget.
+    slow: Option<&'a Throttle>,
+    ledger: &'a Ledger,
+}
+
 /// Runs a session until a peer leaves, it idles, it expires, the listener
 /// revokes the key it was dialed with, or either side is banned. A side
-/// that breaks the protocol is counted toward a ban, and every second both
-/// sides' bytes are charged to their hourly transfer budgets.
+/// that breaks the protocol is counted toward a ban, and every second each
+/// side's bytes are charged to its hourly transfer budget.
 pub async fn splice(dialer: Peer, listener: Peer, session: Session) {
     let bounds = session.bounds();
     let (from_dialer, mut to_dialer) = dialer.split();
     let (from_listener, mut to_listener) = listener.split();
     let last = AtomicU64::new(0);
-    // Bytes already charged to both sides' budgets. Outside the watchdog,
-    // which is dropped when a pump finishes, so the rest is settled below.
-    let charged = AtomicU64::new(0);
+    let ledger = Ledger::default();
     let started = Instant::now();
     let up = Throttle::new(bounds.bandwidth);
     let down = Throttle::new(bounds.bandwidth);
+    let slow_up = Throttle::new(SLOW);
+    let slow_down = Throttle::new(SLOW);
     let end = {
         let pump_up = pump(
             from_dialer,
             &mut to_listener,
             Direction::FromDialer,
-            up.as_ref(),
+            Lane {
+                session: up.as_ref(),
+                slow: slow_up.as_ref(),
+                ledger: &ledger,
+            },
             &session,
             &last,
             started,
@@ -92,7 +119,11 @@ pub async fn splice(dialer: Peer, listener: Peer, session: Session) {
             from_listener,
             &mut to_dialer,
             Direction::FromListener,
-            down.as_ref(),
+            Lane {
+                session: down.as_ref(),
+                slow: slow_down.as_ref(),
+                ledger: &ledger,
+            },
             &session,
             &last,
             started,
@@ -101,12 +132,12 @@ pub async fn splice(dialer: Peer, listener: Peer, session: Session) {
         tokio::select! {
             end = pump_up => end,
             end = pump_down => end,
-            end = watchdog(&session, &charged, &last, started, bounds.idle, bounds.longest) => end,
+            end = watchdog(&session, &ledger, &last, started, bounds.idle, bounds.longest) => end,
             () = session.revoked() => End::Revoked,
             () = session.banned() => End::Banned,
         }
     };
-    settle(&session, &charged);
+    settle(&session, &ledger);
     let _ = tokio::join!(
         timeout(CLOSE_TIMEOUT, to_dialer.finish(end)),
         timeout(CLOSE_TIMEOUT, to_listener.finish(end)),
@@ -120,7 +151,7 @@ async fn pump(
     mut from: Source,
     to: &mut Sink,
     direction: Direction,
-    throttle: Option<&Throttle>,
+    lane: Lane<'_>,
     session: &Session,
     last: &AtomicU64,
     started: Instant,
@@ -146,10 +177,16 @@ async fn pump(
             Next::End => return End::Closed,
         };
         let length = bytes.len();
-        if let Some(throttle) = throttle {
+        if let Some(throttle) = lane.session {
             let wait = throttle.take(length).await;
             if !wait.is_zero() {
                 metrics.throttled(Throttled::Session, wait);
+            }
+        }
+        if let (true, Some(slow)) = (lane.ledger.slow.load(Relaxed), lane.slow) {
+            let wait = slow.take(length).await;
+            if !wait.is_zero() {
+                metrics.throttled(Throttled::Budget, wait);
             }
         }
         if let Some(total) = session.hub().total_throttle(direction) {
@@ -168,23 +205,40 @@ async fn pump(
     }
 }
 
-/// Charges what crossed since the last charge to both sides' budgets.
-pub(crate) fn settle(session: &Session, charged: &AtomicU64) {
-    let carried =
-        session.traffic.from_dialer.load(Relaxed) + session.traffic.from_listener.load(Relaxed);
-    let before = charged.swap(carried, Relaxed);
-    if carried > before {
-        let hub = session.hub_arc();
-        hub.charge(session.dialer(), carried - before);
-        hub.charge(session.listener(), carried - before);
+/// Charges each side for what it sent since the last charge, then notes
+/// whether either side is now over its budget. Only the sender is charged:
+/// a computer is not banned for what a busy phone sends it, nor the phone
+/// for what it downloads.
+pub(crate) fn settle(session: &Session, ledger: &Ledger) {
+    let hub = session.hub_arc();
+    let sides = [
+        (
+            session.dialer(),
+            &session.traffic.from_dialer,
+            &ledger.from_dialer,
+        ),
+        (
+            session.listener(),
+            &session.traffic.from_listener,
+            &ledger.from_listener,
+        ),
+    ];
+    for (address, sent, charged) in sides {
+        let sent = sent.load(Relaxed);
+        let before = charged.swap(sent, Relaxed);
+        if sent > before {
+            hub.charge(address, sent - before);
+        }
     }
+    let slow = hub.over_budget(session.dialer()) || hub.over_budget(session.listener());
+    ledger.slow.store(slow, Relaxed);
 }
 
 /// Resolves when the session has idled or run too long. Each turn also
-/// charges what crossed since the last one to both sides' budgets.
+/// charges what crossed since the last one to each side's budget.
 async fn watchdog(
     session: &Session,
-    charged: &AtomicU64,
+    ledger: &Ledger,
     last: &AtomicU64,
     started: Instant,
     idle: Duration,
@@ -192,7 +246,7 @@ async fn watchdog(
 ) -> End {
     let deadline = started + longest;
     loop {
-        settle(session, charged);
+        settle(session, ledger);
         let quiet_since = started + Duration::from_millis(last.load(Relaxed));
         let idle_at = quiet_since + idle;
         if Instant::now() >= deadline {

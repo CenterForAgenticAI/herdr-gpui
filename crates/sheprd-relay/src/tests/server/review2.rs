@@ -4,16 +4,23 @@
 
 use super::*;
 use crate::{
-    dashboard::same_origin,
     guard::parse_list,
     hub::{Access, Session},
     metrics::{Gauge, Offense},
+    web::same_origin,
 };
 use axum::http::HeaderMap;
 use std::net::IpAddr;
 
 fn ip(text: &str) -> IpAddr {
     text.parse().unwrap()
+}
+
+/// Bans `address` on `hub` for malformed messages, a ban that evicts.
+fn ban(hub: &Arc<Hub>, address: IpAddr) {
+    while !hub.is_banned(address) {
+        hub.offend(address, Offense::Malformed);
+    }
 }
 
 /// A hub whose transfer budget is `budget` bytes an hour.
@@ -46,7 +53,7 @@ async fn a_ban_between_a_dial_and_its_session_is_honoured() {
     registration.set_dial_keys(&[public(&phone())]);
     let toxic = ip("203.0.113.80");
     let waiting = hub.dial(route, public(&phone()), toxic).unwrap().unwrap();
-    hub.offend(toxic, Offense::Lockout);
+    ban(&hub, toxic);
     assert!(hub.open(waiting.slot).is_none());
     assert_eq!(hub.metrics.read(Gauge::Sessions), 0);
 }
@@ -55,7 +62,7 @@ async fn a_ban_between_a_dial_and_its_session_is_honoured() {
 async fn a_banned_address_cannot_listen() {
     let hub = hub(0);
     let toxic = ip("203.0.113.81");
-    hub.offend(toxic, Offense::Lockout);
+    ban(&hub, toxic);
     let route = RouteId::of(signing_key(121).verifying_key());
     assert!(hub.register(route, toxic).is_err());
 }
@@ -76,7 +83,7 @@ async fn an_exact_ipv6_ban_ends_that_hosts_sessions_and_listener() {
 }
 
 #[tokio::test]
-async fn dials_to_an_empty_route_cost_the_same_as_refused_ones() {
+async fn dials_to_an_empty_route_cost_the_same_as_refused_ones_nothing() {
     let empty = hub(0);
     let occupied = hub(0);
     let route = RouteId::of(signing_key(123).verifying_key());
@@ -87,16 +94,18 @@ async fn dials_to_an_empty_route_cost_the_same_as_refused_ones() {
     let signature = sign(&stranger, &signed);
     let caller = ip("203.0.113.82");
     for hub in [&empty, &occupied] {
-        for _ in 0..crate::guard::BAN_POINTS {
+        for _ in 0..2 * crate::guard::BAN_POINTS {
             let refused =
                 crate::broker::dial(hub, caller, route, &public(&stranger), &signature, &signed)
                     .await;
             assert_eq!(refused.err(), Some(Status::Offline));
         }
     }
-    // Both banned alike: the ban says nothing about whether anyone listens.
-    assert!(empty.is_banned(caller));
-    assert!(occupied.is_banned(caller));
+    // Neither bans, so a ban says nothing about whether anyone listens,
+    // and a phone retrying while its computer is off never gets its
+    // household banned. The dial rate limit holds a flood back instead.
+    assert!(!empty.is_banned(caller));
+    assert!(!occupied.is_banned(caller));
 }
 
 #[test]
@@ -143,8 +152,10 @@ async fn a_short_transfer_is_charged_when_it_ends() {
         .traffic
         .from_dialer
         .fetch_add(2_000, std::sync::atomic::Ordering::Relaxed);
-    crate::splice::settle(&session, &std::sync::atomic::AtomicU64::new(0));
-    assert!(hub.is_banned(dialer));
+    crate::splice::settle(&session, &crate::splice::Ledger::default());
+    assert!(hub.over_budget(dialer));
+    // Charged to the side that sent it.
+    assert!(!hub.over_budget(ip("198.51.100.32")));
 }
 
 #[tokio::test]
@@ -156,13 +167,13 @@ async fn a_wide_ban_ends_the_whole_blocks_sessions_and_listeners() {
         let address = IpAddr::from(std::net::Ipv6Addr::from(
             (0x2001_0db8_u128 << 96) | (u128::from(index) << 64),
         ));
-        hub.guard.offend(address, Offense::Lockout, now);
+        while hub.guard.offend(address, Offense::Malformed, now).is_none() {}
     }
     // A computer in 203.0.113.0/24, and a session to it.
     let neighbour = session(&hub, ip("203.0.113.10"), ip("198.51.100.40"), 126);
     assert_eq!(hub.metrics.read(Gauge::Listeners), 1);
     // Another address in that /24 earns a ban, which covers the block.
-    hub.offend(ip("203.0.113.99"), Offense::Lockout);
+    ban(&hub, ip("203.0.113.99"));
     assert!(hub.is_banned(ip("203.0.113.10")));
     tokio::time::timeout(Duration::from_secs(1), neighbour.banned())
         .await

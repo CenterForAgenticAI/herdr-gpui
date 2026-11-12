@@ -108,19 +108,19 @@ async fn three_wrong_tokens_block_the_address_even_for_the_right_one() {
     }
     let third = login_from(&router, attacker, "a wrong token of enough length").await;
     assert_eq!(location(&third), "/dashboard/login?blocked");
-    // A public address is now banned from the whole relay, so even the
-    // right token meets a 403 before it is looked at.
+    // The right token is now refused, unchecked, for 15 minutes. The
+    // address is blocked from the dashboard only, not banned from the
+    // relay (`bans`).
     let right = login_from(&router, attacker, TOKEN).await;
-    assert_eq!(right.status(), StatusCode::FORBIDDEN);
+    assert_eq!(location(&right), "/dashboard/login?blocked");
     assert!(right.headers().get(header::SET_COOKIE).is_none());
     // Its IPv6 neighbours in the same /64 are the same guesser.
     for from in ["2001:db8::1", "2001:db8::2", "2001:db8::3"] {
         login_from(&router, from, "wrong").await;
     }
     let neighbour = login_from(&router, "2001:db8::ffff", TOKEN).await;
-    assert_eq!(neighbour.status(), StatusCode::FORBIDDEN);
-    // A private address is never banned, but the dashboard still locks
-    // it out: the right token is refused, unchecked, for 15 minutes.
+    assert_eq!(location(&neighbour), "/dashboard/login?blocked");
+    // So is a private address.
     let inside = "10.1.2.3";
     for _ in 0..3 {
         login_from(&router, inside, "wrong").await;
@@ -297,6 +297,24 @@ async fn a_cross_site_login_is_refused_and_not_counted() {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
     // None of those counted: the visitor still signs in.
+    assert_eq!(
+        location(&login_from(&router, HOME, TOKEN).await),
+        "/dashboard"
+    );
+}
+
+#[tokio::test]
+async fn a_blocked_guesser_cannot_use_up_the_operators_logins() {
+    let router = router();
+    let attacker = "203.0.113.10";
+    for _ in 0..3 {
+        login_from(&router, attacker, "a wrong token of enough length").await;
+    }
+    // Far more tries than the limit on all addresses allows at once.
+    for _ in 0..100 {
+        let response = login_from(&router, attacker, "a wrong token of enough length").await;
+        assert_eq!(location(&response), "/dashboard/login?blocked");
+    }
     assert_eq!(
         location(&login_from(&router, HOME, TOKEN).await),
         "/dashboard"

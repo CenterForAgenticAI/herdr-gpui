@@ -1,6 +1,7 @@
 //! Bans end to end: a banned address meets 403 on HTTP and a refusal on
 //! QUIC, its sessions and listeners end at once, the ban file applies
-//! without a restart, and the dashboard and metrics show it.
+//! without a restart, the dashboard and metrics show it, and a dashboard
+//! lockout stays the dashboard's.
 
 use super::{quic::*, *};
 use crate::{
@@ -120,7 +121,7 @@ async fn the_ban_file_applies_without_a_restart() {
 }
 
 #[tokio::test]
-async fn three_wrong_dashboard_tokens_ban_a_public_address_from_the_relay() {
+async fn three_wrong_dashboard_tokens_block_the_dashboard_not_the_relay() {
     let options = Options {
         behind_proxy: true,
         ..options(Limits::default())
@@ -147,23 +148,21 @@ async fn three_wrong_dashboard_tokens_ban_a_public_address_from_the_relay() {
     for _ in 0..3 {
         send("/dashboard/login", "203.0.113.70", Some("token=wrong")).await;
     }
-    assert_eq!(
-        send("/v1/info", "203.0.113.70", None).await,
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(send("/v1/info", "203.0.113.71", None).await, StatusCode::OK);
-    let text = hub.metrics.render();
-    assert!(
-        text.contains("sheprd_relay_bans_total{offense=\"lockout\"} 1"),
-        "{text}"
-    );
-    assert!(
-        text.contains("sheprd_relay_strikes_total{offense=\"lockout\"} 1"),
-        "{text}"
-    );
+    // Everyone behind that address, a carrier's NAT say, keeps the relay:
+    // one person's typos must not cost them their computers.
+    assert_eq!(send("/v1/info", "203.0.113.70", None).await, StatusCode::OK);
+    assert!(!hub.is_banned("203.0.113.70".parse().unwrap()));
     let stats = crate::dashboard::snapshot(&hub, Vec::new());
-    assert_eq!(stats.bans.len(), 1);
-    assert_eq!(stats.bans[0].address, "203.0.113.70");
+    assert!(stats.bans.is_empty());
+    // The dashboard's own lockout still holds.
+    let request = Request::post("/dashboard/login")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("x-forwarded-for", "203.0.113.70")
+        .body(Body::from(format!("token={TOKEN}")))
+        .unwrap();
+    let response = router.clone().oneshot(request).await.unwrap();
+    let location = response.headers()["location"].to_str().unwrap();
+    assert_eq!(location, "/dashboard/login?blocked");
 }
 
 #[tokio::test]

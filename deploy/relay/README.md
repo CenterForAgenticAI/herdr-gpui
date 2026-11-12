@@ -75,7 +75,7 @@ told what the outside looks like. Each deploy sets these for you:
 | `PORT` | The HTTP port to listen on, when the platform picks it; `RELAY_LISTEN` wins | not set (8080) | set by the platform |
 | `RELAY_QUIC_PORT` | The UDP port clients reach QUIC on, when a mapping changes it | `443` (published to the container's 8443) | QUIC is off |
 | `RELAY_PUBLIC_HOST` | The name clients use, which WebSocket proofs must cover | `RELAY_DOMAIN` | `${APP_DOMAIN}` |
-| `RELAY_BEHIND_PROXY` | Take callers' addresses from `X-Forwarded-For` | `1` (Caddy) | not set |
+| `RELAY_BEHIND_PROXY` | Take callers' addresses from the last entry of the last `X-Forwarded-For` line; only behind a proxy that appends to that header or replaces it, as Caddy does | `1` (Caddy) | not set |
 | `RELAY_CLIENT_IP_HEADER` | Take them from this header instead | not set | `do-connecting-ip` |
 
 Callers' real addresses matter: limits are per address, so behind a proxy
@@ -138,10 +138,14 @@ never need it.
 
 Addresses that misbehave are banned automatically, with nothing to set up:
 hitting limits again and again, forged proofs, malformed messages, probing,
-dialing computers that refuse them, three wrong dashboard tokens, or
-moving more than 20 GiB in an hour (`RELAY_MAX_TRANSFER_PER_HOUR`). Bans
-last 10 minutes, then an hour, then a day, and show on the dashboard.
-Private and loopback addresses are never banned automatically.
+or sending more than four times `RELAY_MAX_TRANSFER_PER_HOUR` (20 GiB) in
+an hour; past one budget, an address's sessions are only slowed. Bans last
+10 minutes, then an hour, then a day, and show on the dashboard. A ban for
+hitting limits alone refuses new connections but keeps the address's open
+sessions and listeners, since a household or a carrier's NAT can hit them
+together. Wrong dashboard tokens block that address from the dashboard for
+15 minutes, never from the relay. Private and loopback addresses are never
+banned automatically.
 
 To ban someone by hand, without a restart, list their addresses or ranges
 in a file and point the relay at it:

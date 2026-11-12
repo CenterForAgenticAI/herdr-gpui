@@ -392,9 +392,11 @@ impl Hub {
         let ban = Arc::new(Notify::new());
         let mut state = self.state();
         // A ban on either side, checked under the lock `sweep` takes,
-        // so a session either is refused here or is there to be ended.
+        // so a session either is refused here or is there to be ended. A
+        // listener banned only for running into limits keeps taking dials,
+        // as it keeps its route.
         let now = Instant::now();
-        if self.guard.banned(slot.dialer, now) || self.guard.banned(slot.listener, now) {
+        if self.guard.banned(slot.dialer, now) || self.guard.evicts(slot.listener, now) {
             return None;
         }
         let allowed = slot.pairing
@@ -439,8 +441,8 @@ impl Hub {
         }
     }
 
-    /// Counts `bytes` a session carried for `address` against its hourly
-    /// budget, banning it if that goes over.
+    /// Counts `bytes` `address` sent through a session against its hourly
+    /// budget, banning it if it overran the budget many times.
     pub fn charge(self: &Arc<Self>, address: IpAddr, bytes: u64) {
         if let Some(length) = self.guard.charge(address, bytes, Instant::now()) {
             self.metrics.strike(Offense::Bandwidth);
@@ -454,10 +456,23 @@ impl Hub {
         self.bans.subscribe()
     }
 
-    /// Whether `address` is banned now.
+    /// Whether `address` is banned now, and so refused any new work.
     #[must_use]
     pub fn is_banned(&self, address: IpAddr) -> bool {
         self.guard.banned(address, Instant::now())
+    }
+
+    /// Whether `address`'s ban also ends what it has open
+    /// (`guard::severe`).
+    #[must_use]
+    pub fn is_evicted(&self, address: IpAddr) -> bool {
+        self.guard.evicts(address, Instant::now())
+    }
+
+    /// Whether `address` is over its hourly transfer budget.
+    #[must_use]
+    pub fn over_budget(&self, address: IpAddr) -> bool {
+        self.guard.over_budget(address, Instant::now())
     }
 
     /// An address, or its wide block, was just banned: count it and end
@@ -473,15 +488,16 @@ impl Hub {
         self.sweep();
     }
 
-    /// Ends every session and listener that a ban now covers, whatever
-    /// banned it: an address, its wide block, or a manual range. Run after
+    /// Ends every session and listener that a ban now evicts, whatever
+    /// banned it: an address, its wide block, or a manual range. A ban
+    /// earned by limits alone leaves them be (`guard::severe`). Run after
     /// every ban, so a ban of a whole /48 also ends the work of addresses
     /// in it other than the one that tipped it. Bans are rare, so a full
     /// sweep is cheap; it takes the guard's locks under the state lock, in
     /// the same order `open` and `register` do.
     pub fn sweep(&self) {
         let now = Instant::now();
-        let banned = |address: IpAddr| self.guard.banned(address, now);
+        let banned = |address: IpAddr| self.guard.evicts(address, now);
         let mut state = self.state();
         for live in state.sessions.values() {
             if banned(live.dialer) || banned(live.listener) {
