@@ -3563,7 +3563,10 @@ pane's folder, and runs the program there; `sheprd chat new AGENT` does
 the same from a pane. The rows show once the app has found `sheprd-acp`,
 first beside its own executable (the app bundle, `cargo build`'s target
 directory, or where `just install` puts both) and then on the login shell's
-`PATH`, and only for the Herdr on this machine. Each agent has to be
+`PATH`. A Herdr 2 tab starts a chat beside its active pane, including on
+saved SSH, cloud, and WSL hosts; an empty app-kept workspace starts a new
+Herdr 2 chat tab. Remote launches find the remote host's own program rather
+than using the desktop executable's path. Each agent has to be
 installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an
 ACP adapter), `copilot --acp`, `gemini --acp`, or `opencode acp`. The program can
 also be started by hand in any pane: `sheprd-acp claude`.
@@ -3631,8 +3634,25 @@ on Windows reachable by this user alone. A chat on a saved SSH host attaches
 through `sheprd-acp connect` run on that host over SSH, using the `sheprd-acp`
 (or an older host's `herdr-acp`) found in `~/.herdr/bin`, `~/.cargo/bin`,
 `~/.local/bin`, a Mac's installed app, or the host's `PATH`; without one its
-pane keeps the program's terminal view. The view is not offered for WSL or
-cloud hosts. See `crates/sheprd-acp/README.md` for the program itself.
+pane keeps the program's terminal view. Cloud hosts use their existing
+authenticated provider connector, and WSL uses the selected distribution's
+shell on Windows. ACP opens the private endpoint on the owning host: the app
+never interprets a remote endpoint token as a local socket path. Remote
+Herdr 2 panes retain their host, tab, and split identity, so two hosts with
+the same terminal ID do not share a conversation. Mirrors stay read-only
+terminal views. Reattaching resumes the existing ACP stream; it does not
+restart an agent or reopen an intentionally closed chat.
+
+Remote ACP and the chosen agent must already be installed on the host. ACP
+installed for phone pairing by this release is reused before searching the
+host's user bins, app bundles and PATH.
+These launch and attach scripts require a POSIX shell; a Windows SSH host
+without one is not supported by this chat route. Remote conversion also
+requires `sheprd-acp session-convert` and the process-bound session evidence
+described in [agent session evidence](../../docs/agent-session-evidence.md).
+See `crates/sheprd-acp/README.md` for the program itself and
+[remote core chat acceptance](../../docs/remote-core-chats.md) for validation
+and remaining runtime checks.
 
 ## VS Code
 
