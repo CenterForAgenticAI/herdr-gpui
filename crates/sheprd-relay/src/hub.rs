@@ -10,18 +10,21 @@
 
 pub mod access;
 mod guards;
+mod rates;
+mod tally;
 
 pub use access::Access;
-pub use guards::{Permit, Registration, Session, Slot, Unclaimed, Waiting};
+pub use guards::{Buffer, Permit, Registration, Session, Slot, Unclaimed, Waiting};
 
 use crate::{
     Limits, RouteId, SessionId,
-    bucket::{Limiter, Rate, Throttle, source_key},
+    bucket::{Outcome, Throttle, source_key},
     guard::Guard,
     metrics::{Direction, Gauge, Kind, Metrics, Offense, Refused},
     splice::Peer,
     wire::{Key, MAX_DIAL_KEYS},
 };
+use rates::PerAddress;
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -30,8 +33,9 @@ use std::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicU64, Ordering::Relaxed},
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
+use tally::{Counts, Tally};
 use tokio::sync::{Notify, mpsc, oneshot};
 
 /// Incoming dials a listener may have unread before more are refused.
@@ -50,11 +54,15 @@ pub struct Hub {
     /// Wakes every QUIC connection when an address is banned, so the
     /// banned one closes itself; each checks its own address.
     bans: tokio::sync::broadcast::Sender<()>,
-    dials: Mutex<Limiter<IpAddr>>,
+    /// Bytes granted to QUIC connections' windows, against `max_buffer`.
+    buffer: AtomicU64,
+    /// New QUIC connections, per address and wide block.
+    connects: PerAddress,
+    dials: PerAddress,
     /// Bans, earned and manual.
     pub guard: Guard,
     pub limits: Limits,
-    listens: Mutex<Limiter<IpAddr>>,
+    listens: PerAddress,
     pub metrics: Metrics,
     next: AtomicU64,
     state: Mutex<State>,
@@ -66,13 +74,31 @@ pub struct Hub {
 struct State {
     addresses: HashMap<IpAddr, usize>,
     connections: usize,
+    /// Dials and sessions held by each dialing address and block.
+    dialers: Tally,
+    /// Dials and sessions held with each dial key.
+    keys: Counts<Key>,
     listeners: HashMap<RouteId, Listener>,
+    /// Listeners held by each address and block.
+    listening: Tally,
+    /// Each route's open sessions, so a change of its dial keys looks at
+    /// those only.
+    on_route: HashMap<RouteId, HashSet<u64>>,
     pending: HashMap<SessionId, Pending>,
     /// Dials and sessions held against each route, for its limit.
     routes: HashMap<RouteId, usize>,
     sessions: HashMap<u64, Live>,
     /// Dials and sessions in total.
     slots: usize,
+}
+
+impl State {
+    /// Removes `route`'s listener, giving back its address's count.
+    fn remove_listener(&mut self, route: &RouteId) -> Option<Listener> {
+        let listener = self.listeners.remove(route)?;
+        self.listening.remove(listener.address);
+        Some(listener)
+    }
 }
 
 #[derive(Debug)]
@@ -101,11 +127,13 @@ struct Pending {
 }
 
 /// The listener's side of one dial. A WebSocket accept holds its own
-/// connection slot; a QUIC stream shares its connection's.
+/// connection slot; a QUIC stream shares its connection's, and widens its
+/// windows for the session.
 #[derive(Debug)]
 pub struct Accepted {
     pub peer: Peer,
     pub permit: Option<Permit>,
+    pub window: Option<crate::quic::Widened>,
 }
 
 #[derive(Debug)]
@@ -142,9 +170,16 @@ pub enum DialRefusal {
     Unauthorized,
 }
 
-/// The relay holds as many listeners as it may.
+/// Why a listener could not register.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Full;
+pub enum ListenRefusal {
+    /// The address is banned.
+    Banned,
+    /// The relay holds as many listeners as it may.
+    Full,
+    /// The address, or its wide block, holds as many as it may.
+    TooMany,
+}
 
 /// One row of the dashboard's session table.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -159,13 +194,16 @@ pub struct SessionRow {
 impl Hub {
     #[must_use]
     pub fn new(limits: Limits, access: Access) -> Self {
+        let origin = Instant::now();
         Self {
             access,
             bans: tokio::sync::broadcast::channel(16).0,
-            dials: Mutex::new(Limiter::new(Rate::per_minute(limits.dials_per_minute))),
+            buffer: AtomicU64::new(0),
+            connects: PerAddress::new(limits.connections_per_minute, origin),
+            dials: PerAddress::new(limits.dials_per_minute, origin),
             guard: Guard::new(limits.auto_ban, limits.max_transfer_per_hour),
             limits,
-            listens: Mutex::new(Limiter::new(Rate::per_minute(limits.listens_per_minute))),
+            listens: PerAddress::new(limits.listens_per_minute, origin),
             metrics: Metrics::default(),
             next: AtomicU64::new(1),
             state: Mutex::default(),
@@ -194,13 +232,30 @@ impl Hub {
     }
 
     /// Whether `address` may start another dial now.
-    pub fn allow_dial(&self, address: IpAddr) -> bool {
-        allow(&self.dials, address)
+    pub fn allow_dial(&self, address: IpAddr) -> Outcome {
+        self.dials.check(address)
     }
 
     /// Whether `address` may start another listen now.
-    pub fn allow_listen(&self, address: IpAddr) -> bool {
-        allow(&self.listens, address)
+    pub fn allow_listen(&self, address: IpAddr) -> Outcome {
+        self.listens.check(address)
+    }
+
+    /// Whether `address` may start another QUIC connection now.
+    pub fn allow_connect(&self, address: IpAddr) -> Outcome {
+        self.connects.check(address)
+    }
+
+    /// Takes `bytes` from the budget for what QUIC peers may have the relay
+    /// hold, or `None` when that would pass `max_buffer`.
+    pub fn reserve_buffer(self: &Arc<Self>, bytes: u64) -> Option<Buffer> {
+        let max = self.limits.max_buffer;
+        self.buffer
+            .try_update(Relaxed, Relaxed, |held| {
+                held.checked_add(bytes).filter(|total| *total <= max)
+            })
+            .ok()?;
+        Some(Buffer::new(Arc::clone(self), bytes))
     }
 
     /// Takes a connection slot for `address`, or says which limit is full.
@@ -233,19 +288,33 @@ impl Hub {
         self: &Arc<Self>,
         route: RouteId,
         address: IpAddr,
-    ) -> Result<Registration, Full> {
+    ) -> Result<Registration, ListenRefusal> {
         let (sender, incoming) = mpsc::channel(INCOMING_QUEUE);
         let generation = self.next.fetch_add(1, Relaxed);
         let mut state = self.state();
         // Checked under the lock `sweep` takes: a ban either comes
         // first and refuses this listener, or comes after and removes it.
         if self.guard.banned(address, Instant::now()) {
-            return Err(Full);
+            return Err(ListenRefusal::Banned);
         }
-        let replacing = state.listeners.contains_key(&route);
-        if !replacing && state.listeners.len() >= self.limits.max_listeners {
-            return Err(Full);
+        let replaced = state.listeners.get(&route).map(|listener| listener.address);
+        if replaced.is_none() && state.listeners.len() >= self.limits.max_listeners {
+            return Err(ListenRefusal::Full);
         }
+        // The same key from the same address holds its one count; from
+        // another, the new address must have room before the old is freed.
+        if replaced != Some(address) {
+            if !state
+                .listening
+                .try_add(address, self.limits.max_listeners_per_ip)
+            {
+                return Err(ListenRefusal::TooMany);
+            }
+            if let Some(old) = replaced {
+                state.listening.remove(old);
+            }
+        }
+        let replacing = replaced.is_some();
         state.listeners.insert(
             route,
             Listener {
@@ -262,7 +331,7 @@ impl Hub {
         }
         Ok(Registration::new(
             Arc::clone(self),
-            generation,
+            (generation, address),
             incoming,
             route,
         ))
@@ -280,10 +349,17 @@ impl Hub {
         if listener.generation != generation {
             return;
         }
-        listener.dial_keys = keys.iter().copied().take(MAX_DIAL_KEYS).collect();
+        let keys: HashSet<Key> = keys.iter().copied().take(MAX_DIAL_KEYS).collect();
+        if listener.dial_keys == keys {
+            return;
+        }
+        listener.dial_keys = keys;
         let allowed = listener.dial_keys.clone();
-        for live in state.sessions.values() {
-            if live.route == route && !live.pairing && !allowed.contains(&live.key) {
+        let Some(ids) = state.on_route.get(&route) else {
+            return;
+        };
+        for live in ids.iter().filter_map(|id| state.sessions.get(id)) {
+            if !live.pairing && !allowed.contains(&live.key) {
                 live.revoke.notify_one();
             }
         }
@@ -340,13 +416,23 @@ impl Hub {
         let incoming = listener.incoming.clone();
         let listener_address = listener.address;
         let on_route = state.routes.get(&route).copied().unwrap_or(0);
-        if on_route >= self.limits.max_sessions_per_route || state.slots >= self.limits.max_sessions
+        if on_route >= self.limits.max_sessions_per_route
+            || state.slots >= self.limits.max_sessions
+            || state.keys.get(&key) >= self.limits.max_sessions_per_key
+        {
+            return Ok(Err(DialRefusal::Busy));
+        }
+        if !state
+            .dialers
+            .try_add(dialer, self.limits.max_sessions_per_ip)
         {
             return Ok(Err(DialRefusal::Busy));
         }
         if incoming.try_send(Incoming { key, session }).is_err() {
+            state.dialers.remove(dialer);
             return Ok(Err(DialRefusal::Busy));
         }
+        state.keys.add(key);
         if let (true, Some(index), Some(listener)) =
             (pairing, pairing_index, state.listeners.get_mut(&route))
         {
@@ -407,6 +493,7 @@ impl Hub {
         if !allowed {
             return None;
         }
+        state.on_route.entry(slot.route).or_default().insert(id);
         state.sessions.insert(
             id,
             Live {
@@ -504,12 +591,17 @@ impl Hub {
                 live.ban.notify_one();
             }
         }
-        let before = state.listeners.len();
-        // A removed listener's channel closes, which ends its socket.
-        state
+        let evicted: Vec<RouteId> = state
             .listeners
-            .retain(|_, listener| !banned(listener.address));
-        let removed = before - state.listeners.len();
+            .iter()
+            .filter(|(_, listener)| banned(listener.address))
+            .map(|(route, _)| *route)
+            .collect();
+        // A removed listener's channel closes, which ends its socket.
+        let removed = evicted
+            .iter()
+            .filter(|route| state.remove_listener(route).is_some())
+            .count();
         drop(state);
         for _ in 0..removed {
             self.metrics.lower(Gauge::Listeners);
@@ -537,17 +629,5 @@ impl Hub {
         rows.sort_by_key(|row| std::cmp::Reverse(row.bytes_from_dialer + row.bytes_from_listener));
         rows.truncate(MAX_ROWS);
         rows
-    }
-}
-
-fn allow(limiter: &Mutex<Limiter<IpAddr>>, address: IpAddr) -> bool {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| {
-            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
-        });
-    match limiter.lock() {
-        Ok(mut limiter) => limiter.allow(source_key(address), now_ms),
-        Err(poisoned) => poisoned.into_inner().allow(source_key(address), now_ms),
     }
 }

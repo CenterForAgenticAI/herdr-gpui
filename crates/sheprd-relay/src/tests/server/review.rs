@@ -61,6 +61,15 @@ async fn the_total_bandwidth_limit_applies_each_way() {
     assert_eq!(up.reserve(1_000), Duration::ZERO);
     assert_eq!(down.reserve(1_000), Duration::ZERO);
     assert!(up.reserve(500) > Duration::ZERO);
-    let unlimited = Hub::new(Limits::default(), Access::Open);
+    let unlimited = Hub::new(
+        Limits {
+            total_bandwidth: 0,
+            ..Limits::default()
+        },
+        Access::Open,
+    );
     assert!(unlimited.total_throttle(Direction::FromDialer).is_none());
+    // A relay limits total bandwidth unless told not to.
+    let default = Hub::new(Limits::default(), Access::Open);
+    assert!(default.total_throttle(Direction::FromDialer).is_some());
 }

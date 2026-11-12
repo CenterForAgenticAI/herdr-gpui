@@ -345,11 +345,15 @@ impl Guard {
         }
     }
 
-    /// Runs `change` on `address`'s record; a ban it caused, newly.
+    /// Runs `change` on `address`'s record; a ban it caused, newly. When
+    /// the table is all bans, it runs on the wide block's record instead,
+    /// but only if `wide`: a block holds many users, so hitting limits,
+    /// which a busy neighbour does, is never held against it.
     fn record(
         &self,
         address: IpAddr,
         now: Instant,
+        wide: bool,
         change: impl FnOnce(&mut Record, u64) -> Option<Duration>,
     ) -> Option<Duration> {
         if !self.auto || exempt(address) {
@@ -376,10 +380,11 @@ impl Guard {
                     Some(least) => {
                         records.remove(&least);
                     }
-                    None => {
+                    None if wide => {
                         drop(records);
                         return self.record_wide(address, now, change);
                     }
+                    None => return None,
                 }
             }
         }
@@ -425,7 +430,7 @@ impl Guard {
     /// Counts `offense` against `address`; a ban it caused, or made evict,
     /// newly.
     pub fn offend(&self, address: IpAddr, offense: Offense, now: Instant) -> Option<Duration> {
-        self.record(address, now, |record, _| {
+        self.record(address, now, severe(offense), |record, _| {
             if record.banned(now) {
                 // Open work kept through a ban for limits: misbehaving now
                 // ends it.
@@ -447,7 +452,7 @@ impl Guard {
             return None;
         }
         let budget = self.max_transfer_per_hour;
-        self.record(address, now, |record, scale| {
+        self.record(address, now, true, |record, scale| {
             record.window_bytes = record.window_bytes.saturating_add(bytes);
             let budget = budget.saturating_mul(scale).saturating_mul(OVERRUN);
             if record.window_bytes <= budget {

@@ -299,7 +299,7 @@ async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, h
                         hub.offend(address, Offense::Malformed);
                         return close_within(socket, code::PROTOCOL, silence).await;
                     };
-                    let status = broker::apply(&registration, message);
+                    let status = broker::apply(&hub, &registration, message);
                     if !send_within(&mut socket, &ToPeer::Status { status }, silence).await {
                         return;
                     }
@@ -380,7 +380,7 @@ async fn serve_dialer(
     if !send(&mut socket, &ToPeer::Status { status: Status::Ok }).await {
         return;
     }
-    let _permit = accepted.permit;
+    let _held = (accepted.permit, accepted.window);
     splice(Peer::Socket(Box::new(socket)), accepted.peer, session).await;
 }
 
@@ -425,6 +425,7 @@ async fn accept(
             let accepted_peer = Accepted {
                 peer: Peer::Socket(Box::new(socket)),
                 permit: Some(permit),
+                window: None,
             };
             if let Err(Accepted {
                 peer: Peer::Socket(socket),

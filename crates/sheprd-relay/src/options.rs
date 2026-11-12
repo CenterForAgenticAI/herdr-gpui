@@ -49,16 +49,24 @@ Every option is optional, and each can also be set as a RELAY_* variable
   --max-connections N            Open sockets in total (default 10000)
   --max-connections-per-ip N     Per IPv4 address or IPv6 /64 (default 64)
   --max-listeners N              Computers listening (default 5000)
+  --max-listeners-per-ip N       Per IPv4 address or IPv6 /64 (default 16);
+                                 a /24 or /48 may hold 16 times this
   --max-sessions N               Sessions and waiting dials (default 5000)
+  --max-sessions-per-ip N        Per dialing IPv4 address or IPv6 /64
+                                 (default 64); a /24 or /48, 16 times this
+  --max-sessions-per-key N       Per dial key (default 4)
   --max-sessions-per-route N     Per computer (default 32)
+  --max-buffer BYTES             Bytes held for QUIC peers at once, across
+                                 connections (default 512MiB)
   --session-bandwidth BYTES      Per session, each way, per second; 0 is
                                  unlimited (default 4MiB)
-  --total-bandwidth BYTES        Across sessions, each way, per second
-                                 (default 0, unlimited)
+  --total-bandwidth BYTES        Across sessions, each way, per second; 0 is
+                                 unlimited (default 64MiB)
   --max-frame BYTES              Largest frame (default 64KiB)
   --idle-timeout DURATION        Close a silent session (default 5m)
   --max-session-duration DURATION  Close any session after (default 24h)
   --accept-timeout DURATION      Wait for a listener to accept (default 10s)
+  --connections-per-minute N     New QUIC connections per address (default 60)
   --dials-per-minute N           Per address (default 120)
   --listens-per-minute N         Per address (default 30)
   --dashboard-token-file FILE    The dashboard's access token, at least 24
@@ -107,18 +115,23 @@ pub const SETTINGS: &[(&str, Kind)] = &[
     ("ban-file", Kind::File),
     ("behind-proxy", Kind::Flag),
     ("client-ip-header", Kind::Text),
+    ("connections-per-minute", Kind::Count),
     ("dashboard-token-file", Kind::File),
     ("dials-per-minute", Kind::Count),
     ("idle-timeout", Kind::Duration),
     ("listen", Kind::Address),
     ("listen-token-file", Kind::File),
     ("listens-per-minute", Kind::Count),
+    ("max-buffer", Kind::Bytes),
     ("max-connections", Kind::Count),
     ("max-connections-per-ip", Kind::Count),
     ("max-frame", Kind::Bytes),
     ("max-listeners", Kind::Count),
+    ("max-listeners-per-ip", Kind::Count),
     ("max-session-duration", Kind::Duration),
     ("max-sessions", Kind::Count),
+    ("max-sessions-per-ip", Kind::Count),
+    ("max-sessions-per-key", Kind::Count),
     ("max-sessions-per-route", Kind::Count),
     ("max-transfer-per-hour", Kind::Bytes),
     ("metrics", Kind::Address),
@@ -329,11 +342,13 @@ impl Options {
                 }
                 self.client_ip_header = Some(name);
             }
+            "connections-per-minute" => limits.connections_per_minute = per_minute()?,
             "dials-per-minute" => limits.dials_per_minute = per_minute()?,
             "idle-timeout" => limits.idle_timeout = duration()?,
             "listen" => self.listen = text.parse().map_err(|_| invalid())?,
             "listen-token-file" => self.listen_token = Some(read(name, text)?),
             "listens-per-minute" => limits.listens_per_minute = per_minute()?,
+            "max-buffer" => limits.max_buffer = bytes()?,
             "max-connections" => limits.max_connections = count()?,
             "max-connections-per-ip" => limits.max_connections_per_ip = count()?,
             "max-frame" => {
@@ -344,8 +359,11 @@ impl Options {
                 limits.max_frame = usize::try_from(frame).map_err(|_| invalid())?;
             }
             "max-listeners" => limits.max_listeners = count()?,
+            "max-listeners-per-ip" => limits.max_listeners_per_ip = count()?,
             "max-session-duration" => limits.max_session_duration = duration()?,
             "max-sessions" => limits.max_sessions = count()?,
+            "max-sessions-per-ip" => limits.max_sessions_per_ip = count()?,
+            "max-sessions-per-key" => limits.max_sessions_per_key = count()?,
             "max-sessions-per-route" => limits.max_sessions_per_route = count()?,
             "max-transfer-per-hour" => limits.max_transfer_per_hour = bytes()?,
             "metrics" if text == "off" => self.metrics = None,

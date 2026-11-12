@@ -4,6 +4,11 @@
 
 use std::time::Duration;
 
+/// How many times an address's share of a limit a wide block (an IPv6
+/// /48, an IPv4 /24) may hold together: room for the many users a block
+/// can hold, while holding back one caller rotating through its /64s.
+pub const WIDE_SHARE: usize = 16;
+
 /// The bounds a relay enforces. A bandwidth of zero means unlimited.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Limits {
@@ -22,6 +27,11 @@ pub struct Limits {
     pub listens_per_minute: u32,
     /// Whether addresses that misbehave are banned automatically (`guard`).
     pub auto_ban: bool,
+    /// New QUIC connections one address may start per minute.
+    pub connections_per_minute: u32,
+    /// Bytes the relay may hold for QUIC peers at once, across every
+    /// connection: what peers sent that the far side has not read yet.
+    pub max_buffer: u64,
     /// Bytes one address may move in an hour, on either side of its
     /// sessions, before it is banned; 0 for no budget.
     pub max_transfer_per_hour: u64,
@@ -33,9 +43,17 @@ pub struct Limits {
     /// bytes read from a QUIC stream at once.
     pub max_frame: usize,
     pub max_listeners: usize,
+    /// Listeners one IPv4 address or IPv6 /64 may hold.
+    pub max_listeners_per_ip: usize,
     /// How long one session may last, however busy.
     pub max_session_duration: Duration,
     pub max_sessions: usize,
+    /// Sessions and waiting dials one IPv4 address or IPv6 /64 may hold as
+    /// the dialer.
+    pub max_sessions_per_ip: usize,
+    /// Sessions and waiting dials one dial key may hold: a stolen key
+    /// cannot take every slot of its computer.
+    pub max_sessions_per_key: usize,
     /// Sessions open at once to one listener.
     pub max_sessions_per_route: usize,
     /// Bytes per second each way within one session.
@@ -53,16 +71,21 @@ impl Default for Limits {
             listener_silence: Duration::from_secs(60),
             listens_per_minute: 30,
             auto_ban: true,
+            connections_per_minute: 60,
+            max_buffer: 512 * 1024 * 1024,
             max_transfer_per_hour: 20 * 1024 * 1024 * 1024,
             max_connections: 10_000,
             max_connections_per_ip: 64,
             max_frame: 64 * 1024,
             max_listeners: 5_000,
+            max_listeners_per_ip: 16,
             max_session_duration: Duration::from_secs(24 * 60 * 60),
             max_sessions: 5_000,
+            max_sessions_per_ip: 64,
+            max_sessions_per_key: 4,
             max_sessions_per_route: 32,
             session_bandwidth: 4 * 1024 * 1024,
-            total_bandwidth: 0,
+            total_bandwidth: 64 * 1024 * 1024,
         }
     }
 }

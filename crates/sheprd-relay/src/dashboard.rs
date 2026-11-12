@@ -62,6 +62,9 @@ struct Board {
     live: Arc<Streams>,
     lockout: Arc<Lockout>,
     shared: Shared,
+    /// Where `everyone`'s milliseconds count from: a monotonic clock, so a
+    /// wall clock stepping back cannot stop its refills.
+    started: Instant,
 }
 
 /// The dashboard's routes, for an operator `account`.
@@ -84,6 +87,7 @@ pub fn router(shared: Shared, account: Account) -> Router {
         live: Arc::default(),
         lockout: Arc::default(),
         shared,
+        started: Instant::now(),
     };
     Router::new()
         .route("/dashboard", get(index))
@@ -197,7 +201,8 @@ async fn login(
         metrics.login(Login::Blocked);
         return redirect("/dashboard/login?blocked", None);
     }
-    if !allow(&board.everyone, (), now_secs().saturating_mul(1000)) {
+    let since_ms = u64::try_from(board.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    if !allow(&board.everyone, (), since_ms) {
         metrics.login(Login::Limited);
         return redirect("/dashboard/login?limited", None);
     }

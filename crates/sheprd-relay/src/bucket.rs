@@ -39,6 +39,17 @@ struct Bucket {
     updated_ms: u64,
 }
 
+/// What a limiter says to one request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Outcome {
+    Allowed,
+    /// The key spent its bucket: the caller is going too fast.
+    Limited,
+    /// The limiter tracks as many keys as it may and this one is new: the
+    /// caller is refused, but did nothing wrong.
+    Full,
+}
+
 /// One token bucket per key, up to a bound.
 #[derive(Debug)]
 pub struct Limiter<K> {
@@ -62,17 +73,24 @@ impl<K: Eq + Hash> Limiter<K> {
         }
     }
 
-    /// Whether `key` may go ahead at `now_ms`, spending one if so. When every
-    /// slot is held by a key that has spent something, a new key is refused
-    /// rather than pushing out one that is being limited.
+    /// Whether `key` may go ahead at `now_ms`, spending one if so.
     pub fn allow(&mut self, key: K, now_ms: u64) -> bool {
+        self.check(key, now_ms) == Outcome::Allowed
+    }
+
+    /// [`Limiter::allow`], saying why not. When every slot is held by a
+    /// key that has spent something, a new key is refused as
+    /// [`Outcome::Full`] rather than pushing out one that is being limited.
+    /// `now_ms` must come from a monotonic clock: a clock stepping back
+    /// would stop refills.
+    pub fn check(&mut self, key: K, now_ms: u64) -> Outcome {
         let rate = self.rate;
         let full = u64::from(rate.burst) * 1000;
         if self.buckets.len() >= self.max_keys && !self.buckets.contains_key(&key) {
             self.buckets
                 .retain(|_, bucket| refilled(*bucket, rate, now_ms) < full);
             if self.buckets.len() >= self.max_keys {
-                return false;
+                return Outcome::Full;
             }
         }
         let bucket = self.buckets.entry(key).or_insert(Bucket {
@@ -82,10 +100,10 @@ impl<K: Eq + Hash> Limiter<K> {
         bucket.milli = refilled(*bucket, rate, now_ms);
         bucket.updated_ms = now_ms;
         if bucket.milli < 1000 {
-            return false;
+            return Outcome::Limited;
         }
         bucket.milli -= 1000;
-        true
+        Outcome::Allowed
     }
 }
 

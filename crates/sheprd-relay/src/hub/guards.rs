@@ -4,15 +4,42 @@
 use super::{Accepted, Hub, Incoming, PAIRING_SESSION, Traffic};
 use crate::{
     RouteId, SessionId,
+    bucket::{Limiter, Rate},
     metrics::{Gauge, Kind, Metrics},
     splice::Bounds,
     wire::Key,
 };
 use std::{
     net::IpAddr,
-    sync::Arc,
+    sync::{Arc, Mutex, atomic::Ordering::Relaxed},
     time::{Duration, Instant},
 };
+
+/// What one listener may say about who may dial it: plenty for a computer
+/// pairing devices, too little to keep the hub's lock busy.
+const MESSAGES: Rate = Rate {
+    burst: 16,
+    per_minute: 60,
+};
+
+/// Bytes taken from the hub's buffer budget, given back when dropped.
+#[derive(Debug)]
+pub struct Buffer {
+    bytes: u64,
+    hub: Arc<Hub>,
+}
+
+impl Buffer {
+    pub(super) fn new(hub: Arc<Hub>, bytes: u64) -> Self {
+        Self { bytes, hub }
+    }
+}
+
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        self.hub.buffer.fetch_sub(self.bytes, Relaxed);
+    }
+}
 use tokio::sync::{Notify, mpsc, oneshot};
 
 /// One open socket or connection, counted against its address until
@@ -48,26 +75,42 @@ impl Drop for Permit {
 /// A route's listener, until dropped or replaced.
 #[derive(Debug)]
 pub struct Registration {
+    /// Where it listens from, to count offenses against.
+    pub address: IpAddr,
     generation: u64,
     hub: Arc<Hub>,
     /// Dials for this listener; ends when another replaces it.
     pub incoming: mpsc::Receiver<Incoming>,
+    /// Its messages about who may dial, limited.
+    messages: Mutex<(Limiter<()>, Instant)>,
     pub route: RouteId,
 }
 
 impl Registration {
     pub(super) fn new(
         hub: Arc<Hub>,
-        generation: u64,
+        (generation, address): (u64, IpAddr),
         incoming: mpsc::Receiver<Incoming>,
         route: RouteId,
     ) -> Self {
         Self {
+            address,
             generation,
             hub,
             incoming,
+            messages: Mutex::new((Limiter::bounded(MESSAGES, 1), Instant::now())),
             route,
         }
+    }
+
+    /// Whether the listener may send another message now, spending one.
+    pub fn allow_message(&self) -> bool {
+        let mut messages = match self.messages.lock() {
+            Ok(messages) => messages,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let now_ms = u64::try_from(messages.1.elapsed().as_millis()).unwrap_or(u64::MAX);
+        messages.0.allow((), now_ms)
     }
 
     /// Replaces the keys allowed to dial; sessions of a key left out end.
@@ -93,7 +136,7 @@ impl Drop for Registration {
             return;
         }
         // The route's dial and pairing keys go with it.
-        state.listeners.remove(&self.route);
+        state.remove_listener(&self.route);
         drop(state);
         self.hub.metrics.lower(Gauge::Listeners);
     }
@@ -134,6 +177,8 @@ impl Drop for Slot {
     fn drop(&mut self) {
         let mut state = self.hub.state();
         state.slots = state.slots.saturating_sub(1);
+        state.dialers.remove(self.dialer);
+        state.keys.remove(&self.key);
         if let Some(held) = state.routes.get_mut(&self.route) {
             *held = held.saturating_sub(1);
             if *held == 0 {
@@ -262,7 +307,15 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.hub.state().sessions.remove(&self.id);
+        let mut state = self.hub.state();
+        state.sessions.remove(&self.id);
+        if let Some(ids) = state.on_route.get_mut(&self.slot.route) {
+            ids.remove(&self.id);
+            if ids.is_empty() {
+                state.on_route.remove(&self.slot.route);
+            }
+        }
+        drop(state);
         self.hub.metrics.lower(Gauge::Sessions);
     }
 }

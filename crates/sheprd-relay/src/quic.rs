@@ -6,11 +6,14 @@
 
 mod error;
 pub mod tls;
+mod window;
 
 pub use error::Error;
+pub use window::{Widened, Window};
 
 use crate::{
     broker,
+    bucket::Outcome,
     hub::{Accepted, Hub, Registration},
     metrics::{Kind, Listen, Offense, Refused},
     splice::{Peer, splice},
@@ -29,12 +32,13 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// A connection with nothing in flight and no keepalive is dropped after
 /// this. Clients send QUIC keepalives more often.
 const IDLE: Duration = Duration::from_secs(60);
-/// How much one stream, and one connection, may have in flight. quinn's
-/// defaults suit a single stream on a short path; a relay hop carries bulk
-/// transfers over long ones, where a small window caps throughput at
-/// window ÷ round trip.
-const STREAM_WINDOW: u32 = 8 * 1024 * 1024;
-const CONNECTION_WINDOW: u32 = 32 * 1024 * 1024;
+/// How much one stream, and one connection, of a client may have in
+/// flight. quinn's defaults suit a single stream on a short path; a relay
+/// hop carries bulk transfers over long ones, where a small window caps
+/// throughput at window ÷ round trip. The relay's own windows are sized
+/// to its sessions instead (`window`).
+const CLIENT_STREAM_WINDOW: u32 = 8 * 1024 * 1024;
+const CLIENT_CONNECTION_WINDOW: u32 = 32 * 1024 * 1024;
 /// Streams one connection may have open at once: a phone's sessions to a
 /// few computers, or a computer's listen stream and its sessions.
 const MAX_STREAMS: u32 = 64;
@@ -46,8 +50,10 @@ pub fn bind(address: SocketAddr, identity: &Identity) -> Result<Endpoint, Error>
         .max_concurrent_bidi_streams(VarInt::from_u32(MAX_STREAMS))
         .max_concurrent_uni_streams(VarInt::from_u32(0))
         .datagram_receive_buffer_size(None)
-        .max_idle_timeout(IDLE.try_into().ok());
-    windows(&mut transport);
+        .max_idle_timeout(IDLE.try_into().ok())
+        .stream_receive_window(VarInt::from_u32(window::SESSION))
+        .receive_window(VarInt::from_u32(window::BASE))
+        .send_window(u64::from(window::BASE));
     let mut config = ServerConfig::with_crypto(Arc::new(identity.server_crypto()?));
     config.transport_config(Arc::new(transport));
     Endpoint::server(config, address).map_err(|source| Error::Bind { address, source })
@@ -62,16 +68,11 @@ pub fn client_transport() -> TransportConfig {
         .keep_alive_interval(Some(Duration::from_secs(15)))
         .max_idle_timeout(IDLE.try_into().ok())
         .max_concurrent_uni_streams(VarInt::from_u32(0))
-        .max_concurrent_bidi_streams(VarInt::from_u32(MAX_STREAMS));
-    windows(&mut transport);
+        .max_concurrent_bidi_streams(VarInt::from_u32(MAX_STREAMS))
+        .stream_receive_window(VarInt::from_u32(CLIENT_STREAM_WINDOW))
+        .receive_window(VarInt::from_u32(CLIENT_CONNECTION_WINDOW))
+        .send_window(u64::from(CLIENT_CONNECTION_WINDOW));
     transport
-}
-
-fn windows(transport: &mut TransportConfig) {
-    transport
-        .stream_receive_window(VarInt::from_u32(STREAM_WINDOW))
-        .receive_window(VarInt::from_u32(CONNECTION_WINDOW))
-        .send_window(u64::from(CONNECTION_WINDOW));
 }
 
 /// Accepts connections until the endpoint closes.
@@ -98,8 +99,28 @@ pub async fn run(endpoint: Endpoint, hub: Arc<Hub>) {
         }
         let address = incoming.remote_address().ip();
         // Counted before the handshake, so a flood from a proven address
-        // costs no cryptography beyond what the per-address limit allows.
+        // costs no cryptography beyond what the per-address limits allow:
+        // how fast it may connect, and how many connections it may hold.
+        match hub.allow_connect(address) {
+            Outcome::Allowed => {}
+            Outcome::Limited => {
+                hub.offend(address, Offense::Limited);
+                incoming.refuse();
+                continue;
+            }
+            Outcome::Full => {
+                incoming.refuse();
+                continue;
+            }
+        }
         let Ok(permit) = hub.admit(address, Kind::Quic) else {
+            incoming.refuse();
+            continue;
+        };
+        // The connection's base windows, from the buffer budget: when that
+        // is spent, the relay takes no more connections.
+        let Some(base) = hub.reserve_buffer(window::base_cost()) else {
+            hub.metrics.refuse(Refused::Total);
             incoming.refuse();
             continue;
         };
@@ -129,25 +150,39 @@ pub async fn run(endpoint: Endpoint, hub: Arc<Hub>) {
                     }
                 }
             };
+            let window = Window::new(connection.clone());
             tokio::select! {
-                () = serve(connection.clone(), Arc::clone(&hub)) => {}
+                () = serve(connection.clone(), window, Arc::clone(&hub)) => {}
                 () = banned => {
                     connection.close(VarInt::from_u32(wire::code::BANNED), b"");
                 }
             }
-            drop(permit);
+            drop((permit, base));
         });
     }
 }
 
 /// Serves each stream the peer opens until the connection ends.
-async fn serve(connection: Connection, hub: Arc<Hub>) {
+async fn serve(connection: Connection, window: Arc<Window>, hub: Arc<Hub>) {
     while let Ok((send, recv)) = connection.accept_bi().await {
-        tokio::spawn(stream(connection.clone(), send, recv, Arc::clone(&hub)));
+        let window = Arc::clone(&window);
+        tokio::spawn(stream(
+            connection.clone(),
+            window,
+            send,
+            recv,
+            Arc::clone(&hub),
+        ));
     }
 }
 
-async fn stream(connection: Connection, mut send: SendStream, mut recv: RecvStream, hub: Arc<Hub>) {
+async fn stream(
+    connection: Connection,
+    window: Arc<Window>,
+    mut send: SendStream,
+    mut recv: RecvStream,
+    hub: Arc<Hub>,
+) {
     // Checked on every stream too, so nothing slips in between a ban and
     // its connection closing.
     if hub.is_banned(connection.remote_address().ip()) {
@@ -181,7 +216,9 @@ async fn stream(connection: Connection, mut send: SendStream, mut recv: RecvStre
         } => {
             let signed = wire::listen_signed(&exported);
             match broker::listen(&hub, address, &token, &key, &signature, &signed) {
-                Ok(registration) => listen(connection, send, recv, hub, registration).await,
+                Ok(registration) => {
+                    listen(connection, window, (send, recv), hub, registration).await;
+                }
                 Err(status) => reply_and_end(&mut send, status).await,
             }
         }
@@ -190,13 +227,19 @@ async fn stream(connection: Connection, mut send: SendStream, mut recv: RecvStre
             route,
             signature,
         } => {
+            // The session's share of the windows, taken first: a relay
+            // out of buffer budget turns dials away before any listener
+            // hears of them.
+            let Some(widened) = window.widen(&hub) else {
+                return reply_and_end(&mut send, Status::Busy).await;
+            };
             let signed = wire::dial_signed(&exported, &route);
             match broker::dial(&hub, address, route, &key, &signature, &signed).await {
                 Ok((accepted, session)) => {
                     if !reply(&mut send, Status::Ok).await {
                         return;
                     }
-                    let _permit = accepted.permit;
+                    let _held = (widened, accepted.permit, accepted.window);
                     splice(Peer::Stream { recv, send }, accepted.peer, session).await;
                 }
                 Err(status) => reply_and_end(&mut send, status).await,
@@ -282,8 +325,8 @@ async fn reply(send: &mut SendStream, status: Status) -> bool {
 /// connection ends or another listener takes the route.
 async fn listen(
     connection: Connection,
-    mut send: SendStream,
-    mut recv: RecvStream,
+    window: Arc<Window>,
+    (mut send, mut recv): (SendStream, RecvStream),
     hub: Arc<Hub>,
     mut registration: Registration,
 ) {
@@ -300,6 +343,10 @@ async fn listen(
                     return;
                 };
                 let Some(accepted) = hub.accept(incoming.session) else {
+                    continue;
+                };
+                // Out of buffer budget, the dial is left to time out.
+                let Some(widened) = window.widen(&hub) else {
                     continue;
                 };
                 let connection = connection.clone();
@@ -323,6 +370,7 @@ async fn listen(
                         let _ = accepted.send(Accepted {
                             peer: Peer::Stream { recv, send },
                             permit: None,
+                            window: Some(widened),
                         });
                     }
                 });
@@ -339,7 +387,7 @@ async fn listen(
                     return;
                 };
                 for message in taken {
-                    if !reply(&mut send, broker::apply(&registration, message)).await {
+                    if !reply(&mut send, broker::apply(&hub, &registration, message)).await {
                         return;
                     }
                 }

@@ -157,16 +157,49 @@ All settings are flags or `RELAY_*` variables (`sheprd-relay --help`).
 | `max-connections` | 10,000 | Open sockets of every kind |
 | `max-connections-per-ip` | 64 | Per IPv4 address or IPv6 /64 |
 | `max-listeners` | 5,000 | Routes with a listener |
+| `max-listeners-per-ip` | 16 | Per IPv4 address or IPv6 /64; a /24 or /48 holds 16 times this |
 | `max-sessions` | 5,000 | Sessions and waiting dials |
+| `max-sessions-per-ip` | 64 | Per dialing address; a /24 or /48 holds 16 times this |
+| `max-sessions-per-key` | 4 | Per dial key, so a stolen key cannot take every slot of its computer |
 | `max-sessions-per-route` | 32 | Per computer |
+| `max-buffer` | 512 MiB | What QUIC peers may make the relay hold, across connections |
 | `session-bandwidth` | 4 MiB/s | Each way, per session; 0 is unlimited |
-| `total-bandwidth` | unlimited | Each way, across sessions |
+| `total-bandwidth` | 64 MiB/s | Each way, across sessions; 0 is unlimited |
 | `max-frame` | 64 KiB | Largest frame |
 | `idle-timeout` | 5 min | Silent session |
 | `max-session-duration` | 24 h | Any session |
 | `accept-timeout` | 10 s | Listener's time to accept |
 | `dials-per-minute` | 120 | Per address, a quarter of it at once |
 | `listens-per-minute` | 30 | Per address |
+| `connections-per-minute` | 60 | New QUIC connections per address |
+
+One caller must not be able to fill a pool every caller shares:
+
+- Every per-address limit and rate also applies to the address's wide
+  block, an IPv6 /48 or IPv4 /24, at 16 times the address's share: a
+  routed block's 65,536 /64s are not 65,536 fresh callers. A rate limiter
+  whose table is full refuses newcomers without counting it against them.
+- A listener may send 60 messages about who may dial it a minute, 16 at
+  once. A change of dial keys looks only at that route's sessions, and one
+  that changes nothing does nothing.
+- QUIC windows are promises of memory: a peer may send up to its window
+  that the relay has not read, which it stops doing while the far side of
+  a session does not read. A connection starts with 64 KiB each way and
+  gains 2 MiB each way per session it carries (2 MiB passes a session's
+  4 MiB/s over a 500 ms round trip), all drawn from `max-buffer`. When that
+  is spent, new connections and sessions are refused, never buffered.
+- The HTTP listener holds at most `max-connections` plus 1,024 connections,
+  and per address `max-connections-per-ip` plus 16 (private addresses, such
+  as the proxy in front, exempt). A connection must send its request within
+  30 seconds and is closed after the idle timeout plus a minute with
+  nothing crossing it either way.
+- Rate limits count on a monotonic clock, so a wall clock stepping back
+  does not freeze refills.
+- A QUIC connection that migrates keeps the address it was admitted from
+  for its open sessions' budgets and bans; each new stream, and each ban
+  notice, checks its current address. Migration needs the peer to prove
+  it receives at the new address, and keeps phones connected across
+  networks, so it stays on.
 
 Throttles are token buckets that let one second of traffic through at once
 and then charge time, so interactive sessions stay snappy while a bulk

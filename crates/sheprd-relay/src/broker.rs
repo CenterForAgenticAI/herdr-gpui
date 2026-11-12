@@ -5,7 +5,8 @@
 
 use crate::{
     RouteId,
-    hub::{Accepted, DialRefusal, Hub, Registration, Session},
+    bucket::Outcome,
+    hub::{Accepted, DialRefusal, Hub, ListenRefusal, Registration, Session},
     metrics::{Dial, Listen, Offense},
     route::prove,
     wire::{Key, Message, Status},
@@ -33,12 +34,8 @@ pub fn listen(
         }
         status
     };
-    if !hub.allow_listen(address) {
-        return Err(refuse(
-            Status::Limited,
-            Listen::Limited,
-            Some(Offense::Limited),
-        ));
+    if let Some(offense) = limited(hub.allow_listen(address)) {
+        return Err(refuse(Status::Limited, Listen::Limited, offense));
     }
     if !hub.access.admit((!token.is_empty()).then_some(token)) {
         let offense = Some(Offense::BadProof);
@@ -50,13 +47,32 @@ pub fn listen(
     };
     let registration = hub
         .register(route, address)
-        .map_err(|_| refuse(Status::Full, Listen::Full, None))?;
+        .map_err(|refusal| match refusal {
+            ListenRefusal::Banned | ListenRefusal::Full => refuse(Status::Full, Listen::Full, None),
+            ListenRefusal::TooMany => refuse(Status::TooMany, Listen::Full, Some(Offense::Limited)),
+        })?;
     hub.metrics.listen(Listen::Ready);
     Ok(registration)
 }
 
-/// Applies what a listener says about who may dial it.
-pub fn apply(registration: &Registration, message: Message) -> Status {
+/// What a rate limit's `outcome` costs the caller: nothing when allowed
+/// (`None`); otherwise the refusal, with an offense only when the caller
+/// went too fast, not when the limiter was full of others.
+fn limited(outcome: Outcome) -> Option<Option<Offense>> {
+    match outcome {
+        Outcome::Allowed => None,
+        Outcome::Limited => Some(Some(Offense::Limited)),
+        Outcome::Full => Some(None),
+    }
+}
+
+/// Applies what a listener says about who may dial it, unless it says too
+/// much too fast.
+pub fn apply(hub: &Arc<Hub>, registration: &Registration, message: Message) -> Status {
+    if !registration.allow_message() {
+        hub.offend(registration.address, Offense::Limited);
+        return Status::Limited;
+    }
     match message {
         Message::DialKeys(keys) => {
             registration.set_dial_keys(&keys);
@@ -93,12 +109,8 @@ pub async fn dial(
         }
         status
     };
-    if !hub.allow_dial(address) {
-        return Err(refuse(
-            Status::Limited,
-            Dial::Limited,
-            Some(Offense::Limited),
-        ));
+    if let Some(offense) = limited(hub.allow_dial(address)) {
+        return Err(refuse(Status::Limited, Dial::Limited, offense));
     }
     if prove(key, signature, signed).is_err() {
         let offense = Some(Offense::BadProof);

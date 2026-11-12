@@ -1,6 +1,8 @@
 //! Starting the relay: QUIC, its HTTP routes and dashboard, and its
 //! metrics port.
 
+pub(crate) mod capped;
+
 use crate::{
     Error, Options, Result,
     dashboard::{self, auth::Account},
@@ -17,11 +19,18 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
+    serve::ListenerExt,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use capped::Capped;
 use secrecy::ExposeSecret;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
+
+/// HTTP connections beyond the hub's sockets: plain requests such as
+/// `/v1/info` and the dashboard, in all and from one caller.
+const HTTP_HEADROOM: usize = 1_024;
+const HTTP_HEADROOM_PER_CALLER: usize = 16;
 
 /// The shortest listen or metrics token the relay accepts.
 const MIN_TOKEN: usize = 16;
@@ -225,6 +234,14 @@ pub async fn serve(options: Options) -> Result<()> {
         limits = ?options.limits,
         "the relay is listening"
     );
+    // Room for every socket the hub admits, and plain requests beside.
+    let total = options.limits.max_connections.saturating_add(HTTP_HEADROOM);
+    let per_caller = options
+        .limits
+        .max_connections_per_ip
+        .saturating_add(HTTP_HEADROOM_PER_CALLER);
+    let idle = options.limits.idle_timeout;
+    let listener = Capped::new(listener, total, per_caller, idle).tap_io(|_| ());
     axum::serve(
         listener,
         router.into_make_service_with_connect_info::<SocketAddr>(),
