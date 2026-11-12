@@ -10,6 +10,7 @@ mod cross_site;
 mod dashboard;
 mod guard;
 mod history;
+mod identity;
 mod keys;
 mod lockout;
 mod metrics;
@@ -63,7 +64,7 @@ pub(crate) struct Relay {
 
 /// Serves a relay with `options` on loopback ports, QUIC included.
 pub(crate) async fn start_both(options: &Options) -> Relay {
-    let (endpoint, info) = crate::bind_quic("127.0.0.1:0".parse().unwrap(), None).unwrap();
+    let (endpoint, info) = crate::bind_quic("127.0.0.1:0".parse().unwrap(), None, None).unwrap();
     let quic = endpoint.local_addr().unwrap();
     let pin = URL_SAFE_NO_PAD
         .decode(&info.pin)

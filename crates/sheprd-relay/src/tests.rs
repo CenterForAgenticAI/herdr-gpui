@@ -4,9 +4,12 @@
 
 mod directory;
 mod endpoint;
+mod public_hosts;
 mod route;
 #[cfg(feature = "server")]
 mod server;
+#[cfg(feature = "signed-directory")]
+mod signed_directory;
 mod socket;
 mod wire;
 

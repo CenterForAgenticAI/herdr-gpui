@@ -86,6 +86,21 @@ impl Endpoint {
         self.base.scheme() == "https"
     }
 
+    /// Whether the relay's host is one the public internet reaches: not
+    /// this computer, a private, link-local, shared (CGNAT), or reserved
+    /// address, a `.local` or `.internal` name, nor a name such as
+    /// `10.0.0.5.sslip.io` that spells out one. It cannot see where a
+    /// public-looking name resolves: clients check that before connecting.
+    #[must_use]
+    pub fn is_public(&self) -> bool {
+        match self.base.host() {
+            None => false,
+            Some(Host::Ipv4(address)) => public(IpAddr::V4(address)),
+            Some(Host::Ipv6(address)) => public(IpAddr::V6(address)),
+            Some(Host::Domain(name)) => public_name(name),
+        }
+    }
+
     /// The host alone, to resolve for QUIC; IPv6 without brackets.
     #[must_use]
     pub fn hostname(&self) -> String {
@@ -96,7 +111,7 @@ impl Endpoint {
         }
     }
 
-    /// The `Host` a listener signs over, as its WebSocket client sends it.
+    /// The `Host` its WebSocket client sends.
     #[must_use]
     pub fn host(&self) -> String {
         let host = self.base.host_str().unwrap_or_default();
@@ -104,6 +119,16 @@ impl Endpoint {
             Some(port) => format!("{host}:{port}"),
             None => host.to_owned(),
         }
+    }
+
+    /// The name WebSocket proofs sign over: the host, and the path prefix
+    /// when there is one (`relay.example.org/sheprd`). Two relays under one
+    /// host on different prefixes then have different names, so one cannot
+    /// pass the other's challenge through.
+    #[must_use]
+    pub fn proof_name(&self) -> String {
+        let prefix = self.base.path().trim_end_matches('/');
+        format!("{}{prefix}", self.host())
     }
 
     /// `GET`, for checking a relay before using it: `/v1/info`.
@@ -156,6 +181,76 @@ fn private(address: IpAddr) -> bool {
             address.is_loopback() || address.is_unique_local() || address.is_unicast_link_local()
         }
     }
+}
+
+/// Whether the public internet routes to `address`: unicast, and not
+/// loopback, private, link-local, shared (100.64.0.0/10), documentation,
+/// or otherwise reserved.
+#[must_use]
+pub fn public(address: IpAddr) -> bool {
+    match address.to_canonical() {
+        IpAddr::V4(address) => {
+            let [first, second, ..] = address.octets();
+            !(address.is_unspecified()
+                || address.is_loopback()
+                || address.is_private()
+                || address.is_link_local()
+                || address.is_broadcast()
+                || address.is_documentation()
+                || address.is_multicast()
+                || first == 0
+                || first >= 240
+                || (first == 100 && (64..128).contains(&second))
+                || (first == 192 && second == 0 && address.octets()[2] == 0)
+                || (first == 198 && (18..20).contains(&second)))
+        }
+        IpAddr::V6(address) => {
+            let segments = address.segments();
+            !(address.is_unspecified()
+                || address.is_loopback()
+                || address.is_multicast()
+                || address.is_unique_local()
+                || address.is_unicast_link_local()
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+                || segments[0] & 0xe000 != 0x2000)
+        }
+    }
+}
+
+/// Whether a host name could be public: not a local or internal name, and
+/// not one that spells out an address that is not public, as wildcard DNS
+/// services such as sslip.io and nip.io resolve them (`10.0.0.5.sslip.io`,
+/// `10-0-0-5.nip.io`).
+fn public_name(name: &str) -> bool {
+    let name = name.trim_end_matches('.').to_ascii_lowercase();
+    let local = [
+        "localhost",
+        "local",
+        "internal",
+        "lan",
+        "home.arpa",
+        "intranet",
+    ];
+    if local
+        .iter()
+        .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")))
+    {
+        return false;
+    }
+    let labels: Vec<&str> = name.split('.').collect();
+    // Four dotted labels anywhere, or a label ending in four dashed parts,
+    // read as IPv4.
+    let dotted = labels
+        .windows(4)
+        .filter_map(|window| window.join(".").parse::<std::net::Ipv4Addr>().ok());
+    let dashed = labels.iter().filter_map(|label| {
+        let parts: Vec<&str> = label.split('-').collect();
+        let tail = parts.get(parts.len().checked_sub(4)?..)?;
+        tail.join(".").parse::<std::net::Ipv4Addr>().ok()
+    });
+    dotted
+        .chain(dashed)
+        .all(|address| public(IpAddr::V4(address)))
 }
 
 impl fmt::Display for Endpoint {

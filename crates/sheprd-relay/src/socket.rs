@@ -1,7 +1,7 @@
 //! The WebSocket fallback's protocol, for networks that block UDP: the
 //! same steps as `wire`, as JSON text frames, then binary frames for the
 //! session. Proofs sign a nonce the relay sends and the relay's name as
-//! the peer's endpoint gives it ([`crate::Endpoint::host`]), since a
+//! the peer's endpoint gives it ([`crate::Endpoint::proof_name`]), since a
 //! WebSocket has no TLS exporter. The relay checks that name against its
 //! own configured one, never a request's `Host`, which the client sets: a
 //! relay passing another relay's challenge through could otherwise claim

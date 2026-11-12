@@ -26,6 +26,10 @@ services:
       # The directory is mounted, not the file, so editors that replace
       # the file on save still reach the relay.
       RELAY_BAN_FILE: /bans/list
+      # QUIC's certificate, kept so its pin survives restarts and can be
+      # published in Sheprd's signed relay list. The directory must be
+      # writable by the image's user, 65532 (start.sh makes it so).
+      RELAY_QUIC_IDENTITY_DIR: /quic
     ports:
       - "443:8443/udp"
       # /metrics stays on the host. Scrape it locally, through an SSH
@@ -33,6 +37,7 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./bans:/bans:ro
+      - ./quic:/quic
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

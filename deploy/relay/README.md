@@ -150,6 +150,7 @@ told what the outside looks like. Each deploy sets these for you:
 | --- | --- | --- | --- |
 | `PORT` | The HTTP port to listen on, when the platform picks it; `RELAY_LISTEN` wins | not set (8080) | set by the platform |
 | `RELAY_QUIC_PORT` | The UDP port clients reach QUIC on, when a mapping changes it | `443` (published to the container's 8443) | QUIC is off |
+| `RELAY_QUIC_IDENTITY_DIR` | Where QUIC's certificate is kept, so its pin survives restarts and can be listed in Sheprd's signed relay list | `/quic`, from `/opt/sheprd-relay/quic` | QUIC is off |
 | `RELAY_PUBLIC_HOST` | The name clients use, which WebSocket proofs must cover | `RELAY_DOMAIN` | `${APP_DOMAIN}` |
 | `RELAY_BEHIND_PROXY` | Take callers' addresses from the last entry of the last `X-Forwarded-For` line; only behind a proxy that appends to that header or replaces it, as Caddy does | `1` (Caddy) | not set |
 | `RELAY_CLIENT_IP_HEADER` | Take them from this header instead | not set | `do-connecting-ip` |
@@ -243,17 +244,21 @@ turns the automatic bans off.
 ## Listing a relay as one of Sheprd's
 
 Sheprd's own relays are whatever `https://sheprd.org/relays.json` lists,
-from `website/site/relays.json` in this repository. To add one once it
-answers `https://DOMAIN/v1/info`, add an entry and deploy the site:
+from `website/site/relays.json` in this repository. Clients take the list
+only when it is signed by the maintainer's OpenPGP key or the site
+workflow's Ed25519 key (`docs/relay-plan.md`), so never edit it by hand.
+Once a relay answers `https://DOMAIN/v1/info`:
 
-```json
-{
-  "version": 1,
-  "relays": [
-    { "endpoint": "https://fra1.relay.sheprd.org", "region": "fra1", "name": "Frankfurt" }
-  ]
-}
+```sh
+just relays-add https://fra1.relay.sheprd.org fra1 Frankfurt   # reads its QUIC pin, signs (a key tap)
+just relays-remove https://fra1.relay.sheprd.org               # retire one
+just relays-sign                                               # re-sign before the list expires (a year)
 ```
+
+Each one stamps a new serial and expiry, signs with `gpg`, and checks the
+result as clients will. Compare the QUIC pin `relays-add` prints with the
+`pin=` the relay logged at start. Commit `relays.json` and
+`relays.json.asc` together; the site deploy adds `relays.json.sig`.
 
 Remove an entry to retire a relay, or empty the list to take them all out
 of service: Sheprd then shows "No Sheprd relays are available for now", and

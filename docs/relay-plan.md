@@ -115,8 +115,8 @@ Statuses: `0` ok, `1` offline, `2` busy, `3` timeout, `4` limited,
 
 | Route | What it does |
 | --- | --- |
-| `GET /v1/listen` | A computer's control socket. The relay sends `{"t":"challenge","nonce","version":1}`; the computer answers `{"key","signature","token"?}` over `"sheprd-relay/listen/v1\0" ‖ Host ‖ 0x00 ‖ nonce`. Binding the Host stops one relay passing another's challenge through. The relay answers `{"t":"ready","route"}`. The computer sends `{"t":"dial_keys","keys"}` and `{"t":"pairing_key","key","seconds"}`, each answered `{"t":"status","status"}`, and hears `{"t":"incoming","session","key"}` for each dial. A newer listener with the same key replaces the older one, which is closed with 4409. |
-| `GET /v1/dial/{route}` | The same challenge; the device answers `{"key","signature"}` over `"sheprd-relay/dial/v1\0" ‖ Host ‖ 0x00 ‖ nonce ‖ route`, then hears `{"t":"status","status"}` with the same statuses as QUIC. After `ok`, binary frames are the session. |
+| `GET /v1/listen` | A computer's control socket. The relay sends `{"t":"challenge","nonce","version":1}`; the computer answers `{"key","signature","token"?}` over `"sheprd-relay/listen/v1\0" ‖ name ‖ 0x00 ‖ nonce`, where the name is the relay's host and path prefix as its endpoint gives them (`Endpoint::proof_name`, `relay.example.org/sheprd`). Binding the name stops one relay passing another's challenge through, prefixes included. The relay answers `{"t":"ready","route"}`. The computer sends `{"t":"dial_keys","keys"}` and `{"t":"pairing_key","key","seconds"}`, each answered `{"t":"status","status"}`, and hears `{"t":"incoming","session","key"}` for each dial. A newer listener with the same key replaces the older one, which is closed with 4409. |
+| `GET /v1/dial/{route}` | The same challenge; the device answers `{"key","signature"}` over `"sheprd-relay/dial/v1\0" ‖ name ‖ 0x00 ‖ nonce ‖ route`, then hears `{"t":"status","status"}` with the same statuses as QUIC. After `ok`, binary frames are the session. |
 | `GET /v1/accept/{session}` | The listener's socket for one dial. The session id is 128 random bits that only the listener learns, and it can be claimed once. |
 | `GET /v1/info` | `{"protocol":1,"version","listen_token":bool,"quic":{"port","pin"},"websocket":bool}`, so a client can check an endpoint, know to ask for a token, and reach QUIC, before saving it. |
 | `GET /healthz` | For uptime checks. |
@@ -357,30 +357,48 @@ relays = "default"   # Sheprd's relays (the default). Or one of:
 
   ```json
   { "version": 1, "relays": [
-    { "endpoint": "https://fra1.relay.sheprd.org", "region": "fra1", "name": "Frankfurt" }
-  ] }
+    { "endpoint": "https://fra1.relay.sheprd.org", "region": "fra1", "name": "Frankfurt",
+      "quic_pin": "base64url SHA-256 of its QUIC certificate" }
+  ], "serial": 1794506367, "expires": 1826042367 }
   ```
 
-  Adding or removing a relay is a change to `website/site/relays.json` and
-  a site deploy; clients pick it up within the hour. The URL is compiled
-  in, the parser strict (64 KiB, 64 relays, `https` only, duplicates
-  dropped, unknown fields ignored).
-- The list is signed, so changing sheprd.org, its host, or its DNS cannot
-  redirect clients (planned, phase 3). Whoever controls the list would
+  Adding or removing a relay is `just relays-add ENDPOINT REGION NAME` or
+  `just relays-remove ENDPOINT`, then committing `website/site/relays.json`
+  and `relays.json.asc` and letting the site deploy; clients pick it up
+  within the hour. `just relays-sign` re-signs the list as it is, before it
+  expires. The URL is compiled in, the parser strict (64 KiB, 64 relays,
+  `https` on public hosts only, duplicates dropped, unknown fields
+  ignored).
+- A relay listed with its `quic_pin` keeps its QUIC certificate across
+  restarts (`RELAY_QUIC_IDENTITY_DIR`; `deploy/relay` keeps it in
+  `/opt/sheprd-relay/quic`). Clients pin that signed value rather than the
+  one `/v1/info` reports over ordinary HTTPS, which a TLS-inspecting proxy
+  or a mis-issued certificate could forge. `just relays-add` reads the pin
+  from `/v1/info` and prints it, to compare with the `pin=` the relay logs
+  at start before signing.
+- The list is signed (`sheprd_relay::directory::signed`, behind the
+  `signed-directory` feature), so changing sheprd.org, its host, or its
+  DNS cannot redirect clients. Whoever controls the list would
   otherwise learn every computer's address, route, dial keys, and online
   times, could cut everyone off, and could aim every daemon at a host of
   their choosing. Clients accept the list when either of two compiled-in
   signers signed it, and Settings and `sheprd remote status` say which:
   - **Fabien Penso's OpenPGP key**, `gpg@pen.so`, fingerprint
     `3103 20A8 CC1C 5BA8 6AD0 9040 C045 1BAD F764 9BBF`, published on
-    pen.so so anyone can check it. The signing subkey lives on a YubiKey;
-    `relays.json.asc` is a detached armored signature made by hand
-    (`gpg --detach-sign --armor`). "Validated by Fabien Penso (OpenPGP
-    …9BBF)".
-  - **The site workflow's Ed25519 key**, a secret of a protected GitHub
-    environment, as the updater's manifest key is; the deploy writes
-    `relays.json.sig` after an approved run. "Validated by GitHub Actions
-    (sheprd-labs/sheprd)".
+    pen.so so anyone can check it, compiled in from
+    `crates/sheprd-relay/keys/maintainer.asc`. The signing subkey lives on
+    a YubiKey; `relays.json.asc` is its detached armored signature, made by
+    `just relays-sign`. Clients check the subkey's binding, its backward
+    signature, its signing flag, and its expiry. "Validated by Fabien Penso
+    (OpenPGP …F764 9BBF)".
+  - **The site workflow's Ed25519 key**, `RELAYS_SIGNING_KEY`, a secret of
+    the `relays` environment (allowed on `main` only), received only by the
+    `sign-relays` job of `site.yml`, which checks it against
+    `crates/sheprd-relay/keys/actions.ed25519.hex` and publishes
+    `relays.json.sig`, its raw 64-byte signature over the exact bytes
+    deployed. "Validated by GitHub Actions (sheprd-labs/sheprd)". Whoever
+    can change that workflow on `main` can have a list signed this way;
+    required reviewers on the environment narrow that to approved runs.
   - The signed list carries a `serial` and an `expires` time: a client
     refuses a list older than the one it keeps, or expired, so an old
     signed list cannot be replayed. A list neither signer signed is
@@ -573,6 +591,60 @@ timing, and padded sizes. It cannot read prompts, output, tokens, or file
 names, cannot inject or reorder records, and cannot complete a handshake
 with either side.
 
+**Nothing crosses a relay before this ships.** The relay cannot enforce
+encryption: the "blind pipe" claim rests entirely on this layer. Until the
+Noise tunnel is built and reviewed, no client sends anything through a
+relay, and when client code lands, the only way to get a relay stream is
+through a completed Noise handshake.
+
+### What clients must hold to
+
+The relay's word is not authorization. These are requirements on clients,
+since the relay cannot check them:
+
+- **Authorize on the Noise identity, never the relay's header.** The dialer
+  key in a listener's `incoming` message is what the relay says. A
+  computer accepts a session only when the dialer's Noise static key is a
+  paired device's, whatever key the relay named.
+- **Trust a relay's QUIC pin from the signed list**, not `/v1/info`, for
+  Sheprd's relays. `/v1/info` comes over ordinary HTTPS, which a
+  TLS-inspecting proxy or a mis-issued certificate could forge. A private
+  relay's pin is read from `/v1/info` once and kept; a change asks the
+  user.
+- **Refuse private addresses for public relays.** `Directory::parse`
+  refuses non-public hosts in the list, but cannot see where a public
+  name resolves: a client checks the resolved address before connecting
+  to one of Sheprd's relays.
+- **Send the listen token only over TLS.** `Endpoint` allows plain
+  `http://` for this computer, a private address, or `.local`, but a
+  client sends a listen token over it only to loopback: whoever answers
+  mDNS for a `.local` name would otherwise read it.
+- **Use a different relay key, and so a different route, per relay**,
+  derived from the computer's key and the relay's endpoint, so one route
+  does not link a computer across relays.
+- **A stolen relay key** lets its holder contend with the computer for its
+  route, until the computer rotates the key; **a stolen dial key** holds at
+  most `max-sessions-per-key` sessions (4) until it is revoked. Neither
+  reaches the computer past the Noise handshake.
+- **Pairing:** a QR photographed in its two minutes lets someone raise an
+  approval prompt with a device name of their choosing. The prompt marks
+  the device as new and unverified, and approval requires comparing the
+  code shown on both screens.
+
+### What a TLS terminator sees
+
+Whoever terminates the relay's TLS (the proxy in front, a platform, a
+TLS-inspecting middlebox, or the relay itself) sees addresses, timing,
+sizes, routes, and which key reaches which route, and can deny service. It
+can also take over an authenticated WebSocket listen socket, since a
+WebSocket proof cannot be bound to a TLS channel the relay does not end,
+and name its own dial key. That reaches the computer's Noise handshake and
+no further, so listener messages are not signed: signing them would add a
+protocol step that guards nothing the handshake does not. QUIC proofs are
+bound to the TLS session and need none of this. The default
+`IP.sslip.io` name puts sslip.io's DNS in that path too; a relay meant to
+last uses its own domain.
+
 ## Clients
 
 ### Daemon (`sheprd-remote-control`)
@@ -644,8 +716,10 @@ holds no relay secrets and deploys nothing.
 
 ### Before the first public relay
 
-- Make the GHCR package public once, and pin the Dockerfile's base images by
-  digest.
+- Make the GHCR package public once.
+- Create the `relays` environment (allowed on `main`), store
+  `RELAYS_SIGNING_KEY` in it, and sign the first list with
+  `just relays-sign`.
 - Load-test a 1 GB droplet: listeners held, sessions, and throughput at the
   default limits, measured rather than estimated.
 

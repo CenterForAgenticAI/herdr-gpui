@@ -60,6 +60,11 @@ write_files:
       (umask 022; mkdir -p bans; [ -f bans/list ] || printf '# One address or range per line, e.g. 203.0.113.0/24\n' > bans/list)
       chmod 755 bans
       chmod 644 bans/list
+      # QUIC's certificate lives here across restarts, for the relay's
+      # user only (65532, distroless's nonroot).
+      mkdir -p quic
+      chown 65532:65532 quic
+      chmod 700 quic
       # cosign, pinned to the release relay-image.yml signs with, and checked
       # against the SHA-256 in that release's signed cosign_checksums.txt.
       cosign_version=v2.6.5

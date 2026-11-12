@@ -31,8 +31,13 @@ Every option is optional, and each can also be set as a RELAY_* variable
                                  (default 127.0.0.1:8443)
   --quic-port PORT               The UDP port clients reach QUIC on, when a
                                  mapping changes it (default: --quic's)
+  --quic-identity-dir DIR        Keep QUIC's certificate here, so its pin
+                                 survives restarts and can be published in a
+                                 signed relay list (default: a new one each
+                                 start)
   --metrics ADDRESS|off          Prometheus /metrics (default 127.0.0.1:9090)
-  --public-host HOST[:PORT]      The name clients reach this relay by, as in
+  --public-host HOST[:PORT][/PREFIX]
+                                 The name clients reach this relay by, as in
                                  their endpoint (relay.example.org). WebSocket
                                  proofs are checked against it, never against a
                                  request's Host header; without it the
@@ -138,6 +143,7 @@ pub const SETTINGS: &[(&str, Kind)] = &[
     ("metrics-token-file", Kind::File),
     ("public-host", Kind::Text),
     ("quic", Kind::Address),
+    ("quic-identity-dir", Kind::Text),
     ("quic-port", Kind::Port),
     ("session-bandwidth", Kind::Bytes),
     ("total-bandwidth", Kind::Bytes),
@@ -173,12 +179,14 @@ pub struct Options {
     /// Where `/metrics` is served, or `None` when it is off.
     pub metrics: Option<SocketAddr>,
     pub metrics_token: Option<SecretString>,
-    /// The relay's own name, `HOST[:PORT]` as clients' endpoints give it.
+    /// The relay's own name, `HOST[:PORT][/PREFIX]` as clients' endpoints give it.
     /// WebSocket proofs are checked against it; without it, the WebSocket
     /// fallback is off.
     pub public_host: Option<String>,
     /// Where QUIC listens, or `None` when it is off.
     pub quic: Option<SocketAddr>,
+    /// Where QUIC's certificate is kept across restarts, if anywhere.
+    pub quic_identity: Option<PathBuf>,
     /// The port clients reach QUIC on, when it differs from `quic`'s.
     pub quic_port: Option<u16>,
 }
@@ -198,6 +206,7 @@ impl Default for Options {
             metrics_token: None,
             public_host: None,
             quic: Some(SocketAddr::from(([127, 0, 0, 1], 8443))),
+            quic_identity: None,
             quic_port: None,
         }
     }
@@ -372,6 +381,7 @@ impl Options {
             "public-host" => self.public_host = Some(public_host(text).ok_or_else(invalid)?),
             "quic" if text == "off" => self.quic = None,
             "quic" => self.quic = Some(text.parse().map_err(|_| invalid())?),
+            "quic-identity-dir" => self.quic_identity = Some(PathBuf::from(text)),
             "quic-port" => {
                 self.quic_port = Some(
                     text.parse()
@@ -388,17 +398,17 @@ impl Options {
     }
 }
 
-/// `text` as clients sign it: what [`crate::Endpoint::host`] gives for the
+/// `text` as clients sign it: what [`crate::Endpoint::proof_name`] gives for the
 /// same address, so `RELAY.EXAMPLE.ORG:443` becomes `relay.example.org`.
 #[must_use]
 pub fn public_host(text: &str) -> Option<String> {
     let text = text.trim();
-    if text.is_empty() || text.contains('/') || text.contains('@') {
+    if text.is_empty() || text.contains("://") || text.contains('@') {
         return None;
     }
     crate::Endpoint::parse(&format!("https://{text}"))
         .ok()
-        .map(|endpoint| endpoint.host())
+        .map(|endpoint| endpoint.proof_name())
 }
 
 /// A secret file's text, trimmed; refuses an empty one.

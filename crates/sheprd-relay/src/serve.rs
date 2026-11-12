@@ -184,7 +184,7 @@ async fn bind(address: SocketAddr) -> Result<TcpListener> {
 pub async fn serve(options: Options) -> Result<()> {
     let quic = options
         .quic
-        .map(|address| bind_quic(address, options.quic_port))
+        .map(|address| bind_quic(address, options.quic_port, options.quic_identity.as_deref()))
         .transpose()?;
     let (router, hub) = app(&options, quic.as_ref().map(|(_, info)| info.clone()))?;
     if let Some(file) = options.ban_file.clone() {
@@ -260,9 +260,17 @@ pub async fn serve(options: Options) -> Result<()> {
     Ok(())
 }
 
-/// Binds QUIC on `address` with a fresh identity; what clients learn of it.
-pub fn bind_quic(address: SocketAddr, port: Option<u16>) -> Result<(quinn::Endpoint, QuicInfo)> {
-    let identity = Identity::generate()?;
+/// Binds QUIC on `address` with the identity kept in `identity`, or a
+/// fresh one; what clients learn of it.
+pub fn bind_quic(
+    address: SocketAddr,
+    port: Option<u16>,
+    identity: Option<&std::path::Path>,
+) -> Result<(quinn::Endpoint, QuicInfo)> {
+    let identity = match identity {
+        Some(directory) => Identity::kept(directory)?,
+        None => Identity::generate()?,
+    };
     let endpoint = quic::bind(address, &identity)?;
     let bound = endpoint
         .local_addr()

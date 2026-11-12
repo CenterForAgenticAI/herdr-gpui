@@ -15,6 +15,10 @@ workspace = true
 # endpoints, routes, and the listener's proof alone, so Tokio and axum
 # never reach them.
 default = ["server"]
+# Checking that Sheprd's relay list is genuine (`directory::signed`): the
+# maintainer's OpenPGP signature or the site workflow's Ed25519 one. For
+# clients that fetch the list; the relay itself never reads it.
+signed-directory = ["dep:ed25519-dalek", "dep:pgp"]
 server = [
   "dep:axum",
   "dep:futures-util",
@@ -33,6 +37,10 @@ server = [
 name              = "sheprd-relay"
 required-features = ["server"]
 
+[[example]]
+name              = "relays"
+required-features = ["signed-directory"]
+
 [dependencies]
 base64.workspace     = true
 getrandom.workspace  = true
@@ -43,7 +51,9 @@ sha2.workspace       = true
 thiserror.workspace  = true
 url.workspace        = true
 
-axum = { optional = true, workspace = true }
+axum          = { optional = true, workspace = true }
+ed25519-dalek = { optional = true, workspace = true }
+pgp           = { optional = true, workspace = true }
 # `split` lets each direction of a spliced pair wait on its own throttle.
 futures-util       = { features = ["std"], optional = true, workspace = true }
 hmac               = { optional = true, workspace = true }
@@ -57,6 +67,7 @@ tracing            = { optional = true, workspace = true }
 tracing-subscriber = { features = ["fmt"], optional = true, workspace = true }
 
 [dev-dependencies]
+anyhow.workspace            = true
 http-body-util.workspace    = true
 serde_json.workspace        = true
 tokio                       = { features = ["test-util"], workspace = true }
