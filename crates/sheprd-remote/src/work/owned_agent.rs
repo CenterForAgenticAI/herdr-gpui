@@ -155,15 +155,15 @@ fn select(
         || terminal.cwd != path
         || terminal.argv != argv
         // Recovery types into the agent, so it must still be in front. A
-        // cleanup only ends the terminal: its label, command, checkout, and
-        // address prove ownership even once the agent exited and `--keep`
-        // left a shell there, as every finished run does.
+        // cleanup only ends the terminal, which may also be the shell
+        // `--keep` left at its prompt once the agent exited, as every
+        // finished run does; a program started there since is the user's.
         || (terminal.state == TerminalState::Live
-            && !include_finished
             && !terminal.foreground.as_ref().is_some_and(|foreground| {
                 crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
                     == Some(kind)
                     || foreground.argv == argv
+                    || (include_finished && at_prompt(&foreground.name, &foreground.argv))
             }))
         || expected.is_some_and(|expected| terminal.address != expected)
     {
@@ -180,6 +180,19 @@ fn command(agent: &Agent<'_>) -> Vec<String> {
         argv.extend(["--model".into(), model.into()]);
     }
     argv
+}
+
+/// Whether a foreground process is a bare shell waiting at its prompt:
+/// a shell given only options, not a script or command to run.
+fn at_prompt(name: &str, argv: &[String]) -> bool {
+    match argv.split_first() {
+        Some((program, options)) => {
+            crate::teleport::is_shell(program)
+                && options.iter().all(|arg| arg.starts_with('-'))
+                && !options.iter().any(|arg| arg == "-c")
+        }
+        None => crate::teleport::is_shell(name),
+    }
 }
 
 #[cfg(test)]

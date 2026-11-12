@@ -101,13 +101,14 @@ fn a_kept_shell_does_not_inherit_the_original_agents_ownership() {
 }
 
 /// A finished agent leaves `--keep`'s shell in its terminal. Cleanup may
-/// end that terminal by its ownership label and command, but recovery,
+/// end that terminal by its ownership label and command while the shell
+/// waits at its prompt, never once the user runs something there; recovery,
 /// which types into it, never takes the shell for the agent.
 #[test]
 fn cleanup_can_end_the_kept_shell_a_finished_agent_left() {
-    let mut shell = terminal("lane-a", "/work/a", "t7");
-    shell["foreground"] = serde_json::json!({"name":"zsh", "argv":["-zsh"], "pid":43});
-    let inspect = |shell: &serde_json::Value, include_finished| {
+    let inspect = |foreground: serde_json::Value, label: &str, include_finished| {
+        let mut shell = terminal(label, "/work/a", "t7");
+        shell["foreground"] = foreground;
         super::select(
             list(serde_json::json!([shell])),
             "/work/a",
@@ -121,9 +122,28 @@ fn cleanup_can_end_the_kept_shell_a_finished_agent_left() {
             crate::teleport::AgentKind::Claude,
         )
     };
-    assert!(matches!(inspect(&shell, true), Ok(Started::Herdr2 { terminal }) if terminal == "t7"));
-    assert!(matches!(inspect(&shell, false), Err(Error::Uncertain)));
+    let prompt = || serde_json::json!({"name":"zsh", "argv":["-zsh"], "pid":43});
+    assert!(matches!(
+        inspect(prompt(), "lane-a", true),
+        Ok(Started::Herdr2 { terminal }) if terminal == "t7"
+    ));
+    assert!(matches!(
+        inspect(prompt(), "lane-a", false),
+        Err(Error::Uncertain)
+    ));
     // Ownership still rests on the label: another lane's shell is not ours.
-    shell["labels"] = serde_json::json!({OWNER: "lane-b"});
-    assert!(matches!(inspect(&shell, true), Err(Error::Uncertain)));
+    assert!(matches!(
+        inspect(prompt(), "lane-b", true),
+        Err(Error::Uncertain)
+    ));
+    for work in [
+        serde_json::json!({"name":"vim", "argv":["vim", "notes.md"], "pid":44}),
+        serde_json::json!({"name":"bash", "argv":["/bin/bash", "deploy.sh"], "pid":45}),
+        serde_json::json!({"name":"sh", "argv":["sh", "-c", "make"], "pid":46}),
+    ] {
+        assert!(
+            matches!(inspect(work.clone(), "lane-a", true), Err(Error::Uncertain)),
+            "{work}"
+        );
+    }
 }
