@@ -9,6 +9,7 @@ use sheprd_client::protocol::AgentStatus;
 mod author_column;
 mod azure_browse;
 mod browse_pages;
+mod cli_project;
 mod clicks;
 mod conversation;
 mod conversation_list;
