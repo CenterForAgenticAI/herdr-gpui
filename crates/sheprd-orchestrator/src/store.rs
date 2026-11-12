@@ -19,6 +19,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(test)]
+pub(crate) mod faults;
+
 /// The newest schema this build reads and writes.
 pub const SCHEMA_VERSION: i64 = 7;
 
@@ -368,6 +371,10 @@ impl Store {
     /// refuses one removed since it was read, so an action finishing late
     /// never brings a removed run and its session back.
     pub fn update_run(&mut self, run: &Run, session: Option<&HerdrSession>) -> Result<()> {
+        #[cfg(test)]
+        if session.is_some() {
+            faults::before_session_update()?;
+        }
         self.write_run(run, session, true)
     }
 

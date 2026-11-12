@@ -6,6 +6,7 @@ use super::*;
 fn a_failed_kept_checkout_lookup_is_a_localized_host_git_failure() {
     let temp = tempfile::tempdir().unwrap();
     let missing = temp.path().join("missing");
+    // The lookup runs Git on the workspace's host, here this computer.
     let error = super::super::kept_script_checkout(
         &sheprd_client::ConnectTarget::Local,
         missing.to_str().unwrap(),
@@ -17,7 +18,7 @@ fn a_failed_kept_checkout_lookup_is_a_localized_host_git_failure() {
         ..
     })) = &error
     else {
-        panic!("expected the host's Git checkout lookup to fail, got {error:?}");
+        panic!("expected a host Git checkout lookup failure, got {error:?}");
     };
     crate::i18n::errors::tests::assert_localized(&[error]);
 }

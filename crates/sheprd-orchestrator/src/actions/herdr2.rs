@@ -5,7 +5,7 @@
 
 use super::{
     super::model::{Pane, Workspace},
-    Destination, DispatchRequest, place,
+    Attempt, Destination, DispatchRequest, place,
 };
 use crate::{Backend, Error, HerdrSession, Result, Run, RunState, Store, error::script};
 use chrono::Utc;
@@ -90,7 +90,7 @@ pub(super) fn launch(
     name: &str,
     run: &mut Run,
     store: &mut Store,
-    created: &mut Option<(Host, Worktree)>,
+    attempt: &mut Attempt,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     let host = &destination.host;
@@ -102,7 +102,7 @@ pub(super) fn launch(
     let worktree = work::owned_checkout::plan(host, checkout, &request.branch, cancelled)?;
     // Creation itself can lose its reply. Record its planned path first and
     // never delete a path without the successful-creation receipt.
-    *created = None;
+    attempt.created = None;
     let (ssh, session) = place(&destination.target);
     run.workspace = Some(Workspace {
         backend: Backend::Herdr,
@@ -135,7 +135,7 @@ pub(super) fn launch(
     };
     // From the launch intent onward, a lost reply can mean the agent is
     // already working. Keep its checkout and receipt; never replay a prompt.
-    *created = None;
+    attempt.created = None;
     let started = work::owned_agent::start(host, &worktree, &agent, owner(name), cancelled)?;
     let Started::Herdr2 { terminal } = &started else {
         return Err(Error::Output {
@@ -155,6 +155,7 @@ pub(super) fn launch(
         agent_name: name.to_owned(),
         updated_at: Utc::now(),
     };
+    attempt.retained_session = Some(herdr_session.clone());
     prompt(
         host,
         &started,

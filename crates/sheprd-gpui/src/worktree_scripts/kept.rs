@@ -44,6 +44,9 @@ pub(crate) struct Kept {
 /// removed once the script succeeds, and stays when it fails.
 #[derive(Debug)]
 struct Archive {
+    /// Preserve a known exit while checkout metadata is unavailable; the
+    /// terminal view may be pruned before its host answers Git again.
+    ended: Option<Ended>,
     identity: Option<(String, Option<String>)>,
     scope: crate::browser::Scope,
     target: sheprd_client::ConnectTarget,
@@ -61,6 +64,7 @@ struct Archive {
 }
 
 /// What became of a followed archive this tick.
+#[derive(Clone, Copy, Debug)]
 enum Ended {
     /// Its terminal never showed up, or its workspace closed: let it go.
     Gone,
@@ -113,6 +117,7 @@ impl SheprdWindow {
         self.start_in_kept_workspace(&launch.workspace, spawn, cx)?;
         if archive {
             self.kept_scripts.archives.push(Archive {
+                ended: None,
                 identity: Some((
                     launch.repo_key.clone(),
                     self.sessions(self.selected_endpoint)
@@ -283,6 +288,16 @@ impl SheprdWindow {
         }) else {
             return Some(Ended::Gone);
         };
+        let kept = cx
+            .try_global::<crate::browser::Store>()
+            .is_some_and(|store| {
+                store
+                    .kept_workspace(&archive.scope, &archive.workspace)
+                    .is_some()
+            });
+        if !kept {
+            return Some(Ended::Gone);
+        }
         let identity = archive
             .identity
             .as_ref()
@@ -297,6 +312,7 @@ impl SheprdWindow {
         if identity == Identity::Changed {
             return Some(Ended::Gone);
         }
+        let identity_ready = identity == Identity::Same;
         let host = crate::core_terminals::Host::of(&archive.scope);
         if archive.terminal.is_none() {
             archive.terminal = self.host_terminal_labelled(&host, ARCHIVE_LABEL, &archive.attempt);
@@ -304,37 +320,30 @@ impl SheprdWindow {
         let Some(terminal) = &archive.terminal else {
             return (archive.started.elapsed() > ARCHIVE_START_WAIT).then_some(Ended::Gone);
         };
+        if archive.ended.is_none() {
+            archive.ended = self.host_terminal_exit(&host, terminal, cx).map(|exit| {
+                if exit.code == Some(0) {
+                    Ended::Succeeded
+                } else {
+                    Ended::Failed
+                }
+            });
+        }
         // A tab closed on the script cancels it: nothing is removed, and
         // the next archive of the workspace may start. One never shown
         // within the start wait was not opened at all.
         let shown = self.host_terminal_shown(&host, terminal);
         if shown {
             archive.shown = true;
-        } else if archive.shown || archive.started.elapsed() > ARCHIVE_START_WAIT {
+        } else if archive.ended.is_none()
+            && (archive.shown || archive.started.elapsed() > ARCHIVE_START_WAIT)
+        {
             return Some(Ended::Gone);
         }
-        // Closed with its workspace: nothing is left to remove for.
-        let kept = cx
-            .try_global::<crate::browser::Store>()
-            .is_some_and(|store| {
-                store
-                    .kept_workspace(&archive.scope, &archive.workspace)
-                    .is_some()
-            });
-        if !kept {
-            return Some(Ended::Gone);
+        match archive.ended {
+            Some(Ended::Succeeded) if !identity_ready => None,
+            ended => ended,
         }
-        let exit = self.host_terminal_exit(&host, terminal, cx)?;
-        // Nothing is removed until the checkout is known to be the one the
-        // archive started in; a closed tab above still cancels it.
-        if identity == Identity::Unknown {
-            return None;
-        }
-        Some(if exit.code == Some(0) {
-            Ended::Succeeded
-        } else {
-            Ended::Failed
-        })
     }
 }
 
@@ -343,12 +352,12 @@ impl SheprdWindow {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Identity {
     Same,
-    /// The workspace closed, or holds another branch or checkout: nothing
-    /// of the archived checkout is left to remove for.
+    /// The workspace holds another branch or checkout: nothing of the
+    /// archived checkout is left to remove for.
     Changed,
-    /// The workspace is there but its worktree is not yet known, as while a
-    /// remote Git lookup fails: the archive keeps waiting rather than
-    /// dropping a deletion the user asked for.
+    /// The workspace or its worktree is not known yet, as while a remote
+    /// Git lookup fails: a failed query is no evidence of a replacement, so
+    /// the archive keeps waiting rather than dropping a deletion asked for.
     Unknown,
 }
 
@@ -357,21 +366,16 @@ fn checkout_identity(
     key: &str,
     branch: Option<&str>,
 ) -> Identity {
-    let Some(workspace) = workspace else {
-        return Identity::Changed;
+    let Some((workspace, tree)) =
+        workspace.and_then(|workspace| Some((workspace, workspace.worktree.as_ref()?)))
+    else {
+        return Identity::Unknown;
     };
-    if workspace.branch.as_deref() != branch {
+    if workspace.branch.as_deref() != branch || !tree.linked || tree.key != key {
         return Identity::Changed;
     }
-    match &workspace.worktree {
-        None => Identity::Unknown,
-        Some(tree) if tree.linked && tree.key == key => Identity::Same,
-        Some(_) => Identity::Changed,
-    }
+    Identity::Same
 }
-
-#[cfg(test)]
-mod tests;
 
 // For the kept workspaces' tests, which need host scripts.
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
@@ -385,8 +389,27 @@ impl SheprdWindow {
     }
 
     pub(crate) fn follow_archive_for_test(&mut self, workspace: String, terminal: TerminalId) {
+        let path = self
+            .sessions(self.selected_endpoint)
+            .core
+            .as_ref()
+            .and_then(|session| session.workspace(&workspace))
+            .map(|workspace| workspace.cwd.clone())
+            .unwrap_or_else(|| "/nonexistent/archive-checkout".into());
+        let identity = self
+            .sessions(self.selected_endpoint)
+            .core
+            .as_ref()
+            .and_then(|session| {
+                let workspace = session.workspace(&workspace)?;
+                Some((
+                    workspace.worktree.as_ref()?.key.clone(),
+                    workspace.branch.clone(),
+                ))
+            });
         self.kept_scripts.archives.push(Archive {
-            identity: None,
+            ended: None,
+            identity,
             scope: crate::browser::scope(&self.endpoints[self.selected_endpoint]),
             target: self.endpoints[self.selected_endpoint]
                 .connection
@@ -394,7 +417,7 @@ impl SheprdWindow {
                 .clone(),
             attempt: "test-attempt".into(),
             workspace,
-            path: "/nonexistent/archive-checkout".into(),
+            path,
             force: false,
             started: Instant::now(),
             terminal: Some(terminal),
@@ -448,3 +471,6 @@ impl SheprdWindow {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

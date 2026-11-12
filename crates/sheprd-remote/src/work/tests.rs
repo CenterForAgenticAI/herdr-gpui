@@ -4,6 +4,7 @@ mod owned_cleanup;
 use sheprd_client::ConnectTarget;
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
 
+mod deadline;
 mod host_paths;
 mod uncertain_start;
 

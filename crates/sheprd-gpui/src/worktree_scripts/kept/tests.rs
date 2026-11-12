@@ -41,15 +41,25 @@ fn an_unknown_worktree_keeps_waiting() {
     );
 }
 
+/// A workspace the session does not list yet, or one whose worktree a
+/// failed lookup left unknown, is no proof of a replacement, whatever its
+/// branch reads; a closed workspace is caught by the store before this.
 #[test]
-fn a_closed_workspace_or_another_checkout_cancels_the_archive() {
+fn an_unlisted_workspace_or_unknown_worktree_keeps_waiting() {
     assert_eq!(
         checkout_identity(None, "/repo/.git", Some("lane")),
-        Identity::Changed
+        Identity::Unknown
     );
+    assert_eq!(
+        checkout_identity(Some(&workspace("other", None)), "/repo/.git", Some("lane")),
+        Identity::Unknown
+    );
+}
+
+#[test]
+fn another_checkout_cancels_the_archive() {
     for current in [
         workspace("other", Some(("/repo/.git", true))),
-        workspace("other", None),
         workspace("lane", Some(("/other/.git", true))),
         workspace("lane", Some(("/repo/.git", false))),
     ] {

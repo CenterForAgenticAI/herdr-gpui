@@ -5,10 +5,13 @@ use super::*;
 use crate::test_executable;
 
 mod cleanup;
+mod journal;
 mod legacy;
 mod ownership;
 mod remote;
 mod restart;
+mod uncertain;
+mod verified_end;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.
 pub(super) fn fake_core(dir: &Path, status: &str) {
@@ -21,6 +24,8 @@ with (home / 'core-calls').open('a') as log:
     log.write(' '.join(args) + '\n')
 inventory = home / 'core-inventory'
 if args[0] == 'run':
+    if (home / 'reject-run').exists():
+        sys.exit(1)
     label = args[args.index('--label') + 1].split('=', 1)
     terminal = {{'address':'t9', 'cwd': args[args.index('--cwd') + 1], 'argv': args[args.index('--') + 1:], 'labels': {{label[0]: label[1]}}, 'state': 'live', 'pid': 8}}
     terminal['foreground'] = {{'argv': terminal['argv'], 'name': 'claude', 'cwd': terminal['cwd'], 'pid': 9}}
