@@ -27,7 +27,9 @@ pub(crate) use error::Error;
 pub(crate) use kept::Kept;
 #[cfg(feature = "cloud")]
 pub(crate) use launch::SCRIPT_ENV;
-pub(crate) use launch::{Checkout, command_line, core_argv, created_tab, main_checkout};
+#[cfg(feature = "cloud")]
+pub(crate) use launch::core_argv;
+pub(crate) use launch::{Checkout, command_line, created_tab, main_checkout};
 pub(crate) use trust::{Grant, Trust};
 
 use crate::{

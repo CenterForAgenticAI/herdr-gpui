@@ -4,12 +4,12 @@ use super::*;
 fn an_uncertain_start_reports_its_terminal_without_claiming_prompt_success() {
     let reports = std::cell::RefCell::new(Vec::new());
     let result = retain_started(
-        Err(work::Error::Unprompted {
+        Err(work::fanout::Error::Work(work::Error::Unprompted {
             started: work::Started::Herdr2 {
                 terminal: "t9".into(),
             },
             source: Box::new(work::Error::Cancelled),
-        }),
+        })),
         2,
         &|report| {
             reports.borrow_mut().push(report);

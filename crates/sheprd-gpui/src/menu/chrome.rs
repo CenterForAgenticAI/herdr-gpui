@@ -84,12 +84,6 @@ impl SheprdWindow {
         }
     }
 
-    /// The id of the workspace the menu was opened for, whichever page it
-    /// shows now and whether or not the live snapshot still lists it.
-    pub(crate) fn menu_target_id(&self) -> Option<&str> {
-        self.menu.target.as_ref().map(|target| target.id.as_str())
-    }
-
     pub(crate) fn menu_target_current(&self) -> bool {
         self.menu.endpoint_target
             == (

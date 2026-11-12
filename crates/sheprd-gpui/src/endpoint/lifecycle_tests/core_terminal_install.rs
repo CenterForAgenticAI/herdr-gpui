@@ -82,7 +82,9 @@ fn installing_herdr_core_lets_the_host_take_herdr_2_tabs_again(cx: &mut gpui::Te
 }
 
 #[gpui::test]
-fn a_disconnected_cores_agents_never_count_when_ranking_it(cx: &mut gpui::TestAppContext) {
+fn a_disconnected_hosts_herdr_core_agents_do_not_count_when_ranking_it(
+    cx: &mut gpui::TestAppContext,
+) {
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
     let (mut remote, _server) = connected_endpoint("ssh:fixture");
     remote.connection.target = ssh();
@@ -100,9 +102,9 @@ fn a_disconnected_cores_agents_never_count_when_ranking_it(cx: &mut gpui::TestAp
             view.core_terminals
                 .record_for_test(&host, agent(id, status));
         }
-        // Dispatch samples a connected core with or without a tab of it
-        // here. This one never answered, so what it last listed may have
-        // stopped since: its agents count for nothing, tab or not.
+        // Only a connected core keeps its list current: one that never
+        // answered counts none of the agents it last reported, even with a
+        // tab of it shown here.
         assert_eq!(view.core_terminals.working(&host), 0);
         view.core_terminals.show_on_host_for_test(
             crate::browser::TabId::test(1),

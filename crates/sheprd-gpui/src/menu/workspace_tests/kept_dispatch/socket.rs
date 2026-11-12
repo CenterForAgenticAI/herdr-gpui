@@ -1,25 +1,9 @@
 use super::*;
 
-/// Points the shown endpoint at `socket` and keeps a workspace at `LINKED`
-/// there: kept workspaces are scoped by socket path, so the one `window`
-/// opened under `Local` is not this endpoint's.
-fn keep_on_socket(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext, socket: &str) -> String {
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.endpoints[0].connection.target =
-                sheprd_client::ConnectTarget::Socket(socket.into());
-            let location =
-                Location::core_terminal(Panes::single(TerminalId::new("t2").unwrap()), false);
-            view.open_kept_workspace(None, Path::new(LINKED), location, window, cx)
-        })
-    })
-    .unwrap()
-}
-
 #[gpui::test]
 fn forwarded_socket_snapshot_never_supplies_local_core_repository_paths(cx: &mut TestAppContext) {
-    let (view, cx, _) = window(cx, false);
-    keep_on_socket(&view, cx, "/private/forwarded.sock");
+    let target = sheprd_client::ConnectTarget::Socket("/private/forwarded.sock".into());
+    let (view, cx, _) = window_on(cx, false, target);
     view.update(cx, |view, cx| {
         view.config.herdr_2_terminals = true;
         view.live.missing_installation = false;
@@ -58,8 +42,8 @@ fn forwarded_socket_snapshot_never_supplies_local_core_repository_paths(cx: &mut
 
 #[gpui::test]
 fn a_custom_socket_routes_only_app_kept_work_to_local_core_files(cx: &mut TestAppContext) {
-    let (view, cx, _) = window(cx, false);
-    let workspace = keep_on_socket(&view, cx, "/private/custom-herdr.sock");
+    let target = sheprd_client::ConnectTarget::Socket("/private/custom-herdr.sock".into());
+    let (view, cx, workspace) = window_on(cx, false, target);
     view.update(cx, |view, cx| {
         let endpoint = view.endpoints[0].id.clone();
         let local = crate::teleport::host_for(&sheprd_client::ConnectTarget::Local).unwrap();

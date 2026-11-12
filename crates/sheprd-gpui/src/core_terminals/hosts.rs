@@ -60,6 +60,14 @@ pub(super) struct Remote {
 }
 
 impl CoreTerminals {
+    /// The route pinned by the hub that owns a clicked terminal. Never infer
+    /// this from whichever device is selected when a worker finishes.
+    pub(crate) fn link_target(&self, host: &Host) -> Option<&ConnectTarget> {
+        match host {
+            Host::Local => Some(&ConnectTarget::Local),
+            Host::Remote(scope) => self.remote_target(scope),
+        }
+    }
     pub(crate) fn remote_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
         self.remote.get(scope).map(|remote| &remote.target)
     }
@@ -139,12 +147,6 @@ impl CoreTerminals {
     /// What `tab`'s core reports of `terminal`.
     pub(crate) fn info(&self, tab: TabId, terminal: &TerminalId) -> Option<&TerminalInfo> {
         self.infos_of(&self.tabs.get(&tab)?.host)?.get(terminal)
-    }
-
-    /// What this computer's core reports of `terminal`, whichever tab
-    /// shows it.
-    pub(crate) fn local_info(&self, terminal: &TerminalId) -> Option<&TerminalInfo> {
-        self.infos_of(&Host::Local)?.get(terminal)
     }
 
     /// Whether `tab` types into its terminals, on any host: a tab rather
@@ -249,8 +251,7 @@ impl CoreTerminals {
     }
 
     /// Shows `terminal` of `host`'s core in `tab`, as a restored tab would.
-    // Only the lifecycle tests, which need Unix sockets, use it.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn show_on_host_for_test(&mut self, tab: TabId, host: Host, terminal: TerminalId) {
         let panes = super::panes::Panes::single(terminal);
         self.tabs

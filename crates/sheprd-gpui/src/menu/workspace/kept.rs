@@ -16,7 +16,7 @@ use sheprd_session::Keeper;
 /// with Git.
 pub(super) fn items(
     target: &WorkspaceTarget,
-    local: bool,
+    scripts: bool,
     checkout: bool,
     checkpoints: bool,
     fan_out: Option<Label>,
@@ -26,9 +26,6 @@ pub(super) fn items(
     } else {
         (WorkspaceMenuAction::Mute, Label::MUTE)
     }];
-    // Remote scripts run on the host's POSIX shell, including WSL from a
-    // Windows client. Local Windows has no POSIX script runner.
-    let scripts = !local || cfg!(any(target_os = "linux", target_os = "macos"));
     let git = scripts && matches!(target.source, Source::Directory(_));
     if git && target.worktree.is_some() {
         items.push((

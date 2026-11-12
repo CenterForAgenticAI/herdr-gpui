@@ -513,7 +513,7 @@ impl CoreTerminals {
     }
 
     /// The latest terminal waiting to start, as no core answers in tests.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "cloud"))]
     pub(crate) fn last_wanted_for_test(&self) -> Option<(&Purpose, &Spawn)> {
         let (purpose, _, spawn, _) = self.wanted.back()?;
         Some((purpose, spawn))

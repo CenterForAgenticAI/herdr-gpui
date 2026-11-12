@@ -2484,6 +2484,13 @@ reason. Lanes on another host show it next to their status, and Open, Keep and
 the comparison work across hosts; a host that cannot be read marks only its
 own lanes, keeping the changes read before.
 
+Herdr 2 origins use the same host picker, including Herdr 2-only destinations
+and mixed Herdr 1/2 destinations. The destination's backend creates its lanes:
+Herdr 1 through its daemon, Herdr 2 through Git and labelled core agent runs.
+Each lane retains its endpoint when the selected host changes; its kept
+workspace, status, Open and Keep actions follow that endpoint. A failed tab
+presentation leaves the running agent intact.
+
 Each fan-out's lanes and the last step each one reached are kept in
 `fan-outs.json` in the state directory, written before and after every step,
 until a lane is kept or the comparison is forgotten. A lane whose next step
@@ -2493,10 +2500,31 @@ warning, and each lane says where it stopped: while creating its worktree (the
 branch may exist), before its agent started, while the agent was starting, or
 while the prompt was being sent. Nothing runs by itself. Start agent or Send
 prompt finishes a lane only when clicked, and Send prompt never starts a second
-agent. A lane that fails, finishing included, offers the same button again,
-except when a Herdr 2 agent may have started but its terminal address was not
-saved before a crash. That lane cannot be resumed safely: keep its checkout
-and inspect the running terminals before starting another agent.
+agent. New Herdr 2 lanes save the exact destination before creation and write
+an ownership receipt after Git succeeds. Start agent recovers an interrupted
+creation only when that receipt, linked checkout root and branch still match.
+If creation stopped before the receipt was written, the checkout stays for
+inspection; a matching path or branch alone never grants ownership.
+
+Herdr 2 agent runs carry an atomic ownership label. After a lost run reply,
+Send prompt recovers only one live terminal matching that label, the saved
+checkout, original agent command and any saved terminal address. It never
+starts a replacement agent. Old journals without labels cannot recover a
+missing terminal address. Once a prompt send has been attempted, interrupted
+or failed delivery remains explicitly uncertain and is not offered for replay:
+neither backend provides an idempotency key that could prove exactly-once
+delivery after a lost acknowledgement. Inspect the retained agent instead.
+Recovery also checks the live foreground process: a replacement shell does
+not inherit the departed agent's ownership. If a removed device is configured
+again with the same host/session identity, its saved lanes rejoin the open
+comparison without replaying creation, launch or prompts.
+Before discarding a newly owned Herdr 2 lane, the worker verifies its receipt,
+disables terminal keep, ends the owned agent and checks the resulting inventory.
+A live replacement, unreadable result or unrelated program in the checkout
+keeps the checkout intact. Closing its removed workspace then only drops the
+presentation, without sending a second kill through a stale terminal address.
+These checks do not make ownership validation and terminal control atomic.
+
 Keep removes the other worktrees after its usual confirmation; a lane whose
 worktree may exist or sits on a host no longer set up stays saved until Forget,
 which lets the fan-out go and leaves every worktree as it is. Up to four
@@ -2597,7 +2625,8 @@ restart an agent already waiting on you counts as new once.
 ## Orchestrator
 
 The activity bar's **Pull requests**, **Issues**, and **Tasks** sections list,
-across the window, every repository the workspaces of every connected local or SSH host
+across the window, every repository the workspaces of every connected local, SSH,
+cloud, or WSL host
 hold: their GitHub issues and pull requests or GitLab issues, their
 [Beads](https://github.com/steveyegge/beads) issues when a main checkout has a
 `.beads` folder, and the agent runs dispatched for them. Folders outside Git
@@ -2685,7 +2714,29 @@ the issue or PR identifier and title, so long-paste transport markers do not
 replace that task context. With more than one host connected, the
 dialog also ranks the hosts as [Smart Dispatch](#smart-dispatch) does; picking
 another one sets the repository up there the same way and starts the agent
-there, and its run card then acts on that host. A pull
+there, and its run card then acts on that host. Herdr 2 destinations use Git
+for the checkout and herdr-core for the agent, without needing Herdr 1. The
+recorded destination and terminal identity survive an app restart: opening,
+messaging, stopping, and removing the run keep targeting that host, even when
+another host has a checkout at the same path. Removing a run closes only its
+host's saved workspace after checkout removal succeeds. A run can also be
+**Restarted** after confirmation: its checkout and
+uncommitted files stay, while a new owned agent receives the saved model and
+initial prompt. Opening a run whose launch reply was lost first looks up its
+unique ownership receipt; it never resends the initial prompt. The CLI
+`sheprd orchestrator restart RUN` opens the same confirmation for a loaded run.
+Legacy Herdr 2 runs created before ownership receipts require **Adopt current
+process** before reply/stop controls work. The read-only preview shows the host,
+terminal, checkout and current process. Confirmation grants new authority over
+that displayed process, not proof that it was the original agent; cancel changes
+nothing. The worker revalidates the process, adds an ownership label, and saves
+the receipt. A replaced process is refused until explicitly adopted again.
+Legacy runs have no saved initial prompt, so their restart action is unavailable.
+New dispatches require a fresh branch; use Restart to reuse an existing run's
+checkout. Each newly created checkout carries a receipt in its Git metadata.
+Recreating the same path and branch does not transfer the old run's authority.
+Uncertain creation without that receipt remains for manual inspection.
+A pull
 request's **Review with agent** does the same on an `agent/review-…` branch with a
 read-only prompt: the agent verifies the pull request, reads its diff, and
 reports findings without writing to GitHub. A run's card sends it messages, stops
@@ -2940,6 +2991,12 @@ included, first goes to the daemon so a plugin's `[[link_handlers]]` entry can
 claim it; see [Herdr Plugins](#herdr-plugins).
 
 ## Herdr Plugins
+
+Herdr 2 desktop panes support explicitly configured [link-handler
+adapters](../../docs/link-handlers.md), independently of a Herdr 1 daemon.
+These run compatible commands on the clicked pane's host; they do not load
+Herdr's registry or emulate its plugin API. The daemon contract below applies
+to Herdr 1.
 
 Herdr runs plugins; this client never reads plugin manifests, runs plugin
 commands, or touches the plugin registry. It works with the parts of a plugin

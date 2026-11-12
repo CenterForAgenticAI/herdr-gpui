@@ -135,32 +135,3 @@ fn a_remote_dispatch_lands_on_its_host_and_queues_its_setup(cx: &mut TestAppCont
         });
     });
 }
-
-#[gpui::test]
-fn herdr_1_pickers_never_offer_another_hosts_core(cx: &mut TestAppContext) {
-    let (view, cx, _) = window(cx, true);
-    cx.update(|_, cx| {
-        view.update(cx, |view, cx| {
-            view.config.herdr_2_terminals = false;
-            let local = view.endpoints[0].id.clone();
-            let offered = view.herdr_1_candidates("app", cx);
-            let online = |candidates: &[crate::dispatch::Candidate], id: &str| {
-                candidates
-                    .iter()
-                    .find(|c| c.endpoint_id == id)
-                    .unwrap()
-                    .online
-            };
-            assert!(online(&offered, "ssh:box"), "Herdr 1 there takes work");
-            assert!(online(&offered, &local), "the shown host stays offered");
-            // Without Herdr 1, Box keeps its workspaces for Herdr 2, which
-            // the orchestrator and fan-out cannot start agents through.
-            view.endpoints[1].live.snapshot = None;
-            view.endpoints[1].live.ssh_failure = Some(sheprd_client::SshFailure::HerdrMissing);
-            assert!(view.dispatch_keeps("ssh:box"));
-            let offered = view.herdr_1_candidates("app", cx);
-            assert!(!online(&offered, "ssh:box"));
-            assert!(online(&offered, &local));
-        })
-    });
-}
