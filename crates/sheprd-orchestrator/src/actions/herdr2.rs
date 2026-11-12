@@ -24,7 +24,11 @@ struct Listed {
 #[derive(serde::Deserialize)]
 struct Address {
     #[serde(default)]
+    address: String,
+    #[serde(default)]
     cwd: String,
+    #[serde(default)]
+    labels: std::collections::HashMap<String, String>,
     #[serde(default)]
     state: TerminalState,
 }
@@ -75,6 +79,39 @@ pub(super) fn unused_checkout(
         cancelled,
     )?;
     Ok(())
+}
+
+/// Whether the inventory proves the run has no agent left to end: neither
+/// its recorded terminal nor any terminal with its ownership label exists,
+/// and nothing else lives in its checkout. A restart interrupted after
+/// ending the previous agent, or before launching the next, resumes only
+/// on this proof.
+pub(super) fn gone(
+    host: &Host,
+    run: &Run,
+    session: &HerdrSession,
+    cancelled: &AtomicBool,
+) -> Result<bool> {
+    let Some(workspace) = run.workspace.as_ref() else {
+        return Ok(false);
+    };
+    let recorded = match &session.pane {
+        Pane::Herdr2 { terminal } => Some(terminal.as_str()),
+        Pane::Pending => None,
+        Pane::Herdr1 { .. } => return Ok(false),
+    };
+    let label = owner(&session.agent_name);
+    let listed = terminals(host, cancelled)?;
+    if listed.terminals.iter().any(|terminal| {
+        recorded.is_some_and(|recorded| terminal.address == recorded)
+            || terminal
+                .labels
+                .get(label.key)
+                .is_some_and(|value| value == label.value)
+    }) {
+        return Ok(false);
+    }
+    Ok(unused_checkout(host, workspace, cancelled).is_ok())
 }
 
 /// Makes the run's worktree from `checkout`, starts its agent there, and

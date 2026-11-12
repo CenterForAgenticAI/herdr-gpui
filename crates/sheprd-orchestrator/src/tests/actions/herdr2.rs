@@ -6,6 +6,7 @@ use crate::test_executable;
 
 mod cleanup;
 mod completed;
+mod interrupted_restart;
 mod journal;
 mod kept_shell;
 mod legacy;
