@@ -43,3 +43,42 @@ fn the_recovery_shell_is_a_terminal_not_a_chat_despite_its_saved_label() {
     drop(source);
     fake.server.join().unwrap();
 }
+
+#[test]
+fn a_phone_replays_durable_replacement_labels_into_saved_tabs_after_restart() {
+    let endpoint = "0123456789abcdef0123456789abcdef";
+    let mut old = record("t1");
+    old["labels"] = json!({TOKEN: endpoint});
+    old["foreground"] = json!({"pid": 123, "name": "zsh"});
+    let mut replacement = record("t9");
+    replacement["labels"] =
+        json!({TOKEN: endpoint, sheprd_core_client::chat_recovery::REPLACES_LABEL: "[\"t1\"]"});
+    replacement["foreground"] = json!({"pid": 124, "name": "sheprd-acp"});
+    let (mut source, fake) = fake_with_doc(false, Value::Null, vec![old, replacement]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("browser-tabs.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&json!({"tabs": [{
+            "id": 4, "scope": "local:/test.sock", "workspace_id": "w1", "title": "saved chat",
+            "location": {"kind": "core_terminal", "panes": "t1", "names": {"t1": "mine"}}
+        }]}))
+        .unwrap(),
+    )
+    .unwrap();
+    let state = Arc::get_mut(&mut source).unwrap();
+    state.scope = Some("local:/test.sock".into());
+    state.tabs = Some(path);
+    for _ in 0..2 {
+        let layout = source.poll().unwrap();
+        let (workspace, chat) = layout.chat(&id("t9")).unwrap();
+        assert_eq!(workspace.id, "w1");
+        assert_eq!(chat.endpoint.as_str(), endpoint);
+        assert!(layout.terminal(&id("t1")).is_none());
+        // Simulate a new reader with no RAM aliases. The tabs file still
+        // names t1; labels in core are the durable adoption receipt.
+        *lock(&source.poller) = Default::default();
+    }
+    drop(source);
+    fake.server.join().unwrap();
+}

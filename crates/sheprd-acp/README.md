@@ -232,8 +232,13 @@ before agent startup and held for the chat's lifetime. In the shell core keeps
 after unexpected loss, `sheprd-acp restore "$HERDR_ACP_ENDPOINT"` validates
 the original terminal, socket, endpoint and folder and resumes that session.
 Normal quits/successful exits remove the record; unexpected failures retain it.
-It does not automatically type a command into a recovered shell. See
-[explicit Herdr 2 recovery](../../docs/rich-chat.md#explicit-herdr-2-recovery)
+It does not automatically type a command into a recovered shell. It also
+publishes exact opened sessions to the owning core's versioned document store
+for desktop/phone new-terminal recovery. Replacement startup checks the durable
+generation while holding its endpoint lock; expected closure writes a tombstone.
+Explicit launch overrides and allowlisted agent configuration paths are retained,
+not the entire inherited process environment. See
+[Herdr 2 recovery](../../docs/rich-chat.md#herdr-2-recovery)
 for environment policy, supported launches, history limitations and remaining
 automatic-recovery work.
 

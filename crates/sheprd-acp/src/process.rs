@@ -34,6 +34,16 @@ pub(crate) struct AgentProcess {
     stderr: Arc<Mutex<VecDeque<String>>>,
 }
 
+/// The app's sole cleanup owner. Startup errors must reap the exact child it
+/// just created, just as a normal chat shutdown does.
+pub(crate) struct OwnedAgent(AgentProcess);
+
+impl Drop for OwnedAgent {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
+
 pub(crate) fn spawn(
     program: &OsString,
     args: &[OsString],
@@ -87,6 +97,10 @@ pub(crate) fn spawn(
 impl AgentProcess {
     pub(crate) fn id(&self) -> u32 {
         self.lock().id()
+    }
+
+    pub(crate) fn owned(&self) -> OwnedAgent {
+        OwnedAgent(self.clone())
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Child> {

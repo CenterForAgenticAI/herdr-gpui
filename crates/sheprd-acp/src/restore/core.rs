@@ -11,6 +11,144 @@ use sheprd_chat_protocol::{ENDPOINT_ENV, EndpointId, restore};
 
 use crate::cli::{AgentChoice, Options};
 
+use sheprd_core_client::{Core, Endpoint, chat_recovery};
+
+fn connect(socket: PathBuf) -> sheprd_core_client::Result<Core> {
+    Core::connect(&Endpoint {
+        socket,
+        session: "default".to_owned(),
+    })
+}
+
+/// The recovery generation a replacement launch claimed. Only a launch that
+/// holds one registers its agent child, so an explicit restore in a shell that
+/// inherited a replacement's environment never touches the recovery state.
+#[derive(Debug)]
+pub(crate) struct Claimed {
+    generation: u32,
+}
+
+/// A replacement started by a desktop/phone worker must claim its durable
+/// generation before any agent starts. Inherited caller HC_SOCKET is ignored.
+pub(crate) fn claim_launch() -> anyhow::Result<Option<Claimed>> {
+    if crate::herdr::Target::from_env().is_some() {
+        return Ok(None);
+    }
+    let Some(generation) = std::env::var_os(chat_recovery::GENERATION_ENV) else {
+        return Ok(None);
+    };
+    if generation.is_empty() {
+        return Ok(None);
+    }
+    let generation = generation
+        .to_str()
+        .context("invalid recovery generation")?
+        .parse::<u32>()?;
+    let terminal = std::env::var("HC_TERMINAL_ID")?;
+    let socket = std::env::var_os("HC_TERMINAL_SOCKET").context("no terminal socket")?;
+    let endpoint = std::env::var(ENDPOINT_ENV)?.parse::<EndpointId>()?;
+    chat_recovery::claim(
+        &connect(socket.into())?,
+        &endpoint,
+        &terminal,
+        generation,
+        old_child_gone,
+    )?;
+    Ok(Some(Claimed { generation }))
+}
+
+/// Proof, without signalling anything, that the previous chat's agent and its
+/// process group are gone. Doubt refuses the claim, and a refused generation
+/// is never relaunched: the chat stays unrecovered rather than risk two agents
+/// on one session. Nothing here kills or adopts a process from a stored PID.
+fn old_child_gone(
+    child: &sheprd_client::herdr::sessions::Identity,
+) -> sheprd_core_client::Result<bool> {
+    agent_gone(child.pid, &child.started)
+}
+
+fn child_identity(
+    core: &Core,
+    terminal: &str,
+    pid: u32,
+) -> anyhow::Result<sheprd_client::herdr::sessions::Identity> {
+    let started = sheprd_core_client::sessions::process_birth(pid)?
+        .context("agent child identity is unavailable")?;
+    Ok(sheprd_client::herdr::sessions::Identity {
+        core: core.hello().core.id.clone(),
+        terminal: terminal.to_owned(),
+        pid,
+        started,
+    })
+}
+
+/// Records the agent child of the launch that claimed `claimed`.
+pub(crate) fn child_started(claimed: &Claimed, pid: u32) -> anyhow::Result<()> {
+    let terminal = std::env::var("HC_TERMINAL_ID")?;
+    let socket = std::env::var_os("HC_TERMINAL_SOCKET").context("no terminal socket")?;
+    let endpoint = std::env::var(ENDPOINT_ENV)?.parse::<EndpointId>()?;
+    let core = connect(socket.into())?;
+    chat_recovery::child_started(
+        &core,
+        &endpoint,
+        claimed.generation,
+        child_identity(&core, &terminal, pid)?,
+    )?;
+    Ok(())
+}
+
+pub(super) fn opened(keeper: &super::Keeper, session: &str) -> anyhow::Result<()> {
+    let core = connect(keeper.socket.clone())?;
+    let mut env: std::collections::BTreeMap<String, String> =
+        match std::env::var(chat_recovery::OVERRIDES_ENV) {
+            Ok(encoded) if encoded.len() <= 16 * 1024 => serde_json::from_str(&encoded)?,
+            Ok(_) => anyhow::bail!("chat environment overrides exceed the recovery bound"),
+            Err(std::env::VarError::NotPresent) => std::collections::BTreeMap::new(),
+            Err(error) => return Err(error.into()),
+        };
+    if let Some(agent) = sheprd_client::herdr::AgentKind::parse(keeper.agent.name()) {
+        for key in sheprd_client::herdr::sessions::environment_keys(agent) {
+            if let Ok(value) = std::env::var(key) {
+                env.insert((*key).to_owned(), value);
+            }
+        }
+    }
+    chat_recovery::opened(
+        &core,
+        &keeper.endpoint,
+        &keeper.pane,
+        chat_recovery::Session {
+            adapter: keeper.adapter,
+            args: keeper.args.clone(),
+            agent: keeper.agent,
+            child: child_identity(
+                &core,
+                &keeper.pane,
+                keeper
+                    .child
+                    .context("agent child identity is unavailable")?,
+            )?,
+            cwd: keeper
+                .cwd
+                .to_str()
+                .context("chat cwd is not UTF-8")?
+                .to_owned(),
+            env,
+            program: std::env::current_exe()?
+                .to_str()
+                .context("chat program path is not UTF-8")?
+                .to_owned(),
+            session: session.to_owned(),
+        },
+    )?;
+    Ok(())
+}
+
+pub(super) fn closed(keeper: &super::Keeper) -> anyhow::Result<()> {
+    chat_recovery::closed(&connect(keeper.socket.clone())?, &keeper.endpoint)?;
+    Ok(())
+}
+
 /// Held for the entire lifetime of a core chat, including agent startup.
 /// Unlike a timed claim, an OS lock cannot expire while a slow starter is
 /// still running. The lock file is never unlinked (which would split owners).
@@ -64,19 +202,24 @@ pub(crate) fn run(endpoint: EndpointId) -> anyhow::Result<()> {
         previous_agent_gone(&dir, &endpoint)?,
         "the chat's previous agent, or a tool it started, is still running; end it before restoring"
     );
-    crate::app::run_owned(Options {
-        adapter: record.adapter,
-        agent: AgentChoice::Builtin {
-            agent: record.agent,
-            args: Vec::new(),
+    // Never a replacement child: the kept shell may still carry the
+    // generation of the replacement whose agent was lost.
+    crate::app::run_owned(
+        None,
+        Options {
+            adapter: record.adapter,
+            agent: AgentChoice::Builtin {
+                agent: record.agent,
+                args: Vec::new(),
+            },
+            attach: true,
+            cwd: Some(record.cwd),
+            headless: false,
+            load: Some(record.session),
+            name: None,
+            require_load: true,
         },
-        attach: true,
-        cwd: Some(record.cwd),
-        headless: false,
-        load: Some(record.session),
-        name: None,
-        require_load: true,
-    })
+    )
 }
 
 /// The agent a core chat started, kept beside its restore record so an
