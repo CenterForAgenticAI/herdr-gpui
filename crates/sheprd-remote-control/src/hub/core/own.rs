@@ -119,6 +119,9 @@ impl Store {
                     if tab.zoomed.as_ref() == Some(old) {
                         tab.zoomed = Some(new.clone());
                     }
+                    if tab.active.as_ref() == Some(old) {
+                        tab.active = Some(new.clone());
+                    }
                 }
             }
         }

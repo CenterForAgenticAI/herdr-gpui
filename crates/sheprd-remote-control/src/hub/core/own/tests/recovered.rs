@@ -29,3 +29,18 @@ fn a_lone_chat_keeps_its_phone_given_name_when_it_recovers() {
     );
     assert!(!own.layouts.names.contains_key("t1"));
 }
+
+#[test]
+fn a_recovered_selected_pane_stays_selected_in_a_phones_tab() {
+    let mut own = Store::default();
+    own.fit(
+        "fake-core",
+        &[chat("t1", None), record("t2")],
+        &HashSet::new(),
+    );
+    own.split(&id("t2"), Axis::Row, id("t1")).unwrap();
+    assert_eq!(own.layouts.tabs[0].active, Some(id("t1")));
+    let recovered = [chat("t1", None), record("t2"), chat("t3", Some("t1"))];
+    assert!(own.fit("fake-core", &recovered, &HashSet::new()));
+    assert_eq!(own.layouts.tabs[0].active, Some(id("t3")));
+}

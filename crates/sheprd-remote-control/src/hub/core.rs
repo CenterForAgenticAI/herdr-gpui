@@ -164,7 +164,7 @@ impl Source {
         let terminals = core.list(false)?.terminals;
         if terminals
             .iter()
-            .any(|terminal| terminal.labels.contains_key(sheprd_chat_protocol::TOKEN))
+            .any(|terminal| sheprd_core_client::chat_recovery::tracked(&terminal.labels))
         {
             // Recovery performs bounded RPCs without holding a lock phone
             // commands need to inspect saved workspaces or layout ownership.

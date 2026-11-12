@@ -169,6 +169,13 @@ pub fn run(core: &Core, run: &Run<'_>) -> Result<Terminal> {
     core.run(&run)
 }
 
+/// Whether a terminal is a chat recovery watches: one labelled with its
+/// endpoint, or a replacement still pending its claim or its labels. Workers
+/// poll while any is listed, so a pending replacement is never left unwatched.
+pub fn tracked(labels: &BTreeMap<String, String>) -> bool {
+    labels.contains_key(TOKEN) || labels.get(PENDING_LABEL).is_some_and(|id| !id.is_empty())
+}
+
 /// Publish only an actual opened session, never an inferred recent session.
 pub fn opened(core: &Core, endpoint: &EndpointId, terminal: &str, session: Session) -> Result<()> {
     if session.child.core != core.hello().core.id

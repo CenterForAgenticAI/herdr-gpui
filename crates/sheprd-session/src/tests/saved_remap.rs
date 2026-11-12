@@ -40,3 +40,17 @@ fn remapping_a_saved_file_moves_place_name_focus_and_zoom_and_keeps_the_rest() {
     assert_eq!(saved["tabs"][3], file["tabs"][3]);
     assert_eq!(saved["future"], json!({"kept": true}));
 }
+
+/// The selected second pane recovers: the selection must follow it, or the
+/// phone falls back to the first pane.
+#[test]
+fn a_recovered_selected_pane_stays_selected() {
+    let file = json!({"tabs": [
+        {"id": 1, "scope": "s", "workspace_id": "w", "title": "a",
+         "location": {"kind": "core_terminal", "panes": {"axis": "row", "first": "t2", "second": "t1"},
+                      "active": "t1"}}
+    ]});
+    let mut saved = crate::SavedTabs::parse(&serde_json::to_vec(&file).unwrap()).unwrap();
+    saved.remap("s", &map());
+    assert_eq!(saved.tab_active("s", 1).map(TerminalId::as_str), Some("t9"));
+}

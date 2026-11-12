@@ -214,6 +214,7 @@ impl SavedTabs {
     ) {
         for tab in self.tabs.iter_mut().filter(|tab| tab.scope == scope) {
             let Some(CoreLocation::CoreTerminal {
+                active,
                 panes,
                 names,
                 zoomed,
@@ -229,6 +230,9 @@ impl SavedTabs {
                     }
                     if zoomed.as_ref() == Some(old) {
                         *zoomed = Some(new.clone());
+                    }
+                    if active.as_ref() == Some(old) {
+                        *active = Some(new.clone());
                     }
                 }
             }

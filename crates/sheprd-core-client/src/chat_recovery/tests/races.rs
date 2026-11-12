@@ -207,3 +207,18 @@ fn a_failed_relabel_after_a_durable_claim_still_lets_the_replacement_start() {
     );
     worker.join().unwrap().unwrap();
 }
+
+#[test]
+fn a_replacement_pending_its_claim_or_labels_keeps_workers_polling() {
+    let labels = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect()
+    };
+    assert!(tracked(&labels(&[(TOKEN, ID)])));
+    assert!(tracked(&labels(&[(PENDING_LABEL, ID)])));
+    // A claimed replacement clears its pending label to "".
+    assert!(!tracked(&labels(&[(PENDING_LABEL, "")])));
+    assert!(!tracked(&labels(&[])));
+}

@@ -63,7 +63,7 @@ impl sheprd_backend::Backend for CoreBackend {
         let listed = self.core.list(false)?.terminals;
         if listed
             .iter()
-            .any(|terminal| terminal.labels.contains_key(sheprd_chat_protocol::TOKEN))
+            .any(|terminal| crate::chat_recovery::tracked(&terminal.labels))
             && let Ok(mut recovery) = self.recovery.try_lock()
         {
             recovery.poll(&self.core);
@@ -147,7 +147,7 @@ impl sheprd_backend::Changes for CoreChanges {
         if self
             .records
             .values()
-            .any(|terminal| terminal.labels.contains_key(sheprd_chat_protocol::TOKEN))
+            .any(|terminal| crate::chat_recovery::tracked(&terminal.labels))
             && let Ok(mut recovery) = self.recovery.try_lock()
         {
             recovery.poll(&self.core);
