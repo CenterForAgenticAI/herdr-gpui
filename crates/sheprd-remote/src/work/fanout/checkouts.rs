@@ -16,15 +16,7 @@ pub fn plan(host: &Host, checkout: &str, branch: &str, cancelled: &AtomicBool) -
     let common = common.trim_end_matches('\n');
     crate::work::inspect::validate_path(host, common, Step::CreateWorktree)?;
     let folder = worktree::folder(Path::new(common), branch).map_err(crate::work::Error::from)?;
-    // The script runs on a POSIX host, even from a Windows client.
-    let relative = std::iter::once(worktree::ROOT.to_owned())
-        .chain(
-            folder
-                .components()
-                .map(|part| part.as_os_str().to_string_lossy().into_owned()),
-        )
-        .collect::<Vec<_>>()
-        .join("/");
+    let relative = relative(&folder);
     let output = host
         .capture(
             &format!("printf '%s/%s\\n' \"$HOME\" {}\n", shell_quote(&relative)),
@@ -40,6 +32,21 @@ pub fn plan(host: &Host, checkout: &str, branch: &str, cancelled: &AtomicBool) -
         opened: Opened::Herdr2,
     })
 }
+
+/// The script runs on a POSIX host, even from a Windows client.
+fn relative(folder: &Path) -> String {
+    std::iter::once(worktree::ROOT.to_owned())
+        .chain(
+            folder
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned()),
+        )
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(test)]
+mod tests;
 
 pub fn create(
     host: &Host,

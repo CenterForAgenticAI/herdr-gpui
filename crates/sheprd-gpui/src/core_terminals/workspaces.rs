@@ -199,6 +199,7 @@ impl SheprdWindow {
 
     /// This computer's scope, whose workspaces the app keeps, whichever
     /// host is shown.
+    #[cfg(test)]
     pub(crate) fn local_kept_scope(&self) -> Option<Scope> {
         self.core_host().map(|index| scope(&self.endpoints[index]))
     }

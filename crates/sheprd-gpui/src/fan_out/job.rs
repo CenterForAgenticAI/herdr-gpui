@@ -392,30 +392,32 @@ fn start(
         key: LANE_OWNER,
         value: &lane.agent,
     };
-    let started = match work::owned_agent::start(
-        &checkout.host,
-        &checkout.worktree,
-        &agent,
-        owner,
-        cancelled,
-    ) {
-        Ok(started) => started,
-        Err(error) => {
-            if let work::fanout::Error::Work(work::Error::Unprompted {
-                started: work::Started::Herdr2 { terminal },
-                ..
-            }) = &error
-            {
-                let _ = report(Report::Lane(index, Progress::Terminal(terminal.clone())));
-            }
-            return Err(fanout_failed(error));
+    let started = retain_started(
+        work::owned_agent::start(&checkout.host, &checkout.worktree, &agent, owner, cancelled),
+        index,
+        report,
+    )?;
+    send_prompt(index, checkout, &started, prompt, report, cancelled)
+}
+
+/// A failed acknowledgement can still identify a live terminal. Save and
+/// show it before reporting failure; neither retry its launch nor kill it.
+fn retain_started(
+    result: Result<work::Started, work::fanout::Error>,
+    index: usize,
+    report: &impl Fn(Report) -> Result<()>,
+) -> Result<work::Started> {
+    let known = match &result {
+        Ok(started) | Err(work::fanout::Error::Work(work::Error::Unprompted { started, .. })) => {
+            Some(started)
         }
+        _ => None,
     };
-    if let work::Started::Herdr2 { terminal } = &started {
+    if let Some(work::Started::Herdr2 { terminal }) = known {
         // The shell is kept even if this cannot be saved: it is started.
         let _ = report(Report::Lane(index, Progress::Terminal(terminal.clone())));
     }
-    send_prompt(index, checkout, &started, prompt, report, cancelled)
+    result.map_err(fanout_failed)
 }
 
 fn send_prompt(
@@ -638,3 +640,6 @@ pub(crate) fn remove(
     }
     work::discard(host, worktree, cancelled).map_err(failed)
 }
+
+#[cfg(test)]
+mod tests;

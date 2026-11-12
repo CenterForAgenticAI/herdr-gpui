@@ -73,9 +73,13 @@ after a restart and appears in every window that shows the pane.
 `sheprd-acp` reports its status to herdr-core with OSC 7501, so the pane's
 activity dot behaves as it does in Herdr.
 
-The window only attaches to terminals of the herdr-core on this machine. A
-chat in a terminal on another machine that core added keeps its terminal
-view. Mirror tabs only watch, so they show the terminal rather than a chat.
+The window attaches to this computer's core and cores on saved SSH, cloud,
+and WSL hosts. The host's own ACP opens its endpoint through the existing
+authenticated transport; identical terminal IDs on different hosts keep
+separate conversations and split/focus state. A forwarded terminal that one
+core added from another machine (`other/t1`) still keeps its terminal view:
+its forwarding label does not identify a saved authenticated chat route.
+Mirror tabs only watch, so they show the terminal rather than a chat.
 A `sheprd-acp` started by hand in a Herdr 2 pane has no label, so it also
 keeps its terminal view.
 
@@ -290,6 +294,20 @@ monitors once Claude has named them, and Codex's sub-agents. Codex offers no
 way to stop a command inside a thread, so its shells have no Stop, and Copilot's
 and OpenCode's sub-agents are listed without one, as ACP has no request for it.
 Gemini and Pi report none of this, so these sections stay away.
+
+OpenCode versions advertising child-session updates show both foreground and
+background sub-agents. Each gets a card linked from the rail, with its own
+steps even when several run concurrently. Background cards survive the parent
+turn and end when OpenCode reports that child completed, failed, or was
+interrupted. Older OpenCode versions without that extension can only track
+foreground launch calls reliably.
+
+For structured tasks in OpenCode V2, enable `"experimental": {"todo": true}`
+in your OpenCode configuration ([OpenCode's setting](https://opencode.ai/v2/docs/config#todos)).
+It defaults to false in release builds. The resulting `todowrite` calls feed
+the **Plan** section; an assistant's Markdown checklist does not. Child tasks
+remain separate from the parent's plan. Sheprd does not enable agent tools
+or change OpenCode configuration automatically.
 
 Every rail section folds to one line. While anything runs, **Plan** and
 **Changed** fold on their own to leave room, showing the current step and the

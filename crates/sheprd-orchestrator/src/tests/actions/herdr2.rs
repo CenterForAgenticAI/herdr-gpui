@@ -5,11 +5,14 @@ use super::*;
 use crate::test_executable;
 
 mod cleanup;
+mod journal;
 mod kept_shell;
 mod legacy;
 mod ownership;
 mod remote;
 mod restart;
+mod uncertain;
+mod verified_end;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.
 pub(super) fn fake_core(dir: &Path, status: &str) {

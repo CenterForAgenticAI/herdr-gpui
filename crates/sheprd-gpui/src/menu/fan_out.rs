@@ -95,9 +95,11 @@ impl SheprdWindow {
         else {
             return false;
         };
-        if host_for(&self.endpoints[index].connection.target)
-            .ok()
-            .as_ref()
+        if origin_host(
+            &self.endpoints[index].connection.target,
+            origin.checkout.is_some(),
+        )
+        .as_ref()
             != Some(&origin.host)
         {
             return false;
@@ -144,10 +146,13 @@ impl SheprdWindow {
         (scriptable && self.fan_out_host(&source).is_some()).then_some(Label::FAN_OUT)
     }
 
-    /// The host `source`'s lanes are made on: the shown one, or this
-    /// computer for a workspace the app keeps, which is always here.
-    fn fan_out_host(&self, _source: &Source) -> Option<Host> {
-        host_for(&self.endpoints[self.selected_endpoint].connection.target).ok()
+    /// The host `source`'s lanes are made on: the shown one. A workspace the
+    /// app keeps behind a custom Herdr 1 socket lives in this computer's core.
+    fn fan_out_host(&self, source: &Source) -> Option<Host> {
+        origin_host(
+            &self.endpoints[self.selected_endpoint].connection.target,
+            source.checkout.is_some(),
+        )
     }
 
     pub(crate) fn open_fan_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -199,3 +204,12 @@ impl SheprdWindow {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests;
+
+/// The host a fan-out from `target` runs on; `kept` when the app keeps its
+/// workspace, which a custom Herdr 1 socket does not move off this computer.
+fn origin_host(target: &sheprd_client::ConnectTarget, kept: bool) -> Option<Host> {
+    if kept {
+        return sheprd_remote::work::host_for_kept(target).ok();
+    }
+    host_for(target).ok()
+}
