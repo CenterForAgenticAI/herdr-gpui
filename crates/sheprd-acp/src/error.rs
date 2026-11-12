@@ -46,4 +46,6 @@ pub enum Error {
     Observe(#[from] crate::observe::Error),
     #[error(transparent)]
     SessionHelpers(#[from] crate::session_helpers::Error),
+    #[error("could not read the chat's terminal input")]
+    TerminalInput(#[source] io::Error),
 }
