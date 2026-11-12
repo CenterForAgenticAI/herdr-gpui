@@ -5,7 +5,11 @@ pub(crate) mod capped;
 
 use crate::{
     Error, Options, Result,
-    dashboard::{self, auth::Account},
+    dashboard::{
+        self,
+        auth::Account,
+        lockout::{Lockout, Verdict},
+    },
     endpoint::QuicInfo,
     guard::{Cidr, parse_list},
     hub::{Access, Hub},
@@ -15,8 +19,8 @@ use crate::{
 };
 use axum::{
     Router,
-    extract::State,
-    http::{HeaderMap, StatusCode, header},
+    extract::{ConnectInfo, State},
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
     serve::ListenerExt,
@@ -24,7 +28,10 @@ use axum::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use capped::Capped;
 use secrecy::ExposeSecret;
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 use tokio::net::TcpListener;
 
 /// HTTP connections beyond the hub's sockets: plain requests such as
@@ -72,36 +79,64 @@ fn source(options: &Options) -> Source {
     }
 }
 
-/// Who may listen: anyone, unless the operator set a token.
+/// Who may listen: anyone, unless the operator set listen tokens.
 fn access(options: &Options) -> Result<Access> {
-    let Some(token) = &options.listen_token else {
+    let Some(tokens) = &options.listen_token else {
         return Ok(Access::Open);
     };
-    let token = token.expose_secret();
-    strong(token, "the listen token")?;
-    Ok(Access::Token(Secret::new(token.as_bytes())?))
+    Access::tokens(tokens.expose_secret())
+}
+
+/// What the metrics port's routes share.
+#[derive(Clone, Debug)]
+struct MetricsState {
+    hub: Arc<Hub>,
+    /// Wrong tokens per caller, as the dashboard counts them: three block
+    /// the caller for 15 minutes, unchecked, so the token cannot be
+    /// guessed at the port's speed.
+    lockout: Arc<Lockout>,
+    token: Option<Arc<Secret>>,
 }
 
 /// The metrics port's routes.
 pub fn metrics_app(hub: Arc<Hub>, token: Option<Secret>) -> Router {
     Router::new()
         .route("/metrics", get(metrics))
-        .with_state((hub, token.map(Arc::new)))
+        .with_state(MetricsState {
+            hub,
+            lockout: Arc::default(),
+            token: token.map(Arc::new),
+        })
 }
 
-async fn metrics(
-    State((hub, token)): State<(Arc<Hub>, Option<Arc<Secret>>)>,
-    headers: HeaderMap,
-) -> Response {
+async fn metrics(State(state): State<MetricsState>, request: axum::extract::Request) -> Response {
+    let MetricsState {
+        hub,
+        lockout,
+        token,
+    } = state;
     if let Some(token) = token {
-        let given = headers
+        // Served with the caller's address; a router used without one
+        // counts every caller as one.
+        let caller = request
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map_or(IpAddr::from([0, 0, 0, 0]), |info| info.0.ip());
+        let now = std::time::Instant::now();
+        if let Verdict::Blocked(_) = lockout.attempt(caller, now) {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        }
+        let given = request
+            .headers()
             .get(header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix("Bearer "))
             .unwrap_or_default();
+        // `attempt` counted this try as wrong; a right one clears it.
         if !token.matches(given.as_bytes()) {
             return StatusCode::UNAUTHORIZED.into_response();
         }
+        lockout.succeed(caller);
     }
     (
         [(
@@ -161,6 +196,35 @@ pub(crate) async fn watch_ban_file(hub: Arc<Hub>, file: std::path::PathBuf, fixe
     }
 }
 
+/// Re-reads the listen token file every [`BAN_FILE_EVERY`], so tokens can
+/// be added and revoked without a restart; a revoked token's listeners
+/// close. A file that does not parse keeps the tokens already loaded.
+async fn watch_token_file(hub: Arc<Hub>, file: std::path::PathBuf) {
+    let mut ticks = tokio::time::interval(BAN_FILE_EVERY);
+    let mut last: Option<String> = None;
+    loop {
+        ticks.tick().await;
+        let path = file.clone();
+        let read = tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await;
+        let Ok(Ok(text)) = read else {
+            continue;
+        };
+        if last.as_ref() == Some(&text) {
+            continue;
+        }
+        match hub.access.replace(&text) {
+            Ok(kept) => {
+                tracing::info!(tokens = kept.len(), "loaded the listen token file");
+                hub.keep_tokens(&kept);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the listen token file is not usable; keeping its last tokens");
+            }
+        }
+        last = Some(text);
+    }
+}
+
 /// How often the ban file is re-read.
 const BAN_FILE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -190,6 +254,9 @@ pub async fn serve(options: Options) -> Result<()> {
     if let Some(file) = options.ban_file.clone() {
         tokio::spawn(watch_ban_file(Arc::clone(&hub), file, options.bans.clone()));
     }
+    if let Some(file) = options.listen_token_file.clone() {
+        tokio::spawn(watch_token_file(Arc::clone(&hub), file));
+    }
     if !options.limits.auto_ban {
         tracing::info!("automatic bans are off");
     }
@@ -212,6 +279,7 @@ pub async fn serve(options: Options) -> Result<()> {
         let metrics = bind(address).await?;
         let app = metrics_app(Arc::clone(&hub), metrics_token);
         tokio::spawn(async move {
+            let app = app.into_make_service_with_connect_info::<SocketAddr>();
             if let Err(error) = axum::serve(metrics, app)
                 .with_graceful_shutdown(stopped())
                 .await

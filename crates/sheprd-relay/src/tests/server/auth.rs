@@ -25,7 +25,7 @@ fn only_the_token_signs_in() {
 #[test]
 fn cookies_expire_and_cannot_be_forged() {
     let account = Account::new(TOKEN).unwrap();
-    let value = account.issue(1_000);
+    let value = account.issue(1_000).unwrap();
     assert!(account.valid(&value, 1_000));
     assert_eq!(
         account.expiry(&value, 1_000),
@@ -33,12 +33,33 @@ fn cookies_expire_and_cannot_be_forged() {
     );
     assert!(!account.valid(&value, 1_000 + SESSION.as_secs()));
     assert_eq!(account.expiry(&value, 1_000 + SESSION.as_secs()), None);
-    let (expires, tag) = value.split_once('.').unwrap();
-    let extended = format!("{}.{tag}", expires.parse::<u64>().unwrap() + 1);
-    assert!(!account.valid(&extended, 1_000));
+    let mut forged = value.clone();
+    forged.replace_range(0..1, if value.starts_with('A') { "B" } else { "A" });
+    assert!(!account.valid(&forged, 1_000));
     let other = Account::new(TOKEN).unwrap();
     assert!(!other.valid(&value, 1_000));
     assert!(!account.valid("garbage", 1_000));
+}
+
+#[test]
+fn signing_out_ends_the_session_on_the_relay() {
+    let account = Account::new(TOKEN).unwrap();
+    let mine = account.issue(1_000).unwrap();
+    let theirs = account.issue(1_000).unwrap();
+    account.revoke(&mine);
+    assert!(!account.valid(&mine, 1_000));
+    assert!(account.valid(&theirs, 1_000));
+}
+
+#[test]
+fn sessions_are_bounded_and_the_oldest_go_first() {
+    let account = Account::new(TOKEN).unwrap();
+    let first = account.issue(1_000).unwrap();
+    let rest: Vec<String> = (0..crate::dashboard::auth::MAX_SESSIONS)
+        .map(|index| account.issue(1_001 + index as u64).unwrap())
+        .collect();
+    assert!(!account.valid(&first, 1_100));
+    assert!(rest.iter().all(|value| account.valid(value, 1_100)));
 }
 
 #[test]

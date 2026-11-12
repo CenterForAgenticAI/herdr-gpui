@@ -37,20 +37,24 @@ pub fn listen(
     if let Some(offense) = limited(hub.allow_listen(address)) {
         return Err(refuse(Status::Limited, Listen::Limited, offense));
     }
-    if !hub.access.admit((!token.is_empty()).then_some(token)) {
+    let Some(admitted) = hub.access.admit((!token.is_empty()).then_some(token)) else {
         let offense = Some(Offense::BadProof);
         return Err(refuse(Status::Forbidden, Listen::Forbidden, offense));
-    }
+    };
     let Ok(route) = prove(key, signature, signed) else {
         let offense = Some(Offense::BadProof);
         return Err(refuse(Status::Refused, Listen::BadProof, offense));
     };
-    let registration = hub
-        .register(route, address)
-        .map_err(|refusal| match refusal {
-            ListenRefusal::Banned | ListenRefusal::Full => refuse(Status::Full, Listen::Full, None),
-            ListenRefusal::TooMany => refuse(Status::TooMany, Listen::Full, Some(Offense::Limited)),
-        })?;
+    let registration =
+        hub.register_with(route, address, admitted)
+            .map_err(|refusal| match refusal {
+                ListenRefusal::Banned | ListenRefusal::Full => {
+                    refuse(Status::Full, Listen::Full, None)
+                }
+                ListenRefusal::TooMany => {
+                    refuse(Status::TooMany, Listen::Full, Some(Offense::Limited))
+                }
+            })?;
     hub.metrics.listen(Listen::Ready);
     Ok(registration)
 }

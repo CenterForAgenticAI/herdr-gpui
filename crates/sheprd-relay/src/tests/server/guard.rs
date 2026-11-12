@@ -183,15 +183,18 @@ fn the_dashboard_lists_earned_bans_with_their_reason() {
     guard.charge(ip("2001:db8::7"), 81 * GIB, now);
     let rows = guard.bans(now);
     assert_eq!(rows.len(), 2);
+    // Shown masked, so a leaked dashboard names no household: PUBLIC is
+    // 203.0.113.50.
     assert!(
         rows.iter()
-            .any(|row| row.address == PUBLIC && row.reason == "malformed")
+            .any(|row| row.address == "203.0.113.x" && row.reason == "malformed")
     );
-    // IPv6 is banned, and shown, as its /64.
+    // IPv6 is banned as its /64.
     assert!(
         rows.iter()
-            .any(|row| row.address == "2001:db8::/64" && row.reason == "bandwidth")
+            .any(|row| row.address == "2001:db8:0:x" && row.reason == "bandwidth")
     );
+    assert!(rows.iter().all(|row| !row.address.contains(PUBLIC)));
     assert_eq!(guard.active(now), 2);
 }
 

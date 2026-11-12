@@ -228,11 +228,23 @@ async fn login(
     }
     board.lockout.succeed(address);
     metrics.login(Login::Succeeded);
-    let cookie = board.account.issue(now_secs());
+    let Ok(cookie) = board.account.issue(now_secs()) else {
+        return hardened(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    };
     redirect("/dashboard", Some(auth::set_cookie(Some(&cookie))))
 }
 
-async fn logout() -> Response {
+/// Signs this browser's session out on the relay, not only in the browser.
+async fn logout(State(board): State<Board>, headers: HeaderMap) -> Response {
+    if !crate::web::same_origin(&headers) {
+        return hardened(StatusCode::FORBIDDEN.into_response());
+    }
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(auth::cookie)
+        .for_each(|value| board.account.revoke(value));
     redirect("/dashboard/login", Some(auth::set_cookie(None)))
 }
 

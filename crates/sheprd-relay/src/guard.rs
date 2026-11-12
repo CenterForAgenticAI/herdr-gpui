@@ -193,10 +193,29 @@ impl Record {
     }
 }
 
+/// How the dashboard shows an earned ban's address: enough to tell bans
+/// apart and to ban a range by hand, not enough to name a household, so a
+/// leaked dashboard leaks no one's address. `203.0.113.x`, or
+/// `2001:db8:7:x` for an IPv6 /64.
+#[must_use]
+pub fn masked(address: IpAddr) -> String {
+    match address.to_canonical() {
+        IpAddr::V4(address) => {
+            let [a, b, c, _] = address.octets();
+            format!("{a}.{b}.{c}.x")
+        }
+        IpAddr::V6(address) => {
+            let [a, b, c, ..] = address.segments();
+            format!("{a:x}:{b:x}:{c:x}:x")
+        }
+    }
+}
+
 /// A ban the dashboard lists.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct BanRow {
-    /// The address, or the /64 for IPv6; a manual entry's range.
+    /// The address, masked ([`masked`]); a wide block or a manual entry's
+    /// range as it is.
     pub address: String,
     /// Set by the operator rather than earned.
     pub manual: bool,
@@ -473,12 +492,8 @@ impl Guard {
             .iter()
             .filter_map(|(address, record)| {
                 let until = record.banned_until.filter(|until| *until > now)?;
-                let address = match address {
-                    IpAddr::V6(_) => format!("{address}/64"),
-                    IpAddr::V4(_) => address.to_string(),
-                };
                 Some(BanRow {
-                    address,
+                    address: masked(*address),
                     manual: false,
                     reason: record.reason.label(),
                     seconds_left: (until - now).as_secs(),

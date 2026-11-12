@@ -118,7 +118,7 @@ Statuses: `0` ok, `1` offline, `2` busy, `3` timeout, `4` limited,
 | `GET /v1/listen` | A computer's control socket. The relay sends `{"t":"challenge","nonce","version":1}`; the computer answers `{"key","signature","token"?}` over `"sheprd-relay/listen/v1\0" ‖ name ‖ 0x00 ‖ nonce`, where the name is the relay's host and path prefix as its endpoint gives them (`Endpoint::proof_name`, `relay.example.org/sheprd`). Binding the name stops one relay passing another's challenge through, prefixes included. The relay answers `{"t":"ready","route"}`. The computer sends `{"t":"dial_keys","keys"}` and `{"t":"pairing_key","key","seconds"}`, each answered `{"t":"status","status"}`, and hears `{"t":"incoming","session","key"}` for each dial. A newer listener with the same key replaces the older one, which is closed with 4409. |
 | `GET /v1/dial/{route}` | The same challenge; the device answers `{"key","signature"}` over `"sheprd-relay/dial/v1\0" ‖ name ‖ 0x00 ‖ nonce ‖ route`, then hears `{"t":"status","status"}` with the same statuses as QUIC. After `ok`, binary frames are the session. |
 | `GET /v1/accept/{session}` | The listener's socket for one dial. The session id is 128 random bits that only the listener learns, and it can be claimed once. |
-| `GET /v1/info` | `{"protocol":1,"version","listen_token":bool,"quic":{"port","pin"},"websocket":bool}`, so a client can check an endpoint, know to ask for a token, and reach QUIC, before saving it. |
+| `GET /v1/info` | `{"protocol":1,"version","listen_token":bool,"quic":{"port","pin"},"websocket":bool}`, where `version` is the major and minor only (`0.1`), not an exact build, so a client can check an endpoint, know to ask for a token, and reach QUIC, before saving it. |
 | `GET /healthz` | For uptime checks. |
 | `/dashboard` | The read-only dashboard, when an access token is set. |
 
@@ -310,8 +310,17 @@ Server-Sent Events. It changes nothing.
   across all addresses are also limited to 60 a minute, against guessing
   from many addresses.
 - A live stream ends when its login expires; 16 may be open at once.
-- The session cookie is HMAC-signed with a key drawn at start, lasts
-  12 hours, and is `HttpOnly; Secure; SameSite=Strict; Path=/dashboard`.
+- The session cookie is 32 random bytes the relay keeps a record of (their
+  SHA-256 and expiry, 32 sessions at most, the oldest dropped first). It
+  lasts 12 hours, and is `HttpOnly; Secure; SameSite=Strict;
+  Path=/dashboard`. Signing out forgets it on the relay, so a copied cookie
+  stops working then; a restart signs everyone out.
+- Banned addresses are shown masked (`203.0.113.x`, `2001:db8:7:x` for a
+  /64), enough to tell bans apart and ban a range by hand, so a leaked
+  dashboard names no household. Wide blocks and manual ranges show as
+  they are.
+- `/metrics`, when it has a token, blocks a caller for 15 minutes after
+  three wrong ones, as the dashboard does.
 - The page has a strict CSP (no inline script or style), `frame-ancestors
   'none'`, and `no-store`. All values go in through `textContent`.
 
@@ -319,6 +328,20 @@ Server-Sent Events. It changes nothing.
 
 One line at start (addresses, limits, whether the dashboard is on) and one
 per failed dashboard login. No addresses, routes, sessions, or payloads.
+
+Routes and session ids are in URL paths (`/v1/dial/{route}`,
+`/v1/accept/{session}`), so whatever sits in front could log them.
+`deploy/relay`'s Caddy keeps no access log; a platform in front, such as
+App Platform, may. A route is a pseudonym that clients make per relay (see
+What clients must hold to), and a session id is good for one accept within
+seconds.
+
+**Abuse.** The relay keeps no logs to answer a complaint with, by design.
+An operator answers one with bans by hand (`RELAY_BAN`, the ban file),
+`total-bandwidth`, and, for a relay kept to its owner's computers, listen
+tokens. Two ends the same person controls can use any open relay as a
+pipe; the limits bound what that costs the operator, not whether it can
+happen.
 
 ## Choosing a relay
 
@@ -463,8 +486,11 @@ addresses, timing, sizes, and which pseudonymous keys reach which route.
 **Nothing to authorize on the relay.** The relay has no users, accounts,
 or lists to keep. Who may reach a computer is the computer's own choice,
 made when a device pairs, and the relay holds that choice only while the
-computer is connected. One optional token (`RELAY_LISTEN_TOKEN`, off by
-default) keeps a relay to its owner's computers; dialers never need one.
+computer is connected. Optional listen tokens (off by default) keep a
+relay to its owner's computers; dialers never need one. A token file
+(`--listen-token-file`) holds one per person or machine, `NAME: TOKEN` per
+line, re-read every 30 seconds: taking a token out closes the listeners it
+admitted and no one else's. `RELAY_LISTEN_TOKEN` holds a single one.
 
 ### Keys drop themselves
 

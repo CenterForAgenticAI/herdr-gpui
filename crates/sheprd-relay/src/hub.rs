@@ -121,6 +121,8 @@ struct Listener {
     address: IpAddr,
     dial_keys: HashSet<Key>,
     generation: u64,
+    /// The listen token that admitted it, closed with it when revoked.
+    token: access::Admitted,
     incoming: mpsc::Sender<Incoming>,
     pairing: Vec<(Key, Instant)>,
 }
@@ -331,6 +333,16 @@ impl Hub {
         route: RouteId,
         address: IpAddr,
     ) -> Result<Registration, ListenRefusal> {
+        self.register_with(route, address, None)
+    }
+
+    /// [`Hub::register`], for a listener `token` admitted.
+    pub fn register_with(
+        self: &Arc<Self>,
+        route: RouteId,
+        address: IpAddr,
+        token: access::Admitted,
+    ) -> Result<Registration, ListenRefusal> {
         let (sender, incoming) = mpsc::channel(INCOMING_QUEUE);
         let generation = self.next.fetch_add(1, Relaxed);
         let mut state = self.state();
@@ -363,6 +375,7 @@ impl Hub {
                 address,
                 dial_keys: HashSet::new(),
                 generation,
+                token,
                 incoming: sender,
                 pairing: Vec::new(),
             },
@@ -650,6 +663,27 @@ impl Hub {
         }
         // QUIC connections check their own address when told.
         let _ = self.bans.send(());
+    }
+
+    /// Closes the listeners a listen token admitted that is not among
+    /// `kept` any more: revoking one person's token ends their computers'
+    /// listening, and no one else's.
+    pub fn keep_tokens(&self, kept: &[[u8; 32]]) {
+        let mut state = self.state();
+        let revoked: Vec<RouteId> = state
+            .listeners
+            .iter()
+            .filter(|(_, listener)| listener.token.is_some_and(|token| !kept.contains(&token)))
+            .map(|(route, _)| *route)
+            .collect();
+        let removed = revoked
+            .iter()
+            .filter(|route| state.remove_listener(route).is_some())
+            .count();
+        drop(state);
+        for _ in 0..removed {
+            self.metrics.lower(Gauge::Listeners);
+        }
     }
 
     /// The busiest sessions, for the dashboard.

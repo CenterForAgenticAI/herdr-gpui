@@ -156,7 +156,14 @@ async fn info(State(shared): State<Shared>) -> Json<Info> {
         listen_token: shared.hub.access.requires_token(),
         protocol: PROTOCOL,
         quic: shared.quic.clone(),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        // The major and minor version only: enough for a client to tell
+        // what it talks to, not an exact build to look up flaws for.
+        version: concat!(
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            ".",
+            env!("CARGO_PKG_VERSION_MINOR")
+        )
+        .to_owned(),
         websocket: shared.public_host.is_some(),
     })
 }

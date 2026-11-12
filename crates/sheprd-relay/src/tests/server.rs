@@ -22,6 +22,7 @@ mod relay;
 mod review;
 mod review2;
 mod shared_address;
+mod tokens;
 
 pub(crate) use super::{hello, public, sign, signing_key};
 use crate::{

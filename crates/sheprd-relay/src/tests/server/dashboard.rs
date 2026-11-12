@@ -320,3 +320,28 @@ async fn a_blocked_guesser_cannot_use_up_the_operators_logins() {
         "/dashboard"
     );
 }
+
+#[tokio::test]
+async fn the_metrics_token_cannot_be_guessed_at_the_ports_speed() {
+    let hub = Arc::new(Hub::new(Limits::default(), crate::hub::Access::Open));
+    let token = Secret::new(b"a metrics token!").unwrap();
+    let guarded = metrics_app(hub, Some(token));
+    let scrape = |bearer: &'static str| {
+        let guarded = guarded.clone();
+        async move {
+            let request = Request::get("/metrics")
+                .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+                .body(Body::empty())
+                .unwrap();
+            guarded.oneshot(request).await.unwrap().status()
+        }
+    };
+    for _ in 0..3 {
+        assert_eq!(scrape("a wrong guess").await, StatusCode::UNAUTHORIZED);
+    }
+    // Blocked now, even for the right token, unchecked.
+    assert_eq!(
+        scrape("a metrics token!").await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}

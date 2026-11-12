@@ -32,6 +32,8 @@ pub enum Error {
     },
     #[error("the server failed")]
     Serve(#[source] io::Error),
+    #[error("the listen token file holds more than {max} tokens")]
+    TooManyTokens { max: usize },
     #[error("{name} must be at least {min} characters")]
     WeakSecret { min: usize, name: &'static str },
     // keep-sorted end

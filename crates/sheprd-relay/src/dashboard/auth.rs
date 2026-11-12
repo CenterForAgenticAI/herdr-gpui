@@ -1,5 +1,10 @@
-//! The dashboard's login: one access token, a signed session cookie, and
-//! the login form's field.
+//! The dashboard's login: one access token, a session cookie the relay
+//! keeps a record of, and the login form's field.
+//!
+//! A cookie is 32 random bytes; the relay keeps only their SHA-256 and the
+//! session's expiry, in memory and bounded. Signing out forgets it, so a
+//! copied cookie stops working then, not 12 hours later, and a restart
+//! signs everyone out.
 //!
 //! The token, not a password, is what keeps guessing hopeless: at least 24
 //! characters, and `deploy/relay` generates 32 random bytes. The lockout in
@@ -7,10 +12,9 @@
 
 use crate::secret::Secret;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use hmac::{Hmac, KeyInit, Mac};
 use percent_encoding::percent_decode_str;
-use sha2::Sha256;
-use std::{fmt, time::Duration};
+use sha2::{Digest, Sha256};
+use std::{collections::HashMap, fmt, sync::Mutex, time::Duration};
 
 /// The cookie's name.
 pub const COOKIE: &str = "sheprd_relay";
@@ -21,13 +25,14 @@ pub const SESSION: Duration = Duration::from_secs(12 * 60 * 60);
 pub const MIN_TOKEN: usize = 24;
 /// The longest field the login form may carry.
 const MAX_FIELD: usize = 256;
-const CONTEXT: &[u8] = b"sheprd-relay/dashboard/v1\0";
+/// Sessions kept at once; signing in past this ends the oldest.
+pub const MAX_SESSIONS: usize = 32;
 
-/// Who may read the dashboard: whoever holds the token. Also the key its
-/// cookies are signed with.
+/// Who may read the dashboard: whoever holds the token, and the sessions
+/// signed in with it.
 pub struct Account {
-    /// Drawn at start, so a restart signs everyone out.
-    signing: [u8; 64],
+    /// Each session cookie's SHA-256, and when it expires.
+    sessions: Mutex<HashMap<[u8; 32], u64>>,
     token: Secret,
 }
 
@@ -46,12 +51,17 @@ impl Account {
                 name: "the dashboard token",
             });
         }
-        let mut signing = [0; 64];
-        getrandom::fill(&mut signing).map_err(crate::Error::Random)?;
         Ok(Self {
-            signing,
+            sessions: Mutex::default(),
             token: Secret::new(token.as_bytes())?,
         })
+    }
+
+    fn sessions(&self) -> std::sync::MutexGuard<'_, HashMap<[u8; 32], u64>> {
+        match self.sessions.lock() {
+            Ok(sessions) => sessions,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     /// Whether `token` is the dashboard's, in constant time.
@@ -60,40 +70,51 @@ impl Account {
         self.token.matches(token.as_bytes())
     }
 
-    fn mac(&self, expires: u64) -> Hmac<Sha256> {
-        let mut mac = <Hmac<Sha256> as KeyInit>::new(&self.signing.into());
-        mac.update(CONTEXT);
-        mac.update(&expires.to_be_bytes());
-        mac
-    }
-
-    /// A cookie value good until `now_secs` plus [`SESSION`].
-    #[must_use]
-    pub fn issue(&self, now_secs: u64) -> String {
+    /// A new session cookie good until `now_secs` plus [`SESSION`].
+    pub fn issue(&self, now_secs: u64) -> crate::Result<String> {
+        let mut value = [0; 32];
+        getrandom::fill(&mut value).map_err(crate::Error::Random)?;
+        let value = URL_SAFE_NO_PAD.encode(value);
         let expires = now_secs.saturating_add(SESSION.as_secs());
-        let tag = self.mac(expires).finalize().into_bytes();
-        format!("{expires}.{}", URL_SAFE_NO_PAD.encode(tag))
+        let mut sessions = self.sessions();
+        sessions.retain(|_, until| *until > now_secs);
+        if sessions.len() >= MAX_SESSIONS
+            && let Some(oldest) = sessions
+                .iter()
+                .min_by_key(|(_, until)| **until)
+                .map(|(key, _)| *key)
+        {
+            sessions.remove(&oldest);
+        }
+        sessions.insert(digest(&value), expires);
+        Ok(value)
     }
 
-    /// When a cookie this relay issued expires, if it has not yet.
+    /// When the session `value` names expires, if it is still signed in.
     #[must_use]
     pub fn expiry(&self, value: &str, now_secs: u64) -> Option<u64> {
-        let (expires, _) = value.split_once('.')?;
-        let expires = expires.parse().ok()?;
-        self.valid(value, now_secs).then_some(expires)
+        self.sessions()
+            .get(&digest(value))
+            .copied()
+            .filter(|expires| *expires > now_secs)
     }
 
-    /// Whether `value` is a cookie this relay issued that has not expired.
+    /// Whether `value` names a session still signed in.
     #[must_use]
     pub fn valid(&self, value: &str, now_secs: u64) -> bool {
-        let Some((expires, tag)) = value.split_once('.') else {
-            return false;
-        };
-        let (Ok(expires), Ok(tag)) = (expires.parse::<u64>(), URL_SAFE_NO_PAD.decode(tag)) else {
-            return false;
-        };
-        expires > now_secs && self.mac(expires).verify_slice(&tag).is_ok()
+        self.expiry(value, now_secs).is_some()
     }
+
+    /// Signs the session `value` names out.
+    pub fn revoke(&self, value: &str) {
+        self.sessions().remove(&digest(value));
+    }
+}
+
+/// What the relay keeps of a cookie: its SHA-256, compared by lookup of a
+/// hash, so neither the cookie nor timing reveals another session's.
+fn digest(value: &str) -> [u8; 32] {
+    Sha256::digest(value.as_bytes()).into()
 }
 
 /// The session cookie's value in a `Cookie` header, if present.

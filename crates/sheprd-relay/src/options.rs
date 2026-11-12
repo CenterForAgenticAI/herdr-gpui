@@ -78,9 +78,11 @@ Every option is optional, and each can also be set as a RELAY_* variable
                                  characters; or RELAY_DASHBOARD_TOKEN. Without
                                  one, the dashboard is off. Three wrong tries
                                  block an address for 15 minutes.
-  --listen-token-file FILE       Only listeners presenting this token may
-                                 listen; or RELAY_LISTEN_TOKEN. Dialers never
-                                 need it.
+  --listen-token-file FILE       Only listeners presenting one of these tokens
+                                 may listen: one per line, `NAME: TOKEN` or the
+                                 token alone, re-read every 30 s, and a token
+                                 taken out closes its listeners. Or one token
+                                 in RELAY_LISTEN_TOKEN. Dialers never need it.
   --metrics-token-file FILE      Require `Authorization: Bearer TOKEN` on
                                  /metrics; or RELAY_METRICS_TOKEN.
   --auto-ban on|off              Ban addresses that misbehave: limits hit,
@@ -176,6 +178,8 @@ pub struct Options {
     pub limits: Limits,
     pub listen: SocketAddr,
     pub listen_token: Option<SecretString>,
+    /// Where the listen tokens came from, re-read while the relay runs.
+    pub listen_token_file: Option<PathBuf>,
     /// Where `/metrics` is served, or `None` when it is off.
     pub metrics: Option<SocketAddr>,
     pub metrics_token: Option<SecretString>,
@@ -202,6 +206,7 @@ impl Default for Options {
             limits: Limits::default(),
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
             listen_token: None,
+            listen_token_file: None,
             metrics: Some(SocketAddr::from(([127, 0, 0, 1], 9090))),
             metrics_token: None,
             public_host: None,
@@ -355,7 +360,10 @@ impl Options {
             "dials-per-minute" => limits.dials_per_minute = per_minute()?,
             "idle-timeout" => limits.idle_timeout = duration()?,
             "listen" => self.listen = text.parse().map_err(|_| invalid())?,
-            "listen-token-file" => self.listen_token = Some(read(name, text)?),
+            "listen-token-file" => {
+                self.listen_token = Some(read(name, text)?);
+                self.listen_token_file = Some(PathBuf::from(text));
+            }
             "listens-per-minute" => limits.listens_per_minute = per_minute()?,
             "max-buffer" => limits.max_buffer = bytes()?,
             "max-connections" => limits.max_connections = count()?,

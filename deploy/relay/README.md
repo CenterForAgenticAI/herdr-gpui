@@ -213,7 +213,19 @@ relay keeps nothing on disk.
 
 To keep a relay to your own computers, you may set `RELAY_LISTEN_TOKEN`
 (16+ characters) and give it to them. It is off by default, and dialers
-never need it.
+never need it. To give each person or machine its own, so one can be
+revoked alone, put them in a file instead, one per line, and point
+`RELAY_LISTEN_TOKEN_FILE` at it:
+
+```text
+# NAME: TOKEN, or the token alone
+alice-laptop: 0a1b2c...   # openssl rand -base64 32
+bob-desktop: 9f8e7d...
+```
+
+The relay re-reads it every 30 seconds; delete a line and that token's
+computers stop listening within half a minute. A file it cannot use (a
+token under 16 characters, say) is ignored and the last good one kept.
 
 ## Toxic clients
 
