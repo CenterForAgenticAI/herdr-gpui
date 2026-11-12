@@ -99,13 +99,13 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
     let original = terminals
         .iter()
         .find(|terminal| terminal.address == record.terminal);
-    let Some(original) = original else {
+    if original.is_none_or(|terminal| terminal.state == TerminalState::Finished) {
         // Missing is not evidence of restart: it could be an explicit rm.
-        return closed(core, endpoint);
-    };
-    if original.state == TerminalState::Finished {
-        return closed(core, endpoint);
+        return close_if_ended(core, endpoint, record, version);
     }
+    let Some(original) = original else {
+        return Ok(());
+    };
     if record.state == State::Starting {
         return Ok(());
     }
@@ -180,6 +180,27 @@ fn recover(core: &Core, endpoint: &EndpointId, terminals: &[Terminal]) -> Result
         ..Run::default()
     })?;
     Ok(())
+}
+
+/// Tombstones a chat whose terminal is gone or finished, but only on proof
+/// newer than the record. `terminals` may predate the record: another worker
+/// can create and claim a replacement after this pass listed, so a terminal
+/// the record names may simply be too new for that list. A list taken after
+/// reading `version`, and a write fenced on it, close only what really ended.
+fn close_if_ended(
+    core: &Core,
+    endpoint: &EndpointId,
+    mut record: Record,
+    version: u64,
+) -> Result<()> {
+    let terminals = core.list(true)?.terminals;
+    if terminals.iter().any(|terminal| {
+        terminal.address == record.terminal && terminal.state != TerminalState::Finished
+    }) {
+        return Err(Error::Moved.into());
+    }
+    record.state = State::Closed;
+    write(core, endpoint, &record, version)
 }
 
 /// Whether either receipt of the last replacement is missing: the

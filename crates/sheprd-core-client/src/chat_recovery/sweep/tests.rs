@@ -4,6 +4,7 @@ use serde_json::json;
 
 mod lost_replies;
 mod receipts;
+mod stale_list;
 
 fn shell() -> Terminal {
     let mut raw = terminal("t1");
