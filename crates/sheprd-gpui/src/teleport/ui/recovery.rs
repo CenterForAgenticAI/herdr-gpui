@@ -2,10 +2,13 @@
 //! runs on a worker; retries are bounded and never launch or stop a terminal.
 
 use super::*;
+use sheprd_backend::TerminalId;
 use sheprd_remote::teleport::arrival::{self, Receipt};
+use sheprd_session::panes::Panes;
 use std::{
+    collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Mutex, PoisonError},
+    sync::{LazyLock, Mutex, PoisonError},
 };
 
 const RETRY: Duration = Duration::from_secs(1);
@@ -18,6 +21,43 @@ struct Recovery {
 }
 
 impl Global for Recovery {}
+
+/// A receipt this run already turned into tabs, by a finished move or by
+/// recovery. Its tabs are never opened again: closing one is the user's
+/// choice, not process loss.
+struct Adopted {
+    scope: Scope,
+    /// The terminals its tabs hold.
+    terminals: Vec<TerminalId>,
+    /// Of those, the ones whose tabs have been open since it was adopted.
+    /// Until a tab opens, its absence is a move still landing, not a close.
+    seen: HashSet<TerminalId>,
+    /// Of those, the ones whose tabs the user has closed again.
+    closed: Vec<TerminalId>,
+}
+
+/// Process-wide, as both the move worker (`persist`) and every window's
+/// recovery record adoptions. Entries leave when their receipt is released.
+static ADOPTED: LazyLock<Mutex<HashMap<PathBuf, Adopted>>> = LazyLock::new(Mutex::default);
+
+fn adopted() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Adopted>> {
+    ADOPTED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn adopt(path: PathBuf, scope: Scope, outcome: &Outcome) {
+    let terminals = outcome
+        .core_tabs
+        .iter()
+        .flat_map(Panes::terminals)
+        .cloned()
+        .collect();
+    adopted().entry(path).or_insert(Adopted {
+        scope,
+        terminals,
+        seen: HashSet::new(),
+        closed: Vec::new(),
+    });
+}
 
 fn directory() -> Option<PathBuf> {
     Store::path().and_then(|path| Some(path.parent()?.join("teleport-arrivals")))
@@ -33,7 +73,10 @@ pub(super) fn persist(
         return Ok(());
     }
     let directory = directory().ok_or(arrival::Error::Unavailable)?;
-    arrival::save(&directory, &Receipt::new(scope.as_str(), outcome))?;
+    let path = arrival::save(&directory, &Receipt::new(scope.as_str(), outcome))?;
+    // The finished move opens these tabs itself; recovery must not reopen
+    // them after the user closes one.
+    adopt(path, scope.clone(), outcome);
     Ok(())
 }
 
@@ -58,8 +101,13 @@ impl Recovery {
             match arrival::load(&directory) {
                 Ok(receipts) => {
                     let receipts = receipts.into_iter().filter(|(path, receipt)| {
-                        match arrival::release(path, receipt, &saved) {
-                            Ok(done) => !done,
+                        let closed = adopted().get(path).map(|adopted| adopted.closed.clone()).unwrap_or_default();
+                        match arrival::release(path, receipt, &saved, &closed) {
+                            Ok(true) => {
+                                adopted().remove(path);
+                                false
+                            }
+                            Ok(false) => true,
                             Err(error) => { tracing::warn!(%error, "Could not release a saved Teleport arrival"); true }
                         }
                     }).collect();
@@ -90,9 +138,54 @@ impl SheprdWindow {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner),
         );
-        for (_, receipt) in pending {
+        for (path, receipt) in pending {
+            if adopted().contains_key(&path) {
+                continue;
+            }
             let scope = Scope::endpoint(receipt.scope());
-            self.settle_teleport(&receipt.outcome(), &scope, window, cx);
+            let outcome = receipt.outcome();
+            adopt(path, scope.clone(), &outcome);
+            self.settle_teleport(&outcome, &scope, window, cx);
         }
+        track_closed(cx);
     }
 }
+
+/// Note which adopted terminals have tabs open now, and which were open and
+/// have since been closed, so their receipts stop waiting for them.
+fn track_closed(cx: &App) {
+    let mut adopted = adopted();
+    if adopted.is_empty() {
+        return;
+    }
+    let Some(store) = cx.try_global::<Store>() else {
+        return;
+    };
+    for entry in adopted.values_mut() {
+        let held: HashSet<&TerminalId> = store
+            .in_scope(&entry.scope)
+            .filter_map(|tab| match &tab.location {
+                Some(Location::CoreTerminal { panes, .. }) => Some(panes.terminals()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        entry.seen.extend(
+            entry
+                .terminals
+                .iter()
+                .filter(|terminal| held.contains(terminal))
+                .cloned(),
+        );
+        entry.closed = entry
+            .seen
+            .iter()
+            .filter(|terminal| !held.contains(terminal))
+            .cloned()
+            .collect();
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

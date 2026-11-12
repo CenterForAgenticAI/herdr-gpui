@@ -6,6 +6,7 @@ mod error;
 use super::job::{Landed, Outcome};
 pub use error::{Error, Result};
 use serde::{Deserialize, Serialize};
+use sheprd_backend::TerminalId;
 use sheprd_session::{SavedTabs, panes::Panes};
 use std::{
     fs,
@@ -58,11 +59,14 @@ impl Receipt {
         }
     }
 
-    pub fn saved_in(&self, bytes: &[u8]) -> bool {
+    /// Whether every terminal of the receipt, apart from `closed`, has a
+    /// tab of its host saved in `bytes`.
+    pub fn saved_in(&self, bytes: &[u8], closed: &[TerminalId]) -> bool {
         SavedTabs::parse(bytes).is_ok_and(|saved| {
             self.core_tabs
                 .iter()
                 .flat_map(Panes::terminals)
+                .filter(|terminal| !closed.contains(terminal))
                 .all(|terminal| {
                     saved
                         .core_tabs(&self.scope)
@@ -132,7 +136,15 @@ fn read(path: &Path) -> Result<Receipt> {
 
 /// A receipt is released only once all destination terminals are saved. A
 /// failed browser-tab write keeps it recoverable at the next app start.
-pub fn release(path: &Path, receipt: &Receipt, saved_path: &Path) -> Result<bool> {
+/// Removes the receipt once its tabs are saved. `closed` names terminals
+/// whose tabs the user closed after this run adopted the receipt: they are not
+/// waited for, so a closed tab is not reopened on the next launch.
+pub fn release(
+    path: &Path,
+    receipt: &Receipt,
+    saved_path: &Path,
+    closed: &[TerminalId],
+) -> Result<bool> {
     let file = match fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -146,7 +158,7 @@ pub fn release(path: &Path, receipt: &Receipt, saved_path: &Path) -> Result<bool
     (&file)
         .take(sheprd_session::MAX_SAVED_BYTES as u64 + 1)
         .read_to_end(&mut saved)?;
-    if !receipt.saved_in(&saved) {
+    if !receipt.saved_in(&saved, closed) {
         return Ok(false);
     }
     file.sync_all()?;
