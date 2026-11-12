@@ -17,9 +17,10 @@
 //! replayed.
 
 use super::{Directory, Error};
-use ed25519_dalek::{Signature, VerifyingKey};
+use ed25519_dalek::VerifyingKey;
 use pgp::{
     composed::{Deserializable, DetachedSignature, SignedPublicKey},
+    packet::{Signature, SignatureType},
     types::KeyDetails,
 };
 
@@ -37,6 +38,8 @@ pub const ACTIONS_KEY: [u8; 32] = [
     0x71, 0x0f, 0x88, 0xa3, 0x8d, 0xd9, 0x58, 0xcd, 0x22, 0x30, 0x43, 0x62, 0x45, 0xe4, 0x7b, 0x9c,
     0xa1, 0x33, 0x15, 0x1b, 0x56, 0x48, 0x6c, 0x14, 0x5a, 0x3f, 0xd8, 0xcd, 0x42, 0xc8, 0x28, 0x88,
 ];
+/// How far ahead of a client's clock a signature may be dated.
+const CLOCK_SKEW: u64 = 5 * 60;
 /// The largest signature file a client reads.
 pub const MAX_SIGNATURE: usize = 16 * 1024;
 
@@ -145,7 +148,10 @@ fn maintainer_signed(bytes: &[u8], armored: &[u8], now: u64) -> bool {
 }
 
 /// Whether `armored` is `key`'s signature over `bytes`, as
-/// [`maintainer_signed`] checks it.
+/// [`maintainer_signed`] checks it. The signing subkey must not be revoked;
+/// its latest valid binding must give it the signing flag, carry the
+/// subkey's own backward signature, and not have expired at `now`; and the
+/// signature must be made while the subkey lived, and not in the future.
 pub(crate) fn signed_by(key: &SignedPublicKey, bytes: &[u8], armored: &[u8], now: u64) -> bool {
     let Ok(text) = std::str::from_utf8(armored) else {
         return false;
@@ -153,20 +159,54 @@ pub(crate) fn signed_by(key: &SignedPublicKey, bytes: &[u8], armored: &[u8], now
     let Ok((signature, _)) = DetachedSignature::from_string(text) else {
         return false;
     };
+    let Some(signed_at) = signature
+        .signature
+        .created()
+        .map(|at| u64::from(at.as_secs()))
+    else {
+        return false;
+    };
+    if signed_at > now.saturating_add(CLOCK_SKEW) {
+        return false;
+    }
+    let primary = &key.primary_key;
     key.public_subkeys.iter().any(|subkey| {
-        let created = u64::from(subkey.key.created_at().as_secs());
-        let signing = subkey.signatures.iter().any(|binding| {
-            // A lifetime of zero means none, as the standard has it.
-            let expires = binding
-                .key_expiration_time()
-                .map(|lifetime| u64::from(lifetime.as_secs()))
-                .filter(|lifetime| *lifetime > 0)
-                .map(|lifetime| created.saturating_add(lifetime));
-            binding.key_flags().sign() && expires.is_none_or(|expires| now < expires)
+        let valid =
+            |binding: &&Signature| binding.verify_subkey_binding(primary, &subkey.key).is_ok();
+        let of = |kind| {
+            subkey
+                .signatures
+                .iter()
+                .filter(move |binding| binding.typ() == Some(kind))
+        };
+        // A revocation the primary key made ends the subkey, whatever any
+        // binding says.
+        if of(SignatureType::SubkeyRevocation).any(|revocation| valid(&revocation)) {
+            return false;
+        }
+        let Some(binding) = of(SignatureType::SubkeyBinding)
+            .filter(valid)
+            .max_by_key(|binding| binding.created().map(|at| at.as_secs()))
+        else {
+            return false;
+        };
+        let backward = binding.embedded_signature().is_some_and(|back| {
+            back.verify_primary_key_binding(&subkey.key, primary)
+                .is_ok()
         });
-        signing
-            && subkey.verify_bindings(&key.primary_key).is_ok()
-            && signature.verify(&subkey.key, bytes).is_ok()
+        if !binding.key_flags().sign() || !backward {
+            return false;
+        }
+        let born = u64::from(subkey.key.created_at().as_secs());
+        // A lifetime of zero means none, as the standard has it.
+        let expires = binding
+            .key_expiration_time()
+            .map(|lifetime| u64::from(lifetime.as_secs()))
+            .filter(|lifetime| *lifetime > 0)
+            .map(|lifetime| born.saturating_add(lifetime));
+        let lived = signed_at >= born && expires.is_none_or(|expires| signed_at < expires);
+        let alive = expires.is_none_or(|expires| now < expires);
+        lived && alive && signature.verify(&subkey.key, bytes).is_ok()
     })
 }
 
@@ -175,7 +215,7 @@ fn actions_signed(bytes: &[u8], raw: &[u8]) -> bool {
     let Ok(key) = VerifyingKey::from_bytes(&ACTIONS_KEY) else {
         return false;
     };
-    let Ok(signature) = Signature::from_slice(raw) else {
+    let Ok(signature) = ed25519_dalek::Signature::from_slice(raw) else {
         return false;
     };
     key.verify_strict(bytes, &signature).is_ok()

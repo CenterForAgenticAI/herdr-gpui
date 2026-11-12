@@ -151,3 +151,29 @@ fn the_published_list_is_stamped_and_any_maintainer_signature_holds() {
         assert_eq!(signed.signer, Signer::Maintainer);
     }
 }
+
+#[test]
+fn a_revoked_signing_subkey_vouches_for_nothing() {
+    let signature = include_bytes!("fixtures/relays-signed.json.revoked.asc");
+    let before = SignedPublicKey::from_string(include_str!("fixtures/openpgp-revoked-before.asc"))
+        .unwrap()
+        .0;
+    let after = SignedPublicKey::from_string(include_str!("fixtures/openpgp-revoked.asc"))
+        .unwrap()
+        .0;
+    // Signed at 1_794_506_816, then the subkey was revoked.
+    let now = 1_794_507_000;
+    assert!(signed_by(&before, SIGNED, signature, now));
+    assert!(!signed_by(&after, SIGNED, signature, now));
+}
+
+#[test]
+fn a_signature_dated_in_the_future_is_refused() {
+    // Signed at SIGNED_AT: a client whose clock reads an hour earlier.
+    assert!(!signed_by(
+        &test_key(),
+        SIGNED,
+        SIGNED_ASC,
+        SIGNED_AT - 3_600
+    ));
+}
