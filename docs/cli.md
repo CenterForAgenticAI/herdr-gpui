@@ -50,6 +50,13 @@ sheprd COMMAND --help      # one command
 
 ## Options and output
 
+For app-kept work commands from remote Herdr 2 terminals, the managed shim
+supports notes, mute/status, worktree dialogs/listing, setup/run scripts,
+checkpoint restore, Teleport, and fan-out with scoped replies and the same
+confirmation policy. See [the remote work contract](remote-core-work.md) for
+host/window identity, bounds, cancellation, and the full-binary-only Git
+commands. Remote notes listings are restricted to the caller's host.
+
 Every command accepts:
 
 - `--json`: print one JSON document instead of text. Errors become

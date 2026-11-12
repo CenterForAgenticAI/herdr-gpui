@@ -39,13 +39,18 @@ Herdr 2 terminal (HC_TERMINAL_ID), of the workspace that shows it.
   --wait N      Wait up to N seconds for notes (0..600); requires python3.
   --json        Print one JSON document.
 
-Only these work from a remote host. Files on this host cannot be shown: serve
+Files on this host cannot be shown: serve
 their folder (for example `python3 -m http.server 8000`) and open
 localhost:8000. Herdr 1 notes arrive as your next prompt. In Herdr 2, collect
 notes with browser feedback --wait 600 (or feedback --wait 600).
 
-Exit statuses: 0 asked, 1 refused, 2 invalid address, 5 not in a Herdr
-pane, 8 not available on an SSH host.
+Herdr 2 callers can also use worktree, notes, scripts setup/run, checkpoint
+restore, teleport, and fan-out with Python 3. Run COMMAND --help for usage.
+These return scoped results; consequential work still waits for the app's
+confirmation. After timeout/cancellation inspect the app before retrying.
+
+Exit statuses: 0 done/asked, 1 refused, 2 invalid usage, 4 no notes,
+5 caller/window not found, 6 busy, 7 timeout, 8 unsupported.
 EOF
 }
 
@@ -74,7 +79,7 @@ done_message() {
 }
 
 unavailable() {
-        fail 8 unsupported "Not available on this remote host: use browser open, browser reload, or Herdr 2 browser feedback."
+    fail 8 unsupported "Not available through this remote shim; see --help for browser and Herdr 2 work commands."
 }
 
 # In a herdr-core terminal outside a Herdr pane: the core, as the bridge
@@ -304,6 +309,25 @@ PY
 for arg in "$@"; do
     [ "$arg" = --json ] && json=1
 done
+# Work uses a separate namespace and the app's normal confirmation flows.
+skip_window=0
+family=
+for arg in "$@"; do
+    if [ "$skip_window" = 1 ]; then skip_window=0; continue; fi
+    case $arg in
+        --json | --window=*) continue ;;
+        --window) skip_window=1; continue ;;
+        *) family=$arg; break ;;
+    esac
+done
+case $family in
+    notes | worktree | scripts | checkpoint | teleport | fan-out)
+        core_terminal || unavailable
+        command -v python3 >/dev/null 2>&1 || fail 8 unsupported "Remote work requires python3."
+        core_work "$@"
+        exit $?
+        ;;
+esac
 for arg in "$@"; do
     case $arg in
         --window | --window=*) unavailable ;;

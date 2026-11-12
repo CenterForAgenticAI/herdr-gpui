@@ -13,7 +13,12 @@ use gpui::{Context, Global};
 use sheprd_client::{ConnectTarget, ScriptHost, ScriptLimits, run_script};
 use std::{collections::HashSet, sync::atomic::AtomicBool, time::Duration};
 
-pub(super) const SHIM: &str = include_str!("herdr-gpui.sh");
+pub(super) const SHIM: &str = concat!(
+    "#!/bin/sh\ncore_work() {\nexec python3 - \"$@\" <<'SHEPRD_WORK_PY'\n",
+    include_str!("../remote_work/shim.py"),
+    "\nSHEPRD_WORK_PY\n}\n",
+    include_str!("herdr-gpui.sh"),
+);
 /// Where agents on the host run the shim from; their shell expands `~`.
 pub(super) const SHIM_COMMAND: &str = "~/.local/state/herdr/gpui/bin/herdr-gpui";
 
@@ -65,13 +70,27 @@ const LIMITS: ScriptLimits = ScriptLimits {
     idle: Duration::from_secs(30),
 };
 
-/// The hosts tried this run, by SSH target and the choice applied, whether or
-/// not it worked: a host without a POSIX shell is not asked again on every
-/// tick, while a changed choice is applied again.
+/// The hosts tried this run, by saved device, the machine it names, and the
+/// choice applied, whether or not it worked: a host without a POSIX shell is
+/// not asked again on every tick, while a changed choice, or a device edited
+/// to name another machine, is applied again.
 #[derive(Default)]
-struct Tried(HashSet<(crate::browser::Scope, Choice)>);
+struct Tried(HashSet<(crate::browser::Scope, ConnectTarget, Choice)>);
 
 impl Global for Tried {}
+
+impl Tried {
+    /// Whether this is the first try of `choice` on the machine `target`
+    /// names for the saved device `scope`, recording it.
+    fn first(
+        &mut self,
+        scope: crate::browser::Scope,
+        target: &ConnectTarget,
+        choice: Choice,
+    ) -> bool {
+        self.0.insert((scope, target.clone(), choice))
+    }
+}
 
 /// Blocking: short SSH sessions. Run off the UI thread.
 enum InstallHost {
@@ -145,8 +164,11 @@ impl SheprdWindow {
             if !endpoint.enabled || !connected {
                 continue;
             }
-            let key = (crate::browser::scope(endpoint), choice);
-            if !cx.default_global::<Tried>().0.insert(key) {
+            if !cx.default_global::<Tried>().first(
+                crate::browser::scope(endpoint),
+                endpoint.saved_target(),
+                choice,
+            ) {
                 continue;
             }
             cx.background_executor()
@@ -162,3 +184,6 @@ impl SheprdWindow {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

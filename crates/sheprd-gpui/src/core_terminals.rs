@@ -46,6 +46,7 @@ mod split;
 mod start;
 mod tabs;
 mod view;
+mod work_requests;
 mod worker;
 mod workspaces;
 

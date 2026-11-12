@@ -21,6 +21,7 @@ mod feedback;
 mod install;
 mod window;
 
+pub(crate) use feedback::retire as retire_feedback;
 pub(crate) use window::Forwarding;
 
 /// The command installed on the caller's host, never the desktop executable.

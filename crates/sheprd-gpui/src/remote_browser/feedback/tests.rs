@@ -157,3 +157,5 @@ fn an_unacknowledged_reply_retains_and_restores_each_pages_pending_marker() {
     assert!(!feedback.has(&request.target));
     assert_eq!(weak.strong_count(), 0);
 }
+
+mod retire;
