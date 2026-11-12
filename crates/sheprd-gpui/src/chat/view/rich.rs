@@ -360,26 +360,29 @@ impl SheprdWindow {
             let baseline = drawn.baseline.unwrap_or(drawn.height) * scale;
             let top = (text_baseline - baseline).max(0.);
             let before = (baseline - text_baseline).max(0.);
+            // Room for the 1px border `Fragment::atomic` draws around a
+            // selectable formula, so the picture still starts at its padding.
+            let border = 1.;
             div()
                 .debug_selector(|| "chat-math-inline".into())
                 .flex_none()
                 .relative()
                 // As in KaTeX's HTML, the formula advances by its own width
                 // and its padding overlaps the neighboring spaces.
-                .mx(px(-super::super::rich::MATH_PADDING * scale))
+                .mx(px(-super::super::rich::MATH_PADDING * scale - border))
                 .max_w_full()
-                .w(px(width))
+                .w(px(width + 2. * border))
                 .h(px((height + top).max(size * 1.4 + before)))
                 .child(div().pt(px(before)).child("\u{200b}"))
+                // Like KaTeX's HTML, no fit to the column: a percentage
+                // width on this absolute picture shrank short formulas.
                 .child(
                     img(drawn.texture.clone())
                         .absolute()
                         .top(px(top))
                         .left(px(0.))
                         .w(px(width))
-                        .h(px(height))
-                        .max_w_full()
-                        .object_fit(ObjectFit::Contain),
+                        .h(px(height)),
                 )
         } else {
             div()

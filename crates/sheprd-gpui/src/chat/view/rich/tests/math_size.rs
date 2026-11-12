@@ -38,10 +38,11 @@ fn a_formula_scales_with_its_message(cx: &mut TestAppContext) {
                 .size
                 .width
         };
-        assert_eq!(width(full), Some(px(40.).into()));
+        // Plus 1px each side for the selection border, which does not scale.
+        assert_eq!(width(full), Some(px(42.).into()));
         assert_eq!(
             width(full / 2.),
-            Some(px(20.).into()),
+            Some(px(22.).into()),
             "half the text, half the formula"
         );
     });
