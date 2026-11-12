@@ -34,26 +34,27 @@ fn ssh_kept_badge_and_counts_read_the_prefetch_input_without_h1_lookup() {
     );
     let marks = crate::teleport::Marks::detached();
     let theme = Theme::default();
-    // Owned results, so no call holds `workspace` or a `View` past itself.
-    let badge = |workspace: &_, view: &View| {
-        workspace_badge(
-            workspace,
-            Some((&cache, view)),
-            (None, ChangeCounts::PullRequest),
-            (&marks, "ssh:box"),
-            (None, false),
-            &theme,
-        )
-        .map(|found| {
-            let counts = found
-                .counts
-                .map(|counts| (counts.additions.to_string(), counts.deletions.to_string()));
-            (found.pr.map(|pr| pr.number.to_string()), counts)
-        })
-    };
-    let (number, counts) = badge(&workspace, &view).unwrap();
-    assert_eq!(number.as_deref(), Some("#8"));
-    assert_eq!(counts, Some(("+1730".into(), "-31".into())));
+    // A macro rather than a closure: each call borrows its own view and
+    // workspace, which a closure's single inferred lifetime cannot express.
+    macro_rules! badge {
+        ($workspace:expr, $view:expr) => {
+            workspace_badge(
+                $workspace,
+                Some((&cache, $view)),
+                (None, ChangeCounts::PullRequest),
+                (&marks, "ssh:box"),
+                (None, false),
+                &theme,
+            )
+        };
+    }
+    let found = badge!(&workspace, &view).unwrap();
+    assert_eq!(found.pr.unwrap().number, "#8");
+    let counts = found.counts.unwrap();
+    assert_eq!(
+        (counts.additions.as_str(), counts.deletions.as_str()),
+        ("+1730", "-31")
+    );
     for wrong in [
         View {
             origin: Origin::Local,
@@ -68,11 +69,11 @@ fn ssh_kept_badge_and_counts_read_the_prefetch_input_without_h1_lookup() {
             ..view.clone()
         },
     ] {
-        assert!(badge(&workspace, &wrong).is_none());
+        assert!(badge!(&workspace, &wrong).is_none());
     }
     workspace.cwd = "/remote/other-checkout".into();
     assert!(
-        badge(&workspace, &view).is_none(),
+        badge!(&workspace, &view).is_none(),
         "another checkout cannot borrow the answer"
     );
 }
