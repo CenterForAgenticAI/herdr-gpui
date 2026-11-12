@@ -237,13 +237,34 @@ impl SheprdWindow {
             // marks paint behind the text and retain normal text contrast.
             return selectable(fragment.as_ref(), view, layout, context.cx).child(content);
         }
-        let mut children = Vec::new();
+        let mut children: Vec<AnyElement> = Vec::new();
         let mut offset = 0;
+        // A browser breaks a line only after whitespace, so no break may fall
+        // between a formula and the text it touches: `$x$, then` or `($x$)`.
+        let mut glue = false;
+        let push = |children: &mut Vec<AnyElement>, item: AnyElement, glue: bool| {
+            let item = match children.pop() {
+                Some(last) if glue => div()
+                    .flex()
+                    .flex_none()
+                    .items_baseline()
+                    .child(last)
+                    .child(item)
+                    .into_any_element(),
+                last => {
+                    children.extend(last);
+                    item
+                }
+            };
+            children.push(item);
+        };
+        let mut words = 0usize;
         for part in content.iter() {
             match part {
                 Inline::Text(text, style) => {
                     for word in text.split_inclusive(char::is_whitespace) {
-                        let index = children.len();
+                        let index = words;
+                        words += 1;
                         let mut item = div().flex_none().max_w_full().when(style.code, |item| {
                             item.text_font(&self.config.terminal)
                                 .bg(rgb(self.theme.active))
@@ -277,7 +298,8 @@ impl SheprdWindow {
                         } else {
                             item.child(styled)
                         };
-                        children.push(item.into_any_element());
+                        push(&mut children, item.into_any_element(), glue);
+                        glue = !word.ends_with(char::is_whitespace);
                     }
                 }
                 Inline::Math { id, source, .. } => {
@@ -298,10 +320,12 @@ impl SheprdWindow {
                         None => formula,
                     };
                     offset += source.len();
-                    children.push(formula.into_any_element());
+                    push(&mut children, formula.into_any_element(), glue);
+                    glue = true;
                 }
                 Inline::Break => {
                     offset += 1;
+                    glue = false;
                     children.push(div().w_full().h(px(0.)).into_any_element());
                 }
             }
