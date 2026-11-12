@@ -2,34 +2,6 @@ use super::*;
 use crate::store::faults;
 
 #[test]
-fn a_failed_launch_intent_write_starts_nothing_and_removes_the_checkout() {
-    let dir = tempfile::tempdir().unwrap();
-    let site = site(dir.path(), "");
-    fake_core(dir.path(), "idle");
-    let _failure = faults::session_updates(1);
-    let error = perform(
-        &site,
-        &Action::Dispatch(Box::new(herdr2_request())),
-        &AtomicBool::new(false),
-    )
-    .unwrap_err();
-    assert!(matches!(error, Error::Database(_)));
-    let store = Store::open(&site.database).unwrap();
-    let run = store.runs().unwrap().remove(0);
-    assert_eq!(run.state, RunState::Failed);
-    assert!(run.workspace.is_none());
-    assert!(store.sessions().unwrap().is_empty());
-    assert!(
-        !core_calls(dir.path())
-            .iter()
-            .any(|call| call.starts_with("run "))
-    );
-    assert!(!checkout(dir.path()).exists());
-}
-
-/// The launch intent is saved first; the write naming the started terminal
-/// is the one that fails here.
-#[test]
 fn first_session_write_failure_is_recovered_without_replaying_launch_or_prompt() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(dir.path(), "");
@@ -41,8 +13,13 @@ fn first_session_write_failure_is_recovered_without_replaying_launch_or_prompt()
         &AtomicBool::new(false),
     )
     .unwrap_err();
+    // The run's receipt names its pending checkout before anything exists,
+    // so the write that fails is the one recording the started terminal.
+    let Error::Retained { source } = &error else {
+        panic!("a retained agent: {error:?}");
+    };
     assert!(
-        matches!(&error, Error::Database(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy)
+        matches!(&**source, Error::Database(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy)
     );
     assert!(std::error::Error::source(&error).is_some());
     let store = Store::open(&site.database).unwrap();
@@ -120,8 +97,11 @@ fn recovery_write_is_bounded_and_keeps_the_original_database_cause() {
         &AtomicBool::new(false),
     )
     .unwrap_err();
+    let Error::Retained { source } = error else {
+        panic!("a retained agent: {error:?}");
+    };
     assert!(
-        matches!(error, Error::Database(rusqlite::Error::SqliteFailure(_, Some(message))) if message == "injected session write failure 3")
+        matches!(*source, Error::Database(rusqlite::Error::SqliteFailure(_, Some(message))) if message == "injected session write failure 3")
     );
     assert_eq!(
         faults::remaining(),

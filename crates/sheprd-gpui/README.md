@@ -2465,6 +2465,10 @@ On Windows, dispatch between SSH and WSL hosts uses their POSIX shells. A native
 Windows local checkout cannot be a dispatch source or destination because the
 Git transfer scripts require a POSIX shell. Cloud provisioning remains subject
 to each platform's cloud-device availability.
+With a custom Herdr 1 socket, app-kept Herdr 2 workspaces still use this
+computer's core and files on POSIX clients. Herdr 1 workspaces reached through
+that socket remain ineligible for scripted dispatch; their paths are not
+assumed to belong to this computer.
 
 The fan-out dialog offers Spread agents across hosts. Each lane then goes to
 the host with the most room left, a lane counting as a core, and its host chip
@@ -2508,6 +2512,13 @@ Recovery also checks the live foreground process: a replacement shell does
 not inherit the departed agent's ownership. If a removed device is configured
 again with the same host/session identity, its saved lanes rejoin the open
 comparison without replaying creation, launch or prompts.
+Before discarding a newly owned Herdr 2 lane, the worker verifies its receipt,
+disables terminal keep, ends the owned agent and checks the resulting inventory.
+A live replacement, unreadable result or unrelated program in the checkout
+keeps the checkout intact. Closing its removed workspace then only drops the
+presentation, without sending a second kill through a stale terminal address.
+These checks do not make ownership validation and terminal control atomic.
+
 Keep removes the other worktrees after its usual confirmation; a lane whose
 worktree may exist or sits on a host no longer set up stays saved until Forget,
 which lets the fan-out go and leaves every worktree as it is. Up to four
@@ -2702,7 +2713,24 @@ for the checkout and herdr-core for the agent, without needing Herdr 1. The
 recorded destination and terminal identity survive an app restart: opening,
 messaging, stopping, and removing the run keep targeting that host, even when
 another host has a checkout at the same path. Removing a run closes only its
-host's saved workspace after checkout removal succeeds. A pull
+host's saved workspace after checkout removal succeeds. A run can also be
+**Restarted** after confirmation: its checkout and
+uncommitted files stay, while a new owned agent receives the saved model and
+initial prompt. Opening a run whose launch reply was lost first looks up its
+unique ownership receipt; it never resends the initial prompt. The CLI
+`sheprd orchestrator restart RUN` opens the same confirmation for a loaded run.
+Legacy Herdr 2 runs created before ownership receipts require **Adopt current
+process** before reply/stop controls work. The read-only preview shows the host,
+terminal, checkout and current process. Confirmation grants new authority over
+that displayed process, not proof that it was the original agent; cancel changes
+nothing. The worker revalidates the process, adds an ownership label, and saves
+the receipt. A replaced process is refused until explicitly adopted again.
+Legacy runs have no saved initial prompt, so their restart action is unavailable.
+New dispatches require a fresh branch; use Restart to reuse an existing run's
+checkout. Each newly created checkout carries a receipt in its Git metadata.
+Recreating the same path and branch does not transfer the old run's authority.
+Uncertain creation without that receipt remains for manual inspection.
+A pull
 request's **Review with agent** does the same on an `agent/review-…` branch with a
 read-only prompt: the agent verifies the pull request, reads its diff, and
 reports findings without writing to GitHub. A run's card sends it messages, stops
@@ -2957,6 +2985,12 @@ included, first goes to the daemon so a plugin's `[[link_handlers]]` entry can
 claim it; see [Herdr Plugins](#herdr-plugins).
 
 ## Herdr Plugins
+
+Herdr 2 desktop panes support explicitly configured [link-handler
+adapters](../../docs/link-handlers.md), independently of a Herdr 1 daemon.
+These run compatible commands on the clicked pane's host; they do not load
+Herdr's registry or emulate its plugin API. The daemon contract below applies
+to Herdr 1.
 
 Herdr runs plugins; this client never reads plugin manifests, runs plugin
 commands, or touches the plugin registry. It works with the parts of a plugin

@@ -787,6 +787,14 @@ impl Journal {
         Some(record)
     }
 
+    /// A closed comparison no longer owns the record. Unreachable lanes
+    /// left after Keep must be claimable again when their host returns.
+    pub(super) fn release(&self, id: u64) {
+        if let Ok(mut state) = self.0.state.lock() {
+            state.claimed.retain(|claimed| *claimed != id);
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn records(&self) -> Vec<Record> {
         self.0

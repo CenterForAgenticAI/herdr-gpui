@@ -100,4 +100,50 @@ fn a_kept_shell_does_not_inherit_the_original_agents_ownership() {
     ));
 }
 
-mod unlabelled;
+/// A finished agent leaves `--keep`'s shell in its terminal. Cleanup may
+/// end that terminal by its ownership label and command while the shell
+/// waits at its prompt, never once the user runs something there; recovery,
+/// which types into it, never takes the shell for the agent.
+#[test]
+fn cleanup_can_end_the_kept_shell_a_finished_agent_left() {
+    let inspect = |foreground: serde_json::Value, label: &str, include_finished| {
+        let mut shell = terminal(label, "/work/a", "t7");
+        shell["foreground"] = foreground;
+        super::select(
+            list(serde_json::json!([shell])),
+            "/work/a",
+            Owner {
+                key: OWNER,
+                value: "lane-a",
+            },
+            &["claude".into()],
+            Some("t7"),
+            include_finished,
+            crate::teleport::AgentKind::Claude,
+        )
+    };
+    let prompt = || serde_json::json!({"name":"zsh", "argv":["-zsh"], "pid":43});
+    assert!(matches!(
+        inspect(prompt(), "lane-a", true),
+        Ok(Started::Herdr2 { terminal }) if terminal == "t7"
+    ));
+    assert!(matches!(
+        inspect(prompt(), "lane-a", false),
+        Err(Error::Uncertain)
+    ));
+    // Ownership still rests on the label: another lane's shell is not ours.
+    assert!(matches!(
+        inspect(prompt(), "lane-b", true),
+        Err(Error::Uncertain)
+    ));
+    for work in [
+        serde_json::json!({"name":"vim", "argv":["vim", "notes.md"], "pid":44}),
+        serde_json::json!({"name":"bash", "argv":["/bin/bash", "deploy.sh"], "pid":45}),
+        serde_json::json!({"name":"sh", "argv":["sh", "-c", "make"], "pid":46}),
+    ] {
+        assert!(
+            matches!(inspect(work.clone(), "lane-a", true), Err(Error::Uncertain)),
+            "{work}"
+        );
+    }
+}

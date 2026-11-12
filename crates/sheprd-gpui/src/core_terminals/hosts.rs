@@ -61,6 +61,14 @@ pub(super) struct Remote {
 }
 
 impl CoreTerminals {
+    /// The route pinned by the hub that owns a clicked terminal. Never infer
+    /// this from whichever device is selected when a worker finishes.
+    pub(crate) fn link_target(&self, host: &Host) -> Option<&ConnectTarget> {
+        match host {
+            Host::Local => Some(&ConnectTarget::Local),
+            Host::Remote(scope) => self.remote_target(scope),
+        }
+    }
     pub(crate) fn remote_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
         self.remote.get(scope).map(|remote| &remote.target)
     }
@@ -246,8 +254,7 @@ impl CoreTerminals {
     }
 
     /// Shows `terminal` of `host`'s core in `tab`, as a restored tab would.
-    // Only the lifecycle tests, which need Unix sockets, use it.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn show_on_host_for_test(&mut self, tab: TabId, host: Host, terminal: TerminalId) {
         let panes = super::panes::Panes::single(terminal);
         self.tabs
@@ -356,7 +363,12 @@ impl SheprdWindow {
                 .iter()
                 .filter(|endpoint| {
                     endpoint.enabled
-                        && crate::teleport::host_for(&endpoint.connection.target).is_ok()
+                        && (crate::dispatch::scriptable(&endpoint.connection.target)
+                            || (self.dispatch_keeps(&endpoint.id)
+                                && crate::dispatch::scriptable_for(
+                                    &endpoint.connection.target,
+                                    sheprd_session::Keeper::App,
+                                )))
                 })
                 .map(|endpoint| Host::of(&crate::browser::scope(endpoint)))
                 .collect();

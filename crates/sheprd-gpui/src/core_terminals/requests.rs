@@ -33,8 +33,6 @@ impl CoreTerminals {
             .any(|tab| tab.host == host && !tab.observe && tab.panes.contains(terminal))
     }
 
-    // Notes are delivered from the page views Linux builds do not show.
-    #[cfg(any(test, target_os = "macos", windows))]
     pub(crate) fn browser_terminal(&self, scope: &Scope, origin: &str) -> Option<TerminalId> {
         let host = Host::Remote(scope.clone());
         self.tabs
@@ -43,6 +41,16 @@ impl CoreTerminals {
             .flat_map(|tab| tab.panes.terminals())
             .find(|terminal| crate::chat::core_pane::key_on(&host, terminal) == origin)
             .cloned()
+    }
+
+    pub(crate) fn browser_caller_live(&self, scope: &Scope, origin: &str) -> bool {
+        self.browser_backend(scope, origin).is_some()
+    }
+
+    pub(crate) fn browser_backend(&self, scope: &Scope, origin: &str) -> Option<&CoreBackend> {
+        self.browser_terminal(scope, origin)?;
+        self.backend_of(&Host::Remote(scope.clone()))
+            .filter(|backend| !backend.core().is_lost())
     }
 
     pub(crate) fn browser_request_value(

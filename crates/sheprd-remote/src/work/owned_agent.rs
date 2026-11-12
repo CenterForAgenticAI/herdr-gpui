@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicBool;
 
 mod end;
 mod error;
-pub use end::{checkout_idle, end_verified};
+pub use end::{checkout_idle, end, end_verified};
 pub use error::{Error, Result};
 
 /// A caller's namespace and durable operation identity, attached atomically.
@@ -59,10 +59,7 @@ pub fn start(
             cancelled,
         )?);
     }
-    let mut argv = agent.kind.start_argv(None);
-    if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
-        argv.extend(["--model".into(), model.into()]);
-    }
+    let argv = command(agent);
     let program = argv
         .iter()
         .map(|arg| shell_quote(arg))
@@ -101,7 +98,8 @@ pub fn recover(
     inspect(host, tree, owner, agent, expected, false, cancelled)
 }
 
-/// Inspect a retained terminal for cleanup. Finished terminals are accepted
+/// Inspect a retained terminal for cleanup. Finished terminals, and live
+/// ones whose agent exited and left the kept shell in front, are accepted
 /// only when explicitly requested; an unknown state is never ownership proof.
 pub fn inspect(
     host: &Host,
@@ -123,10 +121,7 @@ pub fn inspect(
             step: Step::List,
             source,
         })?;
-    let mut argv = agent.kind.start_argv(None);
-    if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
-        argv.extend(["--model".into(), model.into()]);
-    }
+    let argv = command(agent);
     select(
         list,
         &tree.path,
@@ -159,11 +154,16 @@ fn select(
             || (include_finished && terminal.state == TerminalState::Finished))
         || terminal.cwd != path
         || terminal.argv != argv
+        // Recovery types into the agent, so it must still be in front. A
+        // cleanup only ends the terminal, which may also be the shell
+        // `--keep` left at its prompt once the agent exited, as every
+        // finished run does; a program started there since is the user's.
         || (terminal.state == TerminalState::Live
             && !terminal.foreground.as_ref().is_some_and(|foreground| {
                 crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
                     == Some(kind)
                     || foreground.argv == argv
+                    || (include_finished && at_prompt(&foreground.name, &foreground.argv))
             }))
         || expected.is_some_and(|expected| terminal.address != expected)
     {
@@ -174,64 +174,25 @@ fn select(
     })
 }
 
-/// A terminal saved before launches carried ownership labels: an unlabelled
-/// shell at `expected` with the agent typed into it. Only that exact live
-/// terminal, in the saved checkout with `kind` in its foreground, is
-/// accepted, and only while no terminal carries this owner's label, so a
-/// labelled launch is never bypassed.
-pub fn recover_unlabelled(
-    host: &Host,
-    tree: &Worktree,
-    owner: Owner<'_>,
-    kind: crate::teleport::AgentKind,
-    expected: &str,
-    cancelled: &AtomicBool,
-) -> Result<Started> {
-    owner.validate()?;
-    let output = host
-        .capture("core_cli ls --all --json\n", cancelled)
-        .map_err(script(Step::List))?;
-    let list: List =
-        serde_json::from_slice(output.trim_ascii()).map_err(|source| super::Error::Decode {
-            step: Step::List,
-            source,
-        })?;
-    select_unlabelled(list, &tree.path, owner, kind, expected)
+fn command(agent: &Agent<'_>) -> Vec<String> {
+    let mut argv = agent.kind.start_argv(None);
+    if let Some(model) = agent.model.filter(|model| super::valid_model(model)) {
+        argv.extend(["--model".into(), model.into()]);
+    }
+    argv
 }
 
-fn select_unlabelled(
-    list: List,
-    path: &str,
-    owner: Owner<'_>,
-    kind: crate::teleport::AgentKind,
-    expected: &str,
-) -> Result<Started> {
-    if list.terminals.iter().any(|terminal| {
-        terminal
-            .labels
-            .get(owner.key)
-            .is_some_and(|value| value == owner.value)
-    }) {
-        return Err(Error::Uncertain);
+/// Whether a foreground process is a bare shell waiting at its prompt:
+/// a shell given only options, not a script or command to run.
+fn at_prompt(name: &str, argv: &[String]) -> bool {
+    match argv.split_first() {
+        Some((program, options)) => {
+            crate::teleport::is_shell(program)
+                && options.iter().all(|arg| arg.starts_with('-'))
+                && !options.iter().any(|arg| arg == "-c")
+        }
+        None => crate::teleport::is_shell(name),
     }
-    let terminal = list
-        .terminals
-        .into_iter()
-        .find(|terminal| terminal.address == expected)
-        .ok_or(Error::Uncertain)?;
-    if terminal.state != TerminalState::Live
-        || terminal.cwd != path
-        || terminal.labels.contains_key(owner.key)
-        || !terminal.foreground.as_ref().is_some_and(|foreground| {
-            crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
-                == Some(kind)
-        })
-    {
-        return Err(Error::Uncertain);
-    }
-    Ok(Started::Herdr2 {
-        terminal: terminal.address,
-    })
 }
 
 #[cfg(test)]

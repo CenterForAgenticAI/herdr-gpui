@@ -81,11 +81,16 @@ impl SheprdWindow {
     /// Show a journaled fan-out this window has room for: one the app
     /// stopped partway, or a comparison never settled.
     fn restore_fan_out(&mut self, cx: &mut Context<Self>) {
-        let host = |endpoint_id: &str| {
+        let host = |endpoint_id: &str, keeper| {
             self.endpoints
                 .iter()
                 .find(|endpoint| endpoint.id == endpoint_id)
-                .and_then(|endpoint| host_for(&endpoint.connection.target).ok())
+                .and_then(|endpoint| match keeper {
+                    sheprd_session::Keeper::App => {
+                        sheprd_remote::work::host_for_kept(&endpoint.connection.target).ok()
+                    }
+                    sheprd_session::Keeper::Herdr1 => host_for(&endpoint.connection.target).ok(),
+                })
         };
         let Some(fan_out) = FanOut::reclaim(&Journal::get(cx), host) else {
             return;
@@ -116,11 +121,16 @@ impl SheprdWindow {
             fan_out.stop_probe();
         }
         let was_launching = matches!(fan_out.stage, Stage::Launching);
-        let reconnected = fan_out.reconnect(|id| {
+        let reconnected = fan_out.reconnect(|id, keeper| {
             self.endpoints
                 .iter()
                 .find(|endpoint| endpoint.id == id)
-                .and_then(|endpoint| host_for(&endpoint.connection.target).ok())
+                .and_then(|endpoint| match keeper {
+                    sheprd_session::Keeper::App => {
+                        sheprd_remote::work::host_for_kept(&endpoint.connection.target).ok()
+                    }
+                    sheprd_session::Keeper::Herdr1 => host_for(&endpoint.connection.target).ok(),
+                })
         });
         let (mut changed, kept) = fan_out.poll();
         changed |= reconnected;
@@ -339,13 +349,7 @@ impl SheprdWindow {
             self.show_fan_out_terminal(&endpoint, &host, &label, &path, location, cx);
         }
         for checkout in closed {
-            self.close_fan_out_folder(
-                &checkout.endpoint_id,
-                &checkout.host,
-                checkout.path(),
-                window,
-                cx,
-            );
+            self.close_fan_out_folder(&checkout, window, cx);
         }
     }
 

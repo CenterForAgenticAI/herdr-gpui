@@ -12,13 +12,74 @@ use chrono::Utc;
 use sheprd_client::shell_quote;
 use sheprd_remote::{
     teleport::Host,
-    work::{self, NewWorktree, Repository, Started, Worktree},
+    work::{self, NewWorktree, Started, Worktree},
 };
 use std::sync::atomic::AtomicBool;
 
+#[derive(serde::Deserialize)]
+struct Listed {
+    terminals: Vec<Address>,
+}
+
+#[derive(serde::Deserialize)]
+struct Address {
+    #[serde(default)]
+    cwd: String,
+    #[serde(default)]
+    state: TerminalState,
+}
+
+#[derive(Default, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TerminalState {
+    Live,
+    Finished,
+    #[default]
+    #[serde(other)]
+    Other,
+}
+
+fn terminals(host: &Host, cancelled: &AtomicBool) -> Result<Listed> {
+    let output = host
+        .capture("core_cli ls --all --json\n", cancelled)
+        .map_err(script("Reading the agent terminals"))?;
+    serde_json::from_slice(&output).map_err(|source| Error::OutputJson {
+        operation: "Reading the agent terminals",
+        source,
+    })
+}
+
+/// A failed start may have left a shell whose address the work API could
+/// not return. Never delete its checkout or guess that shell's ownership.
+pub(super) fn unused_checkout(
+    host: &Host,
+    workspace: &Workspace,
+    cancelled: &AtomicBool,
+) -> Result<()> {
+    let Some(path) = workspace.path.as_deref() else {
+        return Ok(());
+    };
+    let listed = terminals(host, cancelled)?;
+    if listed.terminals.iter().any(|terminal| {
+        terminal.state != TerminalState::Finished
+            && (terminal.cwd.is_empty() || std::path::Path::new(&terminal.cwd).starts_with(path))
+    }) {
+        return Err(Error::InvalidCheckout);
+    }
+    work::owned_agent::checkout_idle(
+        host,
+        &Worktree {
+            path: path.to_string_lossy().into_owned(),
+            opened: work::Opened::Herdr2,
+        },
+        cancelled,
+    )?;
+    Ok(())
+}
+
 /// Makes the run's worktree from `checkout`, starts its agent there, and
 /// sends it the prompt once it is ready, recording each step in `store`.
-/// The worktree made is left in `attempt` for the caller to undo on failure;
+/// The worktree made is left in `created` for the caller to undo on failure;
 /// an agent that started is recorded before its prompt so the caller can
 /// confirm it ended before removing its checkout on failure.
 #[allow(clippy::too_many_arguments)]
@@ -38,11 +99,10 @@ pub(super) fn launch(
         base: &destination.commit,
         label: None,
     };
-    let repository = Repository::Herdr2 {
-        checkout: checkout.to_owned(),
-    };
-    let worktree = work::create(host, &repository, &new, cancelled)?;
-    attempt.created = Some((host.clone(), worktree.clone()));
+    let worktree = work::owned_checkout::plan(host, checkout, &request.branch, cancelled)?;
+    // Creation itself can lose its reply. Record its planned path first and
+    // never delete a path without the successful-creation receipt.
+    attempt.created = None;
     let (ssh, session) = place(&destination.target);
     run.workspace = Some(Workspace {
         backend: Backend::Herdr,
@@ -55,6 +115,8 @@ pub(super) fn launch(
     run.state = RunState::Starting;
     run.updated_at = Utc::now();
     let pending = HerdrSession {
+        checkout_token: Some(run.id.clone()),
+        adopted: None,
         run_id: run.id.clone(),
         target: Some(destination.target.clone()),
         host: ssh.clone(),
@@ -64,6 +126,7 @@ pub(super) fn launch(
         updated_at: run.updated_at,
     };
     store.update_run(run, Some(&pending))?;
+    work::owned_checkout::create(host, checkout, &worktree, &new, &run.id, cancelled)?;
     let agent = work::Agent {
         kind: request.kind,
         name,
@@ -73,13 +136,15 @@ pub(super) fn launch(
     // From the launch intent onward, a lost reply can mean the agent is
     // already working. Keep its checkout and receipt; never replay a prompt.
     attempt.created = None;
-    let started = work::owned_agent::start(host, &worktree, &agent, owner(run), cancelled)?;
+    let started = work::owned_agent::start(host, &worktree, &agent, owner(name), cancelled)?;
     let Started::Herdr2 { terminal } = &started else {
         return Err(Error::Output {
             operation: "Starting the agent",
         });
     };
     let herdr_session = HerdrSession {
+        checkout_token: Some(run.id.clone()),
+        adopted: None,
         run_id: run.id.clone(),
         target: Some(destination.target.clone()),
         host: ssh,
@@ -102,95 +167,32 @@ pub(super) fn launch(
     )
 }
 
-fn owner(run: &Run) -> work::owned_agent::Owner<'_> {
+pub(super) fn owner(token: &str) -> work::owned_agent::Owner<'_> {
     work::owned_agent::Owner {
         key: "sheprd.orchestrator.run",
-        value: &run.id,
+        value: token,
     }
 }
 
-/// The terminal Stop and Send address: the run's agent, recovered through
-/// its ownership label. A launch whose reply was lost left its session
-/// Pending; the address found is saved so later actions use it directly.
-/// Nothing is started and the prompt is never replayed.
-pub(super) fn control(
-    host: &Host,
-    store: &mut Store,
-    run: &Run,
-    session: &mut HerdrSession,
-    cancelled: &AtomicBool,
-) -> Result<String> {
-    let Started::Herdr2 { terminal } = recover(host, run, session, false, cancelled)? else {
-        return Err(Error::NothingToOpen);
-    };
-    if session.pane == Pane::Pending {
-        session.pane = Pane::Herdr2 {
-            terminal: terminal.clone(),
-        };
-        session.updated_at = Utc::now();
-        store.update_run(run, Some(session))?;
-    }
-    Ok(terminal)
-}
-
-/// The run's agent by its ownership label or, for a run saved before
-/// launches were labelled, its checked unlabelled shell. Removal passes
-/// `include_finished` so a labelled terminal whose agent exited still ends.
 pub(super) fn recover(
     host: &Host,
     run: &Run,
     session: &HerdrSession,
+    cancelled: &AtomicBool,
+) -> Result<Started> {
+    inspect(host, run, session, false, cancelled)
+}
+
+pub(super) fn inspect(
+    host: &Host,
+    run: &Run,
+    session: &HerdrSession,
     include_finished: bool,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
-    match inspect(host, run, session, include_finished, cancelled) {
-        Err(Error::OwnedAgent(work::owned_agent::Error::Uncertain)) => {
-            recover_unlabelled(host, run, session, cancelled)
-        }
-        found => found,
+    if let Some(receipt) = &session.adopted {
+        return super::legacy::verify(host, receipt, include_finished, cancelled);
     }
-}
-
-/// Runs saved before launches were labelled keep their unlabelled shell;
-/// Stop, Send, and Remove still reach it once its saved address, checkout, and
-/// foreground agent check out.
-fn recover_unlabelled(
-    host: &Host,
-    run: &Run,
-    session: &HerdrSession,
-    cancelled: &AtomicBool,
-) -> Result<Started> {
-    let Pane::Herdr2 { terminal } = &session.pane else {
-        return Err(work::owned_agent::Error::Uncertain.into());
-    };
-    let path = run
-        .workspace
-        .as_ref()
-        .and_then(|workspace| workspace.path.as_ref())
-        .ok_or(Error::NothingToOpen)?
-        .to_string_lossy();
-    let kind = sheprd_remote::teleport::AgentKind::parse(&run.agent).ok_or(Error::NothingToOpen)?;
-    let tree = Worktree {
-        path: path.into_owned(),
-        opened: work::Opened::Herdr2,
-    };
-    Ok(work::owned_agent::recover_unlabelled(
-        host,
-        &tree,
-        owner(run),
-        kind,
-        terminal,
-        cancelled,
-    )?)
-}
-
-fn inspect(
-    host: &Host,
-    run: &Run,
-    session: &HerdrSession,
-    include_finished: bool,
-    cancelled: &AtomicBool,
-) -> Result<Started> {
     let workspace = run.workspace.as_ref().ok_or(Error::NothingToOpen)?;
     let path = workspace
         .path
@@ -215,7 +217,7 @@ fn inspect(
     Ok(work::owned_agent::inspect(
         host,
         &tree,
-        owner(run),
+        owner(&session.agent_name),
         &agent,
         expected,
         include_finished,
@@ -265,19 +267,8 @@ pub(super) fn send(host: &Host, terminal: &str, text: &str, cancelled: &AtomicBo
 }
 
 /// Ends the shell in `terminal` and the agent in it, as removing Herdr 1's
-/// workspace closes its panes. One already gone is no failure; an
-/// unreachable host or a kill that left it running keeps the run and its
-/// checkout, so Remove can try again.
-pub(super) fn end(host: &Host, terminal: &str, cancelled: &AtomicBool) -> Result<()> {
-    Ok(work::owned_agent::end_verified(host, terminal, cancelled)?)
-}
-
-/// Proves no live herdr-core program works in `checkout`, as a failed
-/// start may have left a shell whose address never came back.
-pub(super) fn idle(host: &Host, checkout: &std::path::Path, cancelled: &AtomicBool) -> Result<()> {
-    let tree = Worktree {
-        path: checkout.to_string_lossy().into_owned(),
-        opened: work::Opened::Herdr2,
-    };
-    Ok(work::owned_agent::checkout_idle(host, &tree, cancelled)?)
+/// workspace closes its panes. One already gone is no failure.
+pub(super) fn end(host: &Host, terminal: &str) -> Result<()> {
+    work::owned_agent::end_verified(host, terminal, &AtomicBool::new(false))?;
+    Ok(())
 }

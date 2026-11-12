@@ -22,6 +22,9 @@ use sheprd_remote::{
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 
 mod herdr2;
+pub mod legacy;
+pub(crate) mod lock;
+mod restart;
 mod start;
 
 /// How long `herdr agent start` may wait for the agent to be ready.
@@ -81,6 +84,16 @@ impl DispatchRequest {
 
 #[derive(Clone, Debug)]
 pub enum Action {
+    Adopt {
+        run: String,
+        receipt: Box<legacy::Receipt>,
+    },
+    Recover {
+        run: String,
+    },
+    Restart {
+        run: String,
+    },
     Dispatch(Box<DispatchRequest>),
     /// Interrupt a run's agent.
     Stop {
@@ -108,7 +121,12 @@ impl Action {
         match self {
             Self::DeleteBead { .. } => true,
             Self::Dispatch(request) => request.bead().is_some(),
-            Self::Stop { .. } | Self::Send { .. } | Self::Remove { .. } => false,
+            Self::Adopt { .. }
+            | Self::Stop { .. }
+            | Self::Send { .. }
+            | Self::Remove { .. }
+            | Self::Recover { .. }
+            | Self::Restart { .. } => false,
         }
     }
 
@@ -116,6 +134,9 @@ impl Action {
     fn done(&self) -> Done {
         match self {
             Self::Dispatch(_) => Done::Started,
+            Self::Recover { .. } => Done::Recovered,
+            Self::Adopt { .. } => Done::Adopted,
+            Self::Restart { .. } => Done::Started,
             Self::Stop { .. } => Done::Stopped,
             Self::Send { .. } => Done::Sent,
             Self::Remove { .. } => Done::Removed,
@@ -128,7 +149,9 @@ impl Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Done {
     // keep-sorted start
+    Adopted,
     BeadDeleted,
+    Recovered,
     Removed,
     Sent,
     Started,
@@ -138,11 +161,16 @@ pub enum Done {
 
 /// Runs `action` to completion; what it did, or why it failed.
 pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<Done> {
+    let _lease = lock::take(site)?;
     match action {
+        Action::Adopt { run, receipt } => legacy::adopt(site, run, receipt, cancelled)?,
+        Action::Recover { run } => restart::recover(site, run, cancelled)?,
+        Action::Restart { run } => restart::restart(site, run, cancelled)?,
         Action::Dispatch(request) => dispatch(site, request, cancelled)?,
         Action::Stop { run } => {
-            let (mut store, mut found, mut session, host) = own_run(site, run)?;
+            let (mut store, mut found, session, host) = own_run(site, run, cancelled)?;
             match &session.pane {
+                Pane::Pending => return Err(Error::NothingToOpen),
                 Pane::Herdr1 { pane_id, .. } => {
                     for key in ["esc", "ctrl+c"] {
                         herdr(
@@ -153,10 +181,9 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
                         )?;
                     }
                 }
-                Pane::Pending | Pane::Herdr2 { .. } => {
-                    let terminal =
-                        herdr2::control(&host, &mut store, &found, &mut session, cancelled)?;
-                    herdr2::stop(&host, &terminal, cancelled)?;
+                Pane::Herdr2 { terminal } => {
+                    herdr2::recover(&host, &found, &session, cancelled)?;
+                    herdr2::stop(&host, terminal, cancelled)?;
                 }
             }
             found.state = RunState::Cancelled;
@@ -164,8 +191,9 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
             store.update_run(&found, Some(&session))?;
         }
         Action::Send { run, text } => {
-            let (mut store, found, mut session, host) = own_run(site, run)?;
+            let (_, found, session, host) = own_run(site, run, cancelled)?;
             match &session.pane {
+                Pane::Pending => return Err(Error::NothingToOpen),
                 Pane::Herdr1 { pane_id, .. } => {
                     herdr(
                         &host,
@@ -174,10 +202,9 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
                         cancelled,
                     )?;
                 }
-                Pane::Pending | Pane::Herdr2 { .. } => {
-                    let terminal =
-                        herdr2::control(&host, &mut store, &found, &mut session, cancelled)?;
-                    herdr2::send(&host, &terminal, text, cancelled)?;
+                Pane::Herdr2 { terminal } => {
+                    herdr2::recover(&host, &found, &session, cancelled)?;
+                    herdr2::send(&host, terminal, text, cancelled)?;
                 }
             }
         }
@@ -198,10 +225,23 @@ pub fn perform(site: &Site, action: &Action, cancelled: &AtomicBool) -> Result<D
 
 /// A run Sheprd owns, with its session and the host its agent is on,
 /// read fresh from the database.
-fn own_run(site: &Site, id: &str) -> Result<(Store, Run, HerdrSession, Host)> {
-    let (store, run, session) = owned(site, id)?;
-    let session = session.ok_or_else(|| Error::RunNotFound(id.to_owned()))?;
+fn own_run(
+    site: &Site,
+    id: &str,
+    cancelled: &AtomicBool,
+) -> Result<(Store, Run, HerdrSession, Host)> {
+    let (mut store, run, session) = owned(site, id)?;
+    let mut session = session.ok_or_else(|| Error::RunNotFound(id.to_owned()))?;
     let host = host_of(site, &session)?;
+    if matches!(session.pane, Pane::Pending) {
+        let work::Started::Herdr2 { terminal } =
+            herdr2::inspect(&host, &run, &session, true, cancelled)?
+        else {
+            return Err(Error::NothingToOpen);
+        };
+        session.pane = Pane::Herdr2 { terminal };
+        store.update_run(&run, Some(&session))?;
+    }
     Ok((store, run, session, host))
 }
 
@@ -278,17 +318,29 @@ fn remove_worktree(
     const READING: &str = "Reading the workspaces";
     let host = host_of(site, session)?;
     if matches!(session.pane, Pane::Pending | Pane::Herdr2 { .. }) {
-        let found = herdr2::recover(&host, run, session, true, cancelled);
-        match &found {
-            Ok(work::Started::Herdr2 { terminal }) => herdr2::end(&host, terminal, cancelled)?,
-            Ok(_) => return Err(Error::NothingToOpen),
-            Err(_) => {}
+        let exists = validate_checkout(&host, workspace, cancelled)?;
+        let tree = workspace.path.as_ref().map(|path| Worktree {
+            path: path.to_string_lossy().into_owned(),
+            opened: Opened::Herdr2,
+        });
+        if exists && let (Some(token), Some(tree)) = (&session.checkout_token, &tree) {
+            work::owned_checkout::verify(&host, tree, &workspace.branch, token, cancelled)?;
         }
-        // A terminal already removed needs no further mutation. An unknown
-        // occupant, another program working there, or an unreadable
-        // inventory retains the tree and reports why.
-        if let Some(path) = workspace.path.as_deref() {
-            herdr2::idle(&host, path, cancelled).map_err(|idle| found.err().unwrap_or(idle))?;
+        match herdr2::inspect(&host, run, session, true, cancelled) {
+            Ok(work::Started::Herdr2 { terminal }) => herdr2::end(&host, &terminal)?,
+            Ok(_) => return Err(Error::NothingToOpen),
+            Err(error) => {
+                // A terminal already removed needs no further mutation; an
+                // unknown occupant or unreadable inventory must retain the tree.
+                if herdr2::unused_checkout(&host, workspace, cancelled).is_err() {
+                    return Err(error);
+                }
+            }
+        }
+        herdr2::unused_checkout(&host, workspace, cancelled)?;
+        if exists && let (Some(token), Some(tree)) = (&session.checkout_token, &tree) {
+            work::owned_checkout::discard(&host, tree, &workspace.branch, token, cancelled)?;
+            return Ok(());
         }
         return remove_checkout(&host, workspace, cancelled);
     }
@@ -321,6 +373,36 @@ fn remove_worktree(
 }
 
 const REMOVING: &str = "Removing the worktree";
+
+fn validate_checkout(host: &Host, workspace: &Workspace, cancelled: &AtomicBool) -> Result<bool> {
+    let Some(path) = workspace.path.as_deref() else {
+        return Ok(false);
+    };
+    let path = path.to_string_lossy();
+    let exists = if host.is_local() {
+        std::path::Path::new(path.as_ref()).is_dir()
+    } else {
+        !host
+            .capture(
+                &format!("if [ -d {} ]; then printf yes; fi\n", shell_quote(&path)),
+                cancelled,
+            )
+            .map_err(script(REMOVING))?
+            .is_empty()
+    };
+    if !exists {
+        return Ok(false);
+    }
+    let identity = work::identity(host, &path, cancelled)?;
+    let prefix = work::git(host, &path, &["rev-parse", "--show-prefix"], cancelled)?;
+    if !identity.linked
+        || identity.branch.as_deref() != Some(&workspace.branch)
+        || !prefix.is_empty()
+    {
+        return Err(Error::InvalidCheckout);
+    }
+    Ok(true)
+}
 
 /// The checkout a run recorded, removed with Git: all a Herdr 1 workspace
 /// that is gone could leave, and all a Herdr 2 run has.
@@ -438,8 +520,8 @@ struct Destination {
     prepared: Option<teleport::Prepared>,
 }
 
-/// Ownership kept across fallible launch/journal steps. A new terminal's
-/// receipt must survive even when its first database write does not.
+/// Ownership kept across fallible launch and journal steps. A started
+/// terminal's receipt must survive even when its first database write does not.
 #[derive(Default)]
 struct Attempt {
     created: Option<(Host, Worktree)>,
@@ -448,8 +530,8 @@ struct Attempt {
 
 /// Dispatches `request`. An agent sent to a bead claims it first, on the
 /// host of its database, so a bead someone holds starts nothing. A launch
-/// that fails before retaining an agent gives the claim back. An uncertain
-/// live agent keeps it, since releasing it could authorize duplicate work.
+/// that fails gives the claim back, so nothing stays in progress that no
+/// agent is working on; the bead's status is otherwise the agent's to change.
 fn dispatch(site: &Site, request: &DispatchRequest, cancelled: &AtomicBool) -> Result<()> {
     let mut retained = false;
     let Some(key) = request.bead() else {
@@ -500,8 +582,12 @@ fn start_run(
         owner: Owner::Sheprd,
     };
     store.save_run(&run, None)?;
+    store.save_prompt(&run.id, &request.prompt)?;
     let mut attempt = Attempt::default();
     let outcome = destination(site, request, cancelled).and_then(|destination| {
+        // Carry uncertainty outside error journaling too: a database failure
+        // must not release a claim while an accepted launch may be working.
+        *retained = true;
         let outcome = launch(
             &destination,
             request,
@@ -517,9 +603,6 @@ fn start_run(
         }
         outcome
     });
-    // Set before fallible failure journaling: even a database failure cannot
-    // turn a retained terminal into permission to release its task claim.
-    *retained = attempt.created.is_none() && run.workspace.is_some();
     if let Err(error) = &outcome {
         // Undo the checkout of a run that never got going; the branch stays.
         // A checkout that would not go keeps its session, which names the
@@ -532,9 +615,15 @@ fn start_run(
                 .find(|session| session.run_id == run.id),
         };
         if let Some((host, worktree)) = attempt.created {
+            kept = store
+                .sessions()?
+                .into_iter()
+                .find(|session| session.run_id == run.id);
             if kept.is_none() && matches!(worktree.opened, Opened::Herdr2) {
                 let (host, session) = place(target);
                 kept = Some(HerdrSession {
+                    checkout_token: None,
+                    adopted: None,
                     run_id: run.id.clone(),
                     target: Some(target.clone()),
                     host,
@@ -544,23 +633,20 @@ fn start_run(
                     updated_at: Utc::now(),
                 });
             }
-            // A terminal must be confirmed ended before its checkout goes,
-            // and a start whose reply was lost may have left a shell there.
+            // A terminal must be confirmed ended before its checkout goes.
             // Transport failure keeps both records so Remove can retry.
             let ended = match kept.as_ref().map(|session| &session.pane) {
-                Some(Pane::Herdr2 { terminal }) => {
-                    herdr2::end(&host, terminal, &AtomicBool::new(false))
+                Some(Pane::Herdr2 { terminal }) => herdr2::end(&host, terminal),
+                Some(Pane::Pending) | None if matches!(worktree.opened, Opened::Herdr2) => {
+                    match run.workspace.as_ref() {
+                        Some(workspace) => {
+                            herdr2::unused_checkout(&host, workspace, &AtomicBool::new(false))
+                        }
+                        None => Err(Error::NothingToOpen),
+                    }
                 }
                 _ => Ok(()),
-            }
-            .and_then(|()| match worktree.opened {
-                Opened::Herdr2 => herdr2::idle(
-                    &host,
-                    std::path::Path::new(&worktree.path),
-                    &AtomicBool::new(false),
-                ),
-                Opened::Herdr1 { .. } => Ok(()),
-            });
+            };
             let removed = ended.and_then(|()| match &worktree.opened {
                 Opened::Herdr1 { workspace_id, .. } => herdr(
                     &host,
@@ -580,20 +666,29 @@ fn start_run(
             }
         }
         run.state = RunState::Failed;
+        *retained = run.workspace.is_some() && kept.is_some();
         run.message = Some(error.to_string().chars().take(500).collect());
         run.updated_at = Utc::now();
         // A run removed meanwhile stays removed; the failure is still told.
         match store.update_run(&run, kept.as_ref()) {
             Ok(()) | Err(Error::RunNotFound(_)) => {}
             Err(journal_error) if *retained => {
-                // One bounded recovery write; retain the original failure
-                // and its source even when storage remains unavailable.
+                // One bounded recovery write; keep the original failure and
+                // its source even when storage stays unavailable.
                 tracing::warn!(category = "orchestrator", %journal_error, "Could not persist a retained agent's recovery receipt");
             }
             Err(error) => return Err(error),
         }
     }
-    outcome
+    outcome.map_err(|source| {
+        if *retained {
+            Error::Retained {
+                source: Box::new(source),
+            }
+        } else {
+            source
+        }
+    })
 }
 
 fn destination(
@@ -804,6 +899,8 @@ fn launch(
     run.state = RunState::Starting;
     run.updated_at = Utc::now();
     let herdr_session = HerdrSession {
+        checkout_token: None,
+        adopted: None,
         run_id: run.id.clone(),
         target: Some(destination.target.clone()),
         host: ssh,

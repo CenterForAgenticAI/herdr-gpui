@@ -389,9 +389,8 @@ fn start(
 
 /// A failed acknowledgement can still identify a live terminal. Save and
 /// show it before reporting failure; neither retry its launch nor kill it.
-/// The shell is kept even if this cannot be saved: it is started.
 fn retain_started(
-    result: std::result::Result<work::Started, work::fanout::Error>,
+    result: work::fanout::Result<work::Started>,
     index: usize,
     report: &impl Fn(Report) -> Result<()>,
 ) -> Result<work::Started> {
@@ -402,6 +401,7 @@ fn retain_started(
         _ => None,
     };
     if let Some(work::Started::Herdr2 { terminal }) = known {
+        // The shell is kept even if this cannot be saved: it is started.
         let _ = report(Report::Lane(index, Progress::Terminal(terminal.clone())));
     }
     result.map_err(fanout_failed)
@@ -562,10 +562,35 @@ pub(crate) fn remove(
     repo_key: &str,
     branch: &str,
     owner: Option<&str>,
+    agent: Option<(AgentKind, Option<&str>)>,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     if matches!(worktree.opened, work::Opened::Herdr2) {
         if let Some(owner) = owner {
+            work::fanout::checkouts::verify(host, worktree, branch, owner, cancelled)
+                .map_err(fanout_failed)?;
+            if let Some((kind, terminal)) = agent {
+                work::owned_agent::end(
+                    host,
+                    worktree,
+                    work::owned_agent::Owner {
+                        key: "sheprd.fanout.lane",
+                        value: owner,
+                    },
+                    &work::Agent {
+                        kind,
+                        name: owner,
+                        model: None,
+                        prompt: None,
+                    },
+                    terminal,
+                    cancelled,
+                )
+                .map_err(fanout_failed)?;
+            } else {
+                work::owned_agent::checkout_idle(host, worktree, cancelled)
+                    .map_err(fanout_failed)?;
+            }
             return work::fanout::checkouts::discard(host, worktree, branch, owner, cancelled)
                 .map_err(fanout_failed);
         }
@@ -592,4 +617,5 @@ pub(crate) fn remove(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests;

@@ -6,6 +6,7 @@ mod arrival;
 mod history;
 mod picker;
 mod rank;
+mod routes;
 #[cfg(feature = "container")]
 mod sandbox;
 

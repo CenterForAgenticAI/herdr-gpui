@@ -5,8 +5,8 @@ use std::cell::Cell;
 use std::{marker::PhantomData, rc::Rc};
 
 thread_local! {
+    static PASSING: Cell<usize> = const { Cell::new(0) };
     static REMAINING: Cell<usize> = const { Cell::new(0) };
-    static SKIPPED: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(unix)]
@@ -15,21 +15,18 @@ pub(crate) struct Failure(PhantomData<Rc<()>>);
 #[cfg(unix)]
 impl Drop for Failure {
     fn drop(&mut self) {
+        PASSING.set(0);
         REMAINING.set(0);
-        SKIPPED.set(0);
     }
 }
 
+/// Fails `count` session writes after letting `passing` through, so a test
+/// can fail the write that records a started agent rather than the receipt
+/// written before anything was created.
 #[cfg(unix)]
-pub(crate) fn session_updates(count: usize) -> Failure {
-    session_updates_after(0, count)
-}
-
-/// Fails `count` session writes once `skip` writes have succeeded.
-#[cfg(unix)]
-pub(crate) fn session_updates_after(skip: usize, count: usize) -> Failure {
+pub(crate) fn session_updates_after(passing: usize, count: usize) -> Failure {
     assert_eq!(REMAINING.replace(count), 0);
-    SKIPPED.set(skip);
+    PASSING.set(passing);
     Failure(PhantomData)
 }
 
@@ -43,9 +40,8 @@ pub(super) fn before_session_update() -> crate::Result<()> {
     if left == 0 {
         return Ok(());
     }
-    let skip = SKIPPED.get();
-    if skip > 0 {
-        SKIPPED.set(skip - 1);
+    if let Some(passing) = PASSING.get().checked_sub(1) {
+        PASSING.set(passing);
         return Ok(());
     }
     REMAINING.set(left - 1);

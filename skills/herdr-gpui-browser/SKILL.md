@@ -241,6 +241,10 @@ before the window connected, or while their terminal was not shown, are not
 replayed. Cloud and WSL core callers use the same label bridge; automatic
 localhost forwarding currently requires an SSH endpoint (WSL uses its host's
 localhost integration). Remote file URLs and `--beside` remain unsupported.
+Annotation screenshots are copied to the original caller's host before notes
+are returned (WSL maps the saved artifact). If transfer is unavailable or fails,
+the app warns and returns textual notes without unreadable local paths. SSH/cloud
+screenshot transfer currently requires a Linux or macOS desktop client.
 
 The remote Herdr 2 shim also supports `worktree status|mute|unmute|list`,
 `worktree create [BRANCH]`, `worktree open|delete`, `notes list|get|set|clear`,
@@ -273,6 +277,7 @@ what Sheprd shows or keeps.
 | --- | --- |
 | Show a file at a line, read-only | `sheprd code open src/main.rs:42` |
 | Open the review of your uncommitted changes | `sheprd review` |
+| Ask the user to restart an owned orchestrator run, or adopt a legacy run's current process | `sheprd orchestrator restart RUN` / `sheprd orchestrator adopt RUN` (loaded project; confirmation required) |
 | Open px0 to browse, edit, or review your local checkout (macOS/Windows) | `sheprd px0 open` |
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
 | Keep a note on this worktree (repository and branch) | `sheprd notes set waiting on CI` |

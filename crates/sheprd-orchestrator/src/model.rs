@@ -308,6 +308,10 @@ impl Run {
 /// Where a run's agent lives in Herdr, written by the run's owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HerdrSession {
+    /// Receipt written only after this run creates its linked checkout.
+    pub checkout_token: Option<String>,
+    /// Explicit authority over a legacy terminal's displayed current process.
+    pub adopted: Option<crate::actions::legacy::Receipt>,
     pub run_id: String,
     /// Legacy SSH destination, or an opaque comparison key for other routes.
     pub host: Option<String>,

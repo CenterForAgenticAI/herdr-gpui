@@ -1,7 +1,7 @@
 use super::*;
 
 #[gpui::test]
-fn a_kept_origin_makes_lanes_on_its_own_host_never_the_local_one(cx: &mut gpui::TestAppContext) {
+fn a_kept_origin_runs_its_lanes_on_the_host_that_keeps_it(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
     view.update(cx, |view, _| {
         let source = Source {
@@ -26,11 +26,8 @@ fn a_kept_origin_makes_lanes_on_its_own_host_never_the_local_one(cx: &mut gpui::
             },
         ] {
             view.endpoints[0].connection.target = target;
-            assert!(
-                view.fan_out_host(&source)
-                    .is_some_and(|host| !host.is_local()),
-                "a remote kept origin is never read as a local checkout"
-            );
+            // Lanes run through that host's scripts, never this computer's.
+            assert!(!view.fan_out_host(&source).unwrap().is_local());
         }
     });
 }

@@ -7,6 +7,7 @@
 //! It never blocks: the [`Service`] worker does the I/O, and the host pushes
 //! the theme, live agent statuses, and the GitHub account from its tick.
 
+mod adoption;
 mod browse;
 mod conversation;
 mod core_removal;
@@ -257,6 +258,8 @@ pub(crate) struct OrchestratorView {
     /// Herdr 2 runs being removed here, by ID, with their checkouts, whose
     /// kept workspaces close once the worker forgot the run.
     core_removals: Vec<(String, core_removal::Checkout)>,
+    pending_core_open: Option<String>,
+    adoption_pending: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -332,6 +335,8 @@ impl OrchestratorView {
             hosts: Arc::default(),
             terminals: Vec::new(),
             core_removals: Vec::new(),
+            pending_core_open: None,
+            adoption_pending: false,
             _subscriptions: vec![subscription],
         }
     }
@@ -772,6 +777,17 @@ impl OrchestratorView {
     /// the workspace it worked in, else says why there is nothing to show.
     fn open_run(&mut self, run: usize, cx: &mut Context<Self>) {
         let runs = Runs::new(&self.snapshot().runs, &self.snapshot().sessions, &self.live);
+        if runs
+            .session(run)
+            .is_some_and(|session| matches!(session.pane, super::Pane::Pending))
+        {
+            if let Some(run) = runs.runs.get(run) {
+                let id = run.id.clone();
+                self.pending_core_open = Some(id.clone());
+                self.act(super::Action::Recover { run: id });
+            }
+            return;
+        }
         if runs
             .session(run)
             .is_some_and(|session| matches!(session.pane, super::Pane::Herdr2 { .. }))

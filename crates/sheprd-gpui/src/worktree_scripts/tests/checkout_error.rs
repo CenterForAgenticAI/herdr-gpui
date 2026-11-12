@@ -1,5 +1,7 @@
 use super::*;
 
+/// The checkout is found through the kept workspace's host, so a folder Git
+/// cannot enter fails as that host's Git step, and still reads localized.
 #[test]
 fn a_failed_kept_checkout_lookup_is_a_localized_host_git_failure() {
     let temp = tempfile::tempdir().unwrap();
