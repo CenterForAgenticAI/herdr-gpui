@@ -109,13 +109,13 @@ fn a_failed_copy_stops_the_setup_and_says_why(cx: &mut gpui::TestAppContext) {
     cx.update(|_, cx| {
         view.update(cx, |view, _| {
             assert_eq!(step(view), "none");
-            // Fluent isolates each placeholder; compare the text alone.
+            // The window's text isolates each argument for bidi layout.
             let error: String = view
                 .local_error
                 .as_deref()
                 .unwrap()
                 .chars()
-                .filter(|ch| !matches!(ch, '\u{2068}' | '\u{2069}'))
+                .filter(|c| !matches!(c, '\u{2068}' | '\u{2069}'))
                 .collect();
             assert!(
                 error.starts_with(
