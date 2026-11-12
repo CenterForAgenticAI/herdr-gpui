@@ -808,7 +808,10 @@ impl SheprdWindow {
         // against its folder, which this computer's core reports.
         let fallback = self.core_fallback_view();
         self.answer_phone_split(cx);
-        let listed = self.core_terminals.poll_infos(std::time::Instant::now());
+        let dispatching = self.dispatch_sampling();
+        let listed = self
+            .core_terminals
+            .poll_infos(std::time::Instant::now(), dispatching);
         if listed {
             self.remap_recovered_chats(window, cx);
         }

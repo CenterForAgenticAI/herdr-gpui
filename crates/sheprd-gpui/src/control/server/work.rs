@@ -132,13 +132,15 @@ pub(super) fn find<'a>(view: &'a SheprdWindow, caller: &Caller) -> Result<Found<
     let snapshot = live.snapshot.as_deref().ok_or_else(|| {
         unsupported().unwrap_or_else(|| not_found("The window has no state from that host yet"))
     })?;
-    snapshot
+    if !snapshot
         .workspaces
         .iter()
-        .find(|workspace| workspace.workspace_id == id)
-        .ok_or_else(|| {
+        .any(|workspace| workspace.workspace_id == id)
+    {
+        return Err(
             unsupported().unwrap_or_else(|| not_found(format!("No window shows workspace {id}")))
-        })?;
+        );
+    }
     let session = sessions
         .herdr_1
         .as_ref()

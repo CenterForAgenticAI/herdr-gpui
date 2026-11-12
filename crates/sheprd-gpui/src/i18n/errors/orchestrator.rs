@@ -10,6 +10,12 @@ use sheprd_orchestrator::{Error, beads, gitlab, private_file};
 impl Localize for Error {
     fn localize(&self) -> String {
         match self {
+            Self::Retained { source } => {
+                fl!("error-orchestrator-retained", error = source.localize())
+            }
+            Self::ActionLock(error) => {
+                fl!("error-orchestrator-action-lock", error = error.to_string())
+            }
             Self::NoDataDirectory => fl!("error-orchestrator-no-data-directory"),
             Self::Private(error) => error.localize(),
             Self::Database(error) => fl!("error-orchestrator-database", error = error.to_string()),

@@ -298,27 +298,21 @@ impl SheprdWindow {
         if !kept {
             return Some(Ended::Gone);
         }
-        let identity_ready = if let Some((key, branch)) = &archive.identity {
-            let sessions = self.sessions(index);
-            let current = sessions
-                .core
-                .as_ref()
-                .and_then(|session| session.workspace(&archive.workspace));
-            match current
-                .and_then(|workspace| workspace.worktree.as_ref().map(|tree| (workspace, tree)))
-            {
-                Some((workspace, tree))
-                    if workspace.branch != *branch || !tree.linked || tree.key != *key =>
-                {
-                    return Some(Ended::Gone);
-                }
-                Some(_) => true,
-                // A failed query is not evidence of a replacement.
-                None => false,
-            }
-        } else {
-            true
-        };
+        let identity = archive
+            .identity
+            .as_ref()
+            .map_or(Identity::Same, |(key, branch)| {
+                let sessions = self.sessions(index);
+                let current = sessions
+                    .core
+                    .as_ref()
+                    .and_then(|session| session.workspace(&archive.workspace));
+                checkout_identity(current, key, branch.as_deref())
+            });
+        if identity == Identity::Changed {
+            return Some(Ended::Gone);
+        }
+        let identity_ready = identity == Identity::Same;
         let host = crate::core_terminals::Host::of(&archive.scope);
         if archive.terminal.is_none() {
             archive.terminal = self.host_terminal_labelled(&host, ARCHIVE_LABEL, &archive.attempt);
@@ -351,6 +345,36 @@ impl SheprdWindow {
             ended => ended,
         }
     }
+}
+
+/// What a kept workspace's checkout is now, against the one its archive
+/// started in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Identity {
+    Same,
+    /// The workspace holds another branch or checkout: nothing of the
+    /// archived checkout is left to remove for.
+    Changed,
+    /// The workspace or its worktree is not known yet, as while a remote
+    /// Git lookup fails: a failed query is no evidence of a replacement, so
+    /// the archive keeps waiting rather than dropping a deletion asked for.
+    Unknown,
+}
+
+fn checkout_identity(
+    workspace: Option<&sheprd_session::Workspace>,
+    key: &str,
+    branch: Option<&str>,
+) -> Identity {
+    let Some((workspace, tree)) =
+        workspace.and_then(|workspace| Some((workspace, workspace.worktree.as_ref()?)))
+    else {
+        return Identity::Unknown;
+    };
+    if workspace.branch.as_deref() != branch || !tree.linked || tree.key != key {
+        return Identity::Changed;
+    }
+    Identity::Same
 }
 
 // For the kept workspaces' tests, which need host scripts.
@@ -447,3 +471,6 @@ impl SheprdWindow {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
