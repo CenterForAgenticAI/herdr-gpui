@@ -301,8 +301,10 @@ impl SheprdWindow {
             let pane_id = pane_id.clone();
             list(
                 chat.list.clone(),
-                cx.processor(move |this, index: usize, _, cx| {
-                    this.render_chat_entry(&pane_id, index, cx)
+                cx.processor(move |this, index: usize, window, cx| {
+                    let entry = this.render_chat_entry(&pane_id, index, cx);
+                    this.load_queued_pages(&pane_id, window, cx);
+                    entry
                 }),
             )
             .flex_1()
@@ -739,18 +741,4 @@ impl SheprdWindow {
                     .child(message)
             }))
     }
-}
-
-/// Lets a sideways-scrolling element inside the chat log scroll on the
-/// horizontal axis only: a plain wheel scrolls the log alone, Shift + wheel
-/// scrolls the element alone, and a diagonal trackpad swipe does both.
-///
-/// GPUI's `overflow_x_scroll` alone turns vertical wheel input into horizontal
-/// scrolling while the log scrolls too, and `restrict_scroll_to_axis` locks a
-/// trackpad gesture to one axis. Declaring both axes scrollable maps each
-/// axis to itself; the vertical offset stays clamped at zero because the
-/// element is as tall as its content.
-fn scroll_sideways<E: StatefulInteractiveElement + Styled>(mut element: E) -> E {
-    element.style().allow_concurrent_scroll = Some(true);
-    element.overflow_scroll()
 }

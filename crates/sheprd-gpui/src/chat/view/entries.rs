@@ -19,7 +19,7 @@ use super::{
     layout::{Row, Side, ToolFold, Voice, layout_for, side},
     visuals::Frame,
 };
-use crate::chat::view::scroll_sideways;
+use crate::chat::code_block::scroll_sideways;
 use crate::{SheprdWindow, config::corners, fonts::StyledFont, i18n::fl, notifications::safe_text};
 use gpui::{prelude::*, *};
 use sheprd_chat_protocol::{

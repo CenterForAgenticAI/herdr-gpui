@@ -1,5 +1,5 @@
 //! Native rich blocks. No HTML is executed and code-copy buttons only copy.
-use crate::chat::view::scroll_sideways;
+use crate::chat::code_block::scroll_sideways;
 use crate::chat::{
     rich::{Block, Inline, Kind, Style},
     visual::{Shown, VisualId, Visuals},
@@ -25,6 +25,8 @@ use accents::{Accents, code_ink};
 use links::Links;
 
 struct RichContext<'a, 'b, 'c> {
+    /// The chat drawing the blocks, whose buttons' choices they follow.
+    pane_id: &'a str,
     /// The message's accents; `None` keeps the ink of a colored fill.
     accents: Option<Accents>,
     visuals: &'a Visuals,
@@ -53,6 +55,7 @@ impl SheprdWindow {
             .ground(voice.side, &look)
             .map(|ground| Accents::on(&self.theme, ground));
         let mut context = RichContext {
+            pane_id,
             accents,
             visuals,
             links,

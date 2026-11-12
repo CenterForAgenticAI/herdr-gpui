@@ -2,7 +2,7 @@
 //! Only a successful creation writes the ownership receipt; an uncertain
 //! creation without that receipt is retained for inspection, never adopted.
 
-use super::{Error, Result};
+pub use super::{Error, Result};
 use crate::work::{Host, NewWorktree, Opened, Step, Worktree, script};
 use sheprd_client::{herdr::worktree, shell_quote};
 use std::{path::Path, sync::atomic::AtomicBool};

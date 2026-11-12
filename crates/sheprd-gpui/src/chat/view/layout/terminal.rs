@@ -4,7 +4,7 @@
 //! and the session's settings in a status line under the prompt box.
 
 use super::{super::Hues, ChatLayout, ComposerParts, Look, Row, Side, summary_row};
-use crate::chat::view::scroll_sideways;
+use crate::chat::code_block::scroll_sideways;
 use crate::{
     config::{corners, mix},
     fonts::StyledFont,

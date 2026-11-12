@@ -1,5 +1,6 @@
 use super::*;
 mod fanout;
+mod owned_cleanup;
 use sheprd_client::ConnectTarget;
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
 

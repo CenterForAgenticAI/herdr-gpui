@@ -7,7 +7,7 @@ use super::{
     super::{Hues, entries::ToolState},
     ChatLayout, ComposerParts, Look, Row, Side, ToolFold, summary_row,
 };
-use crate::chat::view::scroll_sideways;
+use crate::chat::code_block::scroll_sideways;
 use crate::{
     config::{Theme, mix},
     fonts::StyledFont,

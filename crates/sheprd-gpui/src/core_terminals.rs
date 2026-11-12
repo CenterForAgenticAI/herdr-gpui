@@ -807,7 +807,10 @@ impl SheprdWindow {
         // against its folder, which this computer's core reports.
         let fallback = self.core_fallback_view();
         self.answer_phone_split(cx);
-        let listed = self.core_terminals.poll_infos(std::time::Instant::now());
+        let dispatching = self.dispatch_sampling();
+        let listed = self
+            .core_terminals
+            .poll_infos(std::time::Instant::now(), dispatching);
         self.adopt_labelled_terminals(listed, cx);
         if listed {
             self.hear_core_agents(cx);
