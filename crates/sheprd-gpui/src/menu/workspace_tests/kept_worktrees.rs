@@ -112,12 +112,28 @@ fn the_new_worktree_dialog_reads_the_kept_folder(cx: &mut TestAppContext) {
             assert_eq!(view.kept_checkout().as_deref(), Some(LINKED));
             assert!(view.menu.worktree.is_some());
             assert!(view.menu.dispatch.is_none(), "no other host makes them");
-            // Read through Git's names, with no daemon to ask.
-            let input = view
-                .menu_target_input(&crate::pull_request::Origin::Local)
+            // Read through Git's names, with no daemon to ask. On this
+            // computer the lookup goes by the shared repository key, the
+            // same input the sidebar prefetch caches; another host keeps
+            // the checkout so a sibling checkout cannot borrow its answer.
+            // The fixture's POSIX paths are not absolute Windows paths.
+            #[cfg(unix)]
+            {
+                let local = view
+                    .menu_target_input(&crate::pull_request::Origin::Local)
+                    .unwrap();
+                assert_eq!(local.checkout, None);
+                assert_eq!(
+                    local.repo_key.as_deref(),
+                    Some(Path::new(MAIN).join(".git").to_str().unwrap())
+                );
+                assert_eq!(local.branch, "feature");
+            }
+            let remote = view
+                .menu_target_input(&crate::pull_request::Origin::Ssh("box".into()))
                 .unwrap();
-            assert_eq!(input.checkout.as_deref(), Some(LINKED));
-            assert_eq!(input.branch, "feature");
+            assert_eq!(remote.checkout.as_deref(), Some(LINKED));
+            assert_eq!(remote.branch, "feature");
         })
     });
 }
