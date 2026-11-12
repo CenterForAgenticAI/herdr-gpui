@@ -538,6 +538,18 @@ the daemon client does; writes have no deadline, so the app's out buffer
 holds a whole answer and the connection bound limits what a stalled caller
 can hold.
 
+## Recovering a kept Herdr 2 chat
+
+At the shell prompt core restored after unexpected chat loss, run
+`sheprd-acp restore "$HERDR_ACP_ENDPOINT"` (PowerShell:
+`sheprd-acp restore $env:HERDR_ACP_ENDPOINT`). This is the companion program's
+command, independent of the desktop control socket. It checks the original
+terminal/socket/endpoint/folder, claims the endpoint for the process lifetime,
+and resumes only the recorded agent session. Run it on the terminal's host;
+it never falls back to a local or Herdr 1 session. See
+[Herdr 2 recovery](rich-chat.md#herdr-2-recovery) for supported launches,
+automatic new-terminal recovery and its remaining limits.
+
 ## Chats on SSH hosts
 
 Native chat views are on by default: turn off **ACP chats** in Settings >
