@@ -10,6 +10,9 @@ name: sheprd-relay
 
 services:
   relay:
+    # The droplet's start.sh sets RELAY_IMAGE to the digest whose cosign
+    # signature it verified. By hand, :latest is pulled unverified; pin a
+    # verified digest instead (README.md, "The image").
     image: ${RELAY_IMAGE:-ghcr.io/sheprd-labs/sheprd-relay:latest}
     restart: unless-stopped
     env_file: .env
@@ -40,7 +43,9 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
   caddy:
-    image: caddy:2-alpine
+    # caddy:2-alpine, pinned by digest so a push to the tag cannot change
+    # what runs; Dependabot moves it.
+    image: caddy:2-alpine@sha256:78bd35025c7ba85961dd149ae670315129954e77abe2383ac47c89106b35ade9
     restart: unless-stopped
     depends_on: [relay]
     ports:

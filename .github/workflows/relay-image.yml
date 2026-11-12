@@ -8,7 +8,8 @@ name: Relay image
 #   ghcr.io/<owner>/sheprd-relay:latest
 #   ghcr.io/<owner>/sheprd-relay:sha-<commit>
 #
-# deploy/relay pulls :latest; pin a digest for production (see its README).
+# Droplets from deploy/relay run :latest's digest only after verifying this
+# signature; App Platform cannot (see deploy/relay/README.md).
 # CI holds no relay secrets and deploys nothing.
 
 on:
@@ -69,7 +70,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Buildx
-        run: docker buildx create --name relay --driver docker-container --use
+        # BuildKit pinned by digest (it was buildx-stable-1); Dependabot does
+        # not see this line, so move it by hand.
+        run: >-
+          docker buildx create --name relay --driver docker-container --use
+          --driver-opt image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
       - name: Check the DigitalOcean user data
         if: matrix.arch == 'amd64'
         run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_relay_deploy.py
@@ -106,7 +111,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Buildx
-        run: docker buildx create --name relay --driver docker-container --use
+        # BuildKit pinned by digest (it was buildx-stable-1); Dependabot does
+        # not see this line, so move it by hand.
+        run: >-
+          docker buildx create --name relay --driver docker-container --use
+          --driver-opt image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
       - name: Log in to GHCR
         env:
           ACTOR: ${{ github.actor }}
@@ -195,7 +204,7 @@ jobs:
             echo '```sh'
             echo "docker pull $IMAGE@$DIGEST"
             echo "cosign verify $IMAGE@$DIGEST \\"
-            echo "  --certificate-identity-regexp 'https://github.com/$REPOSITORY/.github/workflows/relay-image.yml@refs/heads/main' \\"
+            echo "  --certificate-identity https://github.com/$REPOSITORY/.github/workflows/relay-image.yml@refs/heads/main \\"
             echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -20,15 +20,57 @@ Docker picks the right architecture, so the same name works on regular and
 ARM droplets. Before the first deploy, make the package public once (GitHub >
 the organization > Packages > sheprd-relay > Package settings > Change
 visibility), or droplets and App Platform cannot pull it without
-credentials. To pin and verify the digest the workflow's summary prints:
+credentials.
+
+A tag can be pushed again; a digest cannot. To check an image by hand,
+verify its signature against the exact workflow that signs it, on `main`
+(the workflow's summary prints this for each image it publishes):
 
 ```sh
-cosign verify ghcr.io/sheprd-labs/sheprd-relay@sha256:… \
-  --certificate-identity-regexp 'https://github.com/sheprd-labs/sheprd/.github/workflows/relay-image.yml@refs/heads/main' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify ghcr.io/sheprd-labs/sheprd-relay:latest \
+  --certificate-identity https://github.com/sheprd-labs/sheprd/.github/workflows/relay-image.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  | jq -r '.[0].critical.image."docker-manifest-digest"'
 ```
 
+It prints the `sha256:` digest that signature covers. Deploy
+`ghcr.io/sheprd-labs/sheprd-relay@sha256:…` with that digest, never the
+tag you verified: the tag may move between the check and the pull.
+Droplets do this on their own (below); App Platform cannot.
+
 `scripts/relay-image.sh amd64` builds and checks it locally, as CI does.
+
+### Pinned images
+
+Everything else the relay is built or served with is pinned by digest, with
+its tag kept beside it for people:
+
+| Image | Where | Kept current by |
+| --- | --- | --- |
+| `caddy:2-alpine@sha256:…` | `compose.yml` | Dependabot (`docker-compose`) |
+| `moby/buildkit:v0.34.2@sha256:…` | `.github/workflows/relay-image.yml` | by hand: Dependabot does not read `run:` lines |
+| cosign v2.6.5, by SHA-256 per architecture | `cloud-init.yml`'s `start.sh` | by hand, from the release's signed `cosign_checksums.txt`, in step with the version `relay-image.yml` signs with |
+
+The build's base images, in `crates/sheprd-relay/Dockerfile`, are still
+named by tag (`rust:…-alpine…` through the `RUST_IMAGE` argument, and
+`gcr.io/distroless/static-debian12:nonroot`). Dependabot (`docker`) watches
+that directory and keeps a `FROM` digest current once one is added; it does
+not read the `ARG` default.
+
+To move cosign, take the two hashes from the release's checksums after
+checking that file's own signature:
+
+```sh
+v=v2.6.5
+base=https://github.com/sigstore/cosign/releases/download/$v
+curl -fsSLO "$base/cosign_checksums.txt" \
+  -O "$base/cosign_checksums.txt-keyless.pem" -O "$base/cosign_checksums.txt-keyless.sig"
+cosign verify-blob cosign_checksums.txt \
+  --certificate cosign_checksums.txt-keyless.pem --signature cosign_checksums.txt-keyless.sig \
+  --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+  --certificate-oidc-issuer https://accounts.google.com
+grep -E ' cosign-linux-(amd64|arm64)$' cosign_checksums.txt
+```
 
 ## DigitalOcean droplets, one command (QUIC and WebSockets)
 
@@ -47,6 +89,34 @@ To use your own names, set `RELAY_DOMAIN_SUFFIX=relay.example.org`, then point
 `nyc3.relay.example.org` and the rest at the droplets. Set `RELAY_SSH_KEYS` to
 your key ids from `doctl compute ssh-key list` to reach them over SSH.
 
+### What a droplet runs
+
+`/opt/sheprd-relay/start.sh`, which the user data writes and runs at first
+boot, never runs a tag:
+
+1. It installs cosign v2.6.5 as `/usr/local/bin/cosign-v2.6.5`, and only if
+   the download matches the SHA-256 pinned for the droplet's architecture.
+2. It runs `cosign verify` on `ghcr.io/sheprd-labs/sheprd-relay:latest`,
+   accepting only a keyless signature whose certificate names
+   `https://github.com/sheprd-labs/sheprd/.github/workflows/relay-image.yml@refs/heads/main`,
+   issued by `https://token.actions.githubusercontent.com`.
+3. It writes the digest that signature covers to `compose.env` as
+   `RELAY_IMAGE=ghcr.io/sheprd-labs/sheprd-relay@sha256:…` and starts
+   compose with it.
+
+If the signature is missing or from anyone else, or names more than one
+digest, `start.sh` changes nothing, so the relay already running keeps
+running, and exits non-zero with `sheprd-relay: … the running relay is
+unchanged`. At first boot that message is in `/var/log/cloud-init-output.log`.
+
+To run another tag, verified the same way, or a digest you verified
+yourself, set `RELAY_IMAGE` (a digest, `…@sha256:…`, is used as given):
+
+```sh
+RELAY_IMAGE=ghcr.io/sheprd-labs/sheprd-relay:sha-0123456789ab /opt/sheprd-relay/start.sh
+RELAY_IMAGE=ghcr.io/sheprd-labs/sheprd-relay@sha256:… /opt/sheprd-relay/start.sh
+```
+
 ## DigitalOcean App Platform (WebSockets only)
 
 No server to manage, in one click:
@@ -64,6 +134,16 @@ and clients use its WebSocket fallback: slower to connect and with no
 connection migration, but it works from any network. The spec wires up what
 the platform provides (below); add `RELAY_DASHBOARD_TOKEN` as an encrypted
 variable in the app's settings for the dashboard.
+
+**App Platform deploys are not verified.** App Platform pulls the image
+itself and cannot run cosign, so both specs name `tag: latest` and run
+whatever that tag points at when the app deploys. To pin, verify a digest by
+hand (above), then in the spec replace `tag: latest` with
+`digest: sha256:…` (App Platform accepts one or the other, not both) and
+apply it with `doctl apps update APP_ID --spec deploy/relay/app.yaml`. A
+pinned app stays on that digest until you change it again. The Deploy
+button always starts from `.do/deploy.template.yaml` on `main`, so it is
+unverified unless that file is pinned; keep it and `app.yaml` the same.
 
 ## Ports and names from outside
 
@@ -87,8 +167,12 @@ without either setting, every caller would share the proxy's.
 cd deploy/relay
 cp env.example .env    # set RELAY_DASHBOARD_TOKEN for the dashboard
 mkdir -p bans && touch bans/list   # ranges to ban by hand, one per line
-RELAY_DOMAIN=relay.example.org docker compose up -d
+RELAY_DOMAIN=relay.example.org \
+  RELAY_IMAGE=ghcr.io/sheprd-labs/sheprd-relay@sha256:… docker compose up -d
 ```
+
+Set `RELAY_IMAGE` to a digest you verified (see "The image"). Without it,
+compose pulls `:latest` unverified.
 
 Or just the image, with no proxy and no TLS, for a trial:
 
@@ -212,9 +296,15 @@ Logs hold no addresses, routes, or payloads.
 
 ## Updating
 
+On a droplet, run the start script again: it verifies `:latest` and moves
+to its digest only if the signature checks out (see "What a droplet runs").
+
 ```sh
-cd /opt/sheprd-relay && docker compose --env-file compose.env up -d --pull always
+/opt/sheprd-relay/start.sh
 ```
+
+Run compose there only with `--env-file compose.env`, which holds the digest
+last verified; without it, compose falls back to `:latest`, unverified.
 
 Restarting drops open sessions. Computers listen again within seconds and
 clients reconnect; nothing is lost because nothing is stored.

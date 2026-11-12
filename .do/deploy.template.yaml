@@ -16,6 +16,10 @@ spec:
         registry_type: GHCR
         registry: ghcr.io
         repository: sheprd-labs/sheprd-relay
+        # Unverified: App Platform cannot check the image's cosign
+        # signature, and a push to :latest reaches the app on its next
+        # deploy. To pin, verify a digest (deploy/relay/README.md) and
+        # replace this line with `digest: sha256:...`.
         tag: latest
       instance_count: 1
       instance_size_slug: apps-s-1vcpu-0.5gb
