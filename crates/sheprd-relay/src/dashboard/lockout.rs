@@ -4,7 +4,7 @@
 //! nothing. Addresses are keyed as the rate limits key them (an IPv4
 //! address, or an IPv6 /64) and live only in memory.
 
-use crate::bucket::source_key;
+use crate::bucket::{Limiter, Rate, source_key};
 use std::{
     collections::HashMap,
     net::IpAddr,
@@ -32,16 +32,36 @@ pub enum Verdict {
     Allowed,
     /// Blocked for about this long still.
     Blocked(Duration),
-    /// The table is full of recent guessers and this address is not among
-    /// them: check the token, but there is no try to count or clear. The
-    /// token's length, not the lockout, keeps guessing hopeless then.
+    /// Every slot holds an address blocked now and this one is not among
+    /// them: check the token, but there is no try to count or clear. All
+    /// such callers share [`OVERFLOW`], so this is never unlimited.
     Untracked,
 }
 
+/// Tries all untracked callers share while every slot is a block: a few a
+/// minute, enough for an operator, too few to guess with.
+pub const OVERFLOW: Rate = Rate {
+    burst: 5,
+    per_minute: 6,
+};
+
 /// Wrong tries per address, and the blocks they caused.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Lockout {
+    /// Tries untracked callers share, counted from `started`.
+    overflow: Mutex<Limiter<()>>,
     records: Mutex<HashMap<IpAddr, Record>>,
+    started: Instant,
+}
+
+impl Default for Lockout {
+    fn default() -> Self {
+        Self {
+            overflow: Mutex::new(Limiter::bounded(OVERFLOW, 1)),
+            records: Mutex::default(),
+            started: Instant::now(),
+        }
+    }
 }
 
 impl Lockout {
@@ -75,11 +95,32 @@ impl Lockout {
         let mut records = self.records();
         if records.len() >= MAX_ADDRESSES && !records.contains_key(&key) {
             records.retain(|_, record| now.saturating_duration_since(record.last) < BLOCK);
+            // Make room by forgetting the oldest address not blocked now:
+            // a few wrong tries are forgotten, never a block.
+            let oldest = records
+                .iter()
+                .filter(|(_, record)| record.blocked_until.is_none_or(|until| until <= now))
+                .min_by_key(|(_, record)| record.last)
+                .map(|(key, _)| *key);
+            if let Some(oldest) = oldest {
+                records.remove(&oldest);
+            }
             if records.len() >= MAX_ADDRESSES {
-                // Full of recent guessers: track no one new, rather than
-                // forget one, or refuse everyone, the holder of the right
-                // token included.
-                return Verdict::Untracked;
+                // Every slot a block: newcomers share one small allowance,
+                // rather than none (the holder of the right token included)
+                // or an unlimited one.
+                drop(records);
+                let since = u64::try_from(now.saturating_duration_since(self.started).as_millis())
+                    .unwrap_or(u64::MAX);
+                let allowed = match self.overflow.lock() {
+                    Ok(mut overflow) => overflow.allow((), since),
+                    Err(poisoned) => poisoned.into_inner().allow((), since),
+                };
+                return if allowed {
+                    Verdict::Untracked
+                } else {
+                    Verdict::Blocked(BLOCK)
+                };
             }
         }
         let record = records.entry(key).or_insert(Record {

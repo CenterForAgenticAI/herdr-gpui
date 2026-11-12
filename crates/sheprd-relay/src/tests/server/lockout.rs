@@ -91,19 +91,38 @@ fn signing_in_clears_the_count() {
 }
 
 #[test]
-fn a_table_full_of_guessers_still_lets_the_right_token_be_checked() {
-    use crate::dashboard::lockout::MAX_ADDRESSES;
-    let lockout = Lockout::default();
+fn a_full_table_makes_room_and_never_allows_unlimited_guesses() {
+    use crate::dashboard::lockout::{MAX_ADDRESSES, OVERFLOW};
     let now = Instant::now();
-    for index in 0..u32::try_from(MAX_ADDRESSES).unwrap() {
-        let guesser = IpAddr::from(std::net::Ipv6Addr::from(
+    let guesser = |index: u32| {
+        IpAddr::from(std::net::Ipv6Addr::from(
             (0x2001_0db8_u128 << 96) | (u128::from(index) << 64),
-        ));
-        lockout.attempt(guesser, now);
+        ))
+    };
+    let slots = u32::try_from(MAX_ADDRESSES).unwrap();
+    // Full of addresses with one wrong try: the oldest makes room.
+    let lockout = Lockout::default();
+    for index in 0..slots {
+        lockout.attempt(guesser(index), now);
     }
-    // A newcomer is not refused unchecked: its token decides.
     assert_eq!(
         lockout.attempt("198.51.100.94".parse().unwrap(), now),
-        Verdict::Untracked
+        Verdict::Allowed
     );
+    // Full of blocks: newcomers are checked, but share a few tries.
+    let blocked = Lockout::default();
+    for index in 0..slots {
+        for _ in 0..TRIES {
+            blocked.attempt(guesser(index), now);
+        }
+    }
+    let newcomer = |last: u8| IpAddr::from([198, 51, 100, last]);
+    let checked = (0..50_u8)
+        .filter(|last| blocked.attempt(newcomer(*last), now) == Verdict::Untracked)
+        .count();
+    assert_eq!(checked, usize::try_from(OVERFLOW.burst).unwrap());
+    assert!(matches!(
+        blocked.attempt(newcomer(200), now),
+        Verdict::Blocked(_)
+    ));
 }
