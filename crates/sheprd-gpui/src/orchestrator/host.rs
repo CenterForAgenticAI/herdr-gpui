@@ -367,7 +367,7 @@ impl SheprdWindow {
                     .orchestrator_repository(&workspace)
                     .map(|(_, label)| label)
                     .unwrap_or_default();
-                self.dispatch_candidates(&label, cx)
+                self.herdr_1_candidates(&label, cx)
             } else {
                 Vec::new()
             };
@@ -625,6 +625,13 @@ impl SheprdWindow {
             .orchestrator_repository(&request.workspace_id)
             .and_then(|(key, label)| {
                 let origin = self.dispatch_origin(&request.workspace_id, &key, &label)?;
+                // Agents start through Herdr 1's CLI there, which a host
+                // keeping its workspaces for Herdr 2 has none of.
+                if endpoint != self.endpoints[self.selected_endpoint].id
+                    && self.dispatch_keeps(endpoint)
+                {
+                    return None;
+                }
                 let destination = self.herdr_1_destination(endpoint)?;
                 let target = self
                     .endpoints

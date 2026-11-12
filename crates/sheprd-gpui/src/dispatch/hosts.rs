@@ -250,6 +250,21 @@ impl SheprdWindow {
             .collect()
     }
 
+    /// The dispatch candidates for callers that create through Herdr 1's
+    /// CLI (fan-out, the orchestrator): another host that keeps its
+    /// workspaces for Herdr 2 is shown offline, since those callers would
+    /// ask its missing Herdr 1 daemon for a snapshot. They must adopt
+    /// `dispatch_destination` before offering such hosts.
+    pub(crate) fn herdr_1_candidates(&self, repo: &str, cx: &App) -> Vec<Candidate> {
+        let mut candidates = self.dispatch_candidates(repo, cx);
+        for candidate in &mut candidates {
+            if !candidate.current && self.dispatch_keeps(&candidate.endpoint_id) {
+                candidate.online = false;
+            }
+        }
+        candidates
+    }
+
     /// Providers that can make a new machine for a dispatch from the shown
     /// host: only when that host can be scripted, as for other hosts, and
     /// only once the user has a device from the provider, so the dialog
@@ -415,14 +430,7 @@ impl SheprdWindow {
         }
         let composing = self.fan_out.as_ref().filter(|fan_out| fan_out.composing());
         if let Some(repo) = composing.map(|fan_out| fan_out.repo_label().to_owned()) {
-            let mut candidates = self.dispatch_candidates(&repo, cx);
-            // The fan-out consumer must adopt typed destination preparation
-            // before it can offer lanes on another host's core.
-            for candidate in &mut candidates {
-                if !candidate.current && self.dispatch_keeps(&candidate.endpoint_id) {
-                    candidate.online = false;
-                }
-            }
+            let candidates = self.herdr_1_candidates(&repo, cx);
             if let Some(fan_out) = &mut self.fan_out
                 && fan_out.update_hosts(candidates, now)
             {
