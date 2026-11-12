@@ -75,7 +75,7 @@ pub use accent::Accent;
 pub use agent_skill::{AgentSkillConfig, SkillInstall};
 pub use agents_placement::AgentsPlacement;
 pub use backdrop::{Backdrop, Material};
-pub use chat::{ChatLauncher, ChatLayoutMode};
+pub use chat::{ChatLauncher, ChatLayoutMode, HtmlRender};
 pub use cloud::CloudConfig;
 #[cfg(test)]
 use daemon::MAX_DAEMON_CONFIG_BYTES;

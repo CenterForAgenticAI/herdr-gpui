@@ -16,6 +16,8 @@
 // i18n: migrated
 
 mod chats;
+pub(crate) mod code_block;
+mod code_choices;
 mod convert;
 pub(crate) mod core_pane;
 mod discovery;
