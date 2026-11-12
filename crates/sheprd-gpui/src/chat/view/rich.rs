@@ -24,6 +24,9 @@ use crate::chat::selection::Cell;
 use accents::{Accents, code_ink};
 use links::Links;
 
+/// The prose's line height, in ems; inline formulas find its baseline with it.
+const LINE_HEIGHT: f32 = 1.6;
+
 struct RichContext<'a, 'b, 'c> {
     /// The chat drawing the blocks, whose buttons' choices they follow.
     pane_id: &'a str,
@@ -74,7 +77,7 @@ impl SheprdWindow {
             .when(!layout.mono_prose(), |view| view.text_font(&self.config.ui))
             .text_size(px(size))
             .when_some(layout.prose(&look), |view, ink| view.text_color(rgb(ink)))
-            .line_height(relative(1.6))
+            .line_height(relative(LINE_HEIGHT))
             .children(blocks.iter().enumerate().map(|(index, block)| {
                 let element = match block {
                     Block::Paragraph {
@@ -85,7 +88,7 @@ impl SheprdWindow {
                         .rich_paragraph(*kind, *indent, content, index, &mut context)
                         .into_any_element(),
                     Block::Math { id, source } => {
-                        let formula = self.rich_math(*id, source, visuals, false, size);
+                        let formula = self.rich_math(*id, source, visuals, false, size, context.cx);
                         let formula = match selection.fragment(Cell::block(index)) {
                             Some(fragment) => fragment.atomic(formula, &self.theme, context.cx),
                             None => formula,
@@ -278,7 +281,14 @@ impl SheprdWindow {
                     }
                 }
                 Inline::Math { id, source, .. } => {
-                    let formula = self.rich_math(*id, source, context.visuals, true, context.size);
+                    let formula = self.rich_math(
+                        *id,
+                        source,
+                        context.visuals,
+                        true,
+                        context.size,
+                        context.cx,
+                    );
                     let formula = match &fragment {
                         Some(fragment) => fragment.range(offset..offset + source.len()).atomic(
                             formula,
@@ -314,10 +324,12 @@ impl SheprdWindow {
         visuals: &Visuals,
         inline: bool,
         size: f32,
+        cx: &App,
     ) -> Div {
+        let layout = layout_for(self.config.chat.layout);
         // Math textures use the theme's ink. Keep that surface behind them
         // when a layout supplies a different message fill, without re-rasterizing.
-        let backdrop = layout_for(self.config.chat.layout).backdrop(&self.chat_look());
+        let backdrop = layout.backdrop(&self.chat_look());
         let ground =
             |view: Div| view.when_some(backdrop, |view, fill| view.bg(rgb(fill)).rounded(px(2.)));
         let shown = visuals.shown(id);
@@ -353,13 +365,27 @@ impl SheprdWindow {
         // The texture is drawn for the chat's text size.
         let scale = size / self.chat_text_size();
         let (width, height) = (drawn.width * scale, drawn.height * scale);
-        // The zero-width text establishes a text baseline inside the math
-        // atom; the picture is positioned against its measured TeX baseline.
         ground(if inline {
-            let text_baseline = size * 0.8;
+            // GPUI reports no text baselines to layout, so a row's words line
+            // up by the bottoms of their line boxes. Find where the prose's
+            // baseline sits in its line from its font's ascent and descent.
+            let font = if layout.mono_prose() {
+                &self.config.terminal
+            } else {
+                &self.config.ui
+            };
+            let line = size * LINE_HEIGHT;
+            let text = cx.text_system();
+            let id = text.resolve_font(&font.font());
+            let ascent = f32::from(text.ascent(id, px(size)));
+            // Fonts report descent with either sign (font-kit's is negative),
+            // which `TextSystem::baseline_offset` adds as is; lines are laid
+            // out with its magnitude, centered in the line height.
+            let descent = f32::from(text.descent(id, px(size))).abs();
+            let text_baseline = (line - ascent - descent) / 2. + ascent;
+            let below = line - text_baseline;
             let baseline = drawn.baseline.unwrap_or(drawn.height) * scale;
             let top = (text_baseline - baseline).max(0.);
-            let before = (baseline - text_baseline).max(0.);
             // Room for the 1px border `Fragment::atomic` draws around a
             // selectable formula, so the picture still starts at its padding.
             let border = 1.;
@@ -372,8 +398,11 @@ impl SheprdWindow {
                 .mx(px(-super::super::rich::MATH_PADDING * scale - border))
                 .max_w_full()
                 .w(px(width + 2. * border))
-                .h(px((height + top).max(size * 1.4 + before)))
-                .child(div().pt(px(before)).child("\u{200b}"))
+                // The box ends as far below the TeX baseline as a word's line
+                // ends below the prose's, so the baselines meet; a deeper
+                // formula keeps its room below as a margin, outside alignment.
+                .h(px(border + top + baseline + below))
+                .mb(px((height - baseline - below).max(0.)))
                 // Like KaTeX's HTML, no fit to the column: a percentage
                 // width on this absolute picture shrank short formulas.
                 .child(

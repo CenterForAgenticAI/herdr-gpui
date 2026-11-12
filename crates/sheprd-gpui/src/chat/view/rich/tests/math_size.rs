@@ -10,7 +10,7 @@ use std::sync::Arc;
 fn a_formula_scales_with_its_message(cx: &mut TestAppContext) {
     let renderer = cx.update(|cx| cx.svg_renderer());
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
-    view.update(cx, |view, _| {
+    view.update(cx, |view, cx| {
         let mut visuals = Visuals::default();
         let math = VisualId::of("x");
         visuals.want(
@@ -33,7 +33,7 @@ fn a_formula_scales_with_its_message(cx: &mut TestAppContext) {
         }
         let full = view.chat_text_size();
         let width = |size: f32| {
-            view.rich_math(math, "x", &visuals, true, size)
+            view.rich_math(math, "x", &visuals, true, size, cx)
                 .style()
                 .size
                 .width
