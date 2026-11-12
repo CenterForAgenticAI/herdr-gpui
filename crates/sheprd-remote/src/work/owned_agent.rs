@@ -20,7 +20,8 @@ pub enum Purpose {
     /// shell `--keep` leaves once it exits, nor anything typed there since.
     Message,
     /// End it, as cleanup and a confirmed restart do: a finished terminal, or
-    /// a live one whose agent exited into its kept shell, is still ours.
+    /// a live one whose agent exited into its kept shell at its prompt, is
+    /// still ours; another program started in that shell is not.
     End,
 }
 
@@ -167,11 +168,15 @@ fn select(
             || (purpose == Purpose::End && terminal.state == TerminalState::Finished))
         || terminal.cwd != path
         || terminal.argv != argv
-        || (purpose == Purpose::Message
+        // Messaging types into the agent, so it must still be in front.
+        // Ending may also find the shell `--keep` left at its prompt once
+        // the agent exited; a program started there since is the user's.
+        || (terminal.state == TerminalState::Live
             && !terminal.foreground.as_ref().is_some_and(|foreground| {
                 crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
                     == Some(kind)
                     || foreground.argv == argv
+                    || (purpose == Purpose::End && at_prompt(&foreground.name, &foreground.argv))
             }))
         || expected.is_some_and(|expected| terminal.address != expected)
     {
@@ -180,6 +185,19 @@ fn select(
     Ok(Started::Herdr2 {
         terminal: terminal.address,
     })
+}
+
+/// Whether a foreground process is a bare shell waiting at its prompt:
+/// a shell given only options, not a script or command to run.
+fn at_prompt(name: &str, argv: &[String]) -> bool {
+    match argv.split_first() {
+        Some((program, options)) => {
+            crate::teleport::is_shell(program)
+                && options.iter().all(|arg| arg.starts_with('-'))
+                && !options.iter().any(|arg| arg == "-c")
+        }
+        None => crate::teleport::is_shell(name),
+    }
 }
 
 fn command(agent: &Agent<'_>) -> Vec<String> {

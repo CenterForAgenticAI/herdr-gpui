@@ -1,7 +1,7 @@
 use super::*;
 
 #[gpui::test]
-fn a_kept_origin_fans_out_on_its_own_host(cx: &mut gpui::TestAppContext) {
+fn a_kept_origin_runs_its_lanes_on_the_host_that_keeps_it(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
     view.update(cx, |view, _| {
         let source = Source {
@@ -25,10 +25,9 @@ fn a_kept_origin_fans_out_on_its_own_host(cx: &mut gpui::TestAppContext) {
                 session: "work".into(),
             },
         ] {
-            view.endpoints[0].connection.target = target.clone();
-            let host = view.fan_out_host(&source);
-            assert_eq!(host, host_for(&target).ok());
-            assert!(host.is_none_or(|host| !host.is_local()));
+            view.endpoints[0].connection.target = target;
+            // Lanes run through that host's scripts, never this computer's.
+            assert!(!view.fan_out_host(&source).unwrap().is_local());
         }
     });
 }

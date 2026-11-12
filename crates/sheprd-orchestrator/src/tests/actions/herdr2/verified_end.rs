@@ -27,22 +27,24 @@ fn live(address: &str, cwd: &Path) -> String {
     )
 }
 
-/// `t9` as the run started it: its label, folder and program, still live.
-fn owned_t9(dir: &Path) -> String {
+/// The run's own agent in `t9`, as herdr-core lists it: started with the
+/// dispatch's owner label, command, and checkout, so Remove recognizes it.
+fn owned_agent(dir: &Path) -> String {
     let calls = core_calls(dir);
     let run = calls.iter().find(|call| call.starts_with("run ")).unwrap();
     let words: Vec<&str> = run.split(' ').collect();
-    let at = |flag: &str| words[words.iter().position(|word| *word == flag).unwrap() + 1];
-    let (key, value) = at("--label").split_once('=').unwrap();
+    let label = words[words.iter().position(|word| *word == "--label").unwrap() + 1];
+    let (key, value) = label.split_once('=').unwrap();
     let argv = &words[words.iter().position(|word| *word == "--").unwrap() + 1..];
-    serde_json::json!({"terminals": [{
+    let cwd = checkout(dir);
+    serde_json::json!({
         "address": "t9",
-        "cwd": at("--cwd"),
+        "cwd": cwd,
         "argv": argv,
-        "state": "live",
         "labels": {key: value},
-        "foreground": {"name": "claude", "argv": argv, "cwd": at("--cwd"), "pid": 9},
-    }]})
+        "state": "live",
+        "foreground": {"argv": argv, "name": argv[0], "cwd": cwd, "pid": 9},
+    })
     .to_string()
 }
 
@@ -81,7 +83,8 @@ fn remove_is_refused(dir: &Path, site: &Site, id: String) {
 fn a_run_whose_terminal_survives_its_kill_keeps_its_checkout_and_record() {
     let dir = tempfile::tempdir().unwrap();
     let (site, id) = dispatched(dir.path());
-    std::fs::write(dir.path().join("home/listing"), owned_t9(dir.path())).unwrap();
+    let listing = format!(r#"{{"terminals":[{}]}}"#, owned_agent(dir.path()));
+    std::fs::write(dir.path().join("home/listing"), listing).unwrap();
     remove_is_refused(dir.path(), &site, id);
     assert!(
         core_calls(dir.path())

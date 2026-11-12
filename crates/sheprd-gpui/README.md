@@ -2465,6 +2465,10 @@ On Windows, dispatch between SSH and WSL hosts uses their POSIX shells. A native
 Windows local checkout cannot be a dispatch source or destination because the
 Git transfer scripts require a POSIX shell. Cloud provisioning remains subject
 to each platform's cloud-device availability.
+With a custom Herdr 1 socket, app-kept Herdr 2 workspaces still use this
+computer's core and files on POSIX clients. Herdr 1 workspaces reached through
+that socket remain ineligible for scripted dispatch; their paths are not
+assumed to belong to this computer.
 
 The fan-out dialog offers Spread agents across hosts. Each lane then goes to
 the host with the most room left, a lane counting as a core, and its host chip
@@ -2504,6 +2508,17 @@ missing terminal address. Once a prompt send has been attempted, interrupted
 or failed delivery remains explicitly uncertain and is not offered for replay:
 neither backend provides an idempotency key that could prove exactly-once
 delivery after a lost acknowledgement. Inspect the retained agent instead.
+Recovery also checks the live foreground process: a replacement shell does
+not inherit the departed agent's ownership. If a removed device is configured
+again with the same host/session identity, its saved lanes rejoin the open
+comparison without replaying creation, launch or prompts.
+Before discarding a newly owned Herdr 2 lane, the worker verifies its receipt,
+disables terminal keep, ends the owned agent and checks the resulting inventory.
+A live replacement, unreadable result or unrelated program in the checkout
+keeps the checkout intact. Closing its removed workspace then only drops the
+presentation, without sending a second kill through a stale terminal address.
+These checks do not make ownership validation and terminal control atomic.
+
 Keep removes the other worktrees after its usual confirmation; a lane whose
 worktree may exist or sits on a host no longer set up stays saved until Forget,
 which lets the fan-out go and leaves every worktree as it is. Up to four
@@ -2970,6 +2985,12 @@ included, first goes to the daemon so a plugin's `[[link_handlers]]` entry can
 claim it; see [Herdr Plugins](#herdr-plugins).
 
 ## Herdr Plugins
+
+Herdr 2 desktop panes support explicitly configured [link-handler
+adapters](../../docs/link-handlers.md), independently of a Herdr 1 daemon.
+These run compatible commands on the clicked pane's host; they do not load
+Herdr's registry or emulate its plugin API. The daemon contract below applies
+to Herdr 1.
 
 Herdr runs plugins; this client never reads plugin manifests, runs plugin
 commands, or touches the plugin registry. It works with the parts of a plugin

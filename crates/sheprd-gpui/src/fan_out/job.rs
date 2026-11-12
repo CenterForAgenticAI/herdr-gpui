@@ -14,19 +14,6 @@ use crate::teleport::{self, AgentKind, FreshOrigin, Host, HostRepositories, Prep
 use sheprd_remote::work;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// The core label each owned lane's agent is started with, its value the
-/// lane's agent name.
-const LANE_OWNER: &str = "sheprd.fanout.lane";
-
-/// A lane agent that removing its checkout must end first: the name its
-/// label carries, its kind, and the terminal last saved for it.
-#[derive(Clone, Debug)]
-pub(crate) struct Owned {
-    pub(crate) agent: String,
-    pub(crate) kind: AgentKind,
-    pub(crate) terminal: Option<String>,
-}
-
 /// What a fan-out launches.
 #[derive(Debug, Clone)]
 pub(crate) struct Request {
@@ -51,8 +38,8 @@ pub(crate) struct Checkout {
     pub(crate) host: Host,
     /// Its folder, and Herdr 1's workspace and pane when Herdr 1 made it.
     pub(crate) worktree: work::Worktree,
-    /// On Herdr 2, the herdr-core shell its agent was typed into, once that
-    /// started; Herdr 1's agent runs in the worktree's own pane.
+    /// On Herdr 2, the owned core agent terminal once its address is known;
+    /// Herdr 1's agent runs in the worktree's own pane.
     pub(crate) terminal: Option<String>,
     /// New lanes carry an atomic core label for recovery after a lost run reply.
     pub(crate) recoverable: bool,
@@ -96,7 +83,7 @@ pub(crate) enum Progress {
     CreatingOwned(Box<Checkout>),
     Created(Box<Checkout>),
     StartingAgent,
-    /// The herdr-core shell a Herdr 2 lane's agent was typed into.
+    /// The owned herdr-core terminal of a Herdr 2 lane.
     Terminal(String),
     Prompting,
     /// The agent took the prompt and is working on it.
@@ -389,7 +376,7 @@ fn start(
         prompt: None,
     };
     let owner = work::owned_agent::Owner {
-        key: LANE_OWNER,
+        key: "sheprd.fanout.lane",
         value: &lane.agent,
     };
     let started = retain_started(
@@ -403,7 +390,7 @@ fn start(
 /// A failed acknowledgement can still identify a live terminal. Save and
 /// show it before reporting failure; neither retry its launch nor kill it.
 fn retain_started(
-    result: Result<work::Started, work::fanout::Error>,
+    result: work::fanout::Result<work::Started>,
     index: usize,
     report: &impl Fn(Report) -> Result<()>,
 ) -> Result<work::Started> {
@@ -449,7 +436,7 @@ pub(crate) fn resume(
                 &checkout.host,
                 &checkout.worktree,
                 work::owned_agent::Owner {
-                    key: LANE_OWNER,
+                    key: "sheprd.fanout.lane",
                     value: &lane.agent,
                 },
                 &work::Agent {
@@ -503,34 +490,6 @@ pub(crate) fn resume(
         Err(error) => Progress::Failed(error),
     };
     let _ = report(Report::Lane(index, progress));
-}
-
-/// End `owned`'s agent and prove nothing else runs in its checkout. With no
-/// labelled agent to end, as when it never started, the checkout must hold
-/// no live program at all.
-fn end_owned(
-    host: &Host,
-    worktree: &work::Worktree,
-    owned: &Owned,
-    cancelled: &AtomicBool,
-) -> Result<()> {
-    let agent = work::Agent {
-        kind: owned.kind,
-        name: &owned.agent,
-        model: None,
-        prompt: None,
-    };
-    let owner = work::owned_agent::Owner {
-        key: LANE_OWNER,
-        value: &owned.agent,
-    };
-    let terminal = owned.terminal.as_deref();
-    match work::owned_agent::end(host, worktree, owner, &agent, terminal, cancelled) {
-        Err(work::owned_agent::Error::Uncertain) => {
-            work::owned_agent::checkout_idle(host, worktree, cancelled).map_err(fanout_failed)
-        }
-        ended => ended.map_err(fanout_failed),
-    }
 }
 
 fn fanout_failed(error: work::fanout::Error) -> Error {
@@ -602,22 +561,38 @@ pub(crate) fn remove(
     worktree: &work::Worktree,
     repo_key: &str,
     branch: &str,
-    owned: Option<&Owned>,
+    owner: Option<&str>,
+    agent: Option<(AgentKind, Option<&str>)>,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     if matches!(worktree.opened, work::Opened::Herdr2) {
-        if let Some(owned) = owned {
-            // Closing the lane's workspace afterwards cannot be relied on to
-            // stop its agent: a tab that never opened leaves none to close.
-            end_owned(host, worktree, owned, cancelled)?;
-            return work::fanout::checkouts::discard(
-                host,
-                worktree,
-                branch,
-                &owned.agent,
-                cancelled,
-            )
-            .map_err(fanout_failed);
+        if let Some(owner) = owner {
+            work::fanout::checkouts::verify(host, worktree, branch, owner, cancelled)
+                .map_err(fanout_failed)?;
+            if let Some((kind, terminal)) = agent {
+                work::owned_agent::end(
+                    host,
+                    worktree,
+                    work::owned_agent::Owner {
+                        key: "sheprd.fanout.lane",
+                        value: owner,
+                    },
+                    &work::Agent {
+                        kind,
+                        name: owner,
+                        model: None,
+                        prompt: None,
+                    },
+                    terminal,
+                    cancelled,
+                )
+                .map_err(fanout_failed)?;
+            } else {
+                work::owned_agent::checkout_idle(host, worktree, cancelled)
+                    .map_err(fanout_failed)?;
+            }
+            return work::fanout::checkouts::discard(host, worktree, branch, owner, cancelled)
+                .map_err(fanout_failed);
         }
         if !host.is_local() {
             return Err(Error::HostUnavailable {
@@ -642,4 +617,5 @@ pub(crate) fn remove(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests;

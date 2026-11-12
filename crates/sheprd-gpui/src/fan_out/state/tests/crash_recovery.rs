@@ -17,13 +17,16 @@ fn owned_creation_and_start_intents_survive_restart_without_guessing_completion(
         ..checkout(0)
     };
     journal
+        .record(42, &Report::Lane(0, Progress::CreatingWorktree))
+        .unwrap();
+    journal
         .record(
             42,
             &Report::Lane(0, Progress::CreatingOwned(Box::new(owned.clone()))),
         )
         .unwrap();
     let restarted = Journal::at(Some(path.clone()));
-    let restored = FanOut::reclaim(&restarted, |_| Some(origin().host)).unwrap();
+    let restored = FanOut::reclaim(&restarted, |_, _| Some(origin().host)).unwrap();
     assert_eq!(restored.resumable(0), Some(Resume::Creation));
     assert_eq!(restored.lanes[0].checkout, Some(owned.clone()));
     journal
@@ -33,7 +36,7 @@ fn owned_creation_and_start_intents_survive_restart_without_guessing_completion(
         .record(42, &Report::Lane(0, Progress::StartingAgent))
         .unwrap();
     let restarted = Journal::at(Some(path));
-    let mut restored = FanOut::reclaim(&restarted, |_| Some(origin().host)).unwrap();
+    let mut restored = FanOut::reclaim(&restarted, |_, _| Some(origin().host)).unwrap();
     // This action only looks up the atomic ownership label, never runs
     // another agent merely because the original run reply was lost.
     assert_eq!(restored.resumable(0), Some(Resume::Prompt));
@@ -69,7 +72,7 @@ fn a_missing_terminal_after_starting_never_offers_a_second_agent() {
             record.lanes[0].step = step;
             journal.begin(record).unwrap().unwrap().write().unwrap();
             let journal = Journal::at(Some(path));
-            let mut restored = FanOut::reclaim(&journal, |_| Some(origin().host)).unwrap();
+            let mut restored = FanOut::reclaim(&journal, |_, _| Some(origin().host)).unwrap();
             let expected = match step {
                 Checkpoint::Created => Some(Resume::Start),
                 Checkpoint::StartingAgent if terminal.is_some() => Some(Resume::Prompt),

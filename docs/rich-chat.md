@@ -36,7 +36,7 @@ Pick one from **View > Agent Layout**, or select a layout directly with:
 sheprd config set chat.layout bubbles
 ```
 
-In **Settings > General**, turn on **Full-width chat** to use the available
+In **Settings > Chat**, turn on **Full-width chat** to use the available
 conversation area, or set **Chat width** with the slider or numeric field.
 The default is 800 logical pixels; custom widths range from 320 to 4,000 and
 shrink to fit narrower windows. The transcript and native composer use the
@@ -332,8 +332,33 @@ attached images, and explicitly loaded remote pictures. Conversation prose uses
 the UI font (the terminal font in **Terminal** layout), at the terminal's
 configured font size with the same zoom controls. Inline code and code fences
 use the terminal font. Code blocks
-preserve blank lines, show tabs at four-column stops and scroll without wrapping.
-**Copy code** preserves the parsed source's tabs, indentation and Unicode.
+preserve blank lines, show tabs at four-column stops and scroll sideways
+without wrapping. **Copy code** preserves the parsed source's tabs, indentation
+and Unicode.
+
+A code block's **Wrap** button, beside **Copy code**, wraps that block's long
+lines, and **Unwrap** stops it. Settings > Chat sets how every block starts
+out: **Wrap code** (`chat.wrap_code`), **Number code lines**
+(`chat.code_line_numbers`), and **Alternate code line colors**
+(`chat.code_stripes`). Line numbers and alternating colors tell a wrapped line
+from the next one; neither is copied. Unwrapped, the numbers stay put while the
+code scrolls sideways. A diff keeps its added and removed colors rather than
+alternating.
+
+An agent's `html` block starts as a card with **Show page**, unless
+**HTML blocks** (`chat.render_html`) says otherwise: `always` loads its page
+without a click, `never` shows its code, and `default` keeps the card. Every
+HTML block keeps a switch: **Show code** on its card or page, and
+**Render webpage** (**Open in browser** on Linux) on its code. `always` loads
+each block's page once; one you hide, or the oldest closed for a fifth, stays a
+card. Linux cannot show pages inside the window, so there `always` keeps the
+card rather than opening a browser for every block. A choice made with a
+block's own button lasts until the app quits.
+
+```sh
+sheprd config set chat.wrap_code true
+sheprd config set chat.render_html '"never"'
+```
 
 Inline and display equations accept dollar and bracket delimiters outside code.
 Multiline display equations preserve TeX line breaks, including a standalone

@@ -6,11 +6,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// How long a lease is retried before another holder is reported busy. A
-/// child forked while a lease is held keeps the open file, and with it the
-/// `flock`, until it execs, so a lease just dropped can still look held for
-/// a moment. Actions run on their own thread, never the UI's.
-const SETTLE: Duration = Duration::from_millis(1_500);
+/// How long a taken lease may outlive its holder. A process spawned on any
+/// thread inherits the lock's file until it execs, so a lease just dropped
+/// can still be held for that moment; only a lease held past this is busy.
+const RELEASE_GRACE: Duration = Duration::from_secs(1);
 const RETRY: Duration = Duration::from_millis(10);
 
 #[derive(Debug, thiserror::Error)]
@@ -32,7 +31,7 @@ pub(super) fn take(site: &super::Site) -> crate::Result<File> {
             path: path.clone(),
             source,
         })?;
-    let deadline = Instant::now() + SETTLE;
+    let deadline = Instant::now() + RELEASE_GRACE;
     loop {
         match file.try_lock() {
             Ok(()) => return Ok(file),

@@ -71,3 +71,29 @@ fn unrelated_program_in_the_owned_checkout_prevents_any_kill() {
     ));
     assert_eq!(fixture.calls(), ["ls --all --json"]);
 }
+
+#[test]
+fn absence_finishes_known_terminals_but_never_guesses_an_unacknowledged_launch() {
+    let fixture = Fixture::new();
+    fixture.program("herdr-core", "echo '{\"terminals\":[]}'");
+    let tree = Worktree {
+        path: "/work/lane".into(),
+        opened: Opened::Herdr2,
+    };
+    let agent = Agent {
+        kind: AgentKind::Claude,
+        name: "a",
+        model: None,
+        prompt: None,
+    };
+    let owner = Owner {
+        key: "sheprd.fanout.lane",
+        value: "a",
+    };
+    assert!(matches!(
+        owned_agent::end(&fixture.host(), &tree, owner, &agent, None, &never()),
+        Err(owned_agent::Error::Uncertain)
+    ));
+    owned_agent::end(&fixture.host(), &tree, owner, &agent, Some("t9"), &never()).unwrap();
+    assert!(fixture.calls().iter().all(|call| call == "ls --all --json"));
+}

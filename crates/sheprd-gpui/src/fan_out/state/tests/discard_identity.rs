@@ -59,6 +59,7 @@ fn discarding_a_saved_lane_refuses_a_different_branch_or_repository() {
             key.to_str().unwrap(),
             "feature",
             None,
+            None,
             &cancelled
         ),
         Err(Error::Checkout(_))
@@ -70,6 +71,7 @@ fn discarding_a_saved_lane_refuses_a_different_branch_or_repository() {
             &worktree,
             other.join(".git").to_str().unwrap(),
             "feature",
+            None,
             None,
             &cancelled
         ),

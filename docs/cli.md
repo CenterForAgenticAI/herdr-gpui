@@ -11,10 +11,31 @@ Commands reach the app over a socket of its own,
 `$XDG_STATE_HOME/herdr/gpui/control.sock` (default `~/.local/state/`), which
 only your user can open; on Windows, over a named pipe (see
 [Windows](#windows)). An agent on an SSH host has no path to it; there,
-the app's shim at `~/.local/state/herdr/gpui/bin/sheprd` offers
+the app's managed shim at `~/.local/state/herdr/gpui/bin/herdr-gpui` offers
 `browser open` and `browser reload` through Herdr workspace metadata (see
 [remote agents](../crates/sheprd-gpui/README.md#letting-agents-open-pages)),
-and every other command exits 8. A few commands work from files alone and
+and every other command exits 8 for Herdr 1 callers. Remote Herdr 2 callers
+use terminal labels over the existing core bridge for `browser open`,
+`browser reload`, and `browser feedback [--wait SECONDS]` (also `feedback`).
+Feedback requires Python 3 on the remote host, waits up to 600 seconds, and
+returns exit 4 when there are no notes. The window must remain connected and
+hold a driving tab for the caller. Host-qualified terminal identity isolates
+same-named terminals on different machines; requests cannot select another
+pane. At most eight feedback calls are pending. Replies are bounded by the
+normal notes budget and acknowledged after printing; cancellation, timeout,
+or disconnect returns unacknowledged notes to the queue. A lost acknowledgement
+can cause a duplicate on retry. Existing labels at first connection and requests
+on unshown terminals remain intentionally non-replayable. No browser server is
+started remotely. Cloud and WSL use the same core reply route; cloud loopback
+URLs still need a separately reachable address, while SSH uses the existing
+port forward and WSL uses localhost integration.
+Annotation screenshots are transferred to that caller's host before delivery,
+with caller/connection revalidation and cleanup of unaccepted uploads. A failed
+or unsupported transfer warns in the app and returns text without local paths.
+SSH/cloud screenshot transfer requires a Linux/macOS desktop; WSL mapping is
+supported by the Windows desktop.
+
+A few commands work from files alone and
 need no running app; they say so below.
 
 On Windows, `sheprd.exe` is a console program, so a shell waits for it and
@@ -208,6 +229,8 @@ not take it either.
 | `config [path]` | The settings files (no app needed) |
 | `config get\|set\|unset KEY [VALUE]` | Read or change `config-gpui.local.toml`, keeping its comments. A value that would not load, or an unknown key, is refused and nothing is written; the app applies the rest at once (no app needed) |
 | `config check` | Report invalid settings, exit 1 if any |
+| `config get\|set\|unset link_handlers [ARRAY]` | Read or configure explicit [Herdr 2 link-handler adapters](link-handlers.md); execution still requires a terminal link click |
+| `config get\|set\|unset link_plugins [ARRAY]` | Opt in to installed plugin directories on exact hosts; read only link actions with manifest platform filtering, never startup/build/event hooks |
 | `config reload` | Reread Herdr's config and this app's |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
@@ -516,7 +539,7 @@ is off, chat panes show their terminal and `chat new` exits 8.
 
 Set the reading width with `sheprd config set chat.max_width 1200`, or use
 `0` for the full available width. Bounded widths range from 320 to 4000 logical
-pixels; the default is 800. Settings > General offers the same width slider and
+pixels; the default is 800. Settings > Chat offers the same width slider and
 **Full-width chat** switch.
 
 A chat on an SSH host shows in the native chat view like a local one. Sheprd

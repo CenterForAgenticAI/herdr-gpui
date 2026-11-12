@@ -295,11 +295,10 @@ impl Record {
                 if !saved.fits() || lane.checkout.is_some() {
                     return false;
                 }
-                // The planned checkout is what recovery needs if the app
-                // stops while Git creates it, so it is saved even when the
-                // lane already reported creating its worktree.
                 lane.checkout = Some(saved);
                 lane.step = Checkpoint::CreatingWorktree;
+                // The launch already saved CreatingWorktree before resolving
+                // its path. Adding that path is itself a durable change.
                 return true;
             }
             Progress::CreatingWorktree => {
@@ -731,6 +730,19 @@ impl Journal {
         }
     }
 
+    /// The saved ownership and step of a lane whose host may return.
+    pub(super) fn saved_lane(&self, id: u64, index: usize) -> Option<SavedLane> {
+        let state = self.0.state.lock().ok()?;
+        state
+            .records
+            .iter()
+            .chain(&state.unsaved)
+            .find(|record| record.id == id)?
+            .lanes
+            .get(index)
+            .cloned()
+    }
+
     /// The step lane `index` of fan-out `id` last reached.
     pub(crate) fn step(&self, id: u64, index: usize) -> Option<Checkpoint> {
         let state = self.0.state.lock().ok()?;
@@ -773,6 +785,14 @@ impl Journal {
             .clone();
         state.claimed.push(record.id);
         Some(record)
+    }
+
+    /// A closed comparison no longer owns the record. Unreachable lanes
+    /// left after Keep must be claimable again when their host returns.
+    pub(super) fn release(&self, id: u64) {
+        if let Ok(mut state) = self.0.state.lock() {
+            state.claimed.retain(|claimed| *claimed != id);
+        }
     }
 
     #[cfg(test)]

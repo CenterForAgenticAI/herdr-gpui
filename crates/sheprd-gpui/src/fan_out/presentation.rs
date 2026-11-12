@@ -81,22 +81,24 @@ impl SheprdWindow {
 
     pub(super) fn close_fan_out_folder(
         &mut self,
-        endpoint: &str,
-        host: &crate::teleport::Host,
-        path: &str,
+        checkout: &super::job::Checkout,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.fan_out_host_matches(endpoint, host) {
+        if !self.fan_out_host_matches(&checkout.endpoint_id, &checkout.host) {
             return;
         }
-        let Some(scope) = self.fan_out_scope(endpoint) else {
+        let Some(scope) = self.fan_out_scope(&checkout.endpoint_id) else {
             return;
         };
-        let Some(id) = self.kept_workspace_in(&scope, Path::new(path), cx) else {
+        let Some(id) = self.kept_workspace_in(&scope, Path::new(checkout.path()), cx) else {
             return;
         };
-        self.close_kept_workspace_in(&scope, &id, window, cx);
+        if checkout.recoverable {
+            self.forget_removed_kept_workspace_in(&scope, &id, window, cx);
+        } else {
+            self.close_kept_workspace_in(&scope, &id, window, cx);
+        }
     }
 
     pub(super) fn fan_out_core_host(&self, endpoint: &str) -> Option<Host> {
@@ -111,7 +113,7 @@ impl SheprdWindow {
         self.endpoints
             .iter()
             .find(|known| known.id == endpoint)
-            .and_then(|known| crate::teleport::host_for(&known.connection.target).ok())
+            .and_then(|known| sheprd_remote::work::host_for_kept(&known.connection.target).ok())
             .as_ref()
             == Some(host)
     }

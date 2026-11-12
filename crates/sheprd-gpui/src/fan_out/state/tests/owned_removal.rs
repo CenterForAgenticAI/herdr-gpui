@@ -1,6 +1,7 @@
 //! Keep removes an owned lane's checkout only once its agent is ended, and
 //! never while another program runs there. A stand-in `herdr-core` on an
-//! isolated `HOME` answers; Git is never reached when removal is refused.
+//! isolated `HOME` answers; the lane is a real linked checkout with its
+//! owner receipt, so only the core's inventory decides.
 
 use super::*;
 use std::{os::unix::fs::PermissionsExt, path::Path};
@@ -34,19 +35,72 @@ fn calls(home: &Path) -> Vec<String> {
         .collect()
 }
 
-fn owned() -> job::Owned {
-    job::Owned {
-        agent: "lane-a".into(),
-        kind: AgentKind::Claude,
-        terminal: Some("t9".into()),
+const OWNER: &str = "lane-a";
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+/// A linked checkout on branch `lane` carrying `OWNER`'s creation receipt.
+fn lane(dir: &Path) -> work::Worktree {
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    let path = dir.join("lane").canonicalize().unwrap_or(dir.join("lane"));
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "lane",
+            path.to_str().unwrap(),
+        ],
+    );
+    let gitdir = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&path)
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()
+        .unwrap();
+    let gitdir = String::from_utf8(gitdir.stdout).unwrap();
+    std::fs::write(
+        Path::new(gitdir.trim()).join("sheprd-fanout-owner"),
+        format!("{OWNER}\n"),
+    )
+    .unwrap();
+    work::Worktree {
+        path: path.display().to_string(),
+        opened: work::Opened::Herdr2,
     }
 }
 
-fn lane(dir: &Path) -> work::Worktree {
-    work::Worktree {
-        path: dir.join("lane").display().to_string(),
-        opened: work::Opened::Herdr2,
-    }
+fn remove(host: &Host, tree: &work::Worktree) -> Result<()> {
+    job::remove(
+        host,
+        tree,
+        "/tmp/repo/.git",
+        "lane",
+        Some(OWNER),
+        Some((AgentKind::Claude, Some("t9"))),
+        &AtomicBool::new(false),
+    )
 }
 
 #[test]
@@ -59,16 +113,10 @@ fn a_shell_in_the_lane_keeps_its_checkout_and_nothing_is_killed() {
         tree.path
     );
     let host = host(&home, &shell);
-    let removed = job::remove(
-        &host,
-        &tree,
-        "/tmp/repo/.git",
-        "lane",
-        Some(&owned()),
-        &AtomicBool::new(false),
-    );
+    let removed = remove(&host, &tree);
     assert!(matches!(removed, Err(Error::AgentUncertain)), "{removed:?}");
     assert!(calls(&home).iter().all(|call| call.starts_with("ls ")));
+    assert!(Path::new(&tree.path).exists());
 }
 
 #[test]
@@ -81,19 +129,11 @@ fn a_running_lane_agent_is_ended_before_its_checkout_goes() {
         tree.path
     );
     let host = host(&home, &agent);
-    // No receipt was made for this folder, so the checkout itself is kept;
-    // what matters is that the agent ended before Git was asked.
-    let _ = job::remove(
-        &host,
-        &tree,
-        "/tmp/repo/.git",
-        "lane",
-        Some(&owned()),
-        &AtomicBool::new(false),
-    );
+    remove(&host, &tree).unwrap();
     let calls = calls(&home);
     assert!(
         calls.iter().any(|call| call == "kill --json -- t9"),
         "{calls:?}"
     );
+    assert!(!Path::new(&tree.path).exists());
 }
