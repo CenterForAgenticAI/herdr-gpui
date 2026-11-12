@@ -2086,6 +2086,12 @@ its originating host even if you switch devices; an edited or removed device
 is refused rather than applying its paths on another machine. The
 `sheprd worktree` commands open the same confirmation dialogs.
 
+Saved SSH hosts also prefetch desktop pull requests for kept and shown Herdr 2
+checkouts without Herdr 1, using the device's GitHub account selection. See
+[desktop SSH pull requests](../../docs/desktop-ssh-pull-requests.md) for cache
+isolation, merged-checkout discovery, and the remaining cloud/WSL PR-origin
+limitation shared by both terminal backends.
+
 A repository can commit scripts that prepare, start, and clean up its
 worktrees, in `.herdr/worktree.toml` at the repository root:
 
@@ -2146,6 +2152,36 @@ The repository file, rather than this client's configuration, holds the
 scripts, so a team shares them and they follow the branch, as Conductor's
 `.conductor/settings.toml` and Superset's `.superset/config.json` do. Only
 the trust decision is local.
+
+**Copying ignored files.** A new worktree is a clean checkout, so it lacks
+the main checkout's ignored files, such as `.env`, `CLAUDE.local.md`, or a
+personal `.herdr/worktree.toml` kept out of Git. List them in
+`.worktreeinclude` at the root of the main checkout, in `.gitignore` syntax,
+as Conductor, Orca, and Claude Code also read it:
+
+```gitignore
+.herdr/worktree.toml
+CLAUDE.local.md
+.claude/settings.local.json
+.env*
+```
+
+Before a setup script's file is read, after a worktree is created or from
+**Run setup script**, Sheprd copies every file from the main checkout that
+matches the list and that Git ignores there; tracked and merely untracked
+files are not copied. A file the worktree already has is never
+overwritten, missing files are skipped, symbolic links are copied as links,
+directories the copy creates are private to you, a file that a private
+directory protects in the main checkout loses the access the worktree's
+directories would give others, and nothing is written below a worktree
+directory that leads outside it.
+The copy happens before the trust question and whether or not the file has a
+setup script, so a copied `.herdr/worktree.toml` is the one read. The list
+is read from the main checkout, so it can itself be ignored. Git runs the
+match on the daemon's host, over SSH for a remote one; it needs `sh`, `git`,
+and `xargs` there. WSL distributions, cloud machines, and a local daemon on
+a Windows client are not supported yet, and a worktree created outside
+Sheprd gets the files only when you run its setup script from Sheprd.
 
 ## Worktree Notes
 
@@ -5262,7 +5298,7 @@ In-app updates download the release's signed per-user installer, check it
 against `windows-manifest.json` and its Authenticode publisher, and run it
 silently; Setup restarts the app (see
 [App Updates](../../docs/updating.md#windows-installers)). Only the copy in
-`%LOCALAPPDATA%\Programs\Herdr UI` updates itself. The app registers with Restart
+`%LOCALAPPDATA%\Programs\Sheprd` updates itself. The app registers with Restart
 Manager, never after a crash or hang; the `herdr-gpui.exe --restart-manager`
 Windows starts hands off to the launcher (`src/restart_manager.rs`). A crash
 leaves a minidump and a report beside the log; see [crash reports](#crash-reports).
