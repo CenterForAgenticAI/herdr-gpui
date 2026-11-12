@@ -11,6 +11,7 @@ pub(crate) mod chrome_focus;
 pub(crate) mod clipboard;
 #[cfg(target_os = "macos")]
 pub(crate) use clipboard::macos::run_helper as run_clipboard_helper;
+mod clear_notifications;
 mod commands;
 mod config_diagnostic;
 mod construct;

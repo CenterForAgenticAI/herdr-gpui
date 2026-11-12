@@ -2520,6 +2520,14 @@ window at once, and `sheprd ui panel NAME` shows a section.
   hours or with delivery off; clicking one goes to its pane.
   **Notification History** in the palette opens it, and `sheprd window alerts`
   prints it. An alert about the tab you are looking at is not kept.
+  **Clear** on the shelf, or **Clear All Notifications** in the palette (no
+  default shortcut; bind `clear_all_notifications` under `[keybindings]`, or
+  run `sheprd run clear_all_notifications`), empties it in every window,
+  dismisses every toast, shown or waiting, and withdraws the app's OS
+  notifications (see [System notifications](#system-notifications)). Agents
+  keep their status: a finished agent's Done dot and the Dock badge clear as
+  the daemon acknowledges it, when you look at its pane, and an agent waiting
+  for you still waits.
 
   An agent whose pane closes or that exits, while its host stays up,
   waits under **Closed** at the bottom: **Reopen** starts it again in a new
@@ -3807,6 +3815,13 @@ only focuses the window when that connection has since reconnected, the daemon
 restarted, the target is gone, or a menu page is open. Clicks are handled only
 while the GUI runs: a click cannot reopen a closed window.
 
+**Clear All Notifications** withdraws the last 256 notifications the app posted
+in this run, Herdr 1 and Herdr 2 alike, including older ones a click no longer
+opens, and drops those still waiting out the delay or in a connection's queue. macOS removes them from Notification Center and Linux asks the
+notification service to close them; on Windows the app's toasts all leave the
+notification center, including those of an earlier run. On macOS and Linux a
+notification from before the app last started stays until you dismiss it.
+
 - **macOS** uses `UNUserNotificationCenter`, which works only from an app bundle
   with a bundle identifier: the release `Herdr.app` (`so.pen.herdr-gpui`) or the
   `just run`/`just run-debug` bundles (`so.pen.herdr-gpui.dev`), which the
@@ -3821,9 +3836,10 @@ while the GUI runs: a click cannot reopen a closed window.
 - **Linux** uses the freedesktop notification service on the session D-Bus;
   without a notification daemon nothing appears. Clicking requires a server that
   supports the default action, and raising the window depends on the
-  compositor's focus policy. Notifications are neither replaced nor retracted, so
-  each event shows separately, and each keeps a small waiting thread until the
-  server closes it.
+  compositor's focus policy. The app posts over one shared session-bus
+  connection, which also hears the clicks, sending one request at a time: a
+  newer event for the same pane replaces the earlier notification where the
+  server honours replacement. Only Clear All Notifications retracts them.
 - **Windows** uses WinRT toasts under the AppUserModelID `so.pen.herdr-gpui`,
   which the app sets at startup and registers, with its display name, under
   `HKCU\Software\Classes\AppUserModelId`. Once the installer has registered
