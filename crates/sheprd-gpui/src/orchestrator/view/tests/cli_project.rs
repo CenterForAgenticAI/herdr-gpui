@@ -46,8 +46,12 @@ fn a_named_project_is_where_its_run_is_restarted(cx: &mut gpui::TestAppContext) 
                 "the first project has no such run"
             );
 
+            // The first project's confirmation is still open when the
+            // command arrives: it must not survive into the other project.
+            view.confirm = Some(Confirm::Restart { run: "r1".into() });
             view.only_project("other".into(), cx);
             assert_eq!(view.active, 1);
+            assert!(view.confirm.is_none());
             assert!(view.confirm_restart("r7", cx));
             assert!(matches!(
                 &view.confirm,
