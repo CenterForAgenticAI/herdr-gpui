@@ -123,10 +123,18 @@ impl SheprdWindow {
         (scriptable && self.fan_out_host(&source).is_some()).then_some(Label::FAN_OUT)
     }
 
-    /// The host `source`'s lanes are made on: the shown one, or this
-    /// computer for a workspace the app keeps, which is always here.
+    /// Kept origins need the full host-aware fan-out lifecycle before they
+    /// can run remotely. Never interpret their paths through the local-only
+    /// lane implementation while that consumer is unavailable.
     fn fan_out_host(&self, source: &Source) -> Option<Host> {
         if source.checkout.is_some() {
+            if self.endpoints[self.selected_endpoint]
+                .connection
+                .target
+                .is_remote()
+            {
+                return None;
+            }
             return Host::new(&sheprd_client::ConnectTarget::Local).ok();
         }
         host_for(&self.endpoints[self.selected_endpoint].connection.target).ok()

@@ -91,7 +91,7 @@ fn family(name: &str) -> &'static str {
             "sheprd notes [list]\n    Every worktree note, most recently edited first.\nsheprd notes get|clear\nsheprd notes set TEXT...\n    The note on the caller's checkout (its repository and branch), or the\n    focused workspace's outside a Herdr pane. Notes are one line of at most\n    500 characters. `list` and `get` exit 4 when there is none."
         }
         "worktree" => {
-            "sheprd worktree [status]\n    Whether the caller's worktree is muted.\nsheprd worktree mute|unmute\n    Silence its notifications, or let them through again. Mutes stay in\n    this app; nothing reaches the daemon."
+            "sheprd worktree list\n    List app-kept Git workspaces on the caller's host.\nsheprd worktree create [BRANCH]\nsheprd worktree open\nsheprd worktree delete\n    Open the create, existing-checkout, or delete dialog for the caller's\n    Herdr 2 workspace; the user confirms in Sheprd.\nsheprd worktree [status]\n    Whether the caller's worktree is muted.\nsheprd worktree mute|unmute\n    Silence its notifications, or let them through again. Mutes stay in\n    this app; nothing reaches the daemon."
         }
         "feedback" => {
             "sheprd feedback [--wait SECONDS]\n    Notes the user sent this pane: page, review, and terminal notes that\n    were not typed into it. Exits 4 when there are none."

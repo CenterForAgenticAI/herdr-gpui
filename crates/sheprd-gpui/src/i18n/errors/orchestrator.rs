@@ -83,6 +83,12 @@ impl Localize for Error {
             Self::Teleport(error) => fl!("error-orchestrator-teleport", error = error.localize()),
             Self::PullRequestChanged => fl!("error-orchestrator-pull-request-changed"),
             Self::Work(error) => error.localize(),
+            Self::OwnedAgent(error) => match error {
+                sheprd_remote::work::owned_agent::Error::Uncertain => {
+                    fl!("error-orchestrator-ownership-uncertain")
+                }
+                sheprd_remote::work::owned_agent::Error::Work(error) => error.localize(),
+            },
         }
     }
 }
