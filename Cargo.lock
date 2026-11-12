@@ -10472,6 +10472,7 @@ dependencies = [
  "sheprd-credentials",
  "sheprd-github",
  "sheprd-remote",
+ "sheprd-session",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
