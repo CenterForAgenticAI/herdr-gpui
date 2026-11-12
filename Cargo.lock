@@ -10527,6 +10527,7 @@ dependencies = [
  "sheprd-core-client",
  "sheprd-credentials",
  "sheprd-session",
+ "sheprd-vcs",
  "tar",
  "tempfile",
  "thiserror 2.0.21",
