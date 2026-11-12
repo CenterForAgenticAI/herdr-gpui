@@ -86,7 +86,7 @@ impl SheprdWindow {
             );
         }
         match request.operation {
-            WorkOp::Notes => notes::list_in(Some(&self.endpoints[index].id), cx),
+            WorkOp::Notes => notes::list_on(&self.endpoints[index].id, cx),
             WorkOp::Note | WorkOp::SetNote { .. } if checkout.is_none() => Response::error(
                 ErrorCode::InvalidRequest,
                 "Notes need a Git checkout on a branch",

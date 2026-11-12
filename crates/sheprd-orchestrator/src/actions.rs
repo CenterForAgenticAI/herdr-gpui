@@ -278,7 +278,7 @@ fn remove_worktree(
     const READING: &str = "Reading the workspaces";
     let host = host_of(site, session)?;
     if matches!(session.pane, Pane::Pending | Pane::Herdr2 { .. }) {
-        let found = herdr2::inspect(&host, run, session, true, cancelled);
+        let found = herdr2::recover(&host, run, session, true, cancelled);
         match &found {
             Ok(work::Started::Herdr2 { terminal }) => herdr2::end(&host, terminal, cancelled)?,
             Ok(_) => return Err(Error::NothingToOpen),

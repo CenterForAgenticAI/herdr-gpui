@@ -69,11 +69,40 @@ fn remote_note_listing_does_not_return_other_hosts_notes(cx: &mut gpui::TestAppC
         }
         let Response::Work {
             reply: Reply::Notes { notes, .. },
-        } = notes::list_in(Some("ssh:work"), cx)
+        } = notes::list_on("ssh:work", cx)
         else {
             panic!("note reply");
         };
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].host, "ssh:work");
+    });
+}
+
+#[gpui::test]
+fn a_long_remote_note_listing_fits_one_reply_and_counts_the_rest(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        for branch in 0..100 {
+            crate::worktree_notes::Notes::update(cx, |notes| {
+                notes.set(
+                    crate::worktree_notes::Checkout {
+                        endpoint: "ssh:work".into(),
+                        repo_key: "/repo/.git".into(),
+                        branch: format!("feature-{branch}"),
+                    },
+                    &"n".repeat(400),
+                )
+            });
+        }
+        let response = notes::list_on("ssh:work", cx);
+        assert!(crate::control::protocol::work::remote::encode_reply(&response).is_ok());
+        let Response::Work {
+            reply: Reply::Notes { notes, omitted },
+        } = response
+        else {
+            panic!("note reply");
+        };
+        assert!(!notes.is_empty());
+        assert!(omitted > 0);
+        assert_eq!(notes.len() + omitted, 100);
     });
 }

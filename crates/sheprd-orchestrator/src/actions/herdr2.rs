@@ -120,7 +120,7 @@ pub(super) fn control(
     session: &mut HerdrSession,
     cancelled: &AtomicBool,
 ) -> Result<String> {
-    let Started::Herdr2 { terminal } = recover(host, run, session, cancelled)? else {
+    let Started::Herdr2 { terminal } = recover(host, run, session, false, cancelled)? else {
         return Err(Error::NothingToOpen);
     };
     if session.pane == Pane::Pending {
@@ -133,13 +133,17 @@ pub(super) fn control(
     Ok(terminal)
 }
 
-fn recover(
+/// The run's agent by its ownership label or, for a run saved before
+/// launches were labelled, its checked unlabelled shell. Removal passes
+/// `include_finished` so a labelled terminal whose agent exited still ends.
+pub(super) fn recover(
     host: &Host,
     run: &Run,
     session: &HerdrSession,
+    include_finished: bool,
     cancelled: &AtomicBool,
 ) -> Result<Started> {
-    match inspect(host, run, session, false, cancelled) {
+    match inspect(host, run, session, include_finished, cancelled) {
         Err(Error::OwnedAgent(work::owned_agent::Error::Uncertain)) => {
             recover_unlabelled(host, run, session, cancelled)
         }
@@ -148,7 +152,7 @@ fn recover(
 }
 
 /// Runs saved before launches were labelled keep their unlabelled shell;
-/// Stop and Send still reach it once its saved address, checkout, and
+/// Stop, Send, and Remove still reach it once its saved address, checkout, and
 /// foreground agent check out.
 fn recover_unlabelled(
     host: &Host,
@@ -180,7 +184,7 @@ fn recover_unlabelled(
     )?)
 }
 
-pub(super) fn inspect(
+fn inspect(
     host: &Host,
     run: &Run,
     session: &HerdrSession,

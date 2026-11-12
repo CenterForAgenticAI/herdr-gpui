@@ -103,6 +103,9 @@ impl SheprdWindow {
         self.fan_out_scope(endpoint).as_ref().map(Host::of)
     }
 
+    /// Matches as the launch resolved the lane's host: a kept workspace
+    /// behind a custom socket ran on this machine. No Herdr 1 lane exists on
+    /// a socket target, as `host_for` refuses to launch one there.
     pub(super) fn fan_out_host_matches(
         &self,
         endpoint: &str,
@@ -111,7 +114,7 @@ impl SheprdWindow {
         self.endpoints
             .iter()
             .find(|known| known.id == endpoint)
-            .and_then(|known| crate::teleport::host_for(&known.connection.target).ok())
+            .and_then(|known| sheprd_remote::work::host_for_kept(&known.connection.target).ok())
             .as_ref()
             == Some(host)
     }

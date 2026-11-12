@@ -83,3 +83,42 @@ fn an_unlabelled_shell_without_its_agent_is_not_typed_into() {
             .all(|call| call.starts_with("ls "))
     );
 }
+
+#[test]
+fn a_run_in_an_unlabelled_shell_is_removed_with_its_checkout() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, id) = dispatched(dir.path());
+    unlabelled_shell(dir.path(), "claude");
+    perform(&site, &Action::Remove { run: id }, &AtomicBool::new(false)).unwrap();
+    let calls = core_calls(dir.path());
+    assert!(calls.iter().any(|call| call == "kill --json -- t9"));
+    assert!(!checkout(dir.path()).exists());
+    assert!(
+        Store::open(&site.database)
+            .unwrap()
+            .runs()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn an_unlabelled_shell_without_its_agent_keeps_its_checkout_on_remove() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, id) = dispatched(dir.path());
+    unlabelled_shell(dir.path(), "zsh");
+    let error = perform(&site, &Action::Remove { run: id }, &AtomicBool::new(false)).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::OwnedAgent(sheprd_remote::work::owned_agent::Error::Uncertain)
+        ),
+        "{error:?}"
+    );
+    assert!(
+        !core_calls(dir.path())
+            .iter()
+            .any(|call| call.starts_with("kill "))
+    );
+    assert!(checkout(dir.path()).join(".git").exists());
+}
