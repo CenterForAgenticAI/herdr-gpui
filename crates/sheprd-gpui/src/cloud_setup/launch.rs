@@ -27,6 +27,14 @@ pub(crate) struct Running {
     pub(super) request: String,
 }
 
+/// The program of a setup tab on herdr-core: the script from the device's
+/// home, then the user's shell left open on its output, as a worktree's
+/// setup tab does.
+pub(super) fn core_argv() -> Vec<String> {
+    let line = r#"cd && sh -ec 'eval "$HERDR_WORKTREE_SCRIPT"'; exec "${SHELL:-/bin/sh}""#;
+    ["/bin/sh", "-c", line].map(str::to_owned).to_vec()
+}
+
 /// The `tab.create` a device's setup script runs in.
 pub(super) fn tab_params(workspace: &str, provider: CloudProvider, script: &str) -> Value {
     json!({
@@ -65,31 +73,38 @@ impl SheprdWindow {
     }
 
     /// Start `pending` on the shown device's herdr-core, as the program of
-    /// a new `setup` tab of the kept `workspace`, starting where any new
-    /// tab there does.
+    /// a new `setup` tab of the kept `workspace`. A new tab there starts in
+    /// the workspace's folder, a checkout, so the script first changes to
+    /// the device's home, where Herdr 1's setup tab runs it. Hands
+    /// `pending` back when the core's start queue cannot take it yet.
     pub(super) fn start_core_cloud_setup(
         &mut self,
         pending: Pending,
         workspace: &str,
         cx: &mut Context<Self>,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<Option<Pending>> {
         let spawn = Spawn {
-            argv: worktree_scripts::core_argv(worktree_scripts::ScriptKind::Setup),
+            argv: core_argv(),
             cwd: None,
             env: vec![
-                (worktree_scripts::SCRIPT_ENV.to_owned(), pending.script),
+                (
+                    worktree_scripts::SCRIPT_ENV.to_owned(),
+                    pending.script.clone(),
+                ),
                 (PROVIDER_ENV.to_owned(), pending.provider.key().to_owned()),
             ],
             labels: Default::default(),
             name: Some("setup".to_owned()),
         };
-        self.start_in_kept_workspace(workspace, spawn, cx)?;
+        if !self.try_start_in_kept_workspace(workspace, spawn, cx)? {
+            return Ok(Some(pending));
+        }
         tracing::info!(
             category = "cloud_setup",
             endpoint = %pending.endpoint_id,
             "A new cloud device's setup script started on its herdr-core"
         );
-        Ok(())
+        Ok(None)
     }
 
     fn cloud_setup_current(&self, running: &Running) -> bool {

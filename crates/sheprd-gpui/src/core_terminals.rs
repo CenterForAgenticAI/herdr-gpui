@@ -664,9 +664,10 @@ impl SheprdWindow {
 
     /// Starts `spawn` in herdr-core for `purpose`, once the hub of its
     /// host's core connects, in the folder and with the Herdr variables of
-    /// where it opens.
-    pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn, cx: &App) {
-        self.start_core_program_with(purpose, spawn, None, cx);
+    /// where it opens. False when it was dropped: the queue is full, or the
+    /// host has no core to ask.
+    pub(crate) fn start_core_program(&mut self, purpose: Purpose, spawn: Spawn, cx: &App) -> bool {
+        self.start_core_program_with(purpose, spawn, None, cx)
     }
 
     /// Starts `spawn` as [`Self::start_core_program`] does, handing `file`
@@ -678,14 +679,14 @@ impl SheprdWindow {
         mut spawn: Spawn,
         file: Option<tempfile::TempPath>,
         cx: &App,
-    ) {
+    ) -> bool {
         if self.core_terminals.wanted.len() >= MAX_WANTED {
             tracing::warn!("Too many herdr-core terminals waiting to start; dropped one");
-            return;
+            return false;
         }
         let host = self.purpose_host(&purpose);
         let Some(hub) = self.core_hub(&host) else {
-            return;
+            return false;
         };
         hub.connect(Start::IfMissing);
         self.give_core_context(&purpose, &host, &mut spawn, cx);
@@ -693,6 +694,7 @@ impl SheprdWindow {
             .wanted
             .push_back((purpose, host, spawn, file));
         self.start_core_shell();
+        true
     }
 
     /// The core a terminal started for `purpose` runs in, read once as it is

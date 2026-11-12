@@ -49,6 +49,9 @@ fn a_device_without_herdr_1_runs_its_script_in_its_kept_workspace(cx: &mut TestA
             };
             assert_eq!(workspace, &kept);
             assert_eq!(spawn.name.as_deref(), Some("setup"));
+            // The workspace's folder is a checkout: the script changes to
+            // the device's home first, as Herdr 1's setup tab starts there.
+            assert!(spawn.argv[2].starts_with("cd && "), "{:?}", spawn.argv);
             assert!(spawn.env.iter().any(|(key, value)| {
                 key == crate::worktree_scripts::SCRIPT_ENV && value == "echo hi\n"
             }));
@@ -58,6 +61,39 @@ fn a_device_without_herdr_1_runs_its_script_in_its_kept_workspace(cx: &mut TestA
                     .iter()
                     .any(|(key, _)| key == crate::cloud_setup::launch::PROVIDER_ENV)
             );
+        })
+    });
+}
+
+#[gpui::test]
+fn a_full_core_start_queue_keeps_the_script_waiting(cx: &mut TestAppContext) {
+    let (fixture, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| fixture_window(window, cx));
+        SidebarFixture(view)
+    });
+    let view = cx.update(|_, cx| fixture.read(cx).0.clone());
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.live.snapshot = None;
+            view.live.missing_installation = true;
+            let location =
+                Location::core_terminal(Panes::single(TerminalId::new("t1").unwrap()), false);
+            let kept = view
+                .open_kept_workspace(None, Path::new("/home/box"), location, window, cx)
+                .unwrap();
+            // No core answers in tests, so starts wait until the queue fills.
+            while view
+                .try_start_in_kept_workspace(&kept, sheprd_backend::Spawn::default(), cx)
+                .unwrap()
+            {}
+            let now = Instant::now();
+            let device = view.endpoints[0].id.clone();
+            let provider = CloudProvider::ALL[0];
+            let pending = Pending::new(device.clone(), "Box".into(), provider, "x\n".into(), now);
+            view.queue_cloud_setup(pending, cx);
+            view.poll_cloud_setup(now, cx);
+            assert_eq!(PendingSetups::waiting(cx), std::slice::from_ref(&device));
+            assert!(view.local_error.is_none(), "not failed, only waiting");
         })
     });
 }

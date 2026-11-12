@@ -193,8 +193,12 @@ impl SheprdWindow {
             return;
         };
         let label = pending.label.clone();
-        if let Err(error) = self.start_core_cloud_setup(pending, &workspace, cx) {
-            self.fail_cloud_setup(&label, error, cx);
+        match self.start_core_cloud_setup(pending, &workspace, cx) {
+            Ok(None) => {}
+            // The core cannot take it yet: it keeps its place and its
+            // deadline, and is given up on with a word if that passes.
+            Ok(Some(pending)) => cx.global_mut::<PendingSetups>().0.push_front(pending),
+            Err(error) => self.fail_cloud_setup(&label, error, cx),
         }
     }
 }
