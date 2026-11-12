@@ -98,7 +98,8 @@ pub fn recover(
     inspect(host, tree, owner, agent, expected, false, cancelled)
 }
 
-/// Inspect a retained terminal for cleanup. Finished terminals are accepted
+/// Inspect a retained terminal for cleanup. Finished terminals, and live
+/// ones whose agent exited and left the kept shell in front, are accepted
 /// only when explicitly requested; an unknown state is never ownership proof.
 pub fn inspect(
     host: &Host,
@@ -153,7 +154,12 @@ fn select(
             || (include_finished && terminal.state == TerminalState::Finished))
         || terminal.cwd != path
         || terminal.argv != argv
+        // Recovery types into the agent, so it must still be in front. A
+        // cleanup only ends the terminal: its label, command, checkout, and
+        // address prove ownership even once the agent exited and `--keep`
+        // left a shell there, as every finished run does.
         || (terminal.state == TerminalState::Live
+            && !include_finished
             && !terminal.foreground.as_ref().is_some_and(|foreground| {
                 crate::teleport::AgentKind::identify(None, &foreground.name, &foreground.argv)
                     == Some(kind)

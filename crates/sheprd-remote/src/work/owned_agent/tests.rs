@@ -99,3 +99,31 @@ fn a_kept_shell_does_not_inherit_the_original_agents_ownership() {
         Err(Error::Uncertain)
     ));
 }
+
+/// A finished agent leaves `--keep`'s shell in its terminal. Cleanup may
+/// end that terminal by its ownership label and command, but recovery,
+/// which types into it, never takes the shell for the agent.
+#[test]
+fn cleanup_can_end_the_kept_shell_a_finished_agent_left() {
+    let mut shell = terminal("lane-a", "/work/a", "t7");
+    shell["foreground"] = serde_json::json!({"name":"zsh", "argv":["-zsh"], "pid":43});
+    let inspect = |shell: &serde_json::Value, include_finished| {
+        super::select(
+            list(serde_json::json!([shell])),
+            "/work/a",
+            Owner {
+                key: OWNER,
+                value: "lane-a",
+            },
+            &["claude".into()],
+            Some("t7"),
+            include_finished,
+            crate::teleport::AgentKind::Claude,
+        )
+    };
+    assert!(matches!(inspect(&shell, true), Ok(Started::Herdr2 { terminal }) if terminal == "t7"));
+    assert!(matches!(inspect(&shell, false), Err(Error::Uncertain)));
+    // Ownership still rests on the label: another lane's shell is not ours.
+    shell["labels"] = serde_json::json!({OWNER: "lane-b"});
+    assert!(matches!(inspect(&shell, true), Err(Error::Uncertain)));
+}

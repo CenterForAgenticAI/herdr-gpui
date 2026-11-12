@@ -5,6 +5,7 @@ use super::*;
 use crate::test_executable;
 
 mod cleanup;
+mod completed;
 mod journal;
 mod legacy;
 mod ownership;
