@@ -36,6 +36,7 @@ pub(crate) mod mutes;
 mod phone;
 mod processes;
 mod programs;
+mod recovery;
 mod requests;
 mod screen;
 mod selection;
@@ -820,6 +821,9 @@ impl SheprdWindow {
         let listed = self
             .core_terminals
             .poll_infos(std::time::Instant::now(), dispatching);
+        if listed {
+            self.remap_recovered_chats(window, cx);
+        }
         self.adopt_labelled_terminals(listed, cx);
         if listed {
             self.hear_core_agents(cx);
