@@ -211,6 +211,7 @@ impl CoreTerminals {
         };
         shown.host = Host::Remote(scope.clone());
         let remote = self.remote.entry(scope).or_insert_with(|| Remote {
+            checkouts: super::checkouts::Checkouts::default(),
             hub: Hub::remote(target.clone()),
             infos: Infos::default(),
             old_requests: None,
