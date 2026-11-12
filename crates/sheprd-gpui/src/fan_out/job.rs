@@ -328,13 +328,29 @@ fn start(
         model: None,
         prompt: None,
     };
-    let started =
-        work::start_agent(&checkout.host, &checkout.worktree, &agent, cancelled).map_err(failed)?;
-    if let work::Started::Herdr2 { terminal } = &started {
-        // The shell is kept even if this cannot be saved: it is started.
+    let started = retain_started(
+        work::start_agent(&checkout.host, &checkout.worktree, &agent, cancelled),
+        index,
+        report,
+    )?;
+    send_prompt(index, checkout, &started, prompt, report, cancelled)
+}
+
+/// A failed acknowledgement can still identify a live terminal. Save and
+/// show it before reporting failure; neither retry its launch nor kill it.
+fn retain_started(
+    result: work::Result<work::Started>,
+    index: usize,
+    report: &impl Fn(Report) -> Result<()>,
+) -> Result<work::Started> {
+    let known = match &result {
+        Ok(started) | Err(work::Error::Unprompted { started, .. }) => Some(started),
+        _ => None,
+    };
+    if let Some(work::Started::Herdr2 { terminal }) = known {
         let _ = report(Report::Lane(index, Progress::Terminal(terminal.clone())));
     }
-    send_prompt(index, checkout, &started, prompt, report, cancelled)
+    result.map_err(failed)
 }
 
 fn send_prompt(
@@ -461,3 +477,6 @@ pub(crate) fn remove(
     }
     work::discard(host, worktree, cancelled).map_err(failed)
 }
+
+#[cfg(test)]
+mod tests;

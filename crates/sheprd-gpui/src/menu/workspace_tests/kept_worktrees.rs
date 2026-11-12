@@ -159,7 +159,10 @@ fn a_made_checkout_lands_in_a_kept_workspace(cx: &mut TestAppContext) {
             view.menu.creation = Some("kept-1".into());
             view.kept_worktree_done.push(KeptDone::Checkout {
                 request: "kept-1".into(),
-                landing: Box::new(KeptLanding::shell(Some("lane"))),
+                landing: Box::new(KeptLanding::shell(
+                    Some("lane"),
+                    view.endpoints[0].connection.target.clone(),
+                )),
                 result: Ok((
                     Ask::Create {
                         branch: "lane".into(),
@@ -197,7 +200,10 @@ fn a_refused_checkout_keeps_the_dialog_open(cx: &mut TestAppContext) {
             view.menu.creation = Some("kept-2".into());
             view.kept_worktree_done.push(KeptDone::Checkout {
                 request: "kept-2".into(),
-                landing: Box::new(KeptLanding::shell(None)),
+                landing: Box::new(KeptLanding::shell(
+                    None,
+                    view.endpoints[0].connection.target.clone(),
+                )),
                 result: Err(crate::Error::StaleWorkspace),
             });
             view.poll_kept_worktree(window, cx);
@@ -229,6 +235,7 @@ fn deleting_a_kept_checkout_names_its_folder_and_closes_it(cx: &mut TestAppConte
             assert_eq!(deletion.path.as_deref(), Some(LINKED));
             deletion.pending = Some("kept-3".into());
             view.kept_worktree_done.push(KeptDone::Removed {
+                target: view.endpoints[0].connection.target.clone(),
                 scope: crate::browser::scope(&view.endpoints[0]),
                 request: "kept-3".into(),
                 workspace: id.clone(),
@@ -261,6 +268,7 @@ fn a_kept_checkout_with_changes_asks_to_discard_them(cx: &mut TestAppContext) {
                 ..Deletion::new(None, false)
             });
             view.kept_worktree_done.push(KeptDone::Removed {
+                target: view.endpoints[0].connection.target.clone(),
                 scope: crate::browser::scope(&view.endpoints[0]),
                 request: "kept-4".into(),
                 workspace: id.clone(),
@@ -285,7 +293,10 @@ fn work_finishing_together_all_lands(cx: &mut TestAppContext) {
             for (request, path) in [("kept-5", NEW), ("kept-6", other)] {
                 view.kept_worktree_done.push(KeptDone::Checkout {
                     request: request.into(),
-                    landing: Box::new(KeptLanding::shell(None)),
+                    landing: Box::new(KeptLanding::shell(
+                        None,
+                        view.endpoints[0].connection.target.clone(),
+                    )),
                     result: Ok((Ask::Open { path: path.into() }, path.into())),
                 });
             }
@@ -300,31 +311,38 @@ fn work_finishing_together_all_lands(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn another_hosts_kept_workspace_offers_no_local_git(cx: &mut TestAppContext) {
+fn another_hosts_kept_workspace_runs_its_git_on_that_host(cx: &mut TestAppContext) {
     let (view, cx, id) = window(cx, LINKED, Some(true));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.open_workspace_menu(&id, gpui::Point::default(), window, cx);
-            // Shown as if kept on an SSH host: its folder is that host's,
-            // which Git on this computer must never touch.
+            // Shown as if kept on an SSH host: its folder is that host's, so
+            // the worktree rows are offered and their Git goes to that host,
+            // never to this computer.
+            let target = sheprd_client::ConnectTarget::Ssh {
+                target: "box".into(),
+                session: "work".into(),
+            };
             view.endpoints.push(crate::endpoint::Endpoint::new(
                 "ssh:box".into(),
                 "Box".into(),
-                sheprd_client::ConnectTarget::Ssh {
-                    target: "box".into(),
-                    session: "work".into(),
-                },
+                target.clone(),
                 true,
             ));
             view.selected_endpoint = view.endpoints.len() - 1;
-            assert!(view.kept_checkout().is_none());
+            assert_eq!(view.kept_checkout().as_deref(), Some(LINKED));
+            assert!(
+                !sheprd_remote::work::host_for_kept(&target)
+                    .unwrap()
+                    .is_local()
+            );
             let rows: Vec<_> = view
                 .workspace_items()
                 .into_iter()
                 .map(|(action, _)| action)
                 .collect();
-            assert!(!rows.contains(&WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree)));
-            assert!(!rows.contains(&WorkspaceMenuAction::Dialog(
+            assert!(rows.contains(&WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree)));
+            assert!(rows.contains(&WorkspaceMenuAction::Dialog(
                 WorkspaceAction::DeleteWorktree
             )));
         })

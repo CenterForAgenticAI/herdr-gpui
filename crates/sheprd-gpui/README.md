@@ -1167,6 +1167,24 @@ from its menu without the dialog, and `show_agents = false` to hide the Agents
 section and give Spaces the full sidebar height. All four default to `true`.
 A workspace close still asks when its Git check finds uncommitted files or
 unpushed commits, whatever `confirm_close_workspace` says.
+
+**Reopen Closed Tab** (`cmd-shift-t` on macOS, `ctrl-alt-shift-t` elsewhere)
+brings back the focused workspace's most recently closed tab. A terminal tab
+comes back as a new shell in the folder the closed one was in, since Herdr
+ends a tab's programs as it closes it. Turn on **Settings > Tabs & panes >
+Undo closing a tab**, or set `enabled = true` under `[undo_close_tab]`, to
+bring back the same tab instead: a closed terminal tab then stays open in
+Herdr, hidden in this window, for `seconds` (10 by default, 1 to 60) before
+Herdr closes it, and Reopen Closed Tab within that time shows it again with
+its programs still running and its scrollback intact. Herdr's other clients,
+such as another window, the `herdr` TUI, or a phone, still list the tab until
+it closes. A tab focused again in the meantime, as by Next Tab, is shown and
+kept rather than closed. A workspace's last tab closes at once, since Herdr
+closes the workspace with it, and so does a tab alone in a split group, which
+has nothing to show in its place. Quitting the app, or closing the window,
+sends the waiting closes at once, but the connection stops with the window:
+a close still queued behind another request, or on a connection already
+gone, leaves its tab open in Herdr.
 Set `remove_merged_worktrees = true` (**Settings > General > Remove worktrees
 of merged PRs**) to remove a linked worktree's checkout, and close its
 workspace and terminals, once its GitHub pull request is merged. It is off by
@@ -2061,6 +2079,13 @@ forcibly interrupted. A copy stalls out after 30 seconds without progress.
 
 ## Worktree Scripts
 
+Herdr 2 workspaces kept by the app can create, open, list and delete linked
+checkouts on the selected SSH, cloud or WSL host as well as this computer.
+Git metadata and scripts are read on that host. A completed operation keeps
+its originating host even if you switch devices; an edited or removed device
+is refused rather than applying its paths on another machine. The
+`sheprd worktree` commands open the same confirmation dialogs.
+
 A repository can commit scripts that prepare, start, and clean up its
 worktrees, in `.herdr/worktree.toml` at the repository root:
 
@@ -2087,9 +2112,10 @@ for, so each branch can carry its own.
 - **run** starts from **Run script** in the menu of any Git checkout. A
   repository without one says so.
 - **archive** runs when you confirm **Delete worktree checkout**. Its tab
-  removes the checkout with the pane's own `herdr worktree remove` only if
-  the script succeeds; if it fails, the tab stays open on its output and the
-  checkout stays in place.
+  removes the checkout only if the script succeeds: through the pane's own
+  `herdr worktree remove` for Herdr 1, or host-scoped Git for Herdr 2. A
+  failed or closed archive tab leaves the checkout in place. Terminal IDs
+  on another host cannot satisfy an archive's completion.
 
 Each script runs in a new, focused tab labelled `setup`, `run`, or
 `archive` in the checkout's workspace, never in the background, as
@@ -2099,8 +2125,10 @@ the checkout. `HERDR_WORKTREE_PATH` names that checkout and
 as an environment variable, and the line typed into the tab's shell is
 fixed, so the file's contents never pass through your interactive shell.
 Scripts need `sh` on the daemon's host: a remote host's checkout is read and
-run there, not on this machine. WSL distributions are not supported yet: Run
-script says so, and creating or deleting a worktree there runs no script.
+run there, not on this machine. WSL scripts run through the named distribution
+from a Windows client. Local Windows worktree scripts still require a POSIX
+host. Queued setup scripts wait until their own device is shown and never
+run in a similarly named local checkout.
 
 **Trust.** The file is repository content, so nothing in it runs until you
 trust it. The first time a script would run, a dialog shows every script in
@@ -3541,7 +3569,10 @@ pane's folder, and runs the program there; `sheprd chat new AGENT` does
 the same from a pane. The rows show once the app has found `sheprd-acp`,
 first beside its own executable (the app bundle, `cargo build`'s target
 directory, or where `just install` puts both) and then on the login shell's
-`PATH`, and only for the Herdr on this machine. Each agent has to be
+`PATH`. A Herdr 2 tab starts a chat beside its active pane, including on
+saved SSH, cloud, and WSL hosts; an empty app-kept workspace starts a new
+Herdr 2 chat tab. Remote launches find the remote host's own program rather
+than using the desktop executable's path. Each agent has to be
 installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an
 ACP adapter), `copilot --acp`, `gemini --acp`, or `opencode acp`. The program can
 also be started by hand in any pane: `sheprd-acp claude`.
@@ -3609,8 +3640,25 @@ on Windows reachable by this user alone. A chat on a saved SSH host attaches
 through `sheprd-acp connect` run on that host over SSH, using the `sheprd-acp`
 (or an older host's `herdr-acp`) found in `~/.herdr/bin`, `~/.cargo/bin`,
 `~/.local/bin`, a Mac's installed app, or the host's `PATH`; without one its
-pane keeps the program's terminal view. The view is not offered for WSL or
-cloud hosts. See `crates/sheprd-acp/README.md` for the program itself.
+pane keeps the program's terminal view. Cloud hosts use their existing
+authenticated provider connector, and WSL uses the selected distribution's
+shell on Windows. ACP opens the private endpoint on the owning host: the app
+never interprets a remote endpoint token as a local socket path. Remote
+Herdr 2 panes retain their host, tab, and split identity, so two hosts with
+the same terminal ID do not share a conversation. Mirrors stay read-only
+terminal views. Reattaching resumes the existing ACP stream; it does not
+restart an agent or reopen an intentionally closed chat.
+
+Remote ACP and the chosen agent must already be installed on the host. ACP
+installed for phone pairing by this release is reused before searching the
+host's user bins, app bundles and PATH.
+These launch and attach scripts require a POSIX shell; a Windows SSH host
+without one is not supported by this chat route. Remote conversion also
+requires `sheprd-acp session-convert` and the process-bound session evidence
+described in [agent session evidence](../../docs/agent-session-evidence.md).
+See `crates/sheprd-acp/README.md` for the program itself and
+[remote core chat acceptance](../../docs/remote-core-chats.md) for validation
+and remaining runtime checks.
 
 ## VS Code
 
