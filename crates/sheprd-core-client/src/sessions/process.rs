@@ -92,7 +92,10 @@ pub(super) fn read(pid: u32) -> Result<Process> {
         &mut output,
         ScriptLimits {
             output: 1024,
-            idle: Duration::from_secs(5),
+            // PowerShell writes nothing until its CIM query answers, which a
+            // cold start on a busy machine can take well over five seconds.
+            // A timeout is reported as doubt, never as a missing process.
+            idle: Duration::from_secs(30),
         },
         &AtomicBool::new(false),
     )
