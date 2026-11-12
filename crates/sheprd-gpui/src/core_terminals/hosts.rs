@@ -60,6 +60,14 @@ pub(super) struct Remote {
 }
 
 impl CoreTerminals {
+    /// The route pinned by the hub that owns a clicked terminal. Never infer
+    /// this from whichever device is selected when a worker finishes.
+    pub(crate) fn link_target(&self, host: &Host) -> Option<&ConnectTarget> {
+        match host {
+            Host::Local => Some(&ConnectTarget::Local),
+            Host::Remote(scope) => self.remote_target(scope),
+        }
+    }
     pub(crate) fn remote_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
         self.remote.get(scope).map(|remote| &remote.target)
     }
@@ -211,6 +219,7 @@ impl CoreTerminals {
         };
         shown.host = Host::Remote(scope.clone());
         let remote = self.remote.entry(scope).or_insert_with(|| Remote {
+            checkouts: super::checkouts::Checkouts::default(),
             hub: Hub::remote(target.clone()),
             infos: Infos::default(),
             old_requests: None,

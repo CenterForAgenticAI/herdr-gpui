@@ -190,15 +190,9 @@ impl SheprdWindow {
             let painter = self.painter.clone();
             let look = look.clone();
             let observe = role == Role::Observer;
-            let paste_target = match &host {
-                Host::Local => Some(sheprd_client::ConnectTarget::Local),
-                Host::Remote(scope) => self
-                    .core_terminals
-                    .remote
-                    .get(scope)
-                    .map(|remote| remote.target.clone()),
-            };
-            let to_window = super::asks::window_call(cx);
+            let target = self.core_terminals.link_target(&host).cloned();
+            let paste_target = target.clone();
+            let to_window = super::asks::window_call(cx, host.clone(), target);
             let view = cx.new(|cx| {
                 let mut view =
                     CoreTerminalView::new(terminal.clone(), link, look, painter, observe, cx)
