@@ -117,10 +117,17 @@ impl Store {
                     if tab.zoomed.as_ref() == Some(old) {
                         tab.zoomed = Some(new.clone());
                     }
-                    if let Some(name) = layouts.names.remove(old.as_str()) {
-                        layouts.names.insert(new.as_str().to_owned(), name);
-                    }
                 }
+            }
+        }
+        // A phone names a lone chat without a tab, so names move on their own;
+        // a name left under a retired address would be dropped below.
+        for (old, new) in &replacements {
+            if !layouts.names.contains_key(new.as_str())
+                && let Some(name) = layouts.names.remove(old.as_str())
+            {
+                layouts.names.insert(new.as_str().to_owned(), name);
+                rebound = true;
             }
         }
         let mut live: HashSet<&str> = records
