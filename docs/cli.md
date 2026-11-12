@@ -119,6 +119,8 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
 | `orchestrator [--repo PATH]` | Show the Issues section narrowed to your checkout's project, or PATH's |
+| `orchestrator restart RUN [--repo PATH]` | Open the user's confirmation to restart a loaded, owned Herdr 2 run in this project with its saved prompt/model and existing checkout; requires the running app |
+| `orchestrator adopt RUN [--repo PATH]` | Read the current process of a loaded legacy run and prepare the user's adoption confirmation; grants no authority until confirmed and revalidated |
 | `orchestrator items\|issues\|prs\|tasks` | What it last synced, from its local database (no app needed); `tasks` is the repository's Beads tasks, with each one's assignee, priority, and blockers in `--json` |
 | `review` | The review of your workspace's uncommitted changes |
 | `px0 [open]` | Open or focus px0 on your local workspace's checkout (macOS and Windows) |
@@ -206,6 +208,8 @@ not take it either.
 | `config [path]` | The settings files (no app needed) |
 | `config get\|set\|unset KEY [VALUE]` | Read or change `config-gpui.local.toml`, keeping its comments. A value that would not load, or an unknown key, is refused and nothing is written; the app applies the rest at once (no app needed) |
 | `config check` | Report invalid settings, exit 1 if any |
+| `config get\|set\|unset link_handlers [ARRAY]` | Read or configure explicit [Herdr 2 link-handler adapters](link-handlers.md); execution still requires a terminal link click |
+| `config get\|set\|unset link_plugins [ARRAY]` | Opt in to installed plugin directories on exact hosts; read only link actions with manifest platform filtering, never startup/build/event hooks |
 | `config reload` | Reread Herdr's config and this app's |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
@@ -514,7 +518,7 @@ is off, chat panes show their terminal and `chat new` exits 8.
 
 Set the reading width with `sheprd config set chat.max_width 1200`, or use
 `0` for the full available width. Bounded widths range from 320 to 4000 logical
-pixels; the default is 800. Settings > General offers the same width slider and
+pixels; the default is 800. Settings > Chat offers the same width slider and
 **Full-width chat** switch.
 
 A chat on an SSH host shows in the native chat view like a local one. Sheprd
@@ -534,6 +538,20 @@ download first is left out.
 
 Files dropped on a remote chat are copied to the host first, into private
 temporary files under its `${TMPDIR:-/tmp}`, and the copies are attached.
+
+Herdr 2 chats also use saved cloud connectors and, on Windows, the selected
+WSL distribution. ACP installed for phone pairing by this release is reused
+before searching user bins, app bundles and PATH. An empty app-kept workspace
+opens a new core chat tab rather than falling back to Herdr 1.
+
+`chat status --json` returns opaque pane keys. Local core keys remain
+`core:TERMINAL`; remote core keys include their host scope. Pass the returned
+key unchanged to `chat new --pane`, `chat convert --pane`, or
+`chat show|hide|toggle --pane`. An explicit unknown core key is refused rather
+than targeting a Herdr 1 pane. `chat new --pane` splits the named core pane,
+even when another pane in that tab is active. See
+[remote core chat acceptance](remote-core-chats.md) for platform prerequisites
+and pending runtime checks.
 
 ### Existing agent rendering
 

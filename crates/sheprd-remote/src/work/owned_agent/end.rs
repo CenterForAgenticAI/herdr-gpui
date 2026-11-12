@@ -1,10 +1,72 @@
 //! Stop only verified resources, and prove that `--keep` did not leave a
 //! replacement shell before callers remove the checkout.
 
-use super::{Error, Host, Result, Step, Worktree, script};
+use super::{Agent, Error, Host, Owner, Result, Started, Step, Worktree, command, script, select};
 use sheprd_client::shell_quote;
 use sheprd_core_client::wire::{List, TerminalState};
 use std::sync::atomic::AtomicBool;
+
+/// End a directly launched owned agent before deleting its checkout. An
+/// unacknowledged launch without a recoverable receipt remains uncertain.
+pub fn end(
+    host: &Host,
+    tree: &Worktree,
+    owner: Owner<'_>,
+    agent: &Agent<'_>,
+    expected: Option<&str>,
+    cancelled: &AtomicBool,
+) -> Result<()> {
+    owner.validate()?;
+    let listed = inventory(host, cancelled)?;
+    let owned = listed.terminals.iter().any(|terminal| {
+        terminal
+            .labels
+            .get(owner.key)
+            .is_some_and(|value| value == owner.value)
+    });
+    // A different program in this checkout is not ours to close or delete
+    // out from under it, even if the owned agent has already disappeared.
+    if listed.terminals.iter().any(|terminal| {
+        terminal.state != TerminalState::Finished
+            && terminal
+                .labels
+                .get(owner.key)
+                .is_none_or(|value| value != owner.value)
+            && (inside(&terminal.cwd, &tree.path)
+                || terminal
+                    .foreground
+                    .as_ref()
+                    .is_some_and(|foreground| inside(&foreground.cwd, &tree.path)))
+    }) {
+        return Err(Error::Uncertain);
+    }
+    if !owned {
+        return if expected.is_some_and(|expected| {
+            listed
+                .terminals
+                .iter()
+                .all(|terminal| terminal.address != expected)
+        }) {
+            Ok(())
+        } else {
+            Err(Error::Uncertain)
+        };
+    }
+    let started = select(
+        listed,
+        &tree.path,
+        owner,
+        &command(agent),
+        expected,
+        true,
+        agent.kind,
+    )?;
+    let Started::Herdr2 { terminal } = started else {
+        return Err(Error::Uncertain);
+    };
+    end_verified(host, &terminal, cancelled)?;
+    checkout_idle(host, tree, cancelled)
+}
 
 /// Verify that a checkout contains no live core program before removing it,
 /// including unrelated shells opened while inspecting an unstarted lane.
