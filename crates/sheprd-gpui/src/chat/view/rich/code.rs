@@ -130,7 +130,7 @@ impl SheprdWindow {
                     .id("code-scroll")
                     .debug_selector(|| "chat-code-scroll".into())
                     .min_w_0()
-                    .overflow_x_scroll()
+                    .map(scroll_sideways)
                     .flex()
                     .flex_col()
                     .items_start()

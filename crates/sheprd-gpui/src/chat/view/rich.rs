@@ -1,4 +1,5 @@
 //! Native rich blocks. No HTML is executed and code-copy buttons only copy.
+use crate::chat::view::scroll_sideways;
 use crate::chat::{
     rich::{Block, Inline, Kind, Style},
     visual::{Shown, VisualId, Visuals},
@@ -422,7 +423,7 @@ impl SheprdWindow {
             .id("table-scroll")
             .debug_selector(|| "chat-rich-table".into())
             .min_w_0()
-            .overflow_x_scroll()
+            .map(scroll_sideways)
             .rounded(px(5.))
             .border_1()
             .border_color(rgb(self.theme.active))
