@@ -109,7 +109,14 @@ fn a_failed_copy_stops_the_setup_and_says_why(cx: &mut gpui::TestAppContext) {
     cx.update(|_, cx| {
         view.update(cx, |view, _| {
             assert_eq!(step(view), "none");
-            let error = view.local_error.as_deref().unwrap();
+            // Fluent isolates each placeholder; compare the text alone.
+            let error: String = view
+                .local_error
+                .as_deref()
+                .unwrap()
+                .chars()
+                .filter(|ch| !matches!(ch, '\u{2068}' | '\u{2069}'))
+                .collect();
             assert!(
                 error.starts_with(
                     "The setup script did not start: Could not copy the files .worktreeinclude names:"
