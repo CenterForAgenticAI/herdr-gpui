@@ -50,12 +50,8 @@ its tag kept beside it for people:
 | `caddy:2-alpine@sha256:…` | `compose.yml` | Dependabot (`docker-compose`) |
 | `moby/buildkit:v0.34.2@sha256:…` | `.github/workflows/relay-image.yml` | by hand: Dependabot does not read `run:` lines |
 | cosign v2.6.5, by SHA-256 per architecture | `cloud-init.yml`'s `start.sh` | by hand, from the release's signed `cosign_checksums.txt`, in step with the version `relay-image.yml` signs with |
-
-The build's base images, in `crates/sheprd-relay/Dockerfile`, are still
-named by tag (`rust:…-alpine…` through the `RUST_IMAGE` argument, and
-`gcr.io/distroless/static-debian12:nonroot`). Dependabot (`docker`) watches
-that directory and keeps a `FROM` digest current once one is added; it does
-not read the `ARG` default.
+| `gcr.io/distroless/static-debian12:nonroot@sha256:…` | `crates/sheprd-relay/Dockerfile` | Dependabot (`docker`) |
+| `rust:1.99.0-alpine3.22@sha256:…` | `crates/sheprd-relay/Dockerfile`, the `RUST_IMAGE` default | by hand, with the toolchain: Dependabot does not read `ARG` defaults |
 
 To move cosign, take the two hashes from the release's checksums after
 checking that file's own signature:
