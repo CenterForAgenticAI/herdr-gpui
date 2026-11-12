@@ -78,6 +78,26 @@ impl<K: Eq + Hash> Limiter<K> {
         self.check(key, now_ms) == Outcome::Allowed
     }
 
+    /// What [`Limiter::check`] would say for `key` at `now_ms`, without
+    /// spending or tracking anything: a new key with room is allowed.
+    #[must_use]
+    pub fn peek(&self, key: &K, now_ms: u64) -> Outcome {
+        match self.buckets.get(key) {
+            Some(bucket) if refilled(*bucket, self.rate, now_ms) < 1000 => Outcome::Limited,
+            Some(_) => Outcome::Allowed,
+            // Full only if no slot would come free: `check` would drop the
+            // buckets that refilled first.
+            None if self.buckets.len() >= self.max_keys
+                && self.buckets.values().all(|bucket| {
+                    refilled(*bucket, self.rate, now_ms) < u64::from(self.rate.burst) * 1000
+                }) =>
+            {
+                Outcome::Full
+            }
+            None => Outcome::Allowed,
+        }
+    }
+
     /// [`Limiter::allow`], saying why not. When every slot is held by a
     /// key that has spent something, a new key is refused as
     /// [`Outcome::Full`] rather than pushing out one that is being limited.

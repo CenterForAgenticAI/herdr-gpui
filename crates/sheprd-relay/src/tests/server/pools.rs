@@ -209,12 +209,31 @@ async fn the_buffer_budget_is_shared_and_given_back() {
         max_buffer: 1_000,
         ..Limits::default()
     });
-    let first = hub.reserve_buffer(600).unwrap();
-    assert!(hub.reserve_buffer(600).is_none());
-    let second = hub.reserve_buffer(400).unwrap();
+    let private: IpAddr = "10.0.0.2".parse().unwrap();
+    let first = hub.reserve_buffer(private, 600).unwrap();
+    assert!(hub.reserve_buffer(private, 600).is_none());
+    let second = hub.reserve_buffer(private, 400).unwrap();
     drop(first);
-    assert!(hub.reserve_buffer(600).is_some());
+    assert!(hub.reserve_buffer(private, 600).is_some());
     drop(second);
+}
+
+#[tokio::test]
+async fn one_address_or_block_takes_only_its_share_of_the_buffer() {
+    let hub = hub(Limits {
+        max_buffer: 4_000,
+        ..Limits::default()
+    });
+    // An address may hold a quarter, its block half.
+    let mine = hub.reserve_buffer(in_block(0), 1_000).unwrap();
+    assert!(hub.reserve_buffer(in_block(0), 1).is_none());
+    let neighbour = hub.reserve_buffer(in_block(1), 1_000).unwrap();
+    assert!(hub.reserve_buffer(in_block(2), 1).is_none());
+    // Others still get theirs.
+    let elsewhere = hub.reserve_buffer("198.51.100.80".parse().unwrap(), 1_000);
+    assert!(elsewhere.is_some());
+    drop((mine, neighbour));
+    assert!(hub.reserve_buffer(in_block(2), 1_000).is_some());
 }
 
 #[tokio::test]
@@ -232,4 +251,14 @@ async fn a_relay_out_of_buffer_budget_takes_no_more_connections_or_sessions() {
     let route = RouteId::of(computer.verifying_key());
     let (status, _send, _recv) = quic_dial_as(&connection, route, &phone()).await;
     assert_eq!(status, Status::Busy);
+}
+
+#[tokio::test]
+async fn one_address_held_back_does_not_drain_its_blocks_share() {
+    let hub = hub(Limits::default());
+    for _ in 0..10_000 {
+        hub.allow_listen(in_block(0));
+    }
+    assert_eq!(hub.allow_listen(in_block(0)), Outcome::Limited);
+    assert_eq!(hub.allow_listen(in_block(1)), Outcome::Allowed);
 }

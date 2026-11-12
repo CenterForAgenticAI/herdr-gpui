@@ -9,7 +9,11 @@ use crate::{
     guard::wide_key,
     limits::WIDE_SHARE,
 };
-use std::{net::IpAddr, sync::Mutex, time::Instant};
+use std::{
+    net::IpAddr,
+    sync::{Mutex, MutexGuard},
+    time::Instant,
+};
 
 /// One rate, applied to each address and to its wide block.
 #[derive(Debug)]
@@ -34,20 +38,31 @@ impl PerAddress {
         }
     }
 
-    /// Whether `address` may go ahead now, spending from both buckets.
+    /// Whether `address` may go ahead now, spending from both buckets only
+    /// when both allow it. A refusal tracks nothing new: a caller rotating
+    /// through its block's /64s, refused by the block, cannot fill the
+    /// address table and lock newcomers out; and one /64 the narrow limit
+    /// holds back does not drain its neighbours' share of the block.
     pub fn check(&self, address: IpAddr) -> Outcome {
         let now_ms = u64::try_from(self.origin.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let narrow = check(&self.narrow, source_key(address), now_ms);
-        if narrow != Outcome::Allowed {
-            return narrow;
+        let (narrow_key, wide_key) = (source_key(address), wide_key(address));
+        let mut wide = lock(&self.wide);
+        let peeked = wide.peek(&wide_key, now_ms);
+        if peeked != Outcome::Allowed {
+            return peeked;
         }
-        check(&self.wide, wide_key(address), now_ms)
+        let mut narrow = lock(&self.narrow);
+        let checked = narrow.check(narrow_key, now_ms);
+        if checked != Outcome::Allowed {
+            return checked;
+        }
+        wide.check(wide_key, now_ms)
     }
 }
 
-fn check(limiter: &Mutex<Limiter<IpAddr>>, key: IpAddr, now_ms: u64) -> Outcome {
+fn lock(limiter: &Mutex<Limiter<IpAddr>>) -> MutexGuard<'_, Limiter<IpAddr>> {
     match limiter.lock() {
-        Ok(mut limiter) => limiter.check(key, now_ms),
-        Err(poisoned) => poisoned.into_inner().check(key, now_ms),
+        Ok(limiter) => limiter,
+        Err(poisoned) => poisoned.into_inner(),
     }
 }

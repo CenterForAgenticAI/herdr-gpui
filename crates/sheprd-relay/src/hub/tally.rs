@@ -52,12 +52,21 @@ impl<K: Eq + Hash> Counts<K> {
     }
 
     pub fn add(&mut self, key: K) {
-        *self.0.entry(key).or_insert(0) += 1;
+        self.add_by(key, 1);
+    }
+
+    pub fn add_by(&mut self, key: K, amount: usize) {
+        let held = self.0.entry(key).or_insert(0);
+        *held = held.saturating_add(amount);
     }
 
     pub fn remove(&mut self, key: &K) {
+        self.remove_by(key, 1);
+    }
+
+    pub fn remove_by(&mut self, key: &K, amount: usize) {
         if let Some(held) = self.0.get_mut(key) {
-            *held = held.saturating_sub(1);
+            *held = held.saturating_sub(amount);
             if *held == 0 {
                 self.0.remove(key);
             }

@@ -1,12 +1,11 @@
 //! The HTTP listener, bounded: how many connections it holds in all and
-//! from each caller, and how long one may sit with nothing crossing it.
-//! The hub counts WebSockets, but a plain request or an idle TCP
-//! connection was bounded only by the proxy in front, if any.
+//! from each caller and its wide block, and how long one may sit with
+//! nothing crossing it. The hub counts WebSockets, but a plain request or
+//! an idle TCP connection was bounded only by the proxy in front, if any.
 
-use crate::{bucket::source_key, guard::exempt};
+use crate::{guard::exempt, hub::tally::Tally};
 use axum::serve::Listener;
 use std::{
-    collections::HashMap,
     io,
     net::{IpAddr, SocketAddr},
     pin::Pin,
@@ -26,12 +25,13 @@ use tokio::{
 /// sessions end at their idle timeout, so only a connection doing nothing
 /// at all meets this.
 const IDLE_MARGIN: Duration = Duration::from_secs(60);
-/// Headers a caller may take to send, from accepting to its first byte
-/// read, and between its later reads while nothing has been written back.
+/// How long a caller has, from being accepted, before the relay answers
+/// it: its first request must arrive whole by then, however slowly it
+/// trickles in.
 const QUIET: Duration = Duration::from_secs(30);
 
-/// Connections held by each caller, counted as the rate limits key them.
-type Callers = Arc<Mutex<HashMap<IpAddr, usize>>>;
+/// Connections held by each caller and block, as the limits key them.
+type Callers = Arc<Mutex<Tally>>;
 
 /// A TCP listener that waits for room before accepting.
 #[derive(Debug)]
@@ -39,17 +39,24 @@ pub struct Capped {
     callers: Callers,
     idle: Duration,
     inner: TcpListener,
-    per_caller: usize,
+    per_caller: Option<usize>,
     room: Arc<Semaphore>,
 }
 
 impl Capped {
-    /// At most `total` connections, and `per_caller` from one address
-    /// other than a private one, such as the proxy in front; each closed
-    /// once nothing crossed it for a minute past `idle`, a session's idle
-    /// timeout.
+    /// At most `total` connections, and `per_caller` from one public
+    /// address (a wide block, [`crate::limits::WIDE_SHARE`] times that);
+    /// each closed once nothing crossed it for a minute past `idle`, a
+    /// session's idle timeout. `per_caller` is `None` behind a proxy,
+    /// where every connection comes from the proxy, whatever its address:
+    /// the hub then limits callers by the address the proxy reports.
     #[must_use]
-    pub fn new(inner: TcpListener, total: usize, per_caller: usize, idle: Duration) -> Self {
+    pub fn new(
+        inner: TcpListener,
+        total: usize,
+        per_caller: Option<usize>,
+        idle: Duration,
+    ) -> Self {
         Self {
             callers: Arc::default(),
             idle: idle.saturating_add(IDLE_MARGIN),
@@ -104,50 +111,41 @@ impl Listener for Capped {
 #[derive(Debug)]
 struct Caller {
     callers: Callers,
-    key: Option<IpAddr>,
+    /// The address counted, unless none was.
+    counted: Option<IpAddr>,
 }
 
 impl Caller {
-    fn claim(callers: &Callers, address: IpAddr, limit: usize) -> Option<Self> {
-        // A private address is the proxy in front, which carries everyone.
-        if exempt(address) {
-            return Some(Self {
+    fn claim(callers: &Callers, address: IpAddr, limit: Option<usize>) -> Option<Self> {
+        let uncounted = || {
+            Some(Self {
                 callers: Arc::clone(callers),
-                key: None,
-            });
-        }
-        let key = source_key(address);
-        let mut held = match callers.lock() {
-            Ok(held) => held,
-            Err(poisoned) => poisoned.into_inner(),
+                counted: None,
+            })
         };
-        let count = held.entry(key).or_insert(0);
-        if *count >= limit {
-            return None;
-        }
-        *count += 1;
-        Some(Self {
+        // A private address is the proxy in front, which carries everyone.
+        let Some(limit) = limit.filter(|_| !exempt(address)) else {
+            return uncounted();
+        };
+        lock(callers).try_add(address, limit).then(|| Self {
             callers: Arc::clone(callers),
-            key: Some(key),
+            counted: Some(address),
         })
     }
 }
 
 impl Drop for Caller {
     fn drop(&mut self) {
-        let Some(key) = self.key else {
-            return;
-        };
-        let mut held = match self.callers.lock() {
-            Ok(held) => held,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        if let Some(count) = held.get_mut(&key) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                held.remove(&key);
-            }
+        if let Some(address) = self.counted {
+            lock(&self.callers).remove(address);
         }
+    }
+}
+
+fn lock(callers: &Callers) -> std::sync::MutexGuard<'_, Tally> {
+    match callers.lock() {
+        Ok(callers) => callers,
+        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
@@ -182,10 +180,12 @@ impl Held {
         }
     }
 
-    /// Something crossed: push the deadline back.
+    /// Something crossed: push the deadline back, once the relay has
+    /// answered. Until then the deadline set at accepting stands.
     fn crossed(&mut self) {
-        let wait = if self.answered { self.idle } else { QUIET };
-        self.deadline.as_mut().reset(Instant::now() + wait);
+        if self.answered {
+            self.deadline.as_mut().reset(Instant::now() + self.idle);
+        }
     }
 
     fn expired(&mut self, context: &mut Context<'_>) -> bool {

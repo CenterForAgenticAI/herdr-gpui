@@ -12,7 +12,7 @@ use tokio::{
 
 async fn capped(total: usize) -> Capped {
     let inner = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    Capped::new(inner, total, 4, Duration::from_secs(60))
+    Capped::new(inner, total, Some(4), Duration::from_secs(60))
 }
 
 #[tokio::test]

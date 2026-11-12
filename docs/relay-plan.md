@@ -186,13 +186,20 @@ One caller must not be able to fill a pool every caller shares:
   that the relay has not read, which it stops doing while the far side of
   a session does not read. A connection starts with 64 KiB each way and
   gains 2 MiB each way per session it carries (2 MiB passes a session's
-  4 MiB/s over a 500 ms round trip), all drawn from `max-buffer`. When that
-  is spent, new connections and sessions are refused, never buffered.
+  4 MiB/s over a 500 ms round trip), all drawn from `max-buffer`. One
+  public address may hold a quarter of it and its wide block half. When
+  that is spent, new connections and sessions are refused, never buffered.
 - The HTTP listener holds at most `max-connections` plus 1,024 connections,
-  and per address `max-connections-per-ip` plus 16 (private addresses, such
-  as the proxy in front, exempt). A connection must send its request within
-  30 seconds and is closed after the idle timeout plus a minute with
-  nothing crossing it either way.
+  and, when callers connect directly, `max-connections-per-ip` plus 16 per
+  public address and 16 times that per wide block. Behind a proxy every
+  connection is the proxy's, so only the total applies there and the hub
+  limits callers by the address the proxy reports. A connection's first
+  request must arrive whole within 30 seconds of accepting it, however
+  slowly it trickles in, and it is closed after the idle timeout plus a
+  minute with nothing crossing it either way.
+- A rate limit spends from an address's bucket and its block's only when
+  both allow it, so a caller refused by its block adds nothing to the
+  address table, and one held back does not drain its neighbours' share.
 - Rate limits count on a monotonic clock, so a wall clock stepping back
   does not freeze refills.
 - A QUIC connection that migrates keeps the address it was admitted from

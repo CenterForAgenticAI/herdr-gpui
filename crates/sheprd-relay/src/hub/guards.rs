@@ -11,7 +11,7 @@ use crate::{
 };
 use std::{
     net::IpAddr,
-    sync::{Arc, Mutex, atomic::Ordering::Relaxed},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -26,18 +26,24 @@ const MESSAGES: Rate = Rate {
 #[derive(Debug)]
 pub struct Buffer {
     bytes: u64,
+    /// The address the bytes count against, unless only the total did.
+    counted: Option<IpAddr>,
     hub: Arc<Hub>,
 }
 
 impl Buffer {
-    pub(super) fn new(hub: Arc<Hub>, bytes: u64) -> Self {
-        Self { bytes, hub }
+    pub(super) fn new(hub: Arc<Hub>, counted: Option<IpAddr>, bytes: u64) -> Self {
+        Self {
+            bytes,
+            counted,
+            hub,
+        }
     }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        self.hub.buffer.fetch_sub(self.bytes, Relaxed);
+        self.hub.release_buffer(self.counted, self.bytes);
     }
 }
 use tokio::sync::{Notify, mpsc, oneshot};

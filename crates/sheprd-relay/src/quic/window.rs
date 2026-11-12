@@ -46,9 +46,11 @@ impl Window {
     }
 
     /// Widens the windows for one more session, while the result lives;
-    /// `None` when the hub's budget cannot cover it.
+    /// `None` when the hub's budget, or this caller's share of it, cannot
+    /// cover it. Counted against the connection's current address.
     pub fn widen(self: &Arc<Self>, hub: &Arc<Hub>) -> Option<Widened> {
-        let buffer = hub.reserve_buffer(2 * u64::from(SESSION))?;
+        let address = self.connection.remote_address().ip();
+        let buffer = hub.reserve_buffer(address, 2 * u64::from(SESSION))?;
         self.change(|sessions| sessions.saturating_add(1));
         Some(Widened {
             _buffer: buffer,

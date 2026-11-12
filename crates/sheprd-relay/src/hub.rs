@@ -11,7 +11,7 @@
 pub mod access;
 mod guards;
 mod rates;
-mod tally;
+pub(crate) mod tally;
 
 pub use access::Access;
 pub use guards::{Buffer, Permit, Registration, Session, Slot, Unclaimed, Waiting};
@@ -54,8 +54,6 @@ pub struct Hub {
     /// Wakes every QUIC connection when an address is banned, so the
     /// banned one closes itself; each checks its own address.
     bans: tokio::sync::broadcast::Sender<()>,
-    /// Bytes granted to QUIC connections' windows, against `max_buffer`.
-    buffer: AtomicU64,
     /// New QUIC connections, per address and wide block.
     connects: PerAddress,
     dials: PerAddress,
@@ -73,6 +71,9 @@ pub struct Hub {
 #[derive(Debug, Default)]
 struct State {
     addresses: HashMap<IpAddr, usize>,
+    /// Bytes granted to QUIC connections' windows, against `max_buffer`:
+    /// in all, and by each address and block.
+    buffer: Buffered,
     connections: usize,
     /// Dials and sessions held by each dialing address and block.
     dialers: Tally,
@@ -91,6 +92,18 @@ struct State {
     /// Dials and sessions in total.
     slots: usize,
 }
+
+/// Bytes of window granted, in all and per caller.
+#[derive(Debug, Default)]
+struct Buffered {
+    blocks: Counts<IpAddr>,
+    sources: Counts<IpAddr>,
+    total: u64,
+}
+
+/// One public address may hold this share of `max_buffer`, and its wide
+/// block twice that, so one caller cannot spend everyone's.
+const BUFFER_SHARE: u64 = 4;
 
 impl State {
     /// Removes `route`'s listener, giving back its address's count.
@@ -198,7 +211,6 @@ impl Hub {
         Self {
             access,
             bans: tokio::sync::broadcast::channel(16).0,
-            buffer: AtomicU64::new(0),
             connects: PerAddress::new(limits.connections_per_minute, origin),
             dials: PerAddress::new(limits.dials_per_minute, origin),
             guard: Guard::new(limits.auto_ban, limits.max_transfer_per_hour),
@@ -247,15 +259,45 @@ impl Hub {
     }
 
     /// Takes `bytes` from the budget for what QUIC peers may have the relay
-    /// hold, or `None` when that would pass `max_buffer`.
-    pub fn reserve_buffer(self: &Arc<Self>, bytes: u64) -> Option<Buffer> {
+    /// hold for `address`, or `None` when that would pass `max_buffer`, or
+    /// that address's or block's share of it. A private address, which
+    /// only a relay on a private network sees, has only the total.
+    pub fn reserve_buffer(self: &Arc<Self>, address: IpAddr, bytes: u64) -> Option<Buffer> {
         let max = self.limits.max_buffer;
-        self.buffer
-            .try_update(Relaxed, Relaxed, |held| {
-                held.checked_add(bytes).filter(|total| *total <= max)
-            })
-            .ok()?;
-        Some(Buffer::new(Arc::clone(self), bytes))
+        let counted = (!crate::guard::exempt(address)).then_some(address);
+        let amount = usize::try_from(bytes).ok()?;
+        let mut state = self.state();
+        let buffer = &mut state.buffer;
+        if buffer.total.saturating_add(bytes) > max {
+            return None;
+        }
+        if let Some(address) = counted {
+            let (source, block) = (source_key(address), crate::guard::wide_key(address));
+            let share = usize::try_from(max / BUFFER_SHARE).unwrap_or(usize::MAX);
+            if buffer.sources.get(&source).saturating_add(amount) > share
+                || buffer.blocks.get(&block).saturating_add(amount) > share.saturating_mul(2)
+            {
+                return None;
+            }
+            buffer.sources.add_by(source, amount);
+            buffer.blocks.add_by(block, amount);
+        }
+        buffer.total += bytes;
+        drop(state);
+        Some(Buffer::new(Arc::clone(self), counted, bytes))
+    }
+
+    /// Gives back what [`Hub::reserve_buffer`] took.
+    fn release_buffer(&self, counted: Option<IpAddr>, bytes: u64) {
+        let mut state = self.state();
+        let buffer = &mut state.buffer;
+        buffer.total = buffer.total.saturating_sub(bytes);
+        if let (Some(address), Ok(amount)) = (counted, usize::try_from(bytes)) {
+            buffer.sources.remove_by(&source_key(address), amount);
+            buffer
+                .blocks
+                .remove_by(&crate::guard::wide_key(address), amount);
+        }
     }
 
     /// Takes a connection slot for `address`, or says which limit is full.

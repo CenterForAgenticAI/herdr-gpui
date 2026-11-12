@@ -236,10 +236,14 @@ pub async fn serve(options: Options) -> Result<()> {
     );
     // Room for every socket the hub admits, and plain requests beside.
     let total = options.limits.max_connections.saturating_add(HTTP_HEADROOM);
-    let per_caller = options
-        .limits
-        .max_connections_per_ip
-        .saturating_add(HTTP_HEADROOM_PER_CALLER);
+    // Behind a proxy every connection is the proxy's, so only the total
+    // applies here; the hub limits callers by the address it reports.
+    let per_caller = (source(&options) == Source::Peer).then(|| {
+        options
+            .limits
+            .max_connections_per_ip
+            .saturating_add(HTTP_HEADROOM_PER_CALLER)
+    });
     let idle = options.limits.idle_timeout;
     let listener = Capped::new(listener, total, per_caller, idle).tap_io(|_| ());
     axum::serve(

@@ -119,7 +119,7 @@ pub async fn run(endpoint: Endpoint, hub: Arc<Hub>) {
         };
         // The connection's base windows, from the buffer budget: when that
         // is spent, the relay takes no more connections.
-        let Some(base) = hub.reserve_buffer(window::base_cost()) else {
+        let Some(base) = hub.reserve_buffer(address, window::base_cost()) else {
             hub.metrics.refuse(Refused::Total);
             incoming.refuse();
             continue;
