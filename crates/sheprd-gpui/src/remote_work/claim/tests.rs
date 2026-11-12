@@ -41,3 +41,30 @@ fn a_request_withdrawn_before_the_marker_is_not_held() {
         "req"
     ));
 }
+
+#[test]
+fn a_request_another_desktop_claimed_is_not_claimed_again() {
+    let first = with_claim(&serde_json::Value::Null, KEY).unwrap();
+    assert_eq!(first, serde_json::json!([KEY]));
+    assert_eq!(with_claim(&first, KEY), None);
+    let other = "sheprd-work-ffffffffffffffffffffffffffffffff";
+    assert_eq!(
+        with_claim(&first, other).unwrap(),
+        serde_json::json!([KEY, other])
+    );
+}
+
+#[test]
+fn the_claim_document_keeps_only_the_most_recent_requests() {
+    let mut value = serde_json::Value::Null;
+    for index in 0..RECENT + 5 {
+        value = with_claim(&value, &format!("sheprd-work-{index:032x}")).unwrap();
+    }
+    let keys = value.as_array().unwrap();
+    assert_eq!(keys.len(), RECENT);
+    assert_eq!(keys[0], format!("sheprd-work-{:032x}", 5));
+    assert_eq!(
+        with_claim(&value, &format!("sheprd-work-{:032x}", RECENT + 4)),
+        None
+    );
+}

@@ -138,10 +138,16 @@ def output(response, as_json):
             raise ValueError("Unexpected work reply")
     else:
         raise ValueError("Unexpected remote work response")
+    reply = response.get("reply") if status == "work" else None
+    # Exit 4 means nothing to show, as the full CLI reports it.
+    nothing = reply is not None and (
+        (reply["kind"] == "note" and reply["note"] is None)
+        or (reply["kind"] == "notes" and not reply["notes"] and not reply["omitted"])
+    )
+    if nothing and reply["kind"] == "notes":
+        text = "No worktree notes"
     print(json.dumps(result) if as_json else printable(text), flush=True)
-    if status == "work" and response["reply"]["kind"] == "note" and response["reply"]["note"] is None:
-        return 4
-    return 0
+    return 4 if nothing else 0
 
 
 def run(arguments):
