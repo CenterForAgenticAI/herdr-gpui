@@ -512,6 +512,13 @@ impl CoreTerminals {
         self.checkouts.seed(cwd, identity);
     }
 
+    /// The latest terminal waiting to start, as no core answers in tests.
+    #[cfg(test)]
+    pub(crate) fn last_wanted_for_test(&self) -> Option<(&Purpose, &Spawn)> {
+        let (purpose, _, spawn, _) = self.wanted.back()?;
+        Some((purpose, spawn))
+    }
+
     /// Places `tab` in `workspace` of `scope`, as showing the workspace does.
     #[cfg(test)]
     pub(crate) fn place_for_test(&mut self, tab: TabId, scope: Scope, workspace: &str) {

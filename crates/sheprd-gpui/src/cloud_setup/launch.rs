@@ -11,6 +11,7 @@ use crate::{
 };
 use gpui::Context;
 use serde_json::{Value, json};
+use sheprd_backend::Spawn;
 use sheprd_client::{CloudProvider, Method};
 
 /// Names the provider for a script that wants to tell its devices apart.
@@ -60,6 +61,34 @@ impl SheprdWindow {
             label: pending.label,
             request,
         });
+        Ok(())
+    }
+
+    /// Start `pending` on the shown device's herdr-core, as the program of
+    /// a new `setup` tab of the kept `workspace`, starting where any new
+    /// tab there does.
+    pub(super) fn start_core_cloud_setup(
+        &mut self,
+        pending: Pending,
+        workspace: &str,
+        cx: &mut Context<Self>,
+    ) -> crate::Result<()> {
+        let spawn = Spawn {
+            argv: worktree_scripts::core_argv(worktree_scripts::ScriptKind::Setup),
+            cwd: None,
+            env: vec![
+                (worktree_scripts::SCRIPT_ENV.to_owned(), pending.script),
+                (PROVIDER_ENV.to_owned(), pending.provider.key().to_owned()),
+            ],
+            labels: Default::default(),
+            name: Some("setup".to_owned()),
+        };
+        self.start_in_kept_workspace(workspace, spawn, cx)?;
+        tracing::info!(
+            category = "cloud_setup",
+            endpoint = %pending.endpoint_id,
+            "A new cloud device's setup script started on its herdr-core"
+        );
         Ok(())
     }
 
