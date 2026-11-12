@@ -4,6 +4,10 @@
 use super::*;
 use crate::test_executable;
 
+mod journal;
+mod uncertain;
+mod verified_end;
+
 /// A `herdr-core` whose agent in `t9` reports `status` once started.
 fn fake_core(dir: &Path, status: &str) {
     let script = format!(
@@ -12,6 +16,7 @@ printf '%s\n' "$*" >> "$HOME/core-calls"
 case "$1" in
 run) echo '{{"address":"t9"}}' ;;
 wait) echo '{{"ended":true,"exit_code":null,"reason":"status","status":"{status}","turn":0}}' ;;
+ls) echo '{{"terminals":[]}}' ;;
 *) echo '{{}}' ;;
 esac
 "#
@@ -116,7 +121,10 @@ fn a_herdr_2_run_is_stopped_messaged_and_removed_through_its_terminal() {
         [
             "send --json -- t9 --and the tests",
             "keys --json -- t9 esc ctrl+c",
+            "keep --off --json -- t9",
             "kill --json -- t9",
+            "ls --all --json",
+            "ls --all --json",
         ]
     );
     assert!(calls(dir.path()).is_empty());
@@ -131,7 +139,7 @@ fn a_herdr_2_run_is_stopped_messaged_and_removed_through_its_terminal() {
 }
 
 #[test]
-fn a_herdr_2_agent_that_never_gets_ready_is_ended_and_its_worktree_removed() {
+fn a_herdr_2_agent_that_never_gets_ready_keeps_its_terminal_and_checkout() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(dir.path(), "");
     fake_core(dir.path(), "blocked");
@@ -140,12 +148,17 @@ fn a_herdr_2_agent_that_never_gets_ready_is_ended_and_its_worktree_removed() {
     assert!(matches!(error, Error::Work(_)), "{error:?}");
 
     let core = core_calls(dir.path());
-    assert_eq!(core.last().map(String::as_str), Some("kill --json -- t9"));
+    assert!(!core.iter().any(|call| call.starts_with("kill ")));
     assert!(!core.iter().any(|call| call.contains("Fix the icons")));
-    assert!(!checkout(dir.path()).exists());
+    assert!(checkout(dir.path()).exists());
     let store = Store::open(&site.database).unwrap();
     let run = store.runs().unwrap().remove(0);
     assert_eq!(run.state, RunState::Failed);
-    assert!(run.workspace.is_none());
-    assert!(store.sessions().unwrap().is_empty());
+    assert!(run.workspace.is_some());
+    assert_eq!(
+        store.sessions().unwrap()[0].pane,
+        Pane::Herdr2 {
+            terminal: "t9".into()
+        }
+    );
 }

@@ -26,10 +26,10 @@ pub(super) fn items(
     } else {
         (WorkspaceMenuAction::Mute, Label::MUTE)
     }];
-    // Git runs through host scripts, which need `/bin/sh`, on this
-    // computer: another host's kept workspaces wait for its own Git.
-    let scripts = cfg!(any(target_os = "linux", target_os = "macos"));
-    let git = scripts && local && matches!(target.source, Source::Directory(_));
+    // Remote scripts run on the host's POSIX shell, including WSL from a
+    // Windows client. Local Windows has no POSIX script runner.
+    let scripts = !local || cfg!(any(target_os = "linux", target_os = "macos"));
+    let git = scripts && matches!(target.source, Source::Directory(_));
     if git && target.worktree.is_some() {
         items.push((
             WorkspaceMenuAction::Dialog(WorkspaceAction::NewWorktree),

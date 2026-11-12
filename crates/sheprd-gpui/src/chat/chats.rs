@@ -50,6 +50,18 @@ pub(crate) fn connect(
             target.pane_id.clone(),
         ];
         let command = match &target.route {
+            super::Route::Remote(host) => {
+                let args = args
+                    .iter()
+                    .map(|arg| sheprd_client::shell_quote(arg))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Link::start(
+                    Dial::Remote(host.clone(), super::remote_program_script(&args)),
+                    since,
+                    resend,
+                );
+            }
             super::Route::Local => {
                 // Unlike a missing socket directory, this is not permanent:
                 // the lookup started this tick may still be running.
@@ -70,6 +82,10 @@ pub(crate) fn connect(
         return Link::start(Dial::Process(command), since, resend);
     }
     let dial = match &target.route {
+        super::Route::Remote(host) => Dial::Remote(
+            host.clone(),
+            super::remote_program_script(&format!("connect {}", target.endpoint)),
+        ),
         super::Route::Local => Dial::Socket(
             sheprd_chat_protocol::endpoint_address(&target.endpoint).ok_or(Error::NoEndpointDir)?,
         ),
