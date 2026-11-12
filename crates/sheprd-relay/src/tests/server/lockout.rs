@@ -89,3 +89,21 @@ fn signing_in_clears_the_count() {
         assert_eq!(lockout.attempt(address(6), now), Verdict::Allowed);
     }
 }
+
+#[test]
+fn a_table_full_of_guessers_still_lets_the_right_token_be_checked() {
+    use crate::dashboard::lockout::MAX_ADDRESSES;
+    let lockout = Lockout::default();
+    let now = Instant::now();
+    for index in 0..u32::try_from(MAX_ADDRESSES).unwrap() {
+        let guesser = IpAddr::from(std::net::Ipv6Addr::from(
+            (0x2001_0db8_u128 << 96) | (u128::from(index) << 64),
+        ));
+        lockout.attempt(guesser, now);
+    }
+    // A newcomer is not refused unchecked: its token decides.
+    assert_eq!(
+        lockout.attempt("198.51.100.94".parse().unwrap(), now),
+        Verdict::Untracked
+    );
+}

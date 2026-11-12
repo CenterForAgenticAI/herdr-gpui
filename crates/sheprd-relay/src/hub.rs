@@ -192,6 +192,8 @@ pub enum ListenRefusal {
     Banned,
     /// The relay holds as many listeners as it may.
     Full,
+    /// The listen token that admitted it was revoked since.
+    Revoked,
     /// The address, or its wide block, holds as many as it may.
     TooMany,
 }
@@ -350,6 +352,12 @@ impl Hub {
         // first and refuses this listener, or comes after and removes it.
         if self.guard.banned(address, Instant::now()) {
             return Err(ListenRefusal::Banned);
+        }
+        // Checked under the lock `keep_tokens` takes after the tokens
+        // change: a token revoked between its check and here either is
+        // refused now, or registers first and is closed by `keep_tokens`.
+        if token.is_some_and(|token| !self.access.holds(&token)) {
+            return Err(ListenRefusal::Revoked);
         }
         let replaced = state.listeners.get(&route).map(|listener| listener.address);
         if replaced.is_none() && state.listeners.len() >= self.limits.max_listeners {
@@ -676,6 +684,14 @@ impl Hub {
             .filter(|(_, listener)| listener.token.is_some_and(|token| !kept.contains(&token)))
             .map(|(route, _)| *route)
             .collect();
+        // The sessions a revoked listener carries end with it, as a ban's
+        // do: revoking access ends that access, not only new dials.
+        for route in &revoked {
+            let ids = state.on_route.get(route).into_iter().flatten();
+            for live in ids.filter_map(|id| state.sessions.get(id)) {
+                live.revoke.notify_one();
+            }
+        }
         let removed = revoked
             .iter()
             .filter(|route| state.remove_listener(route).is_some())

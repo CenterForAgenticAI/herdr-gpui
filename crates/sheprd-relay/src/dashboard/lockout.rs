@@ -17,7 +17,7 @@ pub const TRIES: u32 = 3;
 /// How long a block lasts, and how long a wrong try is remembered.
 pub const BLOCK: Duration = Duration::from_secs(15 * 60);
 /// The most addresses tracked at once, which bounds memory.
-const MAX_ADDRESSES: usize = 16_384;
+pub const MAX_ADDRESSES: usize = 16_384;
 
 #[derive(Clone, Copy, Debug)]
 struct Record {
@@ -32,6 +32,10 @@ pub enum Verdict {
     Allowed,
     /// Blocked for about this long still.
     Blocked(Duration),
+    /// The table is full of recent guessers and this address is not among
+    /// them: check the token, but there is no try to count or clear. The
+    /// token's length, not the lockout, keeps guessing hopeless then.
+    Untracked,
 }
 
 /// Wrong tries per address, and the blocks they caused.
@@ -64,15 +68,18 @@ impl Lockout {
     /// the same lock that refuses it: each try counts as wrong until
     /// [`Lockout::succeed`] clears it, so requests sent at once cannot
     /// slip more than [`TRIES`] guesses between a check and a failure.
-    /// `Allowed` means check the token; `Blocked`, refuse it unchecked.
+    /// `Allowed` or `Untracked` means check the token; `Blocked`, refuse it
+    /// unchecked.
     pub fn attempt(&self, address: IpAddr, now: Instant) -> Verdict {
         let key = source_key(address);
         let mut records = self.records();
         if records.len() >= MAX_ADDRESSES && !records.contains_key(&key) {
             records.retain(|_, record| now.saturating_duration_since(record.last) < BLOCK);
             if records.len() >= MAX_ADDRESSES {
-                // Full of recent guessers: refuse rather than forget one.
-                return Verdict::Blocked(BLOCK);
+                // Full of recent guessers: track no one new, rather than
+                // forget one, or refuse everyone, the holder of the right
+                // token included.
+                return Verdict::Untracked;
             }
         }
         let record = records.entry(key).or_insert(Record {

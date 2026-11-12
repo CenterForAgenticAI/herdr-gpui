@@ -63,3 +63,40 @@ async fn revoking_one_token_closes_only_its_listeners() {
     assert!(matches!(closed, Ok(None)));
     assert_eq!(hub.metrics.read(crate::metrics::Gauge::Listeners), 1);
 }
+
+#[tokio::test]
+async fn revoking_a_token_ends_the_sessions_its_listener_carries() {
+    let hub = Arc::new(Hub::new(
+        Limits::default(),
+        Access::tokens(&file(&[ALICE, BOB])).unwrap(),
+    ));
+    let alice = hub.access.admit(Some(ALICE.as_bytes())).unwrap();
+    let route = RouteId::of(signing_key(162).verifying_key());
+    let address: IpAddr = "198.51.100.91".parse().unwrap();
+    let registration = hub.register_with(route, address, alice).unwrap();
+    registration.set_dial_keys(&[public(&phone())]);
+    let waiting = hub
+        .dial(route, public(&phone()), "198.51.100.92".parse().unwrap())
+        .unwrap()
+        .unwrap();
+    let session = hub.open(waiting.slot).unwrap();
+    let kept = hub.access.replace(&file(&[BOB])).unwrap();
+    hub.keep_tokens(&kept);
+    tokio::time::timeout(Duration::from_secs(1), session.revoked())
+        .await
+        .expect("the session outlived its token");
+}
+
+#[tokio::test]
+async fn a_token_revoked_after_its_check_cannot_register() {
+    let hub = Arc::new(Hub::new(
+        Limits::default(),
+        Access::tokens(&file(&[ALICE, BOB])).unwrap(),
+    ));
+    // Checked, then revoked before the listener registers.
+    let alice = hub.access.admit(Some(ALICE.as_bytes())).unwrap();
+    hub.access.replace(&file(&[BOB])).unwrap();
+    let route = RouteId::of(signing_key(163).verifying_key());
+    let refused = hub.register_with(route, "198.51.100.93".parse().unwrap(), alice);
+    assert_eq!(refused.err(), Some(crate::hub::ListenRefusal::Revoked));
+}

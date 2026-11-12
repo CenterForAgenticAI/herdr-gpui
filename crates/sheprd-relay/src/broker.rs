@@ -51,6 +51,7 @@ pub fn listen(
                 ListenRefusal::Banned | ListenRefusal::Full => {
                     refuse(Status::Full, Listen::Full, None)
                 }
+                ListenRefusal::Revoked => refuse(Status::Forbidden, Listen::Forbidden, None),
                 ListenRefusal::TooMany => {
                     refuse(Status::TooMany, Listen::Full, Some(Offense::Limited))
                 }

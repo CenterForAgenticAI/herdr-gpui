@@ -74,6 +74,13 @@ impl Access {
         admitted.map(Some)
     }
 
+    /// Whether the token with this digest is still held.
+    #[must_use]
+    pub fn holds(&self, digest: &[u8; 32]) -> bool {
+        self.held()
+            .is_none_or(|tokens| tokens.iter().any(|token| token.digest == *digest))
+    }
+
     /// Whether listening needs a token.
     #[must_use]
     pub fn requires_token(&self) -> bool {
