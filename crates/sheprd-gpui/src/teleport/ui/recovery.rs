@@ -27,6 +27,7 @@ impl Global for Recovery {}
 /// choice, not process loss.
 struct Adopted {
     scope: Scope,
+    receipt: Receipt,
     /// The terminals its tabs hold.
     terminals: Vec<TerminalId>,
     /// Of those, the ones whose tabs have been open since it was adopted.
@@ -34,6 +35,36 @@ struct Adopted {
     seen: HashSet<TerminalId>,
     /// Of those, the ones whose tabs the user has closed again.
     closed: Vec<TerminalId>,
+    /// The most tabs and workspaces the app held while some of its tabs had
+    /// never opened. A tab or workspace limit can leave them out; they are
+    /// tried again once the user frees room, not on every scan.
+    room: Room,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct Room {
+    tabs: usize,
+    workspaces: usize,
+}
+
+impl Room {
+    fn of(store: &Store) -> Self {
+        Self {
+            tabs: store.tabs().count(),
+            workspaces: store.kept_ids().count(),
+        }
+    }
+
+    fn freed_since(self, before: Self) -> bool {
+        self.tabs < before.tabs || self.workspaces < before.workspaces
+    }
+
+    fn max(self, other: Self) -> Self {
+        Self {
+            tabs: self.tabs.max(other.tabs),
+            workspaces: self.workspaces.max(other.workspaces),
+        }
+    }
 }
 
 /// Process-wide, as both the move worker (`persist`) and every window's
@@ -44,8 +75,9 @@ fn adopted() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Adopted>> {
     ADOPTED.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn adopt(path: PathBuf, scope: Scope, outcome: &Outcome) {
-    let terminals = outcome
+fn adopt(path: PathBuf, scope: Scope, receipt: Receipt) {
+    let terminals = receipt
+        .outcome()
         .core_tabs
         .iter()
         .flat_map(Panes::terminals)
@@ -53,9 +85,11 @@ fn adopt(path: PathBuf, scope: Scope, outcome: &Outcome) {
         .collect();
     adopted().entry(path).or_insert(Adopted {
         scope,
+        receipt,
         terminals,
         seen: HashSet::new(),
         closed: Vec::new(),
+        room: Room::default(),
     });
 }
 
@@ -73,10 +107,11 @@ pub(super) fn persist(
         return Ok(());
     }
     let directory = directory().ok_or(arrival::Error::Unavailable)?;
-    let path = arrival::save(&directory, &Receipt::new(scope.as_str(), outcome))?;
+    let receipt = Receipt::new(scope.as_str(), outcome);
+    let path = arrival::save(&directory, &receipt)?;
     // The finished move opens these tabs itself; recovery must not reopen
     // them after the user closes one.
-    adopt(path, scope.clone(), outcome);
+    adopt(path, scope.clone(), receipt);
     Ok(())
 }
 
@@ -144,23 +179,29 @@ impl SheprdWindow {
             }
             let scope = Scope::endpoint(receipt.scope());
             let outcome = receipt.outcome();
-            adopt(path, scope.clone(), &outcome);
+            adopt(path, scope.clone(), receipt);
             self.settle_teleport(&outcome, &scope, window, cx);
         }
-        track_closed(cx);
+        // Settled outside the lock: settling reads the store, never adoptions.
+        for (scope, outcome) in track(cx) {
+            self.settle_teleport(&outcome, &scope, window, cx);
+        }
     }
 }
 
 /// Note which adopted terminals have tabs open now, and which were open and
-/// have since been closed, so their receipts stop waiting for them.
-fn track_closed(cx: &App) {
+/// have since been closed, so their receipts stop waiting for them. Returns
+/// the never-opened tabs to try again now that the user has freed room.
+fn track(cx: &App) -> Vec<(Scope, Outcome)> {
     let mut adopted = adopted();
     if adopted.is_empty() {
-        return;
+        return Vec::new();
     }
     let Some(store) = cx.try_global::<Store>() else {
-        return;
+        return Vec::new();
     };
+    let room = Room::of(store);
+    let mut retries = Vec::new();
     for entry in adopted.values_mut() {
         let held: HashSet<&TerminalId> = store
             .in_scope(&entry.scope)
@@ -183,7 +224,26 @@ fn track_closed(cx: &App) {
             .filter(|terminal| !held.contains(terminal))
             .cloned()
             .collect();
+        // Only tabs none of whose terminals ever opened: one the user closed
+        // stays closed.
+        let mut outcome = entry.receipt.outcome();
+        outcome.core_tabs.retain(|panes| {
+            panes
+                .terminals()
+                .iter()
+                .all(|terminal| !entry.seen.contains(*terminal))
+        });
+        if outcome.core_tabs.is_empty() {
+            continue;
+        }
+        if room.freed_since(entry.room) {
+            entry.room = room;
+            retries.push((entry.scope.clone(), outcome));
+        } else {
+            entry.room = entry.room.max(room);
+        }
     }
+    retries
 }
 
 #[cfg(test)]
