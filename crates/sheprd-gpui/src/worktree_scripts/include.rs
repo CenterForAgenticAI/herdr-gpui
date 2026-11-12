@@ -45,6 +45,7 @@ const IDLE: Duration = Duration::from_secs(60);
 /// can search every directory from one up to `/`, by the execute bit `ls -ld`
 /// shows in column 7 for the group and 10 for others. A symbolic link is
 /// left as it is, since `chmod` would change what it points to.
+// i18n: data
 const BODY: &str = r#"set -eu
 [ -f "$r/.worktreeinclude" ] || exit 0
 herdr_linuxbrew=
