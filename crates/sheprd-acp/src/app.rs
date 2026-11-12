@@ -126,13 +126,17 @@ fn native_history(
 
 pub(crate) fn run(options: Options) -> anyhow::Result<()> {
     let _owner = crate::restore::core::lock()?;
-    crate::restore::core::claim_launch()?;
-    run_owned(options)
+    let claimed = crate::restore::core::claim_launch()?;
+    run_owned(claimed, options)
 }
 
 /// The caller holds the core endpoint lock before reading recovery state or
 /// spawning any agent. Herdr 1 chats retain their existing ownership policy.
-pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
+/// `claimed` is the recovery generation this launch claimed, if any.
+pub(crate) fn run_owned(
+    claimed: Option<crate::restore::core::Claimed>,
+    options: Options,
+) -> anyhow::Result<()> {
     let cwd = match options.cwd.clone() {
         Some(cwd) => cwd,
         None => std::env::current_dir().context("could not read the current directory")?,
@@ -144,7 +148,9 @@ pub(crate) fn run_owned(options: Options) -> anyhow::Result<()> {
     let spawned = process::spawn(&agent.program, &agent.args, &agent.env, &cwd)?;
     let agent_process = spawned.process.clone();
     let owned_agent = agent_process.owned();
-    crate::restore::core::child_started(agent_process.id())?;
+    if let Some(claimed) = &claimed {
+        crate::restore::core::child_started(claimed, agent_process.id())?;
+    }
     let (inputs, receiver) = bounded::<Input>(INPUTS);
 
     let to_session = inputs.clone();

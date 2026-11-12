@@ -20,17 +20,25 @@ fn connect(socket: PathBuf) -> sheprd_core_client::Result<Core> {
     })
 }
 
+/// The recovery generation a replacement launch claimed. Only a launch that
+/// holds one registers its agent child, so an explicit restore in a shell that
+/// inherited a replacement's environment never touches the recovery state.
+#[derive(Debug)]
+pub(crate) struct Claimed {
+    generation: u32,
+}
+
 /// A replacement started by a desktop/phone worker must claim its durable
 /// generation before any agent starts. Inherited caller HC_SOCKET is ignored.
-pub(crate) fn claim_launch() -> anyhow::Result<()> {
+pub(crate) fn claim_launch() -> anyhow::Result<Option<Claimed>> {
     if crate::herdr::Target::from_env().is_some() {
-        return Ok(());
+        return Ok(None);
     }
     let Some(generation) = std::env::var_os(chat_recovery::GENERATION_ENV) else {
-        return Ok(());
+        return Ok(None);
     };
     if generation.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let generation = generation
         .to_str()
@@ -46,7 +54,7 @@ pub(crate) fn claim_launch() -> anyhow::Result<()> {
         generation,
         old_child_gone,
     )?;
-    Ok(())
+    Ok(Some(Claimed { generation }))
 }
 
 /// Proof, without signalling anything, that the previous chat's agent and its
@@ -74,19 +82,8 @@ fn child_identity(
     })
 }
 
-pub(crate) fn child_started(pid: u32) -> anyhow::Result<()> {
-    if crate::herdr::Target::from_env().is_some() {
-        return Ok(());
-    }
-    let Some(generation) =
-        std::env::var_os(chat_recovery::GENERATION_ENV).filter(|value| !value.is_empty())
-    else {
-        return Ok(());
-    };
-    let generation = generation
-        .to_str()
-        .context("invalid recovery generation")?
-        .parse::<u32>()?;
+/// Records the agent child of the launch that claimed `claimed`.
+pub(crate) fn child_started(claimed: &Claimed, pid: u32) -> anyhow::Result<()> {
     let terminal = std::env::var("HC_TERMINAL_ID")?;
     let socket = std::env::var_os("HC_TERMINAL_SOCKET").context("no terminal socket")?;
     let endpoint = std::env::var(ENDPOINT_ENV)?.parse::<EndpointId>()?;
@@ -94,7 +91,7 @@ pub(crate) fn child_started(pid: u32) -> anyhow::Result<()> {
     chat_recovery::child_started(
         &core,
         &endpoint,
-        generation,
+        claimed.generation,
         child_identity(&core, &terminal, pid)?,
     )?;
     Ok(())
@@ -205,19 +202,24 @@ pub(crate) fn run(endpoint: EndpointId) -> anyhow::Result<()> {
         previous_agent_gone(&dir, &endpoint)?,
         "the chat's previous agent, or a tool it started, is still running; end it before restoring"
     );
-    crate::app::run_owned(Options {
-        adapter: record.adapter,
-        agent: AgentChoice::Builtin {
-            agent: record.agent,
-            args: Vec::new(),
+    // Never a replacement child: the kept shell may still carry the
+    // generation of the replacement whose agent was lost.
+    crate::app::run_owned(
+        None,
+        Options {
+            adapter: record.adapter,
+            agent: AgentChoice::Builtin {
+                agent: record.agent,
+                args: Vec::new(),
+            },
+            attach: true,
+            cwd: Some(record.cwd),
+            headless: false,
+            load: Some(record.session),
+            name: None,
+            require_load: true,
         },
-        attach: true,
-        cwd: Some(record.cwd),
-        headless: false,
-        load: Some(record.session),
-        name: None,
-        require_load: true,
-    })
+    )
 }
 
 /// The agent a core chat started, kept beside its restore record so an
