@@ -125,4 +125,9 @@ fn a_full_table_makes_room_and_never_allows_unlimited_guesses() {
         blocked.attempt(newcomer(200), now),
         Verdict::Blocked(_)
     ));
+    // Another block keeps its own share: draining one locks no one else out.
+    assert_eq!(
+        blocked.attempt(IpAddr::from([203, 0, 113, 5]), now),
+        Verdict::Untracked
+    );
 }
