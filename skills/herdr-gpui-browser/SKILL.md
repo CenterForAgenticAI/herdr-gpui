@@ -249,10 +249,13 @@ what Sheprd shows or keeps.
 | --- | --- |
 | Show a file at a line, read-only | `sheprd code open src/main.rs:42` |
 | Open the review of your uncommitted changes | `sheprd review` |
+| Ask the user to restart an owned orchestrator run, or adopt a legacy run's current process | `sheprd orchestrator restart RUN` / `sheprd orchestrator adopt RUN` (loaded project; confirmation required) |
 | Open px0 to browse, edit, or review your local checkout (macOS/Windows) | `sheprd px0 open` |
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
 | Keep a note on this worktree (repository and branch) | `sheprd notes set waiting on CI` |
 | Silence this worktree's notifications | `sheprd worktree mute` |
+| List app-kept Git workspaces on your host | `sheprd worktree list` |
+| Review creating, opening, or deleting an app-kept worktree | `sheprd worktree create [BRANCH]`, `sheprd worktree open`, `sheprd worktree delete` (confirm in Sheprd) |
 | Silence a whole host's notifications | `sheprd host mute studio` |
 | Update the Sheprd app on another machine (the user confirms in Sheprd) | `sheprd host update studio` |
 | Save the working tree before a risky change, and compare later | `sheprd checkpoint create before refactor`, `sheprd checkpoint diff ID` |
@@ -292,16 +295,18 @@ it in the app.
 Add `--json` to any command for machine-readable output; errors then come
 back as `{"error": {"code", "message"}}`. Exit statuses are the ones in the
 table above. A command acts in the window that shows your workspace; it
-exits 5 rather than act in another session's window. A Herdr 2 caller is resolved
-through the app-kept workspace of its tab. Notes, checkpoint restore, and
-Teleport can target a kept workspace; each still enforces its checkout, host
-and platform requirements. The CLI paths for worktree mutes, scripts, and
-fan-out still require Herdr 1 workspace state and exit 8 for app-kept Herdr 2
-workspaces, even where the corresponding desktop menu works. Local support does not imply
-Herdr 2-only remote worktree support. A terminal outside a workspace the window
-keeps is refused rather than targeting an unrelated workspace. Chat conversion
-on Herdr 2 currently needs a local Claude process with an exact session record;
-Herdr 1 integration installation does not establish Herdr 2 session identity.
+exits 5 rather than act in another session's window. A Herdr 2 caller is
+resolved through the app-kept workspace of its tab: `sheprd work` notes,
+mutes, restores, scripts, Teleport, and fan-out target it without needing
+Herdr 1. Each still enforces its checkout, host, and platform requirements,
+and scripts and dialogs retain the workspace menu's host capabilities and
+confirmation rules. Select the caller's host in the window before opening a
+dialog. Worktree dialogs and scripts run Git on the caller's host, including
+SSH, cloud, and WSL devices. A terminal outside every workspace the window
+keeps is refused rather than targeting an unrelated workspace. Chat
+conversion on Herdr 2 currently needs a local Claude process with an exact
+session record; Herdr 1 integration installation does not establish Herdr 2
+session identity.
 
 Some commands only open the app's dialog and the user confirms there:
 restoring a checkpoint, teleporting a worktree, fanning out a prompt, running

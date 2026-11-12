@@ -10,6 +10,7 @@
 pub mod arrival;
 pub mod carry;
 mod core;
+pub(crate) use core::is_shell;
 mod credentials;
 pub mod error;
 mod fresh;
