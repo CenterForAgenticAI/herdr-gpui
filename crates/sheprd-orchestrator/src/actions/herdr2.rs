@@ -5,7 +5,7 @@
 
 use super::{
     super::model::{Pane, Workspace},
-    Destination, DispatchRequest, place,
+    Attempt, Destination, DispatchRequest, place,
 };
 use crate::{Backend, Error, HerdrSession, Result, Run, RunState, Store, error::script};
 use chrono::Utc;
@@ -16,50 +16,9 @@ use sheprd_remote::{
 };
 use std::sync::atomic::AtomicBool;
 
-#[derive(serde::Deserialize)]
-struct Listed {
-    terminals: Vec<Address>,
-}
-
-#[derive(serde::Deserialize)]
-struct Address {
-    address: String,
-    #[serde(default)]
-    cwd: String,
-}
-
-fn terminals(host: &Host, cancelled: &AtomicBool) -> Result<Listed> {
-    let output = host
-        .capture("core_cli ls --all --json\n", cancelled)
-        .map_err(script("Reading the agent terminals"))?;
-    serde_json::from_slice(&output).map_err(|source| Error::OutputJson {
-        operation: "Reading the agent terminals",
-        source,
-    })
-}
-
-/// A failed start may have left a shell whose address the work API could
-/// not return. Never delete its checkout or guess that shell's ownership.
-pub(super) fn unused_checkout(
-    host: &Host,
-    workspace: &Workspace,
-    cancelled: &AtomicBool,
-) -> Result<()> {
-    let Some(path) = workspace.path.as_deref() else {
-        return Ok(());
-    };
-    let listed = terminals(host, cancelled)?;
-    if listed.terminals.iter().any(|terminal| {
-        terminal.cwd.is_empty() || std::path::Path::new(&terminal.cwd).starts_with(path)
-    }) {
-        return Err(Error::InvalidCheckout);
-    }
-    Ok(())
-}
-
 /// Makes the run's worktree from `checkout`, starts its agent there, and
 /// sends it the prompt once it is ready, recording each step in `store`.
-/// The worktree made is left in `created` for the caller to undo on failure;
+/// The worktree made is left in `attempt` for the caller to undo on failure;
 /// an agent that started is recorded before its prompt so the caller can
 /// confirm it ended before removing its checkout on failure.
 #[allow(clippy::too_many_arguments)]
@@ -70,7 +29,7 @@ pub(super) fn launch(
     name: &str,
     run: &mut Run,
     store: &mut Store,
-    created: &mut Option<(Host, Worktree)>,
+    attempt: &mut Attempt,
     cancelled: &AtomicBool,
 ) -> Result<()> {
     let host = &destination.host;
@@ -83,7 +42,7 @@ pub(super) fn launch(
         checkout: checkout.to_owned(),
     };
     let worktree = work::create(host, &repository, &new, cancelled)?;
-    *created = Some((host.clone(), worktree.clone()));
+    attempt.created = Some((host.clone(), worktree.clone()));
     let (ssh, session) = place(&destination.target);
     run.workspace = Some(Workspace {
         backend: Backend::Herdr,
@@ -113,7 +72,7 @@ pub(super) fn launch(
     };
     // From the launch intent onward, a lost reply can mean the agent is
     // already working. Keep its checkout and receipt; never replay a prompt.
-    *created = None;
+    attempt.created = None;
     let started = work::owned_agent::start(host, &worktree, &agent, owner(run), cancelled)?;
     let Started::Herdr2 { terminal } = &started else {
         return Err(Error::Output {
@@ -131,6 +90,7 @@ pub(super) fn launch(
         agent_name: name.to_owned(),
         updated_at: Utc::now(),
     };
+    attempt.retained_session = Some(herdr_session.clone());
     prompt(
         host,
         &started,
@@ -301,25 +261,19 @@ pub(super) fn send(host: &Host, terminal: &str, text: &str, cancelled: &AtomicBo
 }
 
 /// Ends the shell in `terminal` and the agent in it, as removing Herdr 1's
-/// workspace closes its panes. One already gone is no failure.
-pub(super) fn end(host: &Host, terminal: &str) -> Result<()> {
-    let line = format!(
-        "core_cli kill --json -- {} >/dev/null\n",
-        shell_quote(terminal)
-    );
-    let cancelled = AtomicBool::new(false);
-    let Err(error) = host.capture(&line, &cancelled) else {
-        return Ok(());
+/// workspace closes its panes. One already gone is no failure; an
+/// unreachable host or a kill that left it running keeps the run and its
+/// checkout, so Remove can try again.
+pub(super) fn end(host: &Host, terminal: &str, cancelled: &AtomicBool) -> Result<()> {
+    Ok(work::owned_agent::end_verified(host, terminal, cancelled)?)
+}
+
+/// Proves no live herdr-core program works in `checkout`, as a failed
+/// start may have left a shell whose address never came back.
+pub(super) fn idle(host: &Host, checkout: &std::path::Path, cancelled: &AtomicBool) -> Result<()> {
+    let tree = Worktree {
+        path: checkout.to_string_lossy().into_owned(),
+        opened: work::Opened::Herdr2,
     };
-    // A failed kill can mean "already gone", but also an unreachable host.
-    // Only a successful inventory proving absence permits checkout removal.
-    let listed = terminals(host, &cancelled)?;
-    if listed
-        .terminals
-        .iter()
-        .any(|found| found.address == terminal)
-    {
-        return Err(script("Ending the agent terminal")(error));
-    }
-    Ok(())
+    Ok(work::owned_agent::checkout_idle(host, &tree, cancelled)?)
 }

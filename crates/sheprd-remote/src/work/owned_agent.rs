@@ -7,7 +7,9 @@ use sheprd_client::shell_quote;
 use sheprd_core_client::wire::{List, TerminalState};
 use std::sync::atomic::AtomicBool;
 
+mod end;
 mod error;
+pub use end::{checkout_idle, end_verified};
 pub use error::{Error, Result};
 
 /// A caller's namespace and durable operation identity, attached atomically.

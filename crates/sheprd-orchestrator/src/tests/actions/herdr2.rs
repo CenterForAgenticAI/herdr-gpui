@@ -5,10 +5,13 @@ use super::*;
 use crate::test_executable;
 
 mod cleanup;
+mod journal;
 mod legacy;
 mod ownership;
 mod pending;
 mod remote;
+mod uncertain;
+mod verified_end;
 
 /// A `herdr-core` whose agent in `t9` reports `status` once started.
 fn fake_core(dir: &Path, status: &str) {
@@ -144,6 +147,7 @@ fn a_herdr_2_run_is_stopped_messaged_and_removed_through_its_terminal() {
         [
             "send --json -- t9 --and the tests",
             "keys --json -- t9 esc ctrl+c",
+            "keep --off --json -- t9",
             "kill --json -- t9",
         ]
     );
@@ -159,7 +163,7 @@ fn a_herdr_2_run_is_stopped_messaged_and_removed_through_its_terminal() {
 }
 
 #[test]
-fn a_herdr_2_agent_that_never_gets_ready_retains_its_durable_identity() {
+fn a_herdr_2_agent_that_never_gets_ready_keeps_its_terminal_and_checkout() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(dir.path(), "");
     fake_core(dir.path(), "blocked");
@@ -175,5 +179,10 @@ fn a_herdr_2_agent_that_never_gets_ready_retains_its_durable_identity() {
     let run = store.runs().unwrap().remove(0);
     assert_eq!(run.state, RunState::Failed);
     assert!(run.workspace.is_some());
-    assert_eq!(store.sessions().unwrap().len(), 1);
+    assert_eq!(
+        store.sessions().unwrap()[0].pane,
+        Pane::Herdr2 {
+            terminal: "t9".into()
+        }
+    );
 }

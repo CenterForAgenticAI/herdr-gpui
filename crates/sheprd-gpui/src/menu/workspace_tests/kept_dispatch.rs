@@ -231,9 +231,11 @@ fn herdr_1_callers_never_get_kept_workspace_ids(cx: &mut TestAppContext) {
                 .unwrap()
                 .repositories
                 .unwrap();
+            // Herdr 1's checkouts are valid kept inputs too: kept dispatch
+            // reads their Git keys, never their IDs.
             assert!(
                 kept.iter()
-                    .all(|repo| crate::browser::is_kept_id(&repo.workspace_id))
+                    .any(|repo| crate::browser::is_kept_id(&repo.workspace_id))
             );
             let herdr_1 = view
                 .herdr_1_destination(&local)

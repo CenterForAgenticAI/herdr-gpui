@@ -33,6 +33,8 @@ impl CoreTerminals {
             .any(|tab| tab.host == host && !tab.observe && tab.panes.contains(terminal))
     }
 
+    // Notes are delivered from the page views Linux builds do not show.
+    #[cfg(any(test, target_os = "macos", windows))]
     pub(crate) fn browser_terminal(&self, scope: &Scope, origin: &str) -> Option<TerminalId> {
         let host = Host::Remote(scope.clone());
         self.tabs

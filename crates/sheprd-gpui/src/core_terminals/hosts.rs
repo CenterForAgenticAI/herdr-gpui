@@ -61,6 +61,36 @@ pub(super) struct Remote {
 }
 
 impl CoreTerminals {
+    pub(crate) fn remote_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
+        self.remote.get(scope).map(|remote| &remote.target)
+    }
+    /// Driven chat panes with their owning host; terminal IDs never cross cores.
+    pub(crate) fn routed_chat_terminals(&self) -> impl Iterator<Item = (&Host, &TerminalInfo)> {
+        self.tabs
+            .values()
+            .filter(|shown| shown.holds_chats())
+            .flat_map(move |shown| {
+                shown
+                    .panes
+                    .terminals()
+                    .into_iter()
+                    .filter_map(move |terminal| {
+                        self.infos_of(&shown.host)?
+                            .get(terminal)
+                            .map(|info| (&shown.host, info))
+                    })
+            })
+    }
+
+    pub(crate) fn chat_tab_on(&self, host: &Host, terminal: &TerminalId) -> Option<TabId> {
+        self.tabs
+            .iter()
+            .find(|(_, shown)| {
+                shown.host == *host && shown.holds_chats() && shown.panes.contains(terminal)
+            })
+            .map(|(tab, _)| *tab)
+    }
+
     /// The hub of `host`'s core, once the window has asked for it.
     pub(crate) fn hub_of(&self, host: &Host) -> Option<&Hub> {
         match host {
@@ -168,6 +198,29 @@ impl CoreTerminals {
         );
     }
 
+    /// Moves a fixture tab and its reported metadata to a saved host without
+    /// connecting to that host. Used by headless chat routing tests.
+    #[cfg(test)]
+    pub(crate) fn rehost_for_test(&mut self, tab: TabId, scope: Scope, target: ConnectTarget) {
+        let Some(shown) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        shown.host = Host::Remote(scope.clone());
+        let remote = self.remote.entry(scope).or_insert_with(|| Remote {
+            work_requests: Default::default(),
+            checkouts: super::checkouts::Checkouts::default(),
+            hub: Hub::remote(target.clone()),
+            infos: Infos::default(),
+            old_requests: None,
+            target,
+        });
+        for terminal in shown.panes.terminals() {
+            if let Some(info) = self.infos.get(terminal) {
+                remote.infos.insert(info.clone());
+            }
+        }
+    }
+
     /// `host`'s hub, which a test drives directly.
     // Only the lifecycle tests, which need Unix sockets, use it.
     #[cfg(all(test, unix))]
@@ -212,7 +265,7 @@ impl CoreTerminals {
         outcome: Result<TerminalInfo, sheprd_core_client::Error>,
     ) {
         let (send, receive) = std::sync::mpsc::sync_channel(1);
-        let _ = send.send(outcome);
+        let _ = send.send(super::start::Outcome::unwatched(outcome));
         self.starting = Some((purpose, host, receive));
     }
 
@@ -244,8 +297,8 @@ impl CoreTerminals {
 
     /// Drops another host's hub, its views, and a terminal wanted or
     /// starting there; the next ask for the host dials it anew. A terminal
-    /// that was starting keeps running on the machine it started on, but is
-    /// never placed in a tab, which would attach its ID on another machine.
+    /// that was starting is ended by its worker if its result cannot be
+    /// handed back, using the captured core rather than the replacement host.
     /// This computer's hub stays.
     pub(super) fn forget_host(&mut self, host: &Host) {
         let Host::Remote(scope) = host else {
@@ -441,7 +494,7 @@ impl SheprdWindow {
     }
 
     /// Where the saved device `scope` names connects now.
-    fn saved_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
+    pub(crate) fn saved_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
         self.endpoints
             .iter()
             .find(|endpoint| crate::browser::scope(endpoint) == *scope)

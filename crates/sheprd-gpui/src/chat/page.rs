@@ -93,7 +93,7 @@ impl SheprdWindow {
         };
         let copied = match source {
             PageSource::File(path) => {
-                if let super::Route::Ssh(host) = &pane.target.route {
+                if let Some(host) = pane.target.route.remote_name() {
                     pane.error = Some(fl!("chat-page-remote", host = safe_text(host, 80)));
                     cx.notify();
                     return;

@@ -95,11 +95,12 @@ impl SheprdWindow {
         else {
             return false;
         };
-        if host_for(&self.endpoints[index].connection.target)
-            .ok()
-            .as_ref()
-            != Some(&origin.host)
-        {
+        let target = &self.endpoints[index].connection.target;
+        let host = match origin.checkout {
+            Some(_) => sheprd_remote::work::host_for_kept(target).ok(),
+            None => host_for(target).ok(),
+        };
+        if host.as_ref() != Some(&origin.host) {
             return false;
         }
         // Look in the captured host's session even after a host switch.
@@ -138,15 +139,24 @@ impl SheprdWindow {
         {
             return Some(Label::FAN_OUT_COMPARISON);
         }
-        let scriptable =
-            crate::dispatch::scriptable(&self.endpoints[self.selected_endpoint].connection.target);
         let source = self.fan_out_source()?;
-        (scriptable && self.fan_out_host(&source).is_some()).then_some(Label::FAN_OUT)
+        let host = self.fan_out_host(&source)?;
+        // Host scripts need a POSIX client, or a remote host from Windows;
+        // see `sheprd_client::run_script`.
+        let scriptable = cfg!(any(target_os = "linux", target_os = "macos"))
+            || (cfg!(windows) && !host.is_local());
+        scriptable.then_some(Label::FAN_OUT)
     }
 
-    /// The host the menu addresses, for either workspace keeper.
-    fn fan_out_host(&self, _source: &Source) -> Option<Host> {
-        host_for(&self.endpoints[self.selected_endpoint].connection.target).ok()
+    /// The host the menu addresses, for either workspace keeper. A kept
+    /// folder is on the core's host: this computer behind a custom Herdr
+    /// socket, else the saved device itself.
+    fn fan_out_host(&self, source: &Source) -> Option<Host> {
+        let target = &self.endpoints[self.selected_endpoint].connection.target;
+        if source.checkout.is_some() {
+            return sheprd_remote::work::host_for_kept(target).ok();
+        }
+        host_for(target).ok()
     }
 
     pub(crate) fn open_fan_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {

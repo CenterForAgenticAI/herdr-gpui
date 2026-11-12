@@ -198,7 +198,8 @@ impl SheprdWindow {
     }
 
     /// This computer's scope, whose workspaces the app keeps, whichever
-    /// host is shown.
+    /// host is shown. Runs and lanes close and open through their own host.
+    #[cfg(test)]
     pub(crate) fn local_kept_scope(&self) -> Option<Scope> {
         self.core_host().map(|index| scope(&self.endpoints[index]))
     }
@@ -214,6 +215,7 @@ impl SheprdWindow {
 
     /// Closes the workspace this computer keeps at `cwd`, without showing
     /// this computer; whether there was one.
+    #[cfg(test)]
     pub(crate) fn close_local_kept_folder(
         &mut self,
         cwd: &Path,
@@ -236,6 +238,7 @@ impl SheprdWindow {
     /// workspace without focusing it. Answers its ID, or `None`, with a
     /// flash, when it could not be kept or its tab not opened, which ends
     /// the terminals `location` drives.
+    #[cfg(test)]
     pub(crate) fn open_kept_workspace_behind(
         &mut self,
         label: &str,
