@@ -12,6 +12,7 @@ use std::ops::Range;
 
 mod accents;
 mod code;
+mod inline;
 mod links;
 mod rhythm;
 
@@ -22,6 +23,7 @@ use super::{
 };
 use crate::chat::selection::Cell;
 use accents::{Accents, code_ink};
+use inline::{Piece, Runs};
 use links::Links;
 
 /// The prose's line height, in ems; inline formulas find its baseline with it.
@@ -237,27 +239,8 @@ impl SheprdWindow {
             // marks paint behind the text and retain normal text contrast.
             return selectable(fragment.as_ref(), view, layout, context.cx).child(content);
         }
-        let mut children: Vec<AnyElement> = Vec::new();
+        let mut runs = Runs::default();
         let mut offset = 0;
-        // A browser breaks a line only after whitespace, so no break may fall
-        // between a formula and the text it touches: `$x$, then` or `($x$)`.
-        let mut glue = false;
-        let push = |children: &mut Vec<AnyElement>, item: AnyElement, glue: bool| {
-            let item = match children.pop() {
-                Some(last) if glue => div()
-                    .flex()
-                    .flex_none()
-                    .items_baseline()
-                    .child(last)
-                    .child(item)
-                    .into_any_element(),
-                last => {
-                    children.extend(last);
-                    item
-                }
-            };
-            children.push(item);
-        };
         let mut words = 0usize;
         for part in content.iter() {
             match part {
@@ -298,8 +281,8 @@ impl SheprdWindow {
                         } else {
                             item.child(styled)
                         };
-                        push(&mut children, item.into_any_element(), glue);
-                        glue = !word.ends_with(char::is_whitespace);
+                        let spaced = word.ends_with(char::is_whitespace);
+                        runs.push(Piece::Word { spaced }, item.into_any_element());
                     }
                 }
                 Inline::Math { id, source, .. } => {
@@ -320,13 +303,11 @@ impl SheprdWindow {
                         None => formula,
                     };
                     offset += source.len();
-                    push(&mut children, formula.into_any_element(), glue);
-                    glue = true;
+                    runs.push(Piece::Math, formula.into_any_element());
                 }
                 Inline::Break => {
                     offset += 1;
-                    glue = false;
-                    children.push(div().w_full().h(px(0.)).into_any_element());
+                    runs.push(Piece::Break, div().w_full().h(px(0.)).into_any_element());
                 }
             }
         }
@@ -336,7 +317,7 @@ impl SheprdWindow {
             .items_baseline()
             .min_w_0()
             .gap_y(px(2.))
-            .children(children)
+            .children(runs.finish())
     }
 
     /// A formula, drawn for the chat's text and scaled to `size`, the text
