@@ -160,3 +160,33 @@ async fn a_side_over_budget_is_slowed_and_its_peer_is_not_charged() {
     assert!(!hub.over_budget(phone));
     assert!(!ended(&session).await);
 }
+
+#[tokio::test]
+async fn work_kept_through_a_ban_for_limits_is_still_counted() {
+    let hub = hub();
+    let household = ip("203.0.113.46");
+    let computer = session(&hub, household, ip("198.51.100.56"), 146);
+    ban_for_limits(&hub, household);
+    // Its transfer still counts toward the budget ...
+    let budget = Limits::default().max_transfer_per_hour;
+    hub.charge(household, budget + 1);
+    assert!(hub.over_budget(household));
+    assert!(!hub.is_evicted(household));
+    assert!(!ended(&computer).await);
+    // ... and misbehaving turns the ban into one that ends its work.
+    hub.offend(household, Offense::Malformed);
+    assert!(hub.is_evicted(household));
+    assert!(ended(&computer).await);
+}
+
+#[tokio::test]
+async fn overrunning_the_budget_during_a_ban_for_limits_evicts() {
+    let hub = hub();
+    let household = ip("203.0.113.47");
+    let computer = session(&hub, household, ip("198.51.100.57"), 147);
+    ban_for_limits(&hub, household);
+    let overrun = Limits::default().max_transfer_per_hour * crate::guard::OVERRUN;
+    hub.charge(household, overrun + 1);
+    assert!(hub.is_evicted(household));
+    assert!(ended(&computer).await);
+}

@@ -173,6 +173,20 @@ impl Record {
         length
     }
 
+    /// Turns a ban that only refused new work into one that evicts, for
+    /// `reason`, keeping its end: how long it has left, if it changed.
+    /// Counting goes on during a ban that leaves open work running, or that
+    /// work could misbehave, or move any amount, unseen.
+    fn escalate(&mut self, reason: Offense, now: Instant) -> Option<Duration> {
+        if self.evicts {
+            return None;
+        }
+        self.evicts = true;
+        self.reason = reason;
+        self.banned_until
+            .map(|until| until.saturating_duration_since(now))
+    }
+
     /// Nothing worth keeping: no ban, no points, no recent transfer.
     fn idle(&self, now: Instant) -> bool {
         !self.banned(now) && self.points == 0 && self.bans == 0 && self.window_bytes == 0
@@ -371,9 +385,6 @@ impl Guard {
         }
         let record = records.entry(key).or_insert_with(|| Record::new(now));
         record.fade(now);
-        if record.banned(now) {
-            return None;
-        }
         change(record, 1)
     }
 
@@ -408,23 +419,28 @@ impl Guard {
         }
         let record = wide.entry(key).or_insert_with(|| Record::new(now));
         record.fade(now);
-        if record.banned(now) {
-            return None;
-        }
         change(record, WIDE_BUDGET)
     }
 
-    /// Counts `offense` against `address`; a ban it caused, newly.
+    /// Counts `offense` against `address`; a ban it caused, or made evict,
+    /// newly.
     pub fn offend(&self, address: IpAddr, offense: Offense, now: Instant) -> Option<Duration> {
         self.record(address, now, |record, _| {
+            if record.banned(now) {
+                // Open work kept through a ban for limits: misbehaving now
+                // ends it.
+                return severe(offense)
+                    .then(|| record.escalate(offense, now))
+                    .flatten();
+            }
             record.points = record.points.saturating_add(points(offense));
             record.hostile |= severe(offense);
             (record.points >= BAN_POINTS).then(|| record.ban(offense, now))
         })
     }
 
-    /// Counts `bytes` `address` sent; a ban for moving [`OVERRUN`] hourly
-    /// budgets, newly. Going over one budget only slows it
+    /// Counts `bytes` `address` sent, banned or not; a ban for moving
+    /// [`OVERRUN`] hourly budgets, newly, or a ban for limits made to evict. Going over one budget only slows it
     /// ([`Guard::over_budget`]).
     pub fn charge(&self, address: IpAddr, bytes: u64, now: Instant) -> Option<Duration> {
         if self.max_transfer_per_hour == 0 || bytes == 0 {
@@ -434,7 +450,13 @@ impl Guard {
         self.record(address, now, |record, scale| {
             record.window_bytes = record.window_bytes.saturating_add(bytes);
             let budget = budget.saturating_mul(scale).saturating_mul(OVERRUN);
-            (record.window_bytes > budget).then(|| record.ban(Offense::Bandwidth, now))
+            if record.window_bytes <= budget {
+                return None;
+            }
+            if record.banned(now) {
+                return record.escalate(Offense::Bandwidth, now);
+            }
+            Some(record.ban(Offense::Bandwidth, now))
         })
     }
 
