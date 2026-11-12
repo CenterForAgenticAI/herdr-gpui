@@ -364,6 +364,9 @@ impl SheprdWindow {
                 .debug_selector(|| "chat-math-inline".into())
                 .flex_none()
                 .relative()
+                // As in KaTeX's HTML, the formula advances by its own width
+                // and its padding overlaps the neighboring spaces.
+                .mx(px(-super::super::rich::MATH_PADDING * scale))
                 .max_w_full()
                 .w(px(width))
                 .h(px((height + top).max(size * 1.4 + before)))
