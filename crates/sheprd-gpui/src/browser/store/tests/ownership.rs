@@ -1,6 +1,11 @@
 use super::*;
 use std::time::Duration;
 
+/// How long a test waits for a lock just released. A process another test
+/// spawns holds the lock's file until it execs, so a released lock can
+/// linger for that moment; only checks that it is still held use no wait.
+const RELEASED: Duration = Duration::from_secs(1);
+
 #[test]
 fn an_expired_startup_budget_never_reads_or_writes_a_phones_inflight_layout() {
     let dir = tempfile::tempdir().unwrap();
@@ -25,7 +30,7 @@ fn an_expired_startup_budget_never_reads_or_writes_a_phones_inflight_layout() {
     ));
     assert_eq!(std::fs::read(&path).unwrap(), before);
     drop(phone);
-    let mut store = Store::load_at(Some(path.clone()), Duration::ZERO).unwrap();
+    let mut store = Store::load_at(Some(path.clone()), RELEASED).unwrap();
     let tab = store.get(TabId::test(4)).unwrap();
     let restored = serde_json::to_value(&tab.location).unwrap();
     assert_eq!(restored["panes"]["second"], "t2");
@@ -39,7 +44,7 @@ fn an_expired_startup_budget_never_reads_or_writes_a_phones_inflight_layout() {
     );
     store.writer.take().unwrap().finish();
     drop(store);
-    assert!(own(&path, Duration::ZERO).is_ok());
+    assert!(own(&path, RELEASED).is_ok());
 }
 
 #[test]

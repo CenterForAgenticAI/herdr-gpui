@@ -8441,6 +8441,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-wrap"
+version = "10.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f21b97672d2dc848e7b25701ab4535618b92f4861c13cc3f7f7bed52ad3c8da"
+dependencies = [
+ "indexmap 2.14.2",
+ "nix",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "prodash"
 version = "31.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10171,6 +10182,7 @@ dependencies = [
  "interprocess",
  "libc",
  "nix",
+ "process-wrap",
  "rustix",
  "serde",
  "serde_json",
@@ -10181,6 +10193,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml_edit 0.25.19+spec-1.1.0",
  "tracing",
+ "windows 0.62.2",
  "windows-sys 0.61.2",
 ]
 
@@ -10331,6 +10344,7 @@ dependencies = [
  "ratex-render",
  "ratex-types",
  "raw-window-handle",
+ "regex",
  "rodio",
  "rustix",
  "secrecy",
@@ -10458,6 +10472,7 @@ dependencies = [
  "sheprd-credentials",
  "sheprd-github",
  "sheprd-remote",
+ "sheprd-session",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
