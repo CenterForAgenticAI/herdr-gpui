@@ -7,7 +7,7 @@ use crate::{
     SheprdWindow,
     browser::{Feedback, FeedbackKey, FeedbackLease, Scope},
 };
-use gpui::{Context, Global, Window};
+use gpui::{App, Context, Global, Window};
 use sheprd_backend::TerminalId;
 use std::time::{Duration, Instant};
 
@@ -81,6 +81,16 @@ impl Pending {
         }
         keep
     }
+}
+
+/// Forgets every note for `scope` once its saved device names another
+/// machine, including notes a waiter holds: a terminal ID on the new machine
+/// is not the pane they were written for, so they are never handed to it.
+pub(crate) fn retire(scope: &Scope, cx: &mut App) {
+    cx.default_global::<PendingReplies>()
+        .0
+        .retain(|pending| pending.target.scope != *scope);
+    cx.default_global::<Feedback>().retire(scope);
 }
 
 impl SheprdWindow {

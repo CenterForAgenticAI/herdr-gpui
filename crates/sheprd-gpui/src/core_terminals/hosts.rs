@@ -349,7 +349,7 @@ impl SheprdWindow {
     /// what is typed until that core answers again and each terminal is
     /// attached anew; nothing is started or replayed.
     pub(super) fn poll_core_hubs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut changed = self.forget_stale_core_hosts();
+        let mut changed = self.forget_stale_core_hosts(cx);
         if self.dispatch_sampling() {
             let hosts: Vec<_> = self
                 .endpoints
@@ -505,7 +505,7 @@ impl SheprdWindow {
     /// somewhere else, with its views and a terminal wanted there, so no new
     /// terminal starts on a machine the device no longer names. A host still
     /// saved gets a new hub the next time its tabs ask. True when any went.
-    fn forget_stale_core_hosts(&mut self) -> bool {
+    fn forget_stale_core_hosts(&mut self, cx: &mut gpui::App) -> bool {
         let stale: Vec<Scope> = self
             .core_terminals
             .remote
@@ -516,6 +516,8 @@ impl SheprdWindow {
         for scope in &stale {
             self.core_terminals
                 .forget_host(&Host::Remote(scope.clone()));
+            // Notes for the old machine's panes never reach the new one's.
+            crate::remote_browser::retire_feedback(scope, cx);
         }
         !stale.is_empty()
     }

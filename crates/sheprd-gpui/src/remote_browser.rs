@@ -21,6 +21,7 @@ mod feedback;
 mod install;
 mod window;
 
+pub(crate) use feedback::retire as retire_feedback;
 pub(crate) use window::Forwarding;
 
 use crate::browser::Scope;

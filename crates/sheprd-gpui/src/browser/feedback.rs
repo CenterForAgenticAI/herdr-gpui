@@ -188,6 +188,13 @@ impl Feedback {
             .map(|(batch, _, added)| (*added, &batch.target))
     }
 
+    /// Drops every batch and waiter for `scope`, whose saved device now
+    /// names another machine: terminal IDs there are not the same panes.
+    pub(crate) fn retire(&mut self, scope: &Scope) {
+        self.kept.retain(|(batch, ..)| batch.target.scope != *scope);
+        self.waiting.retain(|waiter| waiter.scope != *scope);
+    }
+
     pub(crate) fn has(&self, target: &FeedbackKey) -> bool {
         self.kept.iter().any(|(batch, ..)| &batch.target == target)
     }
