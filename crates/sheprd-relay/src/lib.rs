@@ -44,6 +44,8 @@
 mod broker;
 #[cfg(feature = "server")]
 pub mod bucket;
+#[cfg(feature = "client")]
+pub mod client;
 #[cfg(feature = "server")]
 pub mod dashboard;
 pub mod directory;
@@ -59,6 +61,8 @@ pub mod limits;
 pub mod metrics;
 #[cfg(feature = "server")]
 pub mod options;
+#[cfg(any(feature = "server", feature = "client"))]
+pub mod pin;
 #[cfg(feature = "server")]
 pub mod quic;
 pub mod route;

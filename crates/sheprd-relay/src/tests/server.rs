@@ -22,6 +22,8 @@ mod relay;
 mod review;
 mod review2;
 mod shared_address;
+#[cfg(feature = "client")]
+mod through;
 mod tokens;
 
 pub(crate) use super::{hello, public, sign, signing_key};

@@ -10,26 +10,17 @@
 //! start, and clients read the pin from `GET /v1/info` (or a cached copy).
 
 use super::Error;
-use crate::wire::ALPN;
-use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
-use rustls::{
-    DigitallySignedStruct, SignatureScheme,
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature},
-    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
-};
+use crate::{pin::provider, wire::ALPN};
+use quinn::crypto::rustls::QuicServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use sha2::{Digest, Sha256};
-use std::{fmt, fs, io, path::Path, sync::Arc};
+use std::{fmt, fs, io, path::Path};
 
 /// The files an identity directory holds, as DER.
 const KEY_FILE: &str = "quic-key.der";
 const CERTIFICATE_FILE: &str = "quic-certificate.der";
 
-/// The name in the relay's certificate. Clients check the pin, not names.
-pub const SERVER_NAME: &str = "sheprd-relay";
-
-/// A certificate's SHA-256, as clients pin it.
-pub type Pin = [u8; 32];
+pub use crate::pin::{Pin, SERVER_NAME, client_crypto};
 
 /// The relay's certificate and key for this run.
 pub struct Identity {
@@ -125,81 +116,4 @@ fn private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = options.open(path)?;
     file.write_all(bytes)?;
     file.sync_all()
-}
-
-fn provider() -> Arc<CryptoProvider> {
-    Arc::new(rustls::crypto::ring::default_provider())
-}
-
-/// A client config that trusts only the certificate with `pin`.
-pub fn client_crypto(pin: Pin) -> Result<QuicClientConfig, Error> {
-    let provider = provider();
-    let mut config = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
-        .with_protocol_versions(&[&rustls::version::TLS13])?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(Pinned { pin, provider }))
-        .with_no_client_auth();
-    config.alpn_protocols = vec![ALPN.to_vec()];
-    Ok(QuicClientConfig::try_from(config)?)
-}
-
-/// Accepts exactly the pinned certificate, and still checks that the
-/// handshake was signed by its key.
-#[derive(Debug)]
-struct Pinned {
-    pin: Pin,
-    provider: Arc<CryptoProvider>,
-}
-
-impl ServerCertVerifier for Pinned {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        let seen: Pin = Sha256::digest(end_entity).into();
-        if seen == self.pin {
-            return Ok(ServerCertVerified::assertion());
-        }
-        Err(rustls::Error::InvalidCertificate(
-            rustls::CertificateError::ApplicationVerificationFailure,
-        ))
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
-            message,
-            certificate,
-            signature,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
-            message,
-            certificate,
-            signature,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
 }

@@ -29,19 +29,8 @@ use tokio::{sync::broadcast::error::RecvError, time::timeout};
 
 /// How long a new stream has to send its request.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-/// A connection with nothing in flight and no keepalive is dropped after
-/// this. Clients send QUIC keepalives more often.
-const IDLE: Duration = Duration::from_secs(60);
-/// How much one stream, and one connection, of a client may have in
-/// flight. quinn's defaults suit a single stream on a short path; a relay
-/// hop carries bulk transfers over long ones, where a small window caps
-/// throughput at window ÷ round trip. The relay's own windows are sized
-/// to its sessions instead (`window`).
-const CLIENT_STREAM_WINDOW: u32 = 8 * 1024 * 1024;
-const CLIENT_CONNECTION_WINDOW: u32 = 32 * 1024 * 1024;
-/// Streams one connection may have open at once: a phone's sessions to a
-/// few computers, or a computer's listen stream and its sessions.
-const MAX_STREAMS: u32 = 64;
+pub use crate::pin::client_transport;
+use crate::pin::{IDLE, MAX_STREAMS};
 
 /// Binds the QUIC endpoint on `address` with `identity`.
 pub fn bind(address: SocketAddr, identity: &Identity) -> Result<Endpoint, Error> {
@@ -57,22 +46,6 @@ pub fn bind(address: SocketAddr, identity: &Identity) -> Result<Endpoint, Error>
     let mut config = ServerConfig::with_crypto(Arc::new(identity.server_crypto()?));
     config.transport_config(Arc::new(transport));
     Endpoint::server(config, address).map_err(|source| Error::Bind { address, source })
-}
-
-/// The transport settings clients should use: keepalives under the relay's
-/// idle timeout, so NAT mappings and the connection stay open.
-#[must_use]
-pub fn client_transport() -> TransportConfig {
-    let mut transport = TransportConfig::default();
-    transport
-        .keep_alive_interval(Some(Duration::from_secs(15)))
-        .max_idle_timeout(IDLE.try_into().ok())
-        .max_concurrent_uni_streams(VarInt::from_u32(0))
-        .max_concurrent_bidi_streams(VarInt::from_u32(MAX_STREAMS))
-        .stream_receive_window(VarInt::from_u32(CLIENT_STREAM_WINDOW))
-        .receive_window(VarInt::from_u32(CLIENT_CONNECTION_WINDOW))
-        .send_window(u64::from(CLIENT_CONNECTION_WINDOW));
-    transport
 }
 
 /// Accepts connections until the endpoint closes.
