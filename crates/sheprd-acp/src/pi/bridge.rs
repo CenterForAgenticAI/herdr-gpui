@@ -364,6 +364,17 @@ impl Bridge {
                     self.tool_output.clear();
                     vec![out::reply(id, Err(out::failure(error)))]
                 }
+                // An extension command or input handler consumed the prompt
+                // (`/thinking-lower`, say): no run starts, so no `agent_end`
+                // will come to end the turn.
+                (None, Some(id))
+                    if data.get("disposition").and_then(Value::as_str) == Some("handled") =>
+                {
+                    vec![out::reply(
+                        id,
+                        out::to_value(&wire::PromptResponse::new(wire::StopReason::EndTurn)),
+                    )]
+                }
                 (None, prompt) => {
                     // Accepted: the turn ends with `agent_end`.
                     self.prompt = prompt;
