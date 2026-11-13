@@ -303,7 +303,10 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
         }
     }
     let mut scan = Scan::default();
-    for (pid, port) in listeners {
+    for (pid, port) in listeners
+        .into_iter()
+        .filter(|(_, port)| !agent(&port.process))
+    {
         if let Some(owner) = owners.get(&pid) {
             scan.pids.insert(pid, owner.clone());
             add(scan.ports.entry(owner.clone()).or_default(), port);
@@ -316,6 +319,24 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
         sorted(list);
     }
     Ok(scan)
+}
+
+/// Whether a listener belongs to a coding agent itself, Claude Code or Codex,
+/// whose own sockets are its transport rather than a page to preview. Only
+/// the socket's owner counts: a server an agent starts has its own name and
+/// still shows. Claude Code's native build runs from
+/// `~/.local/share/claude/versions/<version>` through a `claude` link, and
+/// macOS names the process after the resolved file, such as `2.1.322`.
+fn agent(process: &str) -> bool {
+    matches!(process, "claude" | "codex") || version(process)
+}
+
+/// `2.1.322`: dotted numbers only.
+fn version(name: &str) -> bool {
+    name.contains('.')
+        && name
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 /// A daemon token such as a workspace id or terminal address: printable,
