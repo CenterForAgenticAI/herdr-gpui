@@ -127,3 +127,38 @@ async fn emptying_the_file_closes_every_token_listener() {
     assert!(hub.access.admit(Some(BOB.as_bytes())).is_none());
     assert!(hub.register_with(again, address, alice).is_err());
 }
+
+#[tokio::test]
+async fn deleting_the_token_file_revokes_everyone_until_it_returns() {
+    use crate::serve::reload_token_file;
+    let directory =
+        std::env::temp_dir().join(format!("sheprd-relay-tokens-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("tokens");
+    std::fs::write(&path, file(&[ALICE])).unwrap();
+    let hub = Arc::new(Hub::new(
+        Limits::default(),
+        Access::tokens(&file(&[ALICE])).unwrap(),
+    ));
+    let mut last = None;
+    reload_token_file(&hub, &path, &mut last);
+    let address: IpAddr = "198.51.100.96".parse().unwrap();
+    let alice = hub.access.admit(Some(ALICE.as_bytes())).unwrap();
+    let route = RouteId::of(signing_key(166).verifying_key());
+    let mut listener = hub.register_with(route, address, alice).unwrap();
+
+    // Deleted: the listener closes and the token is refused.
+    std::fs::remove_file(&path).unwrap();
+    reload_token_file(&hub, &path, &mut last);
+    let closed = tokio::time::timeout(Duration::from_secs(1), listener.incoming.recv()).await;
+    assert!(matches!(closed, Ok(None)));
+    assert!(hub.access.admit(Some(ALICE.as_bytes())).is_none());
+
+    // Back: its tokens work again.
+    std::fs::write(&path, file(&[BOB])).unwrap();
+    reload_token_file(&hub, &path, &mut last);
+    let bob = hub.access.admit(Some(BOB.as_bytes())).unwrap();
+    assert!(hub.register_with(route, address, bob).is_ok());
+    assert!(hub.access.admit(Some(ALICE.as_bytes())).is_none());
+    std::fs::remove_dir_all(&directory).unwrap();
+}
