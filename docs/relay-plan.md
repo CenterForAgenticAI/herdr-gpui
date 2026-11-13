@@ -490,7 +490,8 @@ computer is connected. Optional listen tokens (off by default) keep a
 relay to its owner's computers; dialers never need one. A token file
 (`--listen-token-file`) holds one per person or machine, `NAME: TOKEN` per
 line, re-read every 30 seconds: taking a token out closes the listeners it
-admitted and no one else's. `RELAY_LISTEN_TOKEN` holds a single one.
+admitted and no one else's, and emptying or deleting the file closes them
+all. `RELAY_LISTEN_TOKEN` holds a single one.
 
 ### Keys drop themselves
 

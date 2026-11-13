@@ -197,32 +197,52 @@ pub(crate) async fn watch_ban_file(hub: Arc<Hub>, file: std::path::PathBuf, fixe
 }
 
 /// Re-reads the listen token file every [`BAN_FILE_EVERY`], so tokens can
-/// be added and revoked without a restart; a revoked token's listeners
-/// close. A file that does not parse keeps the tokens already loaded.
+/// be added and revoked without a restart ([`reload_token_file`]).
 async fn watch_token_file(hub: Arc<Hub>, file: std::path::PathBuf) {
     let mut ticks = tokio::time::interval(BAN_FILE_EVERY);
     let mut last: Option<String> = None;
     loop {
         ticks.tick().await;
-        let path = file.clone();
-        let read = tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await;
-        let Ok(Ok(text)) = read else {
-            continue;
+        let (hub, file) = (Arc::clone(&hub), file.clone());
+        // Reading the file is blocking I/O; so is the hub's lock, briefly.
+        let reloaded = tokio::task::spawn_blocking(move || {
+            reload_token_file(&hub, &file, &mut last);
+            last
+        })
+        .await;
+        let Ok(reloaded) = reloaded else {
+            return;
         };
-        if last.as_ref() == Some(&text) {
-            continue;
-        }
-        match hub.access.replace(&text) {
-            Ok(kept) => {
-                tracing::info!(tokens = kept.len(), "loaded the listen token file");
-                hub.keep_tokens(&kept);
-            }
-            Err(error) => {
-                tracing::warn!(%error, "the listen token file is not usable; keeping its last tokens");
-            }
-        }
-        last = Some(text);
+        last = reloaded;
     }
+}
+
+/// One look at the listen token file: when it changed since `last`, its
+/// tokens replace the hub's and a revoked token's listeners close. An
+/// empty or deleted file revokes them all; one that does not parse, or
+/// cannot be read for another reason, keeps the tokens already loaded.
+pub(crate) fn reload_token_file(hub: &Hub, file: &std::path::Path, last: &mut Option<String>) {
+    let text = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            tracing::warn!(%error, "could not read the listen token file; keeping its last tokens");
+            return;
+        }
+    };
+    if last.as_ref() == Some(&text) {
+        return;
+    }
+    match hub.access.replace(&text) {
+        Ok(kept) => {
+            tracing::info!(tokens = kept.len(), "loaded the listen token file");
+            hub.keep_tokens(&kept);
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the listen token file is not usable; keeping its last tokens");
+        }
+    }
+    *last = Some(text);
 }
 
 /// How often the ban file is re-read.

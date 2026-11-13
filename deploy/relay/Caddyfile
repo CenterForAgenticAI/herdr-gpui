@@ -6,11 +6,9 @@
 }
 
 {$RELAY_DOMAIN} {
-	encode zstd gzip {
-		match {
-			path /dashboard*
-		}
-	}
+	# Compress the dashboard's pages only: never the WebSocket fallback.
+	@dashboard path /dashboard*
+	encode @dashboard zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		-Server

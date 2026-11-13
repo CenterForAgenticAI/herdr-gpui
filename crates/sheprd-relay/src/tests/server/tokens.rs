@@ -36,6 +36,14 @@ fn each_token_in_the_file_admits_and_others_do_not() {
 fn a_short_token_or_an_empty_file_refuses_the_whole_file() {
     assert!(Access::tokens(&file(&[ALICE, "short"])).is_err());
     assert!(Access::tokens("# nothing but comments\n").is_err());
+    // While running, emptying the file revokes everyone.
+    let emptied = Access::tokens(&file(&[ALICE])).unwrap();
+    assert_eq!(
+        emptied.replace("# no one\n").unwrap(),
+        Vec::<[u8; 32]>::new()
+    );
+    assert!(emptied.admit(Some(ALICE.as_bytes())).is_none());
+    assert!(emptied.requires_token());
     let access = Access::tokens(&file(&[ALICE])).unwrap();
     // A bad reload keeps the tokens already loaded.
     assert!(access.replace("short").is_err());
@@ -99,4 +107,58 @@ async fn a_token_revoked_after_its_check_cannot_register() {
     let route = RouteId::of(signing_key(163).verifying_key());
     let refused = hub.register_with(route, "198.51.100.93".parse().unwrap(), alice);
     assert_eq!(refused.err(), Some(crate::hub::ListenRefusal::Revoked));
+}
+
+#[tokio::test]
+async fn emptying_the_file_closes_every_token_listener() {
+    let hub = Arc::new(Hub::new(
+        Limits::default(),
+        Access::tokens(&file(&[ALICE, BOB])).unwrap(),
+    ));
+    let address: IpAddr = "198.51.100.95".parse().unwrap();
+    let alice = hub.access.admit(Some(ALICE.as_bytes())).unwrap();
+    let route = RouteId::of(signing_key(164).verifying_key());
+    let mut listener = hub.register_with(route, address, alice).unwrap();
+    let kept = hub.access.replace("").unwrap();
+    hub.keep_tokens(&kept);
+    let closed = tokio::time::timeout(Duration::from_secs(1), listener.incoming.recv()).await;
+    assert!(matches!(closed, Ok(None)));
+    let again = RouteId::of(signing_key(165).verifying_key());
+    assert!(hub.access.admit(Some(BOB.as_bytes())).is_none());
+    assert!(hub.register_with(again, address, alice).is_err());
+}
+
+#[tokio::test]
+async fn deleting_the_token_file_revokes_everyone_until_it_returns() {
+    use crate::serve::reload_token_file;
+    let directory =
+        std::env::temp_dir().join(format!("sheprd-relay-tokens-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("tokens");
+    std::fs::write(&path, file(&[ALICE])).unwrap();
+    let hub = Arc::new(Hub::new(
+        Limits::default(),
+        Access::tokens(&file(&[ALICE])).unwrap(),
+    ));
+    let mut last = None;
+    reload_token_file(&hub, &path, &mut last);
+    let address: IpAddr = "198.51.100.96".parse().unwrap();
+    let alice = hub.access.admit(Some(ALICE.as_bytes())).unwrap();
+    let route = RouteId::of(signing_key(166).verifying_key());
+    let mut listener = hub.register_with(route, address, alice).unwrap();
+
+    // Deleted: the listener closes and the token is refused.
+    std::fs::remove_file(&path).unwrap();
+    reload_token_file(&hub, &path, &mut last);
+    let closed = tokio::time::timeout(Duration::from_secs(1), listener.incoming.recv()).await;
+    assert!(matches!(closed, Ok(None)));
+    assert!(hub.access.admit(Some(ALICE.as_bytes())).is_none());
+
+    // Back: its tokens work again.
+    std::fs::write(&path, file(&[BOB])).unwrap();
+    reload_token_file(&hub, &path, &mut last);
+    let bob = hub.access.admit(Some(BOB.as_bytes())).unwrap();
+    assert!(hub.register_with(route, address, bob).is_ok());
+    assert!(hub.access.admit(Some(ALICE.as_bytes())).is_none());
+    std::fs::remove_dir_all(&directory).unwrap();
 }
