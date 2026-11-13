@@ -208,3 +208,95 @@ fn keys_are_kept_across_restarts() {
     assert_eq!(first.info().route, again.info().route);
     assert_eq!(first.info().identity, again.info().identity);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_nearby_phone_off_the_network_claims_through_a_pairing_dial() {
+    let (http, quic, pin) = relay().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut shared = state(dir.path());
+    let endpoint = Endpoint::parse(&format!("http://{http}")).unwrap();
+    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint]).unwrap());
+    Arc::get_mut(&mut shared).unwrap().relay = Some(Arc::clone(&relays));
+    let (_stop, stopped) = watch::channel(false);
+    let (served, client) = served(dir.path(), &shared);
+    relays.start(served, stopped);
+    listening(&relays).await;
+
+    // The token sealed to the phone over Bluetooth is the pairing secret.
+    let secret = [0x5e; 32];
+    relays.offer_pairing(secret);
+    let info = relays.info();
+    let identity = Identity::from_bytes(&URL_SAFE_NO_PAD.decode(&info.identity).unwrap()).unwrap();
+    let route = RouteId::parse(&info.route).unwrap();
+    let dial = sheprd_relay::route::pairing_dial_key(&secret);
+    let phone_tunnel = TunnelKeys::from_secrets([0x54; 32], [0x55; 64]);
+    let connection = client::connect(quic, pin).await.unwrap();
+    // The listener names the key moments after it is offered.
+    let mut dialed = None;
+    for _ in 0..50 {
+        if let Ok(halves) = client::dial(&connection, route, &dial).await {
+            dialed = Some(halves);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let (send_half, recv_half) = dialed.expect("the pairing dial was never let through");
+    let (initiator, first) = Initiator::pairing(
+        &phone_tunnel,
+        &identity.x25519(),
+        &identity.fingerprint(),
+        route.as_bytes(),
+        &secret,
+    )
+    .unwrap();
+    let tunnel = stream::connect(
+        join(recv_half, send_half),
+        initiator,
+        &first,
+        identity.x25519(),
+    )
+    .await
+    .unwrap();
+    let mut https = tokio_rustls::TlsConnector::from(Arc::new(client))
+        .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tunnel.io)
+        .await
+        .unwrap();
+    https
+        .write_all(b"GET /api/ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    let _ = https.read_to_end(&mut response).await;
+    let response = String::from_utf8_lossy(&response);
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+
+    // One dial: the key is spent.
+    let again = client::dial(&connection, route, &dial).await;
+    assert!(matches!(
+        again,
+        Err(client::Error::Refused(sheprd_relay::wire::Status::Offline))
+    ));
+}
+
+#[test]
+fn a_nearby_offer_names_the_relays_and_hands_its_token_to_them_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let relays = Relays::load(dir.path(), Vec::new()).unwrap();
+    let mut auth = crate::auth::Auth::load(dir.path(), crate::auth::Limits::default()).unwrap();
+    assert!(auth.take_relay_pairing().is_none());
+    auth.set_relay_offer(relays.info());
+    let offer = serde_json::to_value(crate::auth::nearby::Offer {
+        token: "t".into(),
+        origins: &[],
+        relay: Some(&relays.info()),
+    })
+    .unwrap();
+    assert_eq!(offer["relay"]["route"], relays.info().route);
+    let without = serde_json::to_value(crate::auth::nearby::Offer {
+        token: "t".into(),
+        origins: &[],
+        relay: None,
+    })
+    .unwrap();
+    assert!(without.get("relay").is_none());
+}

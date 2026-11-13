@@ -570,6 +570,21 @@ commitment-based codes; after approval they hand over the same relay
 data inside their channel, so a phone paired in the room also works away
 from it.
 
+**Built: Bluetooth pairing from another network.** When the computer
+listens on relays, the offer it seals to a nearby phone (under the code
+both screens show) also names its relays, route, and tunnel identity,
+and the offer's token doubles as the pairing secret: the daemon opens a
+one-dial pairing key on each relay, derived from it
+(`route::pairing_dial_key`, two minutes). The phone claims at the
+computer's addresses as before; when none answers, it dials that key
+through a relay, runs the tunnel's pairing handshake (PSK from the
+token), and claims over the same TLS inside. Every claim from a nearby
+phone carries its own dial and tunnel keys, stored with the device on
+Allow and named on the relays at once, so later polls, and everything
+after, go through the relays with the phone's own keys. A phone paired
+over Bluetooth on another network therefore works without ever sharing
+a network with the computer.
+
 ### Revoking and losing a phone
 
 - **Revoking a device** in Sheprd removes its dial keys from every relay

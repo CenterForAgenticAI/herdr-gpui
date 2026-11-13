@@ -180,6 +180,13 @@ phone still signs in with its device key and a bearer token. The relay's
 QUIC pin is read from its `/v1/info` over HTTPS. `sheprd remote status`
 shows each relay's state.
 
+Bluetooth pairing works from another network: the sealed nearby offer
+also carries `relay` (the same fields as `GET /api/relay`), revealing it
+opens a one-dial pairing key on each relay derived from the offer's
+token, and a dial with that key runs the tunnel's pairing handshake, so
+the phone can claim with no shared network. A claim may carry
+`relay: {dial, tunnel}`, stored with the device on Allow.
+
 ## Pairing and authentication
 
 `auth` (server only) holds the pairing the desktop dialog opens, the paired

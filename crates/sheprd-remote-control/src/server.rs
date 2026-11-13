@@ -176,6 +176,8 @@ pub async fn run(options: Options) -> Result<()> {
     }
     let router = web::router(state.clone());
     if let Some(relay) = &state.relay {
+        // Nearby offers say how to claim through the relays too.
+        state.auth().set_relay_offer(relay.info());
         // The phone reaches a relay session at `https://127.0.0.1:PORT`
         // through its loopback proxy: the certificate for that address.
         let mut tls = (*config).clone();

@@ -163,3 +163,37 @@ struct RelayLiveTests {
         }
     }
 }
+
+struct RelayPairingTests {
+    struct Pairing: Decodable {
+        let secret: String
+        let scalar: String
+        let `public`: String
+    }
+
+    @Test func thePairingDialKeyIsTheOneTheComputerOpens() throws {
+        let url = try #require(Bundle.module.url(forResource: "Fixtures/relay/pairing", withExtension: "json"))
+        let vector = try JSONDecoder().decode(Pairing.self, from: Data(contentsOf: url))
+        let key = RelayProof.pairingDialKey(secret: try TunnelVectorTests.hex(vector.secret))
+        #expect(key.rawRepresentation == (try TunnelVectorTests.hex(vector.scalar)))
+        #expect(key.publicKey.compressedRepresentation == (try TunnelVectorTests.hex(vector.public)))
+    }
+
+    @Test func anOfferWithAndWithoutRelaysReads() throws {
+        let plain = try JSONDecoder().decode(NearbySAS.Offer.self, from: Data(#"{"token":"t","origins":["https://a:1"]}"#.utf8))
+        #expect(plain.relay == nil)
+        let relayed = try JSONDecoder().decode(
+            NearbySAS.Offer.self,
+            from: Data(#"{"token":"t","origins":[],"relay":{"identity":"i","relays":["https://r"],"route":"x"}}"#.utf8)
+        )
+        #expect(relayed.relay?.relays == ["https://r"])
+    }
+
+    @Test func aClaimCarriesRelayKeysOnlyWhenItHasThem() throws {
+        let without = try JSONSerialization.jsonObject(with: JSONEncoder().encode(API.ClaimRequest(token: "t", name: "n", publicKey: "k"))) as? [String: Any]
+        #expect(without?["relay"] == nil)
+        let keys = API.RelayKeys(dial: "d", tunnel: "t")
+        let with = try JSONSerialization.jsonObject(with: JSONEncoder().encode(API.ClaimRequest(token: "t", name: "n", publicKey: "k", relay: keys))) as? [String: Any]
+        #expect((with?["relay"] as? [String: String]) == ["dial": "d", "tunnel": "t"])
+    }
+}

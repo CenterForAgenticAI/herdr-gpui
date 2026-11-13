@@ -26,6 +26,14 @@ public actor RelaySession {
         self.decoder = decoder
     }
 
+    /// Which tunnel handshake to run once the relay lets the dial through.
+    public enum Handshake: Sendable {
+        /// A paired phone's session, against the pinned identity.
+        case session(local: Curve25519.KeyAgreement.PrivateKey, listener: Tunnel.Identity)
+        /// Pairing, with the PSK from the offer's token.
+        case pairing(local: Curve25519.KeyAgreement.PrivateKey, listener: Tunnel.Identity, secret: Data)
+    }
+
     /// Dials `route` on `endpoint` with `dialKey`, then runs the tunnel's
     /// session handshake with `tunnelKey` against `listener`.
     public static func open(
@@ -34,6 +42,20 @@ public actor RelaySession {
         dialKey: P256.Signing.PrivateKey,
         tunnelKey: Curve25519.KeyAgreement.PrivateKey,
         listener: Tunnel.Identity,
+        session: URLSession = .shared
+    ) async throws -> RelaySession {
+        try await open(
+            endpoint: endpoint, route: route, dialKey: dialKey,
+            tunnel: .session(local: tunnelKey, listener: listener), session: session
+        )
+    }
+
+    /// Dials `route` on `endpoint` with `dialKey`, then runs `tunnel`.
+    public static func open(
+        endpoint: RelayEndpoint,
+        route: Data,
+        dialKey: P256.Signing.PrivateKey,
+        tunnel: Handshake,
         session: URLSession = .shared
     ) async throws -> RelaySession {
         guard let url = endpoint.dial(route: route) else { throw Failure.protocolError }
@@ -55,7 +77,16 @@ public actor RelaySession {
             else { throw Failure.protocolError }
             guard status.status == "ok" else { throw Failure.refused(status.status) }
 
-            let (initiator, first) = try Tunnel.Initiator.session(local: tunnelKey, listener: listener, route: route)
+            let (initiator, first): (Tunnel.Initiator, Data)
+            switch tunnel {
+            case let .session(local, listener):
+                (initiator, first) = try Tunnel.Initiator.session(local: local, listener: listener, route: route)
+            case let .pairing(local, listener, secret):
+                (initiator, first) = try Tunnel.Initiator.pairing(
+                    local: local, listenerX25519: listener.x25519,
+                    listenerFingerprint: listener.fingerprint, route: route, secret: secret
+                )
+            }
             try await socket.send(.data(Tunnel.Frame.encode(first)))
             var decoder = Tunnel.Frame.Decoder()
             let answer = try await nextFrame(socket: socket, decoder: &decoder)

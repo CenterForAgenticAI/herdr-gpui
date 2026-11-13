@@ -115,3 +115,28 @@ pub fn prove(key: &[u8], signature: &[u8], message: &[u8]) -> Result<RouteId, Re
         .map_err(|_| Refusal::Signature)?;
     Ok(RouteId::of(&key))
 }
+
+/// What a pairing dial key's derivation hashes ahead of the secret.
+const PAIRING_DIAL_CONTEXT: &[u8] = b"sheprd-relay/pairing-dial/v1\0";
+
+/// The one-dial key a phone pairs through a relay with, from the pairing
+/// secret both sides hold (the claim token the computer sealed to the
+/// phone): SHA-256 of a context, the secret, and a counter, the first that
+/// is a P-256 scalar. The computer registers its public half as a pairing
+/// key, which the relay lets through once.
+#[must_use]
+pub fn pairing_dial_key(secret: &[u8; 32]) -> p256::ecdsa::SigningKey {
+    let mut counter: u8 = 0;
+    loop {
+        let digest = Sha256::new()
+            .chain_update(PAIRING_DIAL_CONTEXT)
+            .chain_update(secret)
+            .chain_update([counter])
+            .finalize();
+        if let Ok(key) = p256::ecdsa::SigningKey::from_slice(&digest) {
+            return key;
+        }
+        // Out of range about once in 2^32 tries; the next counter is not.
+        counter = counter.wrapping_add(1);
+    }
+}

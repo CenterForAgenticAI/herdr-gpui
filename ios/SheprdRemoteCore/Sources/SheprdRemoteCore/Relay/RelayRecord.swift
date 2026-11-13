@@ -62,6 +62,27 @@ public struct RelayRecord: Codable, Hashable, Sendable {
             && Set(info.relays.compactMap(RelayEndpoint.init)) == Set(relays)
     }
 
+    /// Opens the pairing session a nearby offer allowed, through the first
+    /// relay that answers: the one-dial key and the tunnel's pairing PSK
+    /// both come from the offer's token, `secret`.
+    public func openPairing(secret: Data, session: URLSession = .shared) async throws -> RelaySession {
+        let dial = RelayProof.pairingDialKey(secret: secret)
+        let tunnel = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: tunnelKey)
+        let listener = try Tunnel.Identity(bytes: identity)
+        var last: Error = RelaySession.Failure.closed
+        for relay in relays {
+            do {
+                return try await RelaySession.open(
+                    endpoint: relay, route: route, dialKey: dial, tunnel: .pairing(local: tunnel, listener: listener, secret: secret),
+                    session: session
+                )
+            } catch {
+                last = error
+            }
+        }
+        throw last
+    }
+
     /// Opens a session to the computer through the first relay that
     /// answers.
     public func open(session: URLSession = .shared) async throws -> RelaySession {
@@ -85,7 +106,7 @@ public struct RelayRecord: Codable, Hashable, Sendable {
 
 extension API {
     /// `GET /api/relay`.
-    public struct RelayInfo: Codable, Equatable, Sendable {
+    public struct RelayInfo: Codable, Hashable, Sendable {
         public let identity: String
         public let relays: [String]
         public let route: String

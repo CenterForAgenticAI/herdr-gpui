@@ -65,3 +65,17 @@ fn dial_vectors() {
         }),
     );
 }
+
+#[test]
+fn pairing_dial_vectors() {
+    let secret = [0x5e; 32];
+    let key = crate::route::pairing_dial_key(&secret);
+    check(
+        "pairing",
+        &json!({
+            "secret": hex(&secret),
+            "scalar": hex(&key.to_bytes()),
+            "public": hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        }),
+    );
+}

@@ -70,8 +70,10 @@ async fn session(
     let connection = client::connect(address, pin).await?;
     let mut listener = Listener::listen(connection, &relays.keys.route, b"").await?;
     let mut changed = relays.changed.subscribe();
+    let mut pairing = relays.pairing_changed.subscribe();
     let mut revoked = state.auth().watch_revocations();
     listener.set_dial_keys(dial_keys(state)).await?;
+    add_pairing(relays, &mut listener).await;
     relays.set_status(endpoint, Status::Listening);
     tracing::info!(relay = %endpoint, "listening on a relay");
     // Listening worked: the next failure starts the backoff over.
@@ -88,9 +90,20 @@ async fn session(
                 ));
             }
             _ = changed.changed() => listener.set_dial_keys(dial_keys(state)).await?,
+            _ = pairing.changed() => add_pairing(relays, &mut listener).await,
             _ = revoked.changed() => listener.set_dial_keys(dial_keys(state)).await?,
             error = listener.closed() => return Err(Error::Client(error.into())),
         }
+    }
+}
+
+/// Lets the open pairing dial through, if any. A relay refusing it (too
+/// many at once) leaves listening as it was.
+async fn add_pairing(relays: &Relays, listener: &mut Listener) {
+    if let Some((key, seconds)) = relays.pairing_key()
+        && let Err(error) = listener.add_pairing_key(key, seconds).await
+    {
+        tracing::warn!(error = %error, "a relay did not take the pairing key");
     }
 }
 

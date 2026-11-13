@@ -36,9 +36,16 @@ async fn serve(relays: &Relays, incoming: Incoming, route: RouteId, served: Serv
     let Served { router, state, tls } = served;
     let state = &state;
     let tunnel_keys = &relays.keys.tunnel;
-    let responder = Responder::session(tunnel_keys, route.as_bytes())?;
+    // The open pairing dial runs the pairing handshake, whose PSK is the
+    // token sealed to the nearby phone: any phone that holds it may claim,
+    // as over the network. Every other dial must be a paired device's.
+    let pairing = relays.pairing_secret(&incoming.key);
+    let responder = match &pairing {
+        Some(secret) => Responder::pairing(tunnel_keys, route.as_bytes(), secret)?,
+        None => Responder::session(tunnel_keys, route.as_bytes())?,
+    };
     let io = join(incoming.recv, incoming.send);
-    let paired = |remote: &[u8; 32]| paired(state, remote);
+    let paired = |remote: &[u8; 32]| pairing.is_some() || paired(state, remote);
     let accepted = tokio::time::timeout(
         HANDSHAKE,
         stream::accept(io, tunnel_keys, responder, paired),

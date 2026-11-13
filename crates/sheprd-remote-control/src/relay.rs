@@ -23,12 +23,40 @@ pub(crate) use error::Result;
 pub(crate) use crate::control::RelayState as Status;
 use serde::Serialize;
 use sheprd_relay::Endpoint;
+use sheprd_relay::wire::Key;
 use std::{
     collections::BTreeMap,
     path::Path,
     sync::{Arc, Mutex, PoisonError},
+    time::{Duration, Instant},
 };
 use tokio::sync::watch;
+
+/// How long a pairing dial stays open on the relays: the nearby token's
+/// claim window, with room for the phone to find a relay.
+const PAIRING: Duration = Duration::from_secs(120);
+
+/// A pairing dial the relays let through once: the key a nearby phone
+/// derives from the token sealed to it, and that token, the tunnel's
+/// pairing secret.
+#[derive(Clone, Debug)]
+struct Pairing {
+    key: Key,
+    secret: [u8; 32],
+    until: Instant,
+}
+
+/// Lets the phone a nearby offer was just sealed to pair through the
+/// relays from another network, when this computer listens on any.
+pub(crate) fn open_pairing(state: &crate::web::State) {
+    let Some(relay) = &state.relay else {
+        return;
+    };
+    let secret = state.auth().take_relay_pairing();
+    if let Some(secret) = secret {
+        relay.offer_pairing(secret);
+    }
+}
 
 /// The relays this computer listens on, and what it listens with.
 #[derive(Debug)]
@@ -38,6 +66,9 @@ pub(crate) struct Relays {
     changed: watch::Sender<u64>,
     endpoints: Vec<Endpoint>,
     keys: keys::Keys,
+    /// The open pairing dial, if any, and a revision listeners follow.
+    pairing: Mutex<Option<Pairing>>,
+    pairing_changed: watch::Sender<u64>,
     /// Each relay's state, for `sheprd remote status`.
     status: Mutex<BTreeMap<String, Status>>,
 }
@@ -60,6 +91,8 @@ impl Relays {
             changed: watch::Sender::new(0),
             endpoints,
             keys: keys::Keys::load_or_create(state_dir)?,
+            pairing: Mutex::default(),
+            pairing_changed: watch::Sender::new(0),
             status: Mutex::default(),
         })
     }
@@ -72,6 +105,37 @@ impl Relays {
             relays: self.endpoints.iter().map(ToString::to_string).collect(),
             route: self.keys.route().to_string(),
         }
+    }
+
+    /// Opens a pairing dial for the phone holding `secret`, on every relay.
+    pub(crate) fn offer_pairing(&self, secret: [u8; 32]) {
+        let key = sheprd_relay::client::public(&sheprd_relay::route::pairing_dial_key(&secret));
+        *self.pairing.lock().unwrap_or_else(PoisonError::into_inner) = Some(Pairing {
+            key,
+            secret,
+            until: Instant::now() + PAIRING,
+        });
+        self.pairing_changed.send_modify(|revision| *revision += 1);
+    }
+
+    /// The open pairing dial's key, and how many seconds it has left.
+    fn pairing_key(&self) -> Option<(Key, u16)> {
+        let pairing = self.pairing.lock().unwrap_or_else(PoisonError::into_inner);
+        let pairing = pairing.as_ref()?;
+        let left = pairing.until.checked_duration_since(Instant::now())?;
+        Some((
+            pairing.key,
+            u16::try_from(left.as_secs()).unwrap_or(u16::MAX).max(1),
+        ))
+    }
+
+    /// The pairing secret, when `key` is the open pairing dial's.
+    fn pairing_secret(&self, key: &Key) -> Option<[u8; 32]> {
+        let pairing = self.pairing.lock().unwrap_or_else(PoisonError::into_inner);
+        pairing
+            .as_ref()
+            .filter(|pairing| pairing.key == *key && pairing.until > Instant::now())
+            .map(|pairing| pairing.secret)
     }
 
     /// A device's relay keys changed: every listener names them again.

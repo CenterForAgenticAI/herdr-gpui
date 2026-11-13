@@ -161,7 +161,7 @@ impl Devices {
             apns: None,
             via,
             links,
-            relay: None,
+            relay: device.relay,
         });
         self.save_or_undo(|devices| {
             devices.records.pop();
