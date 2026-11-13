@@ -1305,6 +1305,8 @@ closes; a page reopened after a dropped tunnel keeps its address while that
 local port is free. Windows clients
 do not scan this machine. Set top-level `show_listening_ports = false`, or
 turn off **Show listening ports** in Settings, to hide them and stop scanning.
+Coding agents' own listeners, such as Claude Code's and Codex's, are left
+out; servers they start show under their own process names.
 
 Set top-level `show_network_quality = true` to show latency and packet loss
 from this machine in the status bar, after CPU and memory: `NET 31ms 0%`.
