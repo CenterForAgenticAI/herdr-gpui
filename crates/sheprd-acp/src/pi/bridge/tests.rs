@@ -195,6 +195,37 @@ fn a_turn_streams_and_ends_from_how_pi_stopped() {
 }
 
 #[test]
+fn a_prompt_a_command_handles_ends_the_turn_without_a_run() {
+    let mut bridge = opened();
+    let outs = bridge.on_session(request(
+        2,
+        "session/prompt",
+        json!({"sessionId": SESSION, "prompt": [{"type": "text", "text": "/thinking-lower"}]}),
+    ));
+    let command = harness(&outs[0]).clone();
+    let outs = bridge.on_harness(&done(&command, json!({"disposition": "handled"})));
+    assert_eq!(
+        response(&outs[0], 2).as_ref().unwrap()["stopReason"],
+        "end_turn"
+    );
+    let late = bridge.on_harness(&json!({"type": "agent_end", "messages": []}));
+    assert!(late.is_empty(), "the turn is already over");
+    let outs = bridge.on_session(request(
+        3,
+        "session/prompt",
+        json!({"sessionId": SESSION, "prompt": [{"type": "text", "text": "Next"}]}),
+    ));
+    let command = harness(&outs[0]).clone();
+    let accepted = bridge.on_harness(&done(&command, json!({"disposition": "started"})));
+    assert!(accepted.is_empty(), "a started run ends with agent_end");
+    let outs = bridge.on_harness(&json!({"type": "agent_end", "messages": []}));
+    assert_eq!(
+        response(&outs[0], 3).as_ref().unwrap()["stopReason"],
+        "end_turn"
+    );
+}
+
+#[test]
 fn cancelling_aborts_and_the_turn_ends_cancelled() {
     let mut bridge = opened();
     let idle = bridge.on_session(Inbound::Notification {
