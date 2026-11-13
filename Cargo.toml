@@ -108,9 +108,11 @@ sheprd-mods           = { path = "crates/sheprd-mods" }
 sheprd-orchestrator   = { path = "crates/sheprd-orchestrator" }
 sheprd-protocol       = { path = "crates/sheprd-protocol" }
 sheprd-remote         = { default-features = false, path = "crates/sheprd-remote" }
+sheprd-relay          = { default-features = false, path = "crates/sheprd-relay" }
 sheprd-remote-control         = { default-features = false, path = "crates/sheprd-remote-control" }
 sheprd-session        = { path = "crates/sheprd-session" }
 sheprd-terminal       = { path = "crates/sheprd-terminal" }
+sheprd-tunnel         = { path = "crates/sheprd-tunnel" }
 sheprd-updater        = { path = "crates/sheprd-updater" }
 sheprd-usage          = { path = "crates/sheprd-usage" }
 sheprd-vcs            = { path = "crates/sheprd-vcs" }

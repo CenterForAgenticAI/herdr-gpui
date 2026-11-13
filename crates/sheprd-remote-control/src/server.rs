@@ -104,6 +104,14 @@ pub async fn run(options: Options) -> Result<()> {
     )?;
     let (pull_requests, _) = watch::channel(Arc::new(Default::default()));
     let load = crate::load::start();
+    let relay = if options.relays.is_empty() {
+        None
+    } else {
+        Some(Arc::new(crate::relay::Relays::load(
+            &options.state_dir,
+            options.relays.clone(),
+        )?))
+    };
     let state = Arc::new(State {
         apns,
         apps,
@@ -125,6 +133,7 @@ pub async fn run(options: Options) -> Result<()> {
         privacy: options.privacy,
         pull_requests,
         push,
+        relay,
         reports: Mutex::new(web::report_limit()),
         seen: Mutex::new(seen),
         shortcuts: web::Shortcuts::load(crate::app::shortcuts::file(&options.state_dir)),
@@ -165,7 +174,11 @@ pub async fn run(options: Options) -> Result<()> {
     if options.bonjour && !cfg!(target_os = "macos") {
         tokio::spawn(bonjour::advertise(state.clone(), stopped.clone()));
     }
-    let app = web::router(state).into_make_service_with_connect_info::<web::Peer>();
+    let router = web::router(state.clone());
+    if let Some(relay) = &state.relay {
+        relay.start(state.clone(), router.clone(), stopped.clone());
+    }
+    let app = router.into_make_service_with_connect_info::<web::Peer>();
     let mut shutdown = stopped.clone();
     let serve = axum::serve(listener::TlsListener::new(tcp, config, resolver), app)
         .with_graceful_shutdown(async move {

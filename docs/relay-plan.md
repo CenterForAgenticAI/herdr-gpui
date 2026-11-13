@@ -687,6 +687,13 @@ last uses its own domain.
   `serve_connection`, so the native API, WebSocket, and bearer tokens are
   unchanged.
 - `sheprd remote status --json` reports each relay: listening, last error.
+- **Built (first cut):** `[remote] relays` lists private relays; the daemon
+  listens on each over QUIC (no WebSocket fallback yet), reading the pin
+  from `/v1/info`. Paired phones learn the route, relays, and tunnel
+  identity from `GET /api/relay` and send one dial key and their tunnel key
+  with `POST /api/relay`, over the network or Tailscale. Still to come: a
+  dial key per relay, Sheprd's signed list (`"default"`), the WebSocket
+  fallback, and pairing over a relay from the QR.
 
 ### iOS app and other apps
 

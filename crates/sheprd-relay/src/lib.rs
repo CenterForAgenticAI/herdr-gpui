@@ -85,7 +85,7 @@ pub use limits::Limits;
 pub use options::{Options, USAGE};
 pub use route::{RouteId, SessionId};
 #[cfg(feature = "server")]
-pub use serve::{bind_quic, serve};
+pub use serve::{app, bind_quic, serve};
 
 #[cfg(test)]
 mod tests;

@@ -8,7 +8,7 @@
 //! `std::sync::Mutex` and passes every time explicitly, in milliseconds
 //! since the Unix epoch, so the rules are tested without clocks or sockets.
 
-mod devices;
+pub(crate) mod devices;
 mod handoff;
 mod limits;
 pub(crate) mod links;

@@ -347,5 +347,10 @@ fn status(state: &State) -> Status {
         chats: layout.chats().count(),
         devices: state.auth().devices().len(),
         connected: state.connected().len(),
+        relays: state
+            .relay
+            .as_ref()
+            .map(|relay| relay.status())
+            .unwrap_or_default(),
     }
 }
