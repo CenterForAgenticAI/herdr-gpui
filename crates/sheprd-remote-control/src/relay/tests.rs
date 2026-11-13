@@ -141,7 +141,7 @@ async fn a_paired_phone_reaches_the_api_through_a_relay_end_to_end() {
         header::AUTHORIZATION,
         format!("Bearer {token}").parse().unwrap(),
     );
-    assert_eq!(send(&shared, enroll).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(send(&shared, enroll).await.0, StatusCode::OK);
 
     let (_stop, stopped) = watch::channel(false);
     let (served, client) = served(dir.path(), &shared);

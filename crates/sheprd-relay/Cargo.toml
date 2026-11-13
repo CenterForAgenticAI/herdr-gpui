@@ -44,6 +44,10 @@ required-features = ["server"]
 name              = "relays"
 required-features = ["signed-directory"]
 
+[[example]]
+name              = "echo_computer"
+required-features = ["client", "server"]
+
 [dependencies]
 base64.workspace     = true
 getrandom.workspace  = true

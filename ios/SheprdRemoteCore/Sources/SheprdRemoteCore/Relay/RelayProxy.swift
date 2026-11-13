@@ -4,15 +4,25 @@ import Network
 /// Lets the app's own HTTP and WebSocket code reach a computer through a
 /// relay unchanged: a listener on this device's loopback interface, where
 /// each connection the app opens becomes one `RelaySession` to the
-/// computer, bytes carried both ways. Only this app's process can connect,
-/// and only on loopback; everything that leaves the device is inside the
-/// tunnel.
+/// computer, bytes carried both ways. Everything that leaves the device is
+/// inside the tunnel.
+///
+/// Another process on this device can connect to a loopback port too; it
+/// then reaches the computer's TLS, where everything but its open pairing
+/// and ping routes still needs the phone's bearer token. It could hold
+/// sessions, so the proxy carries at most `maxSessions` at once, the
+/// relay's limit per dial key, and refuses the rest.
 public final class RelayProxy: @unchecked Sendable {
     public typealias Open = @Sendable () async throws -> RelaySession
+
+    /// Sessions at once: the relay allows four per dial key.
+    public static let maxSessions = 4
 
     private let listener: NWListener
     private let open: Open
     private let queue = DispatchQueue(label: "sheprd.relay.proxy")
+    /// Sessions carried now; touched on `queue` only.
+    private var carried = 0
 
     /// A proxy that opens a session with `open` for each connection.
     public init(open: @escaping Open) throws {
@@ -49,10 +59,17 @@ public final class RelayProxy: @unchecked Sendable {
         listener.cancel()
     }
 
+    /// Runs on `queue`, as the listener's handler does.
     private func serve(_ connection: NWConnection) {
+        guard carried < Self.maxSessions else {
+            connection.cancel()
+            return
+        }
+        carried += 1
         connection.start(queue: queue)
         let open = open
         Task {
+            defer { queue.async { self.carried -= 1 } }
             guard let session = try? await open() else {
                 connection.cancel()
                 return

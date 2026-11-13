@@ -7,7 +7,7 @@
 
 use super::{ApiError, Device, Shared};
 use crate::auth::{decode_fixed, devices::RelayKeys};
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{Json, extract::State};
 use serde::Deserialize;
 
 pub(super) async fn info(
@@ -31,7 +31,7 @@ pub(super) async fn enroll(
     State(state): State<Shared>,
     Device(device): Device,
     Json(keys): Json<Keys>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let relay = state.relay.clone().ok_or(ApiError::NotFound)?;
     let keys = RelayKeys {
         dial: keys.dial,
@@ -56,5 +56,5 @@ pub(super) async fn enroll(
         return Err(ApiError::Unauthorized);
     }
     relay.devices_changed();
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(serde_json::json!({})))
 }

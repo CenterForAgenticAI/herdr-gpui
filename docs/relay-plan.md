@@ -711,6 +711,20 @@ last uses its own domain.
   can say "Through relay (fra1)".
 - The share extension, widgets, and the watch app use `SheprdRemoteCore`
   and get the same path.
+- **Built (first cut):** while a computer answers directly, the app asks
+  `GET /api/relay` and, when the computer listens on relays, makes a dial
+  key and a tunnel key for it, sends them (`POST /api/relay`), and keeps
+  the computer's route, relays, and tunnel identity in its Keychain record
+  (`RelayRecord`). While its link runs, a loopback proxy (`RelayProxy`)
+  turns each connection the app opens into a `RelaySession`: the relay's
+  WebSocket fallback, its dial proof, then the hybrid tunnel against the
+  pinned identity. Its `https://127.0.0.1:PORT` origin is raced after the
+  computer's own addresses, and the daemon answers inside the tunnel with
+  the same TLS it serves on the network, so pinning, sign-in, and the live
+  socket are unchanged. The proxy carries at most four sessions, the
+  relay's limit per dial key. Still to come: QUIC on iOS, a relay label in
+  the app, pairing over a relay, and the relay for intents, notification
+  actions, and the share extension, which still go direct.
 - The PWA cannot use the relay: a browser cannot run the handshake inside a
   WebSocket and then treat it as an origin. It keeps LAN and Tailscale.
 
