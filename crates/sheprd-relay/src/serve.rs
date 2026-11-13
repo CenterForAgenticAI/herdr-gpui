@@ -198,7 +198,8 @@ pub(crate) async fn watch_ban_file(hub: Arc<Hub>, file: std::path::PathBuf, fixe
 
 /// Re-reads the listen token file every [`BAN_FILE_EVERY`], so tokens can
 /// be added and revoked without a restart; a revoked token's listeners
-/// close. A file that does not parse keeps the tokens already loaded.
+/// close. An empty or deleted file revokes them all; one that does not
+/// parse keeps the tokens already loaded.
 async fn watch_token_file(hub: Arc<Hub>, file: std::path::PathBuf) {
     let mut ticks = tokio::time::interval(BAN_FILE_EVERY);
     let mut last: Option<String> = None;
@@ -206,8 +207,12 @@ async fn watch_token_file(hub: Arc<Hub>, file: std::path::PathBuf) {
         ticks.tick().await;
         let path = file.clone();
         let read = tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await;
-        let Ok(Ok(text)) = read else {
-            continue;
+        // A deleted file revokes every token, as an empty one does; any
+        // other read failure keeps them, as it may pass.
+        let text = match read {
+            Ok(Ok(text)) => text,
+            Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Ok(Err(_)) | Err(_) => continue,
         };
         if last.as_ref() == Some(&text) {
             continue;

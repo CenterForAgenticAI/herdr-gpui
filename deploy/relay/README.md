@@ -224,8 +224,9 @@ bob-desktop: 9f8e7d...
 ```
 
 The relay re-reads it every 30 seconds; delete a line and that token's
-computers stop listening within half a minute. A file it cannot use (a
-token under 16 characters, say) is ignored and the last good one kept.
+computers stop listening within half a minute. Emptying or deleting the
+file revokes every token. A file it cannot parse (a token under 16
+characters, say) is ignored and the last good one kept.
 
 ## Toxic clients
 

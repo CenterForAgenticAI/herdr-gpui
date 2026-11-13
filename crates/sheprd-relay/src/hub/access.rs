@@ -42,8 +42,18 @@ pub struct Token {
 
 impl Access {
     /// Holders of the tokens in `text`, one per line.
+    /// Holders of the tokens in `text`, one per line. At start, a file
+    /// with none is refused as a mistake; while running, emptying it
+    /// revokes every token ([`Access::replace`]).
     pub fn tokens(text: &str) -> Result<Self> {
-        Ok(Self::Tokens(RwLock::new(parse(text)?)))
+        let tokens = parse(text)?;
+        if tokens.is_empty() {
+            return Err(Error::WeakSecret {
+                min: MIN_TOKEN,
+                name: "the listen token file",
+            });
+        }
+        Ok(Self::Tokens(RwLock::new(tokens)))
     }
 
     fn held(&self) -> Option<RwLockReadGuard<'_, Vec<Token>>> {
@@ -88,8 +98,10 @@ impl Access {
     }
 
     /// Replaces the tokens with those in `text`; the digests of those kept,
-    /// so listeners a dropped token admitted can be closed. On an open
-    /// relay, or when `text` is not a token file, nothing changes.
+    /// so listeners a dropped token admitted can be closed. A file with no
+    /// tokens revokes them all. On an open relay, or when `text` does not
+    /// parse (a short token, say), nothing changes, so a typo never drops
+    /// someone.
     pub fn replace(&self, text: &str) -> Result<Vec<[u8; 32]>> {
         let Self::Tokens(tokens) = self else {
             return Ok(Vec::new());
@@ -131,12 +143,6 @@ fn parse(text: &str) -> Result<Vec<Token>> {
         tokens.push(Token {
             digest: Sha256::digest(token.as_bytes()).into(),
             secret: Secret::new(token.as_bytes())?,
-        });
-    }
-    if tokens.is_empty() {
-        return Err(Error::WeakSecret {
-            min: MIN_TOKEN,
-            name: "the listen token file",
         });
     }
     Ok(tokens)
