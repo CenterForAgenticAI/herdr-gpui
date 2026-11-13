@@ -2,7 +2,7 @@
 //! paired devices' dial keys, and hand each dial to [`super::serve`];
 //! reconnect with backoff when anything breaks.
 
-use super::{Error, Relays, Result, Status, serve};
+use super::{Error, Relays, Result, Served, Status, serve};
 use crate::web::Shared;
 use serde::Deserialize;
 use sheprd_relay::{
@@ -23,15 +23,14 @@ const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) async fn run(
     relays: Arc<Relays>,
     endpoint: Endpoint,
-    state: Shared,
-    router: axum::Router,
+    served: Served,
     mut stopped: watch::Receiver<bool>,
 ) {
     let mut wait = FIRST;
     loop {
         relays.set_status(&endpoint, Status::Connecting);
         let result = tokio::select! {
-            result = session(&relays, &endpoint, &state, &router, &mut wait) => result,
+            result = session(&relays, &endpoint, &served, &mut wait) => result,
             _ = stopped.wait_for(|stop| *stop) => return,
         };
         if let Err(error) = result {
@@ -63,10 +62,10 @@ fn rand_byte() -> u8 {
 async fn session(
     relays: &Arc<Relays>,
     endpoint: &Endpoint,
-    state: &Shared,
-    router: &axum::Router,
+    served: &Served,
     wait: &mut Duration,
 ) -> Result<()> {
+    let state = &served.state;
     let (address, pin) = quic(endpoint).await?;
     let connection = client::connect(address, pin).await?;
     let mut listener = Listener::listen(connection, &relays.keys.route, b"").await?;
@@ -85,8 +84,7 @@ async fn session(
                     Arc::clone(relays),
                     incoming,
                     listener.route(),
-                    state.clone(),
-                    router.clone(),
+                    served.clone(),
                 ));
             }
             _ = changed.changed() => listener.set_dial_keys(dial_keys(state)).await?,

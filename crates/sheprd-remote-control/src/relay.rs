@@ -3,8 +3,11 @@
 //! relays`, the daemon keeps one QUIC connection and listens on its route,
 //! naming the dial keys of its paired devices. Each dial runs the
 //! end-to-end tunnel (`sheprd-tunnel`), admitting only a paired device's
-//! tunnel key, then serves the same API over it as over HTTPS: the phone
-//! still signs in with its device key and a bearer token inside.
+//! tunnel key, then serves the same API over it, over the same TLS as on
+//! the network with the certificate this computer presents for
+//! `127.0.0.1`: the phone reaches it through a loopback proxy at
+//! `https://127.0.0.1:PORT`, so its pinning, sign-in, and bearer tokens
+//! work unchanged, and TLS adds a layer inside the tunnel.
 //!
 //! A relay sees only the tunnel's ciphertext, and a device that is not
 //! paired hears `offline` from the relay or, past it, nothing at all.
@@ -93,21 +96,30 @@ impl Relays {
 
     /// Starts a listener for each relay, serving `router` over each
     /// session, until `stopped`.
-    pub(crate) fn start(
-        self: &Arc<Self>,
-        state: crate::web::Shared,
-        router: axum::Router,
-        stopped: watch::Receiver<bool>,
-    ) {
+    pub(crate) fn start(self: &Arc<Self>, served: Served, stopped: watch::Receiver<bool>) {
         for endpoint in &self.endpoints {
             tokio::spawn(listen::run(
                 Arc::clone(self),
                 endpoint.clone(),
-                state.clone(),
-                router.clone(),
+                served.clone(),
                 stopped.clone(),
             ));
         }
+    }
+}
+
+/// What each relay session serves: the daemon's state and router, behind
+/// the TLS the phone pins.
+#[derive(Clone)]
+pub(crate) struct Served {
+    pub(crate) router: axum::Router,
+    pub(crate) state: crate::web::Shared,
+    pub(crate) tls: Arc<rustls::ServerConfig>,
+}
+
+impl std::fmt::Debug for Served {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Served").finish_non_exhaustive()
     }
 }
 

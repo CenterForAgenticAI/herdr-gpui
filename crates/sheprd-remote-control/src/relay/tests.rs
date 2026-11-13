@@ -4,16 +4,21 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
+use crate::tls::{Authority, Names, Resolver};
 use crate::web::tests::{post, send, signed_in, state};
 use axum::http::{StatusCode, header};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::ecdsa::SigningKey;
+use rustls::pki_types::ServerName;
 use sheprd_relay::{
     Options as RelayOptions, RouteId,
     client::{self, public},
 };
 use sheprd_tunnel::{Identity, Initiator, Keys as TunnelKeys, stream};
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::{Duration, SystemTime},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, join},
     net::TcpListener,
@@ -47,6 +52,39 @@ async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
         .unwrap();
     });
     (http, quic, pin)
+}
+
+/// What a relay session serves on `shared`, behind the certificate the
+/// daemon presents for `127.0.0.1`; and a client config that trusts only
+/// this computer's authority, as the phone does.
+fn served(dir: &Path, shared: &crate::web::Shared) -> (Served, rustls::ClientConfig) {
+    let authority = Authority::load_or_create(dir).unwrap();
+    let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let resolver = Arc::new(
+        Resolver::issue(
+            &authority,
+            Names::new([loopback], Some("studio")),
+            SystemTime::now(),
+        )
+        .unwrap(),
+    );
+    let mut tls = crate::tls::server_config(resolver.clone()).unwrap();
+    tls.cert_resolver = resolver.at(loopback);
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(authority.ca_der().to_vec().into()).unwrap();
+    let client = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let served = Served {
+        router: crate::web::router(shared.clone()),
+        state: shared.clone(),
+        tls: Arc::new(tls),
+    };
+    (served, client)
 }
 
 async fn listening(relays: &Relays) {
@@ -106,15 +144,17 @@ async fn a_paired_phone_reaches_the_api_through_a_relay_end_to_end() {
     assert_eq!(send(&shared, enroll).await.0, StatusCode::NO_CONTENT);
 
     let (_stop, stopped) = watch::channel(false);
-    relays.start(shared.clone(), crate::web::router(shared.clone()), stopped);
+    let (served, client) = served(dir.path(), &shared);
+    relays.start(served, stopped);
     listening(&relays).await;
 
-    // Away from home: through the relay, inside the tunnel, the same API.
+    // Away from home: through the relay, inside the tunnel, the same API
+    // over the same TLS the phone pins.
     let connection = client::connect(quic, pin).await.unwrap();
     let (send_half, recv_half) = client::dial(&connection, route, &phone_dial).await.unwrap();
     let (initiator, first) =
         Initiator::session(&phone_tunnel, &identity, route.as_bytes()).unwrap();
-    let mut tunnel = stream::connect(
+    let tunnel = stream::connect(
         join(recv_half, send_half),
         initiator,
         &first,
@@ -122,12 +162,17 @@ async fn a_paired_phone_reaches_the_api_through_a_relay_end_to_end() {
     )
     .await
     .unwrap();
+    let mut https = tokio_rustls::TlsConnector::from(Arc::new(client))
+        .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tunnel.io)
+        .await
+        .unwrap();
     let request = format!(
-        "GET /api/relay HTTP/1.1\r\nHost: relay\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+        "GET /api/relay HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
     );
-    tunnel.io.write_all(request.as_bytes()).await.unwrap();
+    https.write_all(request.as_bytes()).await.unwrap();
     let mut response = Vec::new();
-    tunnel.io.read_to_end(&mut response).await.unwrap();
+    // A peer closing TLS without close_notify still ends the read.
+    let _ = https.read_to_end(&mut response).await;
     let response = String::from_utf8_lossy(&response);
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(
@@ -144,7 +189,7 @@ async fn a_dial_key_no_device_sent_is_refused_at_the_relay() {
     let endpoint = Endpoint::parse(&format!("http://{http}")).unwrap();
     let relays = Arc::new(Relays::load(dir.path(), vec![endpoint]).unwrap());
     let (_stop, stopped) = watch::channel(false);
-    relays.start(shared.clone(), crate::web::router(shared.clone()), stopped);
+    relays.start(served(dir.path(), &shared).0, stopped);
     listening(&relays).await;
     let route = relays.keys.route();
     let connection = client::connect(quic, pin).await.unwrap();

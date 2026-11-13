@@ -176,7 +176,16 @@ pub async fn run(options: Options) -> Result<()> {
     }
     let router = web::router(state.clone());
     if let Some(relay) = &state.relay {
-        relay.start(state.clone(), router.clone(), stopped.clone());
+        // The phone reaches a relay session at `https://127.0.0.1:PORT`
+        // through its loopback proxy: the certificate for that address.
+        let mut tls = (*config).clone();
+        tls.cert_resolver = resolver.at(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        let served = crate::relay::Served {
+            router: router.clone(),
+            state: state.clone(),
+            tls: Arc::new(tls),
+        };
+        relay.start(served, stopped.clone());
     }
     let app = router.into_make_service_with_connect_info::<web::Peer>();
     let mut shutdown = stopped.clone();

@@ -1,7 +1,8 @@
 //! One dial: the end-to-end tunnel, admitting only a paired device's
-//! tunnel key, then the API over it, as axum serves it over TLS.
+//! tunnel key, then TLS with the certificate for `127.0.0.1`, then the
+//! API, as axum serves it on the network.
 
-use super::{Relays, Result};
+use super::{Relays, Result, Served};
 use crate::web::{Peer, Shared};
 use axum::{Extension, extract::ConnectInfo};
 use hyper_util::{rt::TokioIo, service::TowerToHyperService};
@@ -24,21 +25,16 @@ pub(super) async fn session(
     relays: Arc<Relays>,
     incoming: Incoming,
     route: RouteId,
-    state: Shared,
-    router: axum::Router,
+    served: Served,
 ) {
-    if let Err(error) = serve(&relays, incoming, route, &state, router).await {
+    if let Err(error) = serve(&relays, incoming, route, served).await {
         tracing::debug!(error = %error, "a relay session ended");
     }
 }
 
-async fn serve(
-    relays: &Relays,
-    incoming: Incoming,
-    route: RouteId,
-    state: &Shared,
-    router: axum::Router,
-) -> Result<()> {
+async fn serve(relays: &Relays, incoming: Incoming, route: RouteId, served: Served) -> Result<()> {
+    let Served { router, state, tls } = served;
+    let state = &state;
     let tunnel_keys = &relays.keys.tunnel;
     let responder = Responder::session(tunnel_keys, route.as_bytes())?;
     let io = join(incoming.recv, incoming.send);
@@ -54,8 +50,15 @@ async fn serve(
     // another's.
     let peer = SocketAddr::new(address_for(&accepted.remote), 0);
     let service = TowerToHyperService::new(router.layer(Extension(ConnectInfo(Peer(peer)))));
+    let tls = tokio::time::timeout(
+        HANDSHAKE,
+        tokio_rustls::TlsAcceptor::from(tls).accept(accepted.io),
+    )
+    .await
+    .map_err(|_| sheprd_tunnel::Error::Closed)?
+    .map_err(|_| sheprd_tunnel::Error::Closed)?;
     let served = hyper::server::conn::http1::Builder::new()
-        .serve_connection(TokioIo::new(accepted.io), service)
+        .serve_connection(TokioIo::new(tls), service)
         .with_upgrades()
         .await;
     if let Err(error) = served {
