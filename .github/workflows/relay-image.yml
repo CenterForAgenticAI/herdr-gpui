@@ -78,6 +78,14 @@ jobs:
       - name: Check the DigitalOcean user data
         if: matrix.arch == 'amd64'
         run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_relay_deploy.py
+      - name: Check the Caddyfile with the pinned Caddy
+        if: matrix.arch == 'amd64'
+        run: |
+          caddy=$(sed -n 's/^ *image: \(caddy:.*@sha256:[0-9a-f]\{64\}\).*/\1/p' deploy/relay/compose.yml)
+          test -n "$caddy"
+          docker run --rm -e RELAY_DOMAIN=relay.example.org \
+            -v "$PWD/deploy/relay/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            "$caddy" caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
       - name: Build and check
         env:
           ARCH: ${{ matrix.arch }}
