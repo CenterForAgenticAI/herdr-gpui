@@ -14,18 +14,26 @@ import Network
 /// relay's limit per dial key, and refuses the rest.
 public final class RelayProxy: @unchecked Sendable {
     public typealias Open = @Sendable () async throws -> RelaySession
+    typealias OpenCarried = @Sendable () async throws -> any RelayCarried
 
     /// Sessions at once: the relay allows four per dial key.
     public static let maxSessions = 4
 
     private let listener: NWListener
-    private let open: Open
+    private let open: OpenCarried
     private let queue = DispatchQueue(label: "sheprd.relay.proxy")
-    /// Sessions carried now; touched on `queue` only.
-    private var carried = 0
+    /// The connections carried now, at most `maxSessions`; touched on
+    /// `queue` only.
+    private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// Set by `stop`, on `queue`: nothing is carried after.
+    private var stopped = false
 
     /// A proxy that opens a session with `open` for each connection.
-    public init(open: @escaping Open) throws {
+    public convenience init(open: @escaping Open) throws {
+        try self.init(carrying: { try await open() })
+    }
+
+    init(carrying open: @escaping OpenCarried) throws {
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
@@ -55,45 +63,67 @@ public final class RelayProxy: @unchecked Sendable {
         }
     }
 
+    /// Stops listening and ends every session carried: cancelling a
+    /// connection ends its two directions, which closes its session.
     public func stop() {
         listener.cancel()
+        queue.async {
+            self.stopped = true
+            for connection in self.connections.values { connection.cancel() }
+        }
+    }
+
+    /// Sessions carried now.
+    public func sessions() async -> Int {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: self.connections.count) }
+        }
     }
 
     /// Runs on `queue`, as the listener's handler does.
     private func serve(_ connection: NWConnection) {
-        guard carried < Self.maxSessions else {
+        guard !stopped, connections.count < Self.maxSessions else {
             connection.cancel()
             return
         }
-        carried += 1
+        let id = ObjectIdentifier(connection)
+        connections[id] = connection
         connection.start(queue: queue)
         let open = open
         Task {
-            defer { queue.async { self.carried -= 1 } }
+            defer { queue.async { self.connections[id] = nil } }
             guard let session = try? await open() else {
                 connection.cancel()
                 return
             }
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { await Self.upstream(connection, session) }
-                group.addTask { await Self.downstream(session, connection) }
-                await group.next()
-                group.cancelAll()
-            }
-            await session.close()
+            await Self.carry(connection, session)
+        }
+    }
+
+    /// Carries bytes both ways until either direction ends, then ends the
+    /// other. Cancelling a task does not wake a direction waiting on the
+    /// connection or the socket, so each is ended at its source: a
+    /// cancelled connection completes its pending receive, and a closed
+    /// session fails its pending one. Only then can both be awaited.
+    private static func carry(_ connection: NWConnection, _ session: any RelayCarried) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await upstream(connection, session) }
+            group.addTask { await downstream(session, connection) }
+            await group.next()
             connection.cancel()
+            await session.close()
         }
     }
 
     /// What the app writes goes to the computer.
-    private static func upstream(_ connection: NWConnection, _ session: RelaySession) async {
+    private static func upstream(_ connection: NWConnection, _ session: any RelayCarried) async {
         while let data = await receive(connection) {
             if (try? await session.send(data)) == nil { return }
         }
     }
 
     /// What the computer sends goes to the app.
-    private static func downstream(_ session: RelaySession, _ connection: NWConnection) async {
+    private static func downstream(_ session: any RelayCarried, _ connection: NWConnection) async {
         while let data = try? await session.receive() {
             let sent: Bool = await withCheckedContinuation { continuation in
                 connection.send(content: data, completion: .contentProcessed { error in
@@ -118,6 +148,16 @@ public final class RelayProxy: @unchecked Sendable {
         }
     }
 }
+
+/// What the proxy carries a connection over: a `RelaySession`, or a test's
+/// stand-in for one, which needs no relay.
+protocol RelayCarried: Sendable {
+    func send(_ data: Data) async throws
+    func receive() async throws -> Data?
+    func close() async
+}
+
+extension RelaySession: RelayCarried {}
 
 /// Resumes a continuation once, whatever the listener reports after.
 private final class Once: @unchecked Sendable {
