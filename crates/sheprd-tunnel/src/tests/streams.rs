@@ -65,3 +65,49 @@ async fn an_unpaired_dialer_is_refused_and_hears_nothing() {
     // The listener dropped its side without answering.
     assert!(matches!(dialing.await.unwrap(), Err(Error::Closed)));
 }
+
+/// A paired phone and computer with a tunnel between them, over a stream
+/// that holds `capacity` bytes each way.
+async fn tunnels(capacity: usize) -> (crate::stream::Tunnel, crate::stream::Tunnel) {
+    let (phone, computer) = (keys(1), keys(2));
+    let (dialer_side, listener_side) = duplex(capacity);
+    let listener = tokio::spawn(async move {
+        let computer = keys(2);
+        let responder = Responder::session(&computer, &ROUTE).unwrap();
+        accept(listener_side, &computer, responder, |_| true).await
+    });
+    let identity = computer.identity();
+    let (initiator, first) = Initiator::session(&phone, &identity, &ROUTE).unwrap();
+    let dialing = connect(dialer_side, initiator, &first, identity.x25519())
+        .await
+        .unwrap();
+    (dialing, listener.await.unwrap().unwrap())
+}
+
+#[tokio::test]
+async fn both_sides_sending_at_once_do_not_wait_on_each_other() {
+    // A stream far smaller than what each side sends: each pump's write
+    // waits for the other pump to read, which it must keep doing.
+    let (dialing, listening) = tunnels(1_024).await;
+    let exchange = |tunnel: crate::stream::Tunnel, byte: u8, expected: u8| async move {
+        let (mut read, mut write) = tokio::io::split(tunnel.io);
+        let sent = vec![byte; 1_000_000];
+        let writer = tokio::spawn(async move {
+            write.write_all(&sent).await.unwrap();
+            write
+        });
+        let mut received = vec![0; 1_000_000];
+        read.read_exact(&mut received).await.unwrap();
+        assert!(received.iter().all(|byte| *byte == expected));
+        writer.await.unwrap();
+    };
+    let both = async {
+        tokio::join!(
+            exchange(dialing, 0x11, 0x22),
+            exchange(listening, 0x22, 0x11)
+        );
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(30), both)
+        .await
+        .expect("two-way traffic froze");
+}

@@ -117,9 +117,46 @@ async fn read_frame<S: AsyncRead + Unpin>(
     }
 }
 
+/// Bytes on their way out of the pump, kept until the other side takes
+/// them: a write that waits never stops the pump reading the other way.
+#[derive(Default)]
+struct Pending {
+    bytes: Vec<u8>,
+    sent: usize,
+}
+
+impl Pending {
+    fn is_empty(&self) -> bool {
+        self.sent == self.bytes.len()
+    }
+
+    fn rest(&self) -> &[u8] {
+        &self.bytes[self.sent..]
+    }
+
+    fn set(&mut self, bytes: Vec<u8>) {
+        self.bytes = bytes;
+        self.sent = 0;
+    }
+
+    /// Counts `written` bytes as taken; none taken means the other side
+    /// is gone.
+    fn advance(&mut self, written: usize) -> Result<()> {
+        if written == 0 {
+            return Err(Error::Closed);
+        }
+        self.sent += written;
+        Ok(())
+    }
+}
+
 /// Carries records until either side closes: plaintext from the pipe is
 /// sealed and framed onto the stream; frames from the stream are opened
 /// into the pipe.
+///
+/// Each direction holds at most one record and moves on its own. Were a
+/// write awaited to its end, two peers sending at once would each fill
+/// the stream and wait for the other to read, which neither then does.
 async fn pump<S>(
     stream: S,
     mut decoder: Decoder,
@@ -132,14 +169,19 @@ where
     let (mut from_peer, mut to_peer) = tokio::io::split(stream);
     let (mut from_local, mut to_local) = tokio::io::split(pipe);
     let mut plain = vec![0; MAX_DATA];
+    let mut chunk = vec![0; frame::MAX_FRAME];
+    let mut inbound = Pending::default();
+    let mut outbound = Pending::default();
     let mut local_open = true;
+    let mut unflushed = false;
     loop {
         // Frames already buffered go first, so a burst is not left behind.
-        if let Some(frame) = decoder.next_frame() {
+        // One at a time: the peer's close is seen only after its data left.
+        if inbound.is_empty()
+            && let Some(frame) = decoder.next_frame()
+        {
             match transport.open(&frame)? {
-                Opened::Data(data) => {
-                    to_local.write_all(&data).await.map_err(|_| Error::Closed)?;
-                }
+                Opened::Data(data) => inbound.set(data),
                 Opened::Closed => {
                     let _ = to_local.shutdown().await;
                     return Ok(());
@@ -147,9 +189,10 @@ where
             }
             continue;
         }
-        let mut chunk = vec![0; decoder.wanted().clamp(4_096, frame::MAX_FRAME)];
+        let wanted = decoder.wanted().clamp(4_096, frame::MAX_FRAME);
+        let flushing = unflushed && outbound.is_empty();
         tokio::select! {
-            read = from_peer.read(&mut chunk) => {
+            read = from_peer.read(&mut chunk[..wanted]), if inbound.is_empty() => {
                 let read = read.map_err(|_| Error::Closed)?;
                 if read == 0 {
                     // Cut without a close record: the relay or network.
@@ -157,18 +200,35 @@ where
                 }
                 decoder.push(&chunk[..read]);
             }
-            read = from_local.read(&mut plain), if local_open => {
+            written = to_local.write(inbound.rest()), if !inbound.is_empty() => {
+                inbound.advance(written.map_err(|_| Error::Closed)?)?;
+            }
+            read = from_local.read(&mut plain), if local_open && outbound.is_empty() => {
                 let read = read.map_err(|_| Error::Closed)?;
-                if read == 0 {
+                let record = if read == 0 {
                     local_open = false;
-                    let close = transport.seal_close()?;
-                    to_peer.write_all(&frame::encode(&close)?).await.map_err(|_| Error::Closed)?;
-                    let _ = to_peer.flush().await;
-                    continue;
+                    transport.seal_close()?
+                } else {
+                    transport.seal(&plain[..read], Instant::now())?
+                };
+                outbound.set(frame::encode(&record)?);
+            }
+            // One branch for the stream's write half: the record, then
+            // its flush.
+            written = async {
+                if flushing {
+                    to_peer.flush().await.map(|()| 0)
+                } else {
+                    to_peer.write(outbound.rest()).await
                 }
-                let record = transport.seal(&plain[..read], Instant::now())?;
-                to_peer.write_all(&frame::encode(&record)?).await.map_err(|_| Error::Closed)?;
-                to_peer.flush().await.map_err(|_| Error::Closed)?;
+            }, if flushing || !outbound.is_empty() => {
+                let written = written.map_err(|_| Error::Closed)?;
+                if flushing {
+                    unflushed = false;
+                } else {
+                    outbound.advance(written)?;
+                    unflushed = outbound.is_empty();
+                }
             }
         }
     }
