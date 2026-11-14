@@ -10,7 +10,7 @@ use sheprd_relay::{
     client::{self, Listener},
     wire::Key,
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::watch;
 
 /// Reconnects wait this long at first, doubling to [`LONGEST`].
@@ -18,6 +18,11 @@ const FIRST: Duration = Duration::from_secs(1);
 const LONGEST: Duration = Duration::from_secs(60);
 /// How long reading `/v1/info` may take.
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one of a relay's addresses may take to answer before the next
+/// is tried. The last is given QUIC's own handshake time.
+const ATTEMPT: Duration = Duration::from_secs(5);
+/// How many of a relay's addresses are tried per connection.
+const MAX_ADDRESSES: usize = 8;
 
 /// Keeps listening on `endpoint` until `stopped`.
 pub(super) async fn run(
@@ -66,8 +71,11 @@ async fn session(
     wait: &mut Duration,
 ) -> Result<()> {
     let state = &served.state;
-    let (address, pin) = quic(endpoint).await?;
-    let connection = client::connect(address, pin).await?;
+    let (addresses, pin) = quic(endpoint).await?;
+    let connection = first_reachable(&addresses, ATTEMPT, |address| async move {
+        Ok(client::connect(address, pin).await?)
+    })
+    .await?;
     let mut listener = Listener::listen(connection, &relays.keys.route, b"").await?;
     let mut changed = relays.changed.subscribe();
     let mut pairing = relays.pairing_changed.subscribe();
@@ -129,9 +137,34 @@ struct Quic {
     port: u16,
 }
 
-/// Where the relay's QUIC listens, and its certificate's pin, from its
-/// `/v1/info` over HTTPS.
-async fn quic(endpoint: &Endpoint) -> Result<(SocketAddr, sheprd_relay::pin::Pin)> {
+/// Connects to the first of `addresses` that answers, in the resolver's
+/// order: a relay with IPv6 and IPv4 records is still reached when this
+/// computer has a route to only one of them. An address that fails, or
+/// takes longer than `attempt` while another is left, gives way to the
+/// next; the last one's failure is the one reported.
+pub(super) async fn first_reachable<C, F>(
+    addresses: &[SocketAddr],
+    attempt: Duration,
+    mut connect: impl FnMut(SocketAddr) -> F,
+) -> Result<C>
+where
+    F: Future<Output = Result<C>>,
+{
+    let (last, earlier) = addresses
+        .split_last()
+        .ok_or_else(|| Error::Resolve(std::io::Error::other("no address")))?;
+    for address in earlier {
+        if let Ok(Ok(connection)) = tokio::time::timeout(attempt, connect(*address)).await {
+            return Ok(connection);
+        }
+    }
+    connect(*last).await
+}
+
+/// Where the relay's QUIC listens (every address its name resolves to, up
+/// to [`MAX_ADDRESSES`]), and its certificate's pin, from its `/v1/info`
+/// over HTTPS.
+async fn quic(endpoint: &Endpoint) -> Result<(Vec<SocketAddr>, sheprd_relay::pin::Pin)> {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     let url = endpoint.info().to_string();
     let info = tokio::task::spawn_blocking(move || -> Result<Info> {
@@ -158,10 +191,10 @@ async fn quic(endpoint: &Endpoint) -> Result<(SocketAddr, sheprd_relay::pin::Pin
         .and_then(|pin| pin.try_into().ok())
         .ok_or(Error::InfoFormat)?;
     let host = endpoint.hostname();
-    let address = tokio::net::lookup_host((host.as_str(), quic.port))
+    let addresses = tokio::net::lookup_host((host.as_str(), quic.port))
         .await
         .map_err(Error::Resolve)?
-        .next()
-        .ok_or_else(|| Error::Resolve(std::io::Error::other("no address")))?;
-    Ok((address, pin))
+        .take(MAX_ADDRESSES)
+        .collect();
+    Ok((addresses, pin))
 }

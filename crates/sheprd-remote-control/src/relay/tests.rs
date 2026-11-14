@@ -24,6 +24,8 @@ use tokio::{
     net::TcpListener,
 };
 
+mod addresses;
+
 /// A relay serving QUIC and HTTP on loopback ports: its HTTP address, and
 /// its QUIC address and pin.
 async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
