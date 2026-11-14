@@ -58,6 +58,21 @@ pub(crate) enum PaneKey {
     Text(String),
 }
 
+/// The resolved `[pane_keys]`: what the focused pane receives instead of
+/// each listed keystroke. Herdr panes and herdr-core terminals both read it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PaneKeyMap(Vec<(Keystroke, PaneKey)>);
+
+impl PaneKeyMap {
+    /// What the focused pane receives when `typed` is pressed.
+    pub(crate) fn get(&self, typed: &Keystroke) -> Option<&PaneKey> {
+        self.0
+            .iter()
+            .find(|(bound, _)| typed_matches(typed, bound))
+            .map(|(_, sent)| sent)
+    }
+}
+
 /// Ghostty's macOS line-editing chords, which every other Mac terminal also
 /// sends: Cmd-Left and Cmd-Right to the line's start and end, Cmd-Backspace
 /// to delete back to its start, and Option-Left and Option-Right a word back
@@ -145,7 +160,7 @@ pub struct Keymap {
     navigate_down: Vec<Keystroke>,
     /// Keystrokes the focused pane receives as another keystroke or as text.
     /// No command is bound to them, so GPUI's keymap never claims them first.
-    pane_keys: Vec<(Keystroke, PaneKey)>,
+    pane_keys: PaneKeyMap,
 }
 
 impl Default for Keymap {
@@ -332,16 +347,18 @@ impl Keymap {
             prefixes,
             navigate_up: keys.navigate_up.clone(),
             navigate_down: keys.navigate_down.clone(),
-            pane_keys,
+            pane_keys: PaneKeyMap(pane_keys),
         }
     }
 
     /// What the focused pane receives when `typed` is pressed.
     pub(crate) fn pane_key(&self, typed: &Keystroke) -> Option<&PaneKey> {
-        self.pane_keys
-            .iter()
-            .find(|(bound, _)| typed_matches(typed, bound))
-            .map(|(_, sent)| sent)
+        self.pane_keys.get(typed)
+    }
+
+    /// Every `[pane_keys]` remap, for views that match keystrokes themselves.
+    pub(crate) fn pane_keys(&self) -> &PaneKeyMap {
+        &self.pane_keys
     }
 
     /// Every shortcut bound to `command`, primary first. A prefix chord reads

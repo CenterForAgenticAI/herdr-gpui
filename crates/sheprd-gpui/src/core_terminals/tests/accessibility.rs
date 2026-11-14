@@ -31,6 +31,7 @@ pub(super) fn look() -> Look {
         keep_selection: true,
         option_as_alt: Default::default(),
         padding: Default::default(),
+        pane_keys: crate::keymap::Keymap::default().pane_keys().clone(),
         right_click_passthrough: Default::default(),
         scroll_lines: crate::herdr_settings::DEFAULT_MOUSE_SCROLL_LINES,
         smooth_scroll: true,
