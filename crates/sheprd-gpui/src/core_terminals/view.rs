@@ -25,7 +25,8 @@ use crate::{
     config::{FontConfig, OptionAsAlt, Padding, Theme},
     herdr_settings::RightClickPassthrough,
     i18n::fl,
-    terminal::{HeldKeys, key_input, viewport},
+    keymap::PaneKeyMap,
+    terminal::{HeldKeys, key_input, pane_key_input, viewport},
     terminal_painter::{Ground, ImageTarget, PlacedImages, TerminalPainter},
 };
 use gpui::{prelude::*, *};
@@ -51,6 +52,9 @@ pub(crate) struct Look {
     pub(crate) keep_selection: bool,
     pub(crate) option_as_alt: OptionAsAlt,
     pub(crate) padding: Padding,
+    /// The window keymap's `[pane_keys]`, so Cmd-Backspace and the other
+    /// line-editing chords reach this terminal as they reach a Herdr pane.
+    pub(crate) pane_keys: PaneKeyMap,
     /// Herdr's `ui.right_click_passthrough_modifier`.
     pub(crate) right_click_passthrough: RightClickPassthrough,
     /// Herdr's `ui.mouse_scroll_lines`: lines one wheel notch scrolls.
@@ -535,6 +539,24 @@ impl CoreTerminalView {
         }
         // The window's own shortcuts keep working over the terminal.
         self.held_keys.forget(&event.keystroke.key);
+        // `[pane_keys]` come first: on macOS they remap Cmd chords, which
+        // would otherwise go to the window and send the terminal nothing.
+        if self.marked.is_empty()
+            && let Some(sent) = self.look.pane_keys.get(&event.keystroke)
+        {
+            if self.selection.take().is_some() {
+                cx.notify();
+            }
+            if let Some(input) = pane_key_input(event, sent) {
+                let input =
+                    self.held_keys
+                        .press(&event.keystroke.key, input, self.screen.keys.releases);
+                self.send(input);
+            }
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
         if modifiers.platform {
             return;
         }

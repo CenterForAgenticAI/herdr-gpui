@@ -478,7 +478,7 @@ fn default_pane_keys_follow_ghostty_on_macos() {
     );
     let keymap = Keymap::default();
     assert_eq!(
-        keymap.pane_keys,
+        keymap.pane_keys.0,
         defaults
             .clone()
             .filter(|_| cfg!(target_os = "macos"))
