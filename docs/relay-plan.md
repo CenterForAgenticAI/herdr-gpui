@@ -570,6 +570,21 @@ commitment-based codes; after approval they hand over the same relay
 data inside their channel, so a phone paired in the room also works away
 from it.
 
+**Built: Bluetooth pairing from another network.** When the computer
+listens on relays, the offer it seals to a nearby phone (under the code
+both screens show) also names its relays, route, and tunnel identity,
+and the offer's token doubles as the pairing secret: the daemon opens a
+one-dial pairing key on each relay, derived from it
+(`route::pairing_dial_key`, two minutes). The phone claims at the
+computer's addresses as before; when none answers, it dials that key
+through a relay, runs the tunnel's pairing handshake (PSK from the
+token), and claims over the same TLS inside. Every claim from a nearby
+phone carries its own dial and tunnel keys, stored with the device on
+Allow and named on the relays at once, so later polls, and everything
+after, go through the relays with the phone's own keys. A phone paired
+over Bluetooth on another network therefore works without ever sharing
+a network with the computer.
+
 ### Revoking and losing a phone
 
 - **Revoking a device** in Sheprd removes its dial keys from every relay
@@ -687,6 +702,13 @@ last uses its own domain.
   `serve_connection`, so the native API, WebSocket, and bearer tokens are
   unchanged.
 - `sheprd remote status --json` reports each relay: listening, last error.
+- **Built (first cut):** `[remote] relays` lists private relays; the daemon
+  listens on each over QUIC (no WebSocket fallback yet), reading the pin
+  from `/v1/info`. Paired phones learn the route, relays, and tunnel
+  identity from `GET /api/relay` and send one dial key and their tunnel key
+  with `POST /api/relay`, over the network or Tailscale. Still to come: a
+  dial key per relay, Sheprd's signed list (`"default"`), the WebSocket
+  fallback, and pairing over a relay from the QR.
 
 ### iOS app and other apps
 
@@ -704,6 +726,20 @@ last uses its own domain.
   can say "Through relay (fra1)".
 - The share extension, widgets, and the watch app use `SheprdRemoteCore`
   and get the same path.
+- **Built (first cut):** while a computer answers directly, the app asks
+  `GET /api/relay` and, when the computer listens on relays, makes a dial
+  key and a tunnel key for it, sends them (`POST /api/relay`), and keeps
+  the computer's route, relays, and tunnel identity in its Keychain record
+  (`RelayRecord`). While its link runs, a loopback proxy (`RelayProxy`)
+  turns each connection the app opens into a `RelaySession`: the relay's
+  WebSocket fallback, its dial proof, then the hybrid tunnel against the
+  pinned identity. Its `https://127.0.0.1:PORT` origin is raced after the
+  computer's own addresses, and the daemon answers inside the tunnel with
+  the same TLS it serves on the network, so pinning, sign-in, and the live
+  socket are unchanged. The proxy carries at most four sessions, the
+  relay's limit per dial key. Still to come: QUIC on iOS, a relay label in
+  the app, pairing over a relay, and the relay for intents, notification
+  actions, and the share extension, which still go direct.
 - The PWA cannot use the relay: a browser cannot run the handshake inside a
   WebSocket and then treat it as an origin. It keeps LAN and Tailscale.
 

@@ -19,6 +19,9 @@ default = ["server"]
 # maintainer's OpenPGP signature or the site workflow's Ed25519 one. For
 # clients that fetch the list; the relay itself never reads it.
 signed-directory = ["dep:ed25519-dalek", "dep:pgp"]
+# Reaching a relay over QUIC as a listener or a dialer (`client`), for the
+# daemon and tests; no axum or server limits.
+client = ["dep:quinn", "dep:rustls", "dep:tokio"]
 server = [
   "dep:axum",
   "dep:futures-util",
@@ -40,6 +43,10 @@ required-features = ["server"]
 [[example]]
 name              = "relays"
 required-features = ["signed-directory"]
+
+[[example]]
+name              = "echo_computer"
+required-features = ["client", "server"]
 
 [dependencies]
 base64.workspace     = true
@@ -68,6 +75,7 @@ tracing-subscriber = { features = ["fmt"], optional = true, workspace = true }
 
 [dev-dependencies]
 anyhow.workspace            = true
+sheprd-tunnel               = { features = ["tokio"], path = "../sheprd-tunnel" }
 http-body-util.workspace    = true
 serde_json.workspace        = true
 tokio                       = { features = ["test-util"], workspace = true }

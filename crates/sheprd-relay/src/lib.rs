@@ -44,6 +44,8 @@
 mod broker;
 #[cfg(feature = "server")]
 pub mod bucket;
+#[cfg(feature = "client")]
+pub mod client;
 #[cfg(feature = "server")]
 pub mod dashboard;
 pub mod directory;
@@ -59,6 +61,8 @@ pub mod limits;
 pub mod metrics;
 #[cfg(feature = "server")]
 pub mod options;
+#[cfg(any(feature = "server", feature = "client"))]
+pub mod pin;
 #[cfg(feature = "server")]
 pub mod quic;
 pub mod route;
@@ -81,7 +85,7 @@ pub use limits::Limits;
 pub use options::{Options, USAGE};
 pub use route::{RouteId, SessionId};
 #[cfg(feature = "server")]
-pub use serve::{bind_quic, serve};
+pub use serve::{app, bind_quic, serve};
 
 #[cfg(test)]
 mod tests;
