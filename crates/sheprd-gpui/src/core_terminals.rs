@@ -963,6 +963,7 @@ impl SheprdWindow {
             keep_selection: self.config.keep_selection_after_copy,
             option_as_alt: self.config.option_as_alt,
             padding: self.config.terminal_padding,
+            pane_keys: self.keymap().pane_keys().clone(),
             right_click_passthrough: shared
                 .map(|shared| shared.right_click_passthrough)
                 .unwrap_or_default(),
