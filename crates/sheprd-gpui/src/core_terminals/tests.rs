@@ -24,6 +24,7 @@ mod kept_checkouts;
 mod kept_ports;
 mod kept_workspaces;
 mod keys;
+mod line_keys;
 mod link_handlers;
 mod links;
 mod menus;
