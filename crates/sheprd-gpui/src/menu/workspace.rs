@@ -860,12 +860,17 @@ impl SheprdWindow {
             return;
         }
         if action == WorkspaceAction::Close
-            && target.keeper == sheprd_session::Keeper::Herdr1
-            && let Some(snapshot) = &self.live.snapshot
+            && let Some(target) = self.menu.target.as_ref()
+            && (target.keeper == sheprd_session::Keeper::App || self.live.snapshot.is_some())
         {
+            let endpoint = self.endpoints[self.selected_endpoint]
+                .connection
+                .target
+                .clone();
             self.menu.close_check = Some(super::workspace_close::CloseCheck::start(
-                snapshot,
+                self.live.snapshot.as_deref(),
                 target,
+                &endpoint,
                 self.selected_endpoint == 0 && self.live.local_daemon_peer,
                 cx,
             ));

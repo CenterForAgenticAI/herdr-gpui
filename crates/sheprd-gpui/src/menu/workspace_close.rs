@@ -9,7 +9,10 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use gpui::App;
-use sheprd_client::protocol::{ClientShellSnapshot, ClientShellWorktree};
+use sheprd_client::{
+    ConnectTarget,
+    protocol::{ClientShellSnapshot, ClientShellWorktree},
+};
 
 use super::workspace::WorkspaceTarget;
 use crate::i18n::fl;
@@ -19,6 +22,7 @@ struct Checkout {
     id: String,
     worktree: Option<ClientShellWorktree>,
     branch: Option<String>,
+    input: Option<crate::pull_request::Input>,
 }
 
 #[cfg(test)]
@@ -58,15 +62,43 @@ impl Drop for CloseCheck {
     }
 }
 
-fn checkouts(snapshot: &ClientShellSnapshot, target: &WorkspaceTarget) -> Vec<Checkout> {
+fn app_input(target: &WorkspaceTarget) -> Option<crate::pull_request::Input> {
+    let tree = target.worktree.as_ref()?;
+    let branch = target.branch.as_ref()?.clone();
+    let checkout = match &target.source {
+        super::workspace::Source::Directory(path)
+        | super::workspace::Source::Repository { root: path, .. }
+            if !path.is_empty() =>
+        {
+            path.clone()
+        }
+        _ => return None,
+    };
+    Some(crate::pull_request::Input {
+        checkout: Some(checkout),
+        repo_key: Some(tree.key.clone()),
+        branch,
+    })
+}
+
+fn checkouts(snapshot: Option<&ClientShellSnapshot>, target: &WorkspaceTarget) -> Vec<Checkout> {
+    if target.keeper == sheprd_session::Keeper::App {
+        return vec![Checkout {
+            id: target.id.clone(),
+            worktree: target.worktree.clone(),
+            branch: target.branch.clone(),
+            input: app_input(target),
+        }];
+    }
     snapshot
-        .workspaces
-        .iter()
+        .into_iter()
+        .flat_map(|snapshot| snapshot.workspaces.iter())
         .filter(|workspace| target.close_members.contains(&workspace.workspace_id))
         .map(|workspace| Checkout {
             id: workspace.workspace_id.clone(),
             worktree: workspace.worktree.clone(),
             branch: workspace.branch.clone(),
+            input: None,
         })
         .collect()
 }
@@ -80,30 +112,63 @@ impl CloseCheck {
     ) -> Self {
         let (_, receiver) = mpsc::sync_channel(1);
         Self {
-            checkouts: checkouts(snapshot, target),
+            checkouts: checkouts(Some(snapshot), target),
             receiver,
             cancelled: Arc::new(AtomicBool::new(false)),
             report,
         }
     }
+}
 
+fn remote_close_status(
+    target: &ConnectTarget,
+    input: &crate::pull_request::Input,
+    cancelled: &AtomicBool,
+) -> crate::Result<(bool, bool)> {
+    let checkout = input
+        .checkout
+        .as_deref()
+        .ok_or(crate::Error::StaleWorkspace)?;
+    let host = sheprd_remote::work::host_for_kept(target)?;
+    let identity = sheprd_remote::work::identity(&host, checkout, cancelled)?;
+    if input.repo_key.as_deref() != Some(identity.key.as_str())
+        || identity.branch.as_deref() != Some(input.branch.as_str())
+    {
+        return Err(crate::Error::StaleWorkspace);
+    }
+    let dirty = !sheprd_remote::work::git(
+        &host,
+        checkout,
+        &[
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=normal",
+            "--ignore-submodules=none",
+        ],
+        cancelled,
+    )?
+    .is_empty();
+    let unpushed = !sheprd_remote::work::git(
+        &host,
+        checkout,
+        &["rev-list", "--max-count=1", "HEAD", "--not", "--remotes"],
+        cancelled,
+    )?
+    .is_empty();
+    Ok((dirty, unpushed))
+}
+
+impl CloseCheck {
     pub fn start(
-        snapshot: &ClientShellSnapshot,
+        snapshot: Option<&ClientShellSnapshot>,
         target: &WorkspaceTarget,
+        endpoint: &ConnectTarget,
         local: bool,
         cx: &App,
     ) -> Self {
         let checkouts = checkouts(snapshot, target);
-        let inputs: Vec<_> = checkouts
-            .iter()
-            .take(128)
-            .map(|checkout| {
-                crate::pull_request::repository_input(
-                    checkout.worktree.as_ref(),
-                    checkout.branch.as_deref(),
-                )
-            })
-            .collect();
+        let app = target.keeper == sheprd_session::Keeper::App;
+        let endpoint = endpoint.clone();
         let mut report = Report {
             unknown: checkouts.len() > 128,
             ..Report::default()
@@ -111,22 +176,42 @@ impl CloseCheck {
         let (sender, receiver) = mpsc::sync_channel(1);
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancellation = cancelled.clone();
+        let jobs = checkouts
+            .iter()
+            .take(128)
+            .map(|checkout| {
+                checkout.input.clone().or_else(|| {
+                    crate::pull_request::repository_input(
+                        checkout.worktree.as_ref(),
+                        checkout.branch.as_deref(),
+                    )
+                    .ok()
+                })
+            })
+            .collect::<Vec<_>>();
         cx.background_executor()
             .spawn(async move {
                 let deadline = Instant::now() + Duration::from_secs(15);
-                for input in inputs {
+                for input in jobs {
                     if cancellation.load(Ordering::Relaxed) {
                         return;
                     }
-                    let status = input.map_err(crate::Error::from).and_then(|input| {
-                        if !local {
-                            return Err(
-                                sheprd_github::pull_request::Error::UntrustedEndpoint.into()
-                            );
+                    let status = input.ok_or(crate::Error::StaleWorkspace).and_then(|input| {
+                        if app {
+                            if endpoint.is_remote() {
+                                remote_close_status(&endpoint, &input, &cancellation)
+                            } else {
+                                Ok(crate::git::close_status(&input, deadline, &|| {
+                                    cancellation.load(Ordering::Relaxed)
+                                })?)
+                            }
+                        } else if !local {
+                            Err(sheprd_github::pull_request::Error::UntrustedEndpoint.into())
+                        } else {
+                            Ok(crate::git::close_status(&input, deadline, &|| {
+                                cancellation.load(Ordering::Relaxed)
+                            })?)
                         }
-                        Ok(crate::git::close_status(&input, deadline, &|| {
-                            cancellation.load(Ordering::Relaxed)
-                        })?)
                     });
                     match status {
                         Ok((dirty, unpushed)) => {
@@ -165,7 +250,7 @@ impl CloseCheck {
     }
 
     pub fn current(&self, snapshot: &ClientShellSnapshot, target: &WorkspaceTarget) -> bool {
-        self.checkouts == checkouts(snapshot, target)
+        self.checkouts == checkouts(Some(snapshot), target)
     }
 
     /// Whether the close may go without the dialog once
