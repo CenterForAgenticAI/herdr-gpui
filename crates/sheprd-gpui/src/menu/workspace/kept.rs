@@ -105,6 +105,25 @@ impl WorkspaceTarget {
             muted: false,
         }
     }
+
+    fn kept_current(&self, workspace: &sheprd_session::Workspace) -> bool {
+        if self.id != workspace.id || self.branch != workspace.branch {
+            return false;
+        }
+        let source_matches = match (&self.source, workspace.cwd.as_str()) {
+            (Source::Directory(expected), cwd) => expected == cwd,
+            (Source::Workspace, "") => true,
+            _ => false,
+        };
+        let worktree_matches = match (&self.worktree, &workspace.worktree) {
+            (None, None) => true,
+            (Some(expected), Some(actual)) => {
+                expected.key == actual.key && expected.is_linked_worktree == actual.linked
+            }
+            _ => false,
+        };
+        source_matches && worktree_matches
+    }
 }
 
 impl SheprdWindow {
@@ -163,7 +182,29 @@ impl SheprdWindow {
                 }
                 self.rename_kept_workspace(&id, &text, cx);
             }
-            WorkspaceAction::Close => self.close_kept_workspace(&id, window, cx),
+            WorkspaceAction::Close => {
+                let current = self.menu_target_current()
+                    && self.menu.target.as_ref().is_some_and(|target| {
+                        self.sessions(self.selected_endpoint)
+                            .core
+                            .as_ref()
+                            .and_then(|core| core.workspace(&target.id))
+                            .is_some_and(|workspace| target.kept_current(workspace))
+                    });
+                let allowed =
+                    self.menu.close_check.as_ref().is_some_and(|check| {
+                        check.allows(&text, self.config.confirm_close_workspace)
+                    });
+                if !current {
+                    self.menu.error = Some(crate::Error::StaleWorkspace.localize());
+                    cx.notify();
+                    return;
+                }
+                if !allowed {
+                    return;
+                }
+                self.close_kept_workspace(&id, window, cx);
+            }
             WorkspaceAction::NewWorktree => {
                 let ask = self
                     .menu
