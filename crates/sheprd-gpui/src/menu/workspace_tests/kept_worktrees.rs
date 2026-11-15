@@ -61,6 +61,50 @@ fn window<'a>(
     (view, cx, id.unwrap())
 }
 
+fn git(dir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_window<'a>(
+    cx: &'a mut TestAppContext,
+    folder: &str,
+) -> (Entity<SheprdWindow>, &'a mut VisualTestContext, String) {
+    let (fixture, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| fixture_window(window, cx));
+        SidebarFixture(view)
+    });
+    let view = cx.update(|_, cx| fixture.read(cx).0.clone());
+    let id = cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.live.snapshot = None;
+            view.live.missing_installation = true;
+            view.endpoints[0].connection.target = sheprd_client::ConnectTarget::Local;
+            view.core_terminals.seed_checkout_for_test(
+                folder,
+                Some(Identity {
+                    branch: Some("main".into()),
+                    key: Path::new(folder).join(".git").display().to_string(),
+                    label: "app".into(),
+                    linked: false,
+                }),
+            );
+            let location =
+                Location::core_terminal(Panes::single(TerminalId::new("t1").unwrap()), false);
+            view.open_kept_workspace(None, Path::new(folder), location, window, cx)
+        })
+    });
+    (view, cx, id.unwrap())
+}
+
 fn rows(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext, id: &str) -> Vec<WorkspaceAction> {
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -420,6 +464,183 @@ fn a_kept_dialog_outlives_the_tick_without_herdr_1(cx: &mut TestAppContext) {
                 Some(Page::Dialog(WorkspaceAction::DeleteWorktree))
             );
         })
+    });
+}
+
+#[gpui::test]
+fn a_clean_kept_close_dialog_enables_close_after_git_preflight(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    git(
+        dir.path(),
+        &["config", "user.email", "test@example.invalid"],
+    );
+    std::fs::write(dir.path().join("tracked"), "clean\n").unwrap();
+    git(dir.path(), &["add", "tracked"]);
+    git(dir.path(), &["commit", "-m", "initial"]);
+    git(
+        dir.path(),
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    let folder = dir.path().display().to_string();
+    let (view, cx, id) = git_window(cx, &folder);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.config.confirm_close_workspace = true;
+            view.open_workspace_dialog_for(
+                &id,
+                WorkspaceAction::Close,
+                gpui::Point::default(),
+                window,
+                cx,
+            );
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.update_workspace_dialog(window, cx);
+            let report = view
+                .menu
+                .close_check
+                .as_ref()
+                .unwrap()
+                .report
+                .as_ref()
+                .unwrap();
+            assert!(!report.dirty);
+            assert!(!report.unpushed);
+            assert!(!report.unknown);
+        });
+        window.draw(cx).clear(cx);
+    });
+    assert!(cx.debug_bounds("dialog-submit").is_some());
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.submit_workspace_dialog(window, cx);
+            assert!(
+                view.menu.page.is_none(),
+                "a clean close should submit without consent"
+            );
+            assert!(!view.is_kept_workspace(&id));
+        });
+    });
+}
+
+#[gpui::test]
+fn a_kept_close_dialog_starts_a_real_check(cx: &mut TestAppContext) {
+    let (view, cx, id) = window(cx, PLAIN, None);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.config.confirm_close_workspace = true;
+            view.open_workspace_dialog_for(
+                &id,
+                WorkspaceAction::Close,
+                gpui::Point::default(),
+                window,
+                cx,
+            );
+            assert_eq!(
+                view.menu.page,
+                Some(Page::Dialog(WorkspaceAction::Close)),
+                "the app-owned close dialog opened"
+            );
+            assert!(
+                view.menu.close_check.is_some(),
+                "app-owned close must start its Git preflight"
+            );
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.update_workspace_dialog(window, cx);
+            let report = view
+                .menu
+                .close_check
+                .as_ref()
+                .unwrap()
+                .report
+                .as_ref()
+                .unwrap();
+            assert!(!report.dirty);
+            assert!(!report.unpushed);
+            assert!(report.unknown);
+        });
+        window.draw(cx).clear(cx);
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.submit_workspace_dialog(window, cx);
+            assert!(view.menu.page.is_some(), "unknown status requires consent");
+            view.menu.input = Some(DialogInput::new("close".into()));
+            view.submit_workspace_dialog(window, cx);
+            assert!(
+                view.menu.page.is_none(),
+                "typed consent submits unknown close"
+            );
+        });
+    });
+}
+#[gpui::test]
+fn a_risky_kept_close_dialog_requires_typed_consent(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    git(
+        dir.path(),
+        &["config", "user.email", "test@example.invalid"],
+    );
+    std::fs::write(dir.path().join("tracked"), "initial\n").unwrap();
+    git(dir.path(), &["add", "tracked"]);
+    git(dir.path(), &["commit", "-m", "initial"]);
+    git(
+        dir.path(),
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    std::fs::write(dir.path().join("tracked"), "unpublished\n").unwrap();
+    git(dir.path(), &["commit", "-am", "unpublished"]);
+    std::fs::write(dir.path().join("tracked"), "dirty\n").unwrap();
+    let folder = dir.path().display().to_string();
+    let (view, cx, id) = git_window(cx, &folder);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.config.confirm_close_workspace = true;
+            view.open_workspace_dialog_for(
+                &id,
+                WorkspaceAction::Close,
+                gpui::Point::default(),
+                window,
+                cx,
+            );
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.update_workspace_dialog(window, cx);
+            let report = view
+                .menu
+                .close_check
+                .as_ref()
+                .unwrap()
+                .report
+                .as_ref()
+                .unwrap();
+            assert!(report.dirty);
+            assert!(report.unpushed);
+        });
+        window.draw(cx).clear(cx);
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.submit_workspace_dialog(window, cx);
+            assert!(view.menu.page.is_some(), "risky close requires consent");
+            view.menu.input = Some(DialogInput::new("close".into()));
+            view.submit_workspace_dialog(window, cx);
+            assert!(view.menu.page.is_none());
+        });
     });
 }
 
